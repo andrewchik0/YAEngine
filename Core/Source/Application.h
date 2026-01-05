@@ -2,6 +2,7 @@
 
 #include <mutex>
 
+#include "EventBus.h"
 #include "Window.h"
 #include "Layer.h"
 #include "Assets/AssetManager.h"
@@ -50,6 +51,11 @@ namespace YAEngine
       return m_Scene;
     }
 
+    EventBus& Events()
+    {
+      return m_EventBus;
+    }
+
     AssetManager& GetAssetManager()
     {
       return m_AssetManager;
@@ -86,6 +92,7 @@ namespace YAEngine
     Window m_Window;
     AssetManager m_AssetManager;
     Timer m_Timer;
+    EventBus m_EventBus;
 
     friend class Scene;
     friend class Render;

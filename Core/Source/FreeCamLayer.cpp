@@ -1,5 +1,7 @@
 #include "FreeCamLayer.h"
 
+#include <iostream>
+
 #include "Application.h"
 
 namespace YAEngine
@@ -16,7 +18,19 @@ namespace YAEngine
 
     glm::quat orientation = qYaw * qPitch;
     App().GetScene().GetTransform(freeCam).rotation = glm::normalize(orientation);
+
+    onMouseButton = App().Events().Subscribe<MouseButtonEvent>([&](const MouseButtonEvent& e) { OnMouseButton(e); });
+    onMouseMove = App().Events().Subscribe<MouseMovedEvent>([&](const MouseMovedEvent& e) { OnMouseMoved(e); });
+    onKeyboard = App().Events().Subscribe<KeyEvent>([&](const KeyEvent& e) { OnKeyboard(e); });
   }
+
+  void FreeCamLayer::Destroy()
+  {
+    App().Events().Unsubscribe<MouseButtonEvent>(onMouseButton);
+    App().Events().Unsubscribe<MouseMovedEvent>(onMouseMove);
+    App().Events().Unsubscribe<KeyEvent>(onKeyboard);
+  }
+
 
   void FreeCamLayer::Update(double deltaTime)
   {

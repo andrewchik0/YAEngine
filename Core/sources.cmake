@@ -65,4 +65,5 @@ set(SOURCE_FILES
   Source/Utils/Timer.h
   Source/Assets/ModelManager.cpp
   Source/Assets/ModelManager.h
+  Source/EventBus.h
 )

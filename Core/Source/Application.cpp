@@ -54,30 +54,27 @@ namespace YAEngine
 
     for (auto& windowEvent : windowEventStack)
     {
-      for (auto& layer : m_LayerStack)
+      switch (windowEvent->type)
       {
-        switch (windowEvent->type)
+      case EventType::Key:
+        m_EventBus.Emit<KeyEvent>(*dynamic_cast<KeyEvent*>(windowEvent.get()));
+        break;
+      case EventType::MouseButton:
+        m_EventBus.Emit<MouseButtonEvent>(*dynamic_cast<MouseButtonEvent*>(windowEvent.get()));
+        break;
+      case EventType::MouseMoved:
+        m_EventBus.Emit<MouseMovedEvent>(*dynamic_cast<MouseMovedEvent*>(windowEvent.get()));
+        break;
+      case EventType::Resize:
         {
-        case EventType::Key:
-          layer->OnKeyboard(*dynamic_cast<KeyEvent*>(windowEvent.get()));
+          float width = static_cast<float>(dynamic_cast<ResizeEvent*>(windowEvent.get())->width);
+          float height = static_cast<float>(dynamic_cast<ResizeEvent*>(windowEvent.get())->height);
+          m_Render.Resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+          m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(width, height);
+          m_EventBus.Emit<ResizeEvent>(*dynamic_cast<ResizeEvent*>(windowEvent.get()));
           break;
-        case EventType::MouseButton:
-          layer->OnMouseButton(*dynamic_cast<MouseButtonEvent*>(windowEvent.get()));
-          break;
-        case EventType::MouseMoved:
-          layer->OnMouseMoved(*dynamic_cast<MouseMovedEvent*>(windowEvent.get()));
-          break;
-        case EventType::Resize:
-          {
-            float width = static_cast<float>(dynamic_cast<ResizeEvent*>(windowEvent.get())->width);
-            float height = static_cast<float>(dynamic_cast<ResizeEvent*>(windowEvent.get())->height);
-            m_Render.Resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-            m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(width, height);
-            layer->OnResize(*dynamic_cast<ResizeEvent*>(windowEvent.get()));
-            break;
-          }
-        default: break;
         }
+      default: break;
       }
     }
   }

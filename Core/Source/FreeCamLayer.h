@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Pch.h"
+#include "Events.h"
+#include "EventBus.h"
 #include "Layer.h"
 #include "Scene/Scene.h"
 
@@ -27,10 +28,12 @@ namespace YAEngine
 
     void Init() override;
     void Update(double deltaTime) override;
+    void Destroy() override;
 
-    void OnKeyboard(const YAEngine::KeyEvent& event) override;
-    void OnMouseMoved(const YAEngine::MouseMovedEvent& event) override;
-    void OnMouseButton(const YAEngine::MouseButtonEvent& event) override;
+    SubscriptionId onKeyboard, onMouseMove, onMouseButton;
+    void OnKeyboard(const KeyEvent& event);
+    void OnMouseMoved(const MouseMovedEvent& event);
+    void OnMouseButton(const MouseButtonEvent& event);
 
   };
 }
