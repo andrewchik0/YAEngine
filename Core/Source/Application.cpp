@@ -16,6 +16,7 @@ namespace YAEngine
     renderSpecs.applicationName = specs.windowSpecs.title;
 
     m_Render.Init(m_Window.Get(), renderSpecs);
+    m_Render.Draw(this);
   }
 
   void Application::Destroy()
@@ -29,10 +30,15 @@ namespace YAEngine
     for (auto& layer : m_LayerStack)
       layer->OnBeforeInit();
     m_AssetManager.Init();
+    int w, h;
+    glfwGetWindowSize(m_Window.Get(), &w, &h);
+    m_Render.Resize(w, h);
+    m_Render.Draw(this);
+
     for (auto& layer : m_LayerStack)
       layer->Init();
 
-    m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(static_cast<float>(m_Window.GetWidth()), static_cast<float>(m_Window.GetHeight()));
+    m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize((float)w, (float)h);
 
     while (m_Window.IsOpen())
     {

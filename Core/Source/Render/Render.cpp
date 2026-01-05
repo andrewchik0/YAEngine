@@ -170,6 +170,8 @@ namespace YAEngine
 
   void Render::SetUpCamera(Application* app)
   {
+    if (!app->m_Scene.HasComponent<CameraComponent>(app->m_Scene.GetActiveCamera())) return;
+
     auto cameraEntity = (app->m_Scene.m_Registry.get<CameraComponent, TransformComponent>(app->m_Scene.GetActiveCamera()));
     auto transform = std::get<TransformComponent &>(cameraEntity);
     auto camera = std::get<CameraComponent &>(cameraEntity);

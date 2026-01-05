@@ -47,6 +47,7 @@ public:
 
   void OnBeforeInit() override
   {
+    App().GetWindow().Maximize();
     App().PushLayer<YAEngine::FreeCamLayer>();
     App().PushLayer<YAEngine::DebugUILayer>();
   }

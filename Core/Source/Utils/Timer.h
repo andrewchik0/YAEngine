@@ -26,7 +26,7 @@ namespace YAEngine
 
     float GetFPS() const
     {
-      return 1.0f / m_DeltaTime;
+      return 1.0f / (float)m_DeltaTime;
     }
 
   private:

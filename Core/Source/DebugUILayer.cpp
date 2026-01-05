@@ -16,7 +16,7 @@ namespace YAEngine
       {
         static float updateTime = 0.0f;
         static float fps = App().GetTimer().GetFPS();
-        updateTime += App().GetTimer().GetDeltaTime();
+        updateTime += (float)App().GetTimer().GetDeltaTime();
 
         if (updateTime >= .5f)
         {

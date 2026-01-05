@@ -160,7 +160,7 @@ namespace YAEngine
       VkImageView attachments[] = {
         m_SwapChainImageViews[i],
         depthView
-    };
+      };
 
       VkFramebufferCreateInfo framebufferInfo{};
       framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;

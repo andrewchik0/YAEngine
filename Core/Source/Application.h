@@ -56,6 +56,11 @@ namespace YAEngine
       return m_EventBus;
     }
 
+    Window& GetWindow()
+    {
+      return m_Window;
+    }
+
     AssetManager& GetAssetManager()
     {
       return m_AssetManager;

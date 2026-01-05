@@ -41,6 +41,15 @@ namespace YAEngine
       return m_WindowHeight;
     }
 
+    void Maximize(bool maximize = true)
+    {
+      bool maximized = glfwGetWindowAttrib(m_WindowHandle, GLFW_MAXIMIZED);
+      if (maximized == maximize)
+        return;
+      if (maximize)
+        glfwMaximizeWindow(m_WindowHandle);
+    }
+
   private:
 
     GLFWwindow* m_WindowHandle = nullptr;
