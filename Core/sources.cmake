@@ -66,4 +66,10 @@ set(SOURCE_FILES
   Source/Assets/ModelManager.cpp
   Source/Assets/ModelManager.h
   Source/EventBus.h
+  Source/DebugUILayer.cpp
+  Source/DebugUILayer.h
+  Source/Render/VulkanImGui.cpp
+  Source/Render/VulkanImGui.h
+  Vendor/ImGui/imgui_impl_glfw.cpp
+  Vendor/ImGui/imgui_impl_vulkan.cpp
 )

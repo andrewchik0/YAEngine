@@ -7,6 +7,7 @@
 #include "RenderSpecs.h"
 #include "VulkanCommandBuffer.h"
 #include "VulkanDescriptorPool.h"
+#include "VulkanImGui.h"
 #include "VulkanMemoryAllocator.h"
 #include "VulkanPhysicalDevice.h"
 #include "VulkanPipeline.h"
@@ -51,5 +52,6 @@ namespace YAEngine
     VulkanMemoryAllocator m_Allocator;
     VulkanDescriptorPool m_DescriptorPool;
     VulkanMaterial m_DefaultMaterial {};
+    VulkanImGui m_ImGUI;
   };
 }

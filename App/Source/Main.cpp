@@ -1,5 +1,6 @@
 #include "Application.h"
 #include "FreeCamLayer.h"
+#include "DebugUILayer.h"
 
 class AppLayer : public YAEngine::Layer
 {
@@ -42,16 +43,20 @@ public:
   };
 
   YAEngine::Entity monkey;
+  YAEngine::Entity car;
 
   void OnBeforeInit() override
   {
     App().PushLayer<YAEngine::FreeCamLayer>();
+    App().PushLayer<YAEngine::DebugUILayer>();
   }
 
   void Init() override
   {
     auto monkeyHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/monkey.obj");
+    auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf");
     monkey = App().GetAssetManager().Models().Get(monkeyHandle).rootEntity;
+    car = App().GetAssetManager().Models().Get(carHandle).rootEntity;
 
     auto textureHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Textures/Checkerboard.png");
     auto meshHandle = App().GetAssetManager().Meshes().Load(vertices, indices);
@@ -62,6 +67,7 @@ public:
     auto entity = App().GetScene().CreateEntity("Plane");
     App().GetScene().AddComponent<YAEngine::MeshComponent>(entity, meshHandle);
     App().GetScene().AddComponent<YAEngine::MaterialComponent>(entity, materialHandle);
+    App().GetScene().GetTransform(car).position = glm::vec3(2.0, 0.0, 0.0);
   }
 
   void Update(double deltaTime) override
@@ -81,6 +87,7 @@ int main()
   YAEngine::Application::Init(specs);
   YAEngine::Application::Get().PushLayer<AppLayer>();
   YAEngine::Application::Get().Run();
+  YAEngine::Application::Get().Destroy();
 
   return 0;
 }

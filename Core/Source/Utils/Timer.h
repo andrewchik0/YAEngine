@@ -24,6 +24,11 @@ namespace YAEngine
       return m_CurrentTime;
     }
 
+    float GetFPS() const
+    {
+      return 1.0f / m_DeltaTime;
+    }
+
   private:
     double m_CurrentTime = 0, m_DeltaTime = 0, m_LastTime = 0;
   };

@@ -1,5 +1,8 @@
 #include "Render.h"
 
+#include <imgui_impl_glfw.h>
+#include <ImGui/imgui_impl_vulkan.h>
+
 #include "Application.h"
 #include "VulkanVertexBuffer.h"
 
@@ -51,12 +54,27 @@ namespace YAEngine
       })
     };
     m_ForwardPipeline.Init(m_Device.Get(), m_RenderPass.Get(), forwardInfo);
+
+    m_ImGUI.Init(
+      window,
+      m_VulkanInstance.Get(),
+      m_PhysicalDevice.Get(),
+      m_Device.Get(),
+      m_Sync.GetQueue(),
+      m_SwapChain.GetImageCount(),
+      VulkanPhysicalDevice::FindQueueFamilies(
+        m_PhysicalDevice.Get(),
+        m_Surface.Get()
+      ).graphicsFamily.value(),
+      m_RenderPass.Get()
+    );
   }
 
   void Render::Destroy()
   {
     m_Sync.Destroy();
 
+    m_ImGUI.Destroy();
     m_CommandBuffer.Destroy();
     m_ForwardPipeline.Destroy();
     m_DefaultMaterial.Destroy();
@@ -101,6 +119,13 @@ namespace YAEngine
 
     DrawMeshes(app);
 
+    ImGui_ImplVulkan_NewFrame();
+    ImGui_ImplGlfw_NewFrame();
+    ImGui::NewFrame();
+    app->RenderUI();
+    ImGui::Render();
+    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), m_CommandBuffer.GetCurrentBuffer());
+
     m_RenderPass.End(m_CommandBuffer.GetCurrentBuffer());
     m_CommandBuffer.End(m_CurrentFrameIndex);
     result = m_Sync.Submit(m_CommandBuffer.GetCurrentBuffer(), m_SwapChain.Get(), imageIndex, b_Resized);
@@ -135,6 +160,7 @@ namespace YAEngine
 
     view.each([&](MeshComponent mesh, TransformComponent transform, MaterialComponent material)
     {
+      if (!mesh.shouldRender) return;
       m_ForwardPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), transform.world);
       m_ForwardPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(m_CurrentFrameIndex)}, 1);
       app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, app->GetAssetManager().Materials().Get(material.asset), m_CurrentFrameIndex);

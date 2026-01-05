@@ -1,5 +1,7 @@
 #include "Application.h"
 
+#include "../../cmake-build-release/_deps/imgui-src/imgui.h"
+
 namespace YAEngine
 {
   std::unique_ptr<Application> Application::instance;
@@ -16,9 +18,10 @@ namespace YAEngine
     m_Render.Init(m_Window.Get(), renderSpecs);
   }
 
-  Application::~Application()
+  void Application::Destroy()
   {
     m_Render.Destroy();
+    m_Window.Destroy();
   }
 
   void Application::Run()
@@ -52,15 +55,19 @@ namespace YAEngine
   {
     const auto& windowEventStack = m_Window.PollEvents();
 
+    ImGuiIO& io = ImGui::GetIO();
+
     for (auto& windowEvent : windowEventStack)
     {
       switch (windowEvent->type)
       {
       case EventType::Key:
-        m_EventBus.Emit<KeyEvent>(*dynamic_cast<KeyEvent*>(windowEvent.get()));
+        if (!io.WantCaptureKeyboard)
+          m_EventBus.Emit<KeyEvent>(*dynamic_cast<KeyEvent*>(windowEvent.get()));
         break;
       case EventType::MouseButton:
-        m_EventBus.Emit<MouseButtonEvent>(*dynamic_cast<MouseButtonEvent*>(windowEvent.get()));
+        if (!io.WantCaptureMouse)
+          m_EventBus.Emit<MouseButtonEvent>(*dynamic_cast<MouseButtonEvent*>(windowEvent.get()));
         break;
       case EventType::MouseMoved:
         m_EventBus.Emit<MouseMovedEvent>(*dynamic_cast<MouseMovedEvent*>(windowEvent.get()));

@@ -23,5 +23,5 @@ layout(push_constant) uniform PushConstants
 void main() {
   gl_Position = u_Data.proj * u_Data.view * pc.world * vec4(inPosition, 1.0);
   outTexCoord = inTexCoord;
-  outNormal = (pc.world * vec4(inNormal, 1.0)).xyz;
+  outNormal = normalize(mat3(pc.world) * inNormal);
 }

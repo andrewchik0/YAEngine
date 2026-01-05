@@ -19,7 +19,7 @@ namespace YAEngine
     Assimp::Importer importer;
     const aiScene* scene =
       importer.ReadFile(path,
-                        aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_GenUVCoords |
+                        aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_GenUVCoords | aiProcess_FlipUVs |
                         aiProcess_GenNormals | aiProcess_Triangulate);
 
     if (scene == nullptr)
@@ -73,7 +73,6 @@ namespace YAEngine
       mt.world  = glm::mat4(1.0f);
       mt.dirty  = true;
 
-      // sibling chain
       if (prevChild == entt::null)
         tc.firstChild = meshEntity;
       else
@@ -83,11 +82,13 @@ namespace YAEngine
     }
     for (size_t i = 0; i < node->mNumChildren; ++i)
     {
-      Entity child = ProcessNode(model, nodeEntity, node->mChildren[i], scene);
+      auto child = ProcessNode(model, nodeEntity, node->mChildren[i], scene);
       if (prevChild == entt::null)
         tc.firstChild = child;
       else
         m_Scene->GetTransform(prevChild).nextSibling = child;
+
+      prevChild = child;
     }
     return nodeEntity;
   }

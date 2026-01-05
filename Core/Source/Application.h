@@ -42,7 +42,7 @@ namespace YAEngine
       return *instance;
     }
 
-    ~Application();
+    void Destroy();
 
     void Run();
 
@@ -78,6 +78,20 @@ namespace YAEngine
           return casted;
       }
     }
+
+    void RenderUI()
+    {
+      for (auto& layer : m_LayerStack)
+      {
+        layer->RenderUI();
+      }
+    }
+
+    Timer& GetTimer()
+    {
+      return m_Timer;
+    }
+
   private:
 
     explicit Application(const ApplicationSpecs& specs);

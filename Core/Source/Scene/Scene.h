@@ -36,6 +36,12 @@ namespace YAEngine
     }
 
     template<typename T>
+    bool HasComponent(Entity e)
+    {
+      return m_Registry.all_of<T>(e);
+    }
+
+    template<typename T>
     T& GetComponent(Entity e)
     {
       if (m_Registry.all_of<T>(e))

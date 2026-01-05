@@ -66,7 +66,7 @@ namespace YAEngine
     glfwSetFramebufferSizeCallback(m_WindowHandle, FramebufferSizeCallback);
   }
 
-  Window::~Window()
+  void Window::Destroy()
   {
     glfwDestroyWindow(m_WindowHandle);
     glfwTerminate();

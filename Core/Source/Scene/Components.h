@@ -37,6 +37,7 @@ namespace YAEngine
   struct MeshComponent
   {
     MeshHandle asset;
+    bool shouldRender = true;
   };
 
 

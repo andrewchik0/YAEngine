@@ -18,7 +18,7 @@ namespace YAEngine
   {
   public:
     explicit Window(const WindowSpecs& specs);
-    ~Window();
+    void Destroy();
 
     bool IsOpen() const;
 
