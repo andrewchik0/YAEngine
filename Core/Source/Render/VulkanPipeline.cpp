@@ -93,10 +93,16 @@ namespace YAEngine
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
 
+    VkPushConstantRange range{};
+    range.stageFlags = VK_SHADER_STAGE_ALL;
+    range.offset = 0;
+    range.size = sizeof(glm::mat4);
+
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     pipelineLayoutInfo.setLayoutCount = 0;
-    pipelineLayoutInfo.pushConstantRangeCount = 0;
+    pipelineLayoutInfo.pushConstantRangeCount = 1;
+    pipelineLayoutInfo.pPushConstantRanges = &range;
     pipelineLayoutInfo.pSetLayouts = info.sets.data();
     pipelineLayoutInfo.setLayoutCount = (uint32_t)info.sets.size();
 
@@ -161,6 +167,18 @@ namespace YAEngine
       descriptorSets.data(),
       0,
       nullptr);
+  }
+
+  void VulkanPipeline::PushConstants(VkCommandBuffer cmd, glm::mat4& matrix)
+  {
+    vkCmdPushConstants(
+      cmd,
+      m_PipelineLayout,
+      VK_SHADER_STAGE_ALL,
+      0,
+      sizeof(glm::mat4),
+      &matrix
+    );
   }
 
 

@@ -6,8 +6,9 @@ namespace YAEngine
 {
   void FreeCamLayer::Init()
   {
+    freeCam = App().GetScene().CreateEntity("FreeCam");
     App().GetScene().AddComponent<CameraComponent>(freeCam);
-    App().GetScene().GetTransform(freeCam).position = glm::vec3(0.0f, 0.0f, -1.0f);
+    App().GetScene().GetTransform(freeCam).position = glm::vec3(0.0f, 0.0f, 3.0f);
     App().GetScene().SetActiveCamera(freeCam);
 
     glm::quat qPitch = glm::angleAxis(pitch, glm::vec3(1.0f, 0.0f, 0.0f));

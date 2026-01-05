@@ -1,13 +1,13 @@
 #version 450
 
-layout(location = 0) in vec2 texCoord;
-layout(location = 1) in vec3 normal;
+layout(location = 0) in vec2 inTexCoord;
+layout(location = 1) in vec3 inNormal;
 
 layout(set = 0, binding = 0) uniform PerFrameUBO {
   mat4 view;
   mat4 proj;
   float time;
-} ubo;
+} u_Data;
 
 layout(set = 1, binding = 0) uniform PerMaterialUBO {
   vec3 albedo;
@@ -16,7 +16,7 @@ layout(set = 1, binding = 0) uniform PerMaterialUBO {
   float specular;
   int textureMask;
   int sg;
-} material;
+} u_Material;
 layout(set = 1, binding = 1) uniform sampler2D baseColorTexture;
 layout(set = 1, binding = 2) uniform sampler2D metallicTexture;
 layout(set = 1, binding = 3) uniform sampler2D roughnessTexture;
@@ -28,7 +28,8 @@ layout(set = 1, binding = 7) uniform sampler2D heightTexture;
 layout(location = 0) out vec4 outColor;
 
 void main() {
-  float base = float(material.textureMask & 1);
-  vec3 col = texture(baseColorTexture, texCoord).xyz * base + material.albedo * (1 - base);
-  outColor = vec4(col * max(dot(normalize(vec3(0.5, 1, 0.5)), normal), 0.1), 1.0);
+  float base = float(u_Material.textureMask & 1);
+  vec3 col = texture(baseColorTexture, inTexCoord).xyz * base + u_Material.albedo * (1 - base);
+  outColor = vec4(col * max(dot(normalize(vec3(0.5, 1, 0.5)), inNormal), 0.1), 1.0);
+  outColor *= vec4(0.8, 0.9, 1.0, 1.0);
 }

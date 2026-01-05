@@ -44,6 +44,12 @@ namespace YAEngine
       throw std::runtime_error("Entity does not have requested component");
     }
 
+    template<typename... Ts>
+    auto GetView()
+    {
+      return m_Registry.view<Ts...>();
+    }
+
     void SetActiveCamera(Entity e)
     {
       m_ActiveCamera = e;
@@ -54,10 +60,16 @@ namespace YAEngine
       return m_ActiveCamera;
     }
 
+    void MarkDirty(Entity e);
+    void Update();
+    void UpdateWorldTransform(entt::entity e);
+
   private:
     entt::registry m_Registry;
 
     entt::entity m_ActiveCamera = entt::null;
+
+    glm::mat4 ComposeLocal(const TransformComponent& t);
 
     friend class Render;
   };

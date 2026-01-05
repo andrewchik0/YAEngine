@@ -49,4 +49,74 @@ namespace YAEngine
   {
     return m_Registry.get<TransformComponent>(e);
   }
+
+  void Scene::MarkDirty(Entity e)
+  {
+    auto& t = m_Registry.get<TransformComponent>(e);
+    if (t.dirty)
+      return;
+
+    t.dirty = true;
+
+    entt::entity child = t.firstChild;
+    while (child != entt::null)
+    {
+      MarkDirty(child);
+      child = m_Registry.get<TransformComponent>(child).nextSibling;
+    }
+  }
+
+  void Scene::Update()
+  {
+    auto view = m_Registry.view<TransformComponent>();
+
+    for (auto e : view)
+    {
+      auto& t = view.get<TransformComponent>(e);
+
+      if (t.parent == entt::null && t.dirty)
+      {
+        UpdateWorldTransform(e);
+      }
+    }
+  }
+
+  void Scene::UpdateWorldTransform(Entity e)
+  {
+    auto& t = m_Registry.get<TransformComponent>(e);
+
+    if (!t.dirty)
+      return;
+
+    t.local = ComposeLocal(t);
+
+    if (t.parent != entt::null)
+    {
+      auto& parent = m_Registry.get<TransformComponent>(t.parent);
+      t.world = parent.world * t.local;
+    }
+    else
+    {
+      t.world = t.local;
+    }
+
+    t.dirty = false;
+
+    entt::entity child = t.firstChild;
+    while (child != entt::null)
+    {
+      auto& ct = m_Registry.get<TransformComponent>(child);
+      ct.dirty = true;
+      UpdateWorldTransform(child);
+      child = ct.nextSibling;
+    }
+  }
+
+  glm::mat4 Scene::ComposeLocal(const TransformComponent& t)
+  {
+    glm::mat4 T = glm::translate(glm::mat4(1.0f), t.position);
+    glm::mat4 R = glm::toMat4(t.rotation);
+    glm::mat4 S = glm::scale(glm::mat4(1.0f), t.scale);
+    return T * R * S;
+  }
 }

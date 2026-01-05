@@ -13,7 +13,7 @@ namespace YAEngine
 
     Entity freeCam;
 
-    float yaw = -glm::pi<float>();
+    float yaw = 0;
     float pitch = 0.0f;
 
     bool keyAPressed = false;

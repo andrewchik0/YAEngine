@@ -135,6 +135,7 @@ namespace YAEngine
 
     view.each([&](MeshComponent mesh, TransformComponent transform, MaterialComponent material)
     {
+      m_ForwardPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), transform.world);
       m_ForwardPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(m_CurrentFrameIndex)}, 1);
       app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, app->GetAssetManager().Materials().Get(material.asset), m_CurrentFrameIndex);
       app->m_AssetManager.Meshes().Get(mesh.asset).vertexBuffer.Draw(m_CommandBuffer.GetCurrentBuffer());

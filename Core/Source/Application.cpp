@@ -24,7 +24,7 @@ namespace YAEngine
   void Application::Run()
   {
     for (auto& layer : m_LayerStack)
-      layer->OnBeforeLoad();
+      layer->OnBeforeInit();
     m_AssetManager.Init();
     for (auto& layer : m_LayerStack)
       layer->Init();
@@ -35,6 +35,7 @@ namespace YAEngine
     {
       HandleEvents();
       m_Timer.Step();
+      m_Scene.Update();
       for (auto& layer : m_LayerStack)
         layer->Update(m_Timer.GetDeltaTime());
 

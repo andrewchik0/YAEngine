@@ -6,8 +6,6 @@ class AppLayer : public YAEngine::Layer
 public:
   AppLayer() = default;
 
-  YAEngine::Entity monkey;
-
   std::vector<YAEngine::Vertex> vertices = {
     {
       { -5, -1.0, -5 },
@@ -43,14 +41,17 @@ public:
     0, 1, 2, 1, 3, 2
   };
 
-  void OnBeforeLoad() override
+  YAEngine::Entity monkey;
+
+  void OnBeforeInit() override
   {
     App().PushLayer<YAEngine::FreeCamLayer>();
   }
 
   void Init() override
   {
-    App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/monkey.obj");
+    auto monkeyHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/monkey.obj");
+    monkey = App().GetAssetManager().Models().Get(monkeyHandle).rootEntity;
 
     auto textureHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Textures/Checkerboard.png");
     auto meshHandle = App().GetAssetManager().Meshes().Load(vertices, indices);
@@ -61,6 +62,12 @@ public:
     auto entity = App().GetScene().CreateEntity("Plane");
     App().GetScene().AddComponent<YAEngine::MeshComponent>(entity, meshHandle);
     App().GetScene().AddComponent<YAEngine::MaterialComponent>(entity, materialHandle);
+  }
+
+  void Update(double deltaTime) override
+  {
+    App().GetScene().GetTransform(monkey).rotation = glm::angleAxis(1.0f * (float)deltaTime, glm::vec3(0,1,0)) * App().GetScene().GetTransform(monkey).rotation;
+    App().GetScene().MarkDirty(monkey);
   }
 
 };

@@ -33,7 +33,7 @@ namespace YAEngine
 
     model->rootEntity = m_Scene->CreateEntity(std::filesystem::path(path).filename().string());
 
-    ProcessNode(*model, model->rootEntity, scene->mRootNode, scene);
+    m_Scene->GetTransform(model->rootEntity).firstChild = ProcessNode(*model, model->rootEntity, scene->mRootNode, scene);
 
     return AssetManagerBase::Load(std::move(model));
   }
@@ -216,24 +216,24 @@ namespace YAEngine
     mat.specular = specular.r;
     mat.sg = hasSG;
 
-    if (baseColorTexture.size() > 0)
+    if (!baseColorTexture.empty())
       mat.baseColorTexture = m_AssetManager->Textures().Load((model.basePath / baseColorTexture).string());
-    if (metallicTexture.size() > 0)
+    if (!metallicTexture.empty())
       mat.metallicTexture = m_AssetManager->Textures().Load((model.basePath / metallicTexture).string());
-    if (roughnessTexture.size() > 0)
+    if (!roughnessTexture.empty())
       mat.roughnessTexture = m_AssetManager->Textures().Load((model.basePath / roughnessTexture).string());
-    else if (hasSG && specularTexture.size() > 0)
+    else if (hasSG && !specularTexture.empty())
       mat.roughnessTexture = m_AssetManager->Textures().Load((model.basePath / roughnessTexture).string());
-    if (specularTexture.size() > 0)
+    if (!specularTexture.empty())
       mat.specularTexture = m_AssetManager->Textures().Load((model.basePath / specularTexture).string());
-    if (emissiveTexture.size() > 0)
+    if (!emissiveTexture.empty())
       mat.emissiveTexture = m_AssetManager->Textures().Load((model.basePath / emissiveTexture).string());
 
-    if (normalTexture.size() > 0)
+    if (!normalTexture.empty())
       mat.normalTexture = m_AssetManager->Textures().Load((model.basePath / normalTexture).string());
-    else if (normalPBR.size() > 0)
+    else if (!normalPBR.empty())
       mat.normalTexture = m_AssetManager->Textures().Load((model.basePath / normalPBR).string());
-    else if (heightTexture.size() > 0)
+    else if (!heightTexture.empty())
       mat.heightTexture = m_AssetManager->Textures().Load((model.basePath / heightTexture).string());
 
     m_Scene->AddComponent<MaterialComponent>(mesh, materialHandle);
@@ -246,7 +246,7 @@ namespace YAEngine
       aiString path;
       if (mat->GetTexture(type, 0, &path) == AI_SUCCESS)
       {
-        return std::string(path.C_Str());
+        return { path.C_Str() };
       }
     }
     return ""; // No texture found
