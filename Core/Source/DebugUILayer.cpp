@@ -6,9 +6,12 @@
 
 namespace YAEngine
 {
+  static Entity s_SelectedEntity;
+
   void DebugUILayer::RenderUI()
   {
     ImGui::Begin("Debug UI");
+    ImGui::SetWindowFontScale(1.5);
 
     if (ImGui::BeginTabBar("###TabBar"))
     {
@@ -32,6 +35,25 @@ namespace YAEngine
       {
         auto view = App().GetScene().GetView<TransformComponent>();
 
+        ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 6));
+        ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f);
+        DrawInspector();
+        ImGui::PopStyleVar(2);
+        ImGui::PopStyleColor();
+
+        ImGui::Spacing();
+        ImGui::Separator();
+        ImGui::Spacing();
+
+        ImVec2 pos = ImGui::GetCursorScreenPos();
+        ImGui::Text("Scene Tree");
+        ImGui::GetWindowDrawList()->AddText(
+          ImVec2(pos.x + 1, pos.y),
+          ImGui::GetColorU32(ImGuiCol_Text),
+          "Scene Tree"
+        );
+
         view.each([&](auto entity, TransformComponent& tc)
         {
           if (tc.parent == entt::null)
@@ -51,30 +73,32 @@ namespace YAEngine
   void DebugUILayer::DrawEntity(Entity entity)
   {
     auto& scene = App().GetScene();
-    auto& tc = scene.GetComponent<TransformComponent>(entity);
-    const auto& name = scene.GetComponent<Name>(entity);
 
-    ImGuiTreeNodeFlags flags = ImGuiTreeNodeFlags_OpenOnArrow;
+    auto& tc   = scene.GetComponent<TransformComponent>(entity);
+    auto& name = scene.GetComponent<Name>(entity);
+
+    ImGuiTreeNodeFlags flags =
+        ImGuiTreeNodeFlags_OpenOnArrow |
+        ImGuiTreeNodeFlags_SpanFullWidth;
+
     if (tc.firstChild == entt::null)
-      flags |= ImGuiTreeNodeFlags_Leaf;
+      flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 
+    if (entity == s_SelectedEntity)
+      flags |= ImGuiTreeNodeFlags_Selected;
+
+    ImGui::SetNextItemWidth(400.0f);
     bool opened = ImGui::TreeNodeEx(
-      (void*)(uint64_t)entity,
-      flags,
-      "%s",
-      name.c_str()
+        (void*)(uint64_t)entity,
+        flags,
+        "%s",
+        name.c_str()
     );
 
-    if (scene.HasComponent<MeshComponent>(entity))
-    {
-      ImGui::SameLine();
-      ImGui::Checkbox(
-        "##render",
-        &scene.GetComponent<MeshComponent>(entity).shouldRender
-      );
-    }
+    if (ImGui::IsItemClicked())
+      s_SelectedEntity = entity;
 
-    if (opened)
+    if (opened && tc.firstChild != entt::null)
     {
       Entity child = tc.firstChild;
       while (child != entt::null)
@@ -84,6 +108,51 @@ namespace YAEngine
       }
 
       ImGui::TreePop();
+    }
+  }
+
+
+  void DebugUILayer::DrawTransform(TransformComponent& tc)
+  {
+    if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+      bool dirty = false;
+      if (ImGui::DragFloat3("Position", &tc.position.x, 0.1f))
+        dirty = true;
+
+      glm::vec3 euler = glm::degrees(glm::eulerAngles(tc.rotation));
+      if (ImGui::DragFloat3("Rotation", &euler.x, 0.5f))
+      {
+        tc.rotation = glm::quat(glm::radians(euler));
+        dirty = true;
+      }
+
+      if (ImGui::DragFloat3("Scale", &tc.scale.x, 0.1f, 0.001f, 1000.0f))
+        dirty = true;
+
+      if (dirty)
+        App().GetScene().MarkDirty(s_SelectedEntity);
+    }
+  }
+
+  void DebugUILayer::DrawInspector()
+  {
+    if (s_SelectedEntity == entt::null)
+      return;
+
+    auto& scene = App().GetScene();
+
+    if (scene.HasComponent<TransformComponent>(s_SelectedEntity))
+    {
+      DrawTransform(scene.GetComponent<TransformComponent>(s_SelectedEntity));
+    }
+
+    if (scene.HasComponent<MeshComponent>(s_SelectedEntity))
+    {
+      ImGui::Checkbox(
+        "Render",
+        &scene.GetComponent<MeshComponent>(s_SelectedEntity).shouldRender
+      );
     }
   }
 }

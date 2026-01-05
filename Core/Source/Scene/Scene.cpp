@@ -53,6 +53,17 @@ namespace YAEngine
   void Scene::MarkDirty(Entity e)
   {
     auto& t = m_Registry.get<TransformComponent>(e);
+
+    if (t.parent != entt::null)
+    {
+      entt::entity parent = t.parent;
+      while (parent != entt::null)
+      {
+        m_Registry.get<TransformComponent>(parent).dirty = true;
+        parent = m_Registry.get<TransformComponent>(parent).parent;
+      }
+    }
+
     if (t.dirty)
       return;
 
@@ -73,8 +84,7 @@ namespace YAEngine
     for (auto e : view)
     {
       auto& t = view.get<TransformComponent>(e);
-
-      if (t.parent == entt::null && t.dirty)
+      if (t.parent == entt::null)
       {
         UpdateWorldTransform(e);
       }

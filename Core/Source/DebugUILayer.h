@@ -14,5 +14,7 @@ namespace YAEngine
   private:
 
     void DrawEntity(Entity entity);
+    void DrawTransform(TransformComponent& tc);
+    void DrawInspector();
   };
 }

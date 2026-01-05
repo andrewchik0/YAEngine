@@ -36,8 +36,8 @@ namespace YAEngine
   {
     if (mousePressed)
     {
-      yaw   -= (float)deltaX * (float)deltaTime * 3.0f;
-      pitch -= (float)deltaY * (float)deltaTime * 3.0f;
+      yaw   -= (float)deltaX * (float)deltaTime * 2.0f;
+      pitch -= (float)deltaY * (float)deltaTime * 2.0f;
 
       deltaX = 0.0f;
       deltaY = 0.0f;

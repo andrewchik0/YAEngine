@@ -74,10 +74,15 @@ namespace YAEngine
     init_info.PipelineInfoMain.RenderPass = renderPass;
 
     ImGui_ImplVulkan_Init(&init_info);
+
+    io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/Roboto-Regular.ttf", 13.0f);
+    io.Fonts->Build();
+    ImGui::PushFont(io.Fonts->Fonts[0]);
   }
 
   void VulkanImGui::Destroy()
   {
+    ImGui::PopFont();
     if (ImGui::GetCurrentContext())
     {
       ImGui::UpdatePlatformWindows();
