@@ -27,7 +27,7 @@ namespace YAEngine
     int width, height;
     glfwGetWindowSize(window, &width, &height);
     m_RenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), width, height);
-    m_SwapChain.CreateFrameBuffers(m_RenderPass.Get(), m_RenderPass.GetDepthView());
+    m_SwapChain.CreateFrameBuffers(m_RenderPass.Get(), m_RenderPass.GetDepthView(), m_RenderPass.GetMultisampleView());
 
     m_CommandBuffer.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), s_MaxFramesInFlight);
 
@@ -92,7 +92,7 @@ namespace YAEngine
   {
     b_Resized = false;
     m_RenderPass.Recreate(width, height);
-    m_SwapChain.Recreate(m_RenderPass.Get(), m_RenderPass.GetDepthView());
+    m_SwapChain.Recreate(m_RenderPass.Get(), m_RenderPass.GetDepthView(), m_RenderPass.GetMultisampleView());
   }
 
   void Render::Draw(Application *app)

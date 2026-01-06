@@ -23,12 +23,21 @@ namespace YAEngine
       return m_DepthImageView;
     }
 
+    VkImageView GetMultisampleView()
+    {
+      return m_MultisampleImageView;
+    }
+
   private:
 
     VkRenderPass m_RenderPass {};
     VkImage m_DepthImage {};
     VmaAllocation m_DepthImageAllocation {};
     VkImageView m_DepthImageView {};
+
+    VkImage m_MultisampleImage {};
+    VmaAllocation m_MultisampleImageAllocation {};
+    VkImageView m_MultisampleImageView {};
 
     VkDevice m_Device {};
     VkFormat m_SwapChainImageFormat {};

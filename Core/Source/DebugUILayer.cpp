@@ -18,15 +18,16 @@ namespace YAEngine
       if (ImGui::BeginTabItem("Info"))
       {
         static float updateTime = 0.0f;
-        static float fps = App().GetTimer().GetFPS();
+        static float fps;
         updateTime += (float)App().GetTimer().GetDeltaTime();
 
         if (updateTime >= .5f)
         {
           fps = App().GetTimer().GetFPS();
+          updateTime = 0.0f;
         }
 
-        ImGui::Text("FPS: %.1f", App().GetTimer().GetFPS());
+        ImGui::Text("FPS: %.1f", fps);
         ImGui::Text("Frame time: %.2fms", App().GetTimer().GetDeltaTime() * 1000.0f);
         ImGui::EndTabItem();
       }

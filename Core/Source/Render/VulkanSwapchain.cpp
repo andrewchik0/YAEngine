@@ -150,7 +150,7 @@ namespace YAEngine
     }
   }
 
-  void VulkanSwapChain::CreateFrameBuffers(VkRenderPass renderPass, VkImageView depthView)
+  void VulkanSwapChain::CreateFrameBuffers(VkRenderPass renderPass, VkImageView depthView, VkImageView multisampleView)
   {
     m_RenderPass = renderPass;
     m_SwapChainFrameBuffers.resize(m_SwapChainImageViews.size());
@@ -158,14 +158,15 @@ namespace YAEngine
     for (size_t i = 0; i < m_SwapChainImageViews.size(); i++)
     {
       VkImageView attachments[] = {
+        multisampleView,
+        depthView,
         m_SwapChainImageViews[i],
-        depthView
       };
 
       VkFramebufferCreateInfo framebufferInfo{};
       framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
       framebufferInfo.renderPass = m_RenderPass;
-      framebufferInfo.attachmentCount = 2;
+      framebufferInfo.attachmentCount = 3;
       framebufferInfo.pAttachments = attachments;
       framebufferInfo.width = m_SwapChainExtent.width;
       framebufferInfo.height = m_SwapChainExtent.height;
@@ -192,7 +193,7 @@ namespace YAEngine
     vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
   }
 
-  void VulkanSwapChain::Recreate(VkRenderPass renderPass, VkImageView depthView)
+  void VulkanSwapChain::Recreate(VkRenderPass renderPass, VkImageView depthView, VkImageView multisampleView)
   {
     m_RenderPass = renderPass;
     int width = 0, height = 0;
@@ -206,6 +207,6 @@ namespace YAEngine
 
     Destroy();
     Init(m_Device, m_PhysicalDevice, m_Surface, m_Window);
-    CreateFrameBuffers(m_RenderPass, depthView);
+    CreateFrameBuffers(m_RenderPass, depthView, multisampleView);
   }
 }

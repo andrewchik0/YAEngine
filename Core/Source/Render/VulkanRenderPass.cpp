@@ -22,7 +22,7 @@ namespace YAEngine
     depthImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     depthImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     depthImageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    depthImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthImageInfo.samples = VK_SAMPLE_COUNT_4_BIT;
     depthImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo allocInfo{};
@@ -47,7 +47,7 @@ namespace YAEngine
 
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = VK_FORMAT_D32_SFLOAT;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.samples = VK_SAMPLE_COUNT_4_BIT;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -59,9 +59,21 @@ namespace YAEngine
     depthAttachmentRef.attachment = 1;
     depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
+    VkAttachmentDescription resolveAttachment{};
+    resolveAttachment.format = swapChainImageFormat;
+    resolveAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    resolveAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    resolveAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+    resolveAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    resolveAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference resolveRef{};
+    resolveRef.attachment = 2;
+    resolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = swapChainImageFormat;
-    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.samples = VK_SAMPLE_COUNT_4_BIT;
     colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -78,6 +90,7 @@ namespace YAEngine
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
     subpass.pDepthStencilAttachment = &depthAttachmentRef;
+    subpass.pResolveAttachments = &resolveRef;
 
     VkSubpassDependency dependency{};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -87,10 +100,56 @@ namespace YAEngine
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
 
-    VkAttachmentDescription attachments[] = { colorAttachment, depthAttachment };
+    VkImageCreateInfo multisamplingImageInfo{};
+    multisamplingImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    multisamplingImageInfo.imageType = VK_IMAGE_TYPE_2D;
+    multisamplingImageInfo.extent.width  = width;
+    multisamplingImageInfo.extent.height = height;
+    multisamplingImageInfo.extent.depth  = 1;
+    multisamplingImageInfo.mipLevels = 1;
+    multisamplingImageInfo.arrayLayers = 1;
+    multisamplingImageInfo.format = swapChainImageFormat;
+    multisamplingImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    multisamplingImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    multisamplingImageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    multisamplingImageInfo.samples = VK_SAMPLE_COUNT_4_BIT;
+    multisamplingImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo multisamplingAllocInfo{};
+    multisamplingAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    vmaCreateImage(
+      m_Allocator,
+      &multisamplingImageInfo,
+      &multisamplingAllocInfo,
+      &m_MultisampleImage,
+      &m_MultisampleImageAllocation,
+      nullptr
+    );
+
+    VkImageViewCreateInfo multisamplingViewInfo{};
+    multisamplingViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    multisamplingViewInfo.image = m_MultisampleImage;
+    multisamplingViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    multisamplingViewInfo.format = swapChainImageFormat;
+
+    multisamplingViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    multisamplingViewInfo.subresourceRange.baseMipLevel = 0;
+    multisamplingViewInfo.subresourceRange.levelCount = 1;
+    multisamplingViewInfo.subresourceRange.baseArrayLayer = 0;
+    multisamplingViewInfo.subresourceRange.layerCount = 1;
+
+    vkCreateImageView(
+      m_Device,
+      &multisamplingViewInfo,
+      nullptr,
+      &m_MultisampleImageView
+    );
+
+    VkAttachmentDescription attachments[] = { colorAttachment, depthAttachment, resolveAttachment };
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = 2;
+    renderPassInfo.attachmentCount = 3;
     renderPassInfo.pAttachments = attachments;
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
@@ -107,8 +166,12 @@ namespace YAEngine
   {
     vkDeviceWaitIdle(m_Device);
     vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
+
     vkDestroyImageView(m_Device, m_DepthImageView, nullptr);
     vmaDestroyImage(m_Allocator, m_DepthImage, m_DepthImageAllocation);
+
+    vkDestroyImageView(m_Device, m_MultisampleImageView, nullptr);
+    vmaDestroyImage(m_Allocator, m_MultisampleImage, m_MultisampleImageAllocation);
   }
 
   void VulkanRenderPass::Recreate(uint32_t width, uint32_t height)

@@ -72,6 +72,7 @@ namespace YAEngine
     init_info.Allocator = nullptr;
     init_info.CheckVkResultFn = CkeckVkResult;
     init_info.PipelineInfoMain.RenderPass = renderPass;
+    init_info.PipelineInfoMain.MSAASamples = VK_SAMPLE_COUNT_4_BIT;
 
     ImGui_ImplVulkan_Init(&init_info);
 

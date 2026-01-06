@@ -6,9 +6,9 @@ namespace YAEngine
   {
   public:
     void Init(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, GLFWwindow* window);
-    void CreateFrameBuffers(VkRenderPass renderPass, VkImageView depthView);
+    void CreateFrameBuffers(VkRenderPass renderPass, VkImageView depthView, VkImageView multisampleView);
     void Destroy();
-    void Recreate(VkRenderPass renderPass, VkImageView depthView);
+    void Recreate(VkRenderPass renderPass, VkImageView depthView, VkImageView multisampleView);
 
     VkSwapchainKHR& Get()
     {
