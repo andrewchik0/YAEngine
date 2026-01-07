@@ -47,11 +47,12 @@ namespace YAEngine
     VulkanSwapChain m_SwapChain;
     VulkanRenderPass m_RenderPass;
     VulkanPipeline m_ForwardPipeline;
+    VulkanPipeline m_ForwardPipelineDoubleSided;
     VulkanCommandBuffer m_CommandBuffer;
     VulkanSync m_Sync;
     VulkanMemoryAllocator m_Allocator;
     VulkanDescriptorPool m_DescriptorPool;
     VulkanMaterial m_DefaultMaterial {};
-    VulkanImGui m_ImGUI;
+    VulkanImGui m_ImGUI {};
   };
 }

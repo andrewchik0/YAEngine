@@ -129,4 +129,28 @@ namespace YAEngine
     glm::mat4 S = glm::scale(glm::mat4(1.0f), t.scale);
     return T * R * S;
   }
+
+  void Scene::SetDoubleSided(Entity e)
+  {
+    if (HasComponent<MeshComponent>(e))
+    {
+      GetComponent<MeshComponent>(e).doubleSided = true;
+    }
+
+    auto next = GetTransform(e).nextSibling;
+    while (next != entt::null)
+    {
+      if (HasComponent<MeshComponent>(next))
+      {
+        GetComponent<MeshComponent>(next).doubleSided = true;
+      }
+      next = GetTransform(next).nextSibling;
+    }
+
+    if (GetTransform(e).firstChild != entt::null)
+    {
+      SetDoubleSided(GetTransform(e).firstChild);
+    }
+  }
+
 }

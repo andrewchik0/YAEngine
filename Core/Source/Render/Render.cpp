@@ -54,6 +54,8 @@ namespace YAEngine
       })
     };
     m_ForwardPipeline.Init(m_Device.Get(), m_RenderPass.Get(), forwardInfo);
+    forwardInfo.doubleSided = true;
+    m_ForwardPipelineDoubleSided.Init(m_Device.Get(), m_RenderPass.Get(), forwardInfo);
 
     m_ImGUI.Init(
       window,
@@ -77,6 +79,7 @@ namespace YAEngine
     m_ImGUI.Destroy();
     m_CommandBuffer.Destroy();
     m_ForwardPipeline.Destroy();
+    m_ForwardPipelineDoubleSided.Destroy();
     m_DefaultMaterial.Destroy();
     m_PerFrameData.Destroy();
     m_DescriptorPool.Destroy();
@@ -115,6 +118,8 @@ namespace YAEngine
 
     m_ForwardPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
     m_ForwardPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_PerFrameData.GetDescriptorSet(m_CurrentFrameIndex) }, 0);
+    m_ForwardPipelineDoubleSided.Bind(m_CommandBuffer.GetCurrentBuffer());
+    m_ForwardPipelineDoubleSided.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_PerFrameData.GetDescriptorSet(m_CurrentFrameIndex) }, 0);
     SetViewportAndScissor();
 
     DrawMeshes(app);
@@ -161,8 +166,12 @@ namespace YAEngine
     view.each([&](MeshComponent mesh, TransformComponent transform, MaterialComponent material)
     {
       if (!mesh.shouldRender) return;
-      m_ForwardPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), transform.world);
-      m_ForwardPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(m_CurrentFrameIndex)}, 1);
+
+      auto& currentPipeline = mesh.doubleSided ? m_ForwardPipelineDoubleSided : m_ForwardPipeline;
+
+      currentPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
+      currentPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), transform.world);
+      currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(m_CurrentFrameIndex)}, 1);
       app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, app->GetAssetManager().Materials().Get(material.asset), m_CurrentFrameIndex);
       app->m_AssetManager.Meshes().Get(mesh.asset).vertexBuffer.Draw(m_CommandBuffer.GetCurrentBuffer());
     });

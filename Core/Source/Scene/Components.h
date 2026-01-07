@@ -38,6 +38,7 @@ namespace YAEngine
   {
     MeshHandle asset;
     bool shouldRender = true;
+    bool doubleSided = false;
   };
 
 

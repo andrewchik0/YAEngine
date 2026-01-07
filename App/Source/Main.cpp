@@ -69,6 +69,7 @@ public:
     App().GetScene().AddComponent<YAEngine::MeshComponent>(entity, meshHandle);
     App().GetScene().AddComponent<YAEngine::MaterialComponent>(entity, materialHandle);
     App().GetScene().GetTransform(car).position = glm::vec3(2.0, 0.0, 0.0);
+    App().GetScene().SetDoubleSided(car);
   }
 
   void Update(double deltaTime) override

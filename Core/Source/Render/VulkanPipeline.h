@@ -11,6 +11,8 @@ namespace YAEngine
     std::string vertexShaderFile;
     std::string geometryShaderFile;
 
+    bool doubleSided = false;
+
     // "f2i3u4"
     //    |
     //    V

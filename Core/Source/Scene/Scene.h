@@ -69,6 +69,7 @@ namespace YAEngine
     void MarkDirty(Entity e);
     void Update();
     void UpdateWorldTransform(entt::entity e);
+    void SetDoubleSided(Entity e);
 
   private:
     entt::registry m_Registry;
