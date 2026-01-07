@@ -5,6 +5,7 @@
 #include "VulkanDevice.h"
 #include "VulkanInstance.h"
 #include "RenderSpecs.h"
+#include "SkyBox.h"
 #include "VulkanCommandBuffer.h"
 #include "VulkanDescriptorPool.h"
 #include "VulkanImGui.h"
@@ -39,6 +40,7 @@ namespace YAEngine
     bool b_Resized = false;
 
     PerFrameData m_PerFrameData {};
+    SkyBox m_SkyBox;
 
     VulkanInstance m_VulkanInstance;
     VulkanPhysicalDevice m_PhysicalDevice;

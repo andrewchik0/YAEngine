@@ -191,9 +191,6 @@ namespace YAEngine
 
       DrawCube(cmd);
 
-      // Draw cube
-      vkCmdDraw(cmd, 36, 1, 0, 0);
-
       vkCmdEndRenderPass(cmd);
 
       s_CommandBuffer->EndSingleTimeCommands(cmd);
@@ -404,6 +401,7 @@ namespace YAEngine
   {
     VkDeviceSize offset = 0;
     vkCmdBindVertexBuffers(cmd, 0, 1, &s_VertexBuffer, &offset);
+    vkCmdDraw(cmd, 36, 1, 0, 0);
   }
 
   void VulkanCubicTexture::InitRenderPass()

@@ -72,12 +72,15 @@ namespace YAEngine
     );
 
     VulkanCubicTexture::InitCubicTextures(m_Device.Get(), m_Allocator.Get(), m_CommandBuffer, m_DescriptorPool.Get());
+
+    m_SkyBox.Init(m_Device.Get(), m_DescriptorPool.Get(), m_RenderPass.Get(), s_MaxFramesInFlight);
   }
 
   void Render::Destroy()
   {
     m_Sync.Destroy();
 
+    m_SkyBox.Destroy();
     VulkanCubicTexture::DestroyCubicTextures();
     m_ImGUI.Destroy();
     m_CommandBuffer.Destroy();
@@ -173,13 +176,20 @@ namespace YAEngine
       auto& currentPipeline = mesh.doubleSided ? m_ForwardPipelineDoubleSided : m_ForwardPipeline;
 
       currentPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
-      currentPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), transform.world);
+      currentPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), &transform.world);
       currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(m_CurrentFrameIndex)}, 1);
       auto& mat = app->GetAssetManager().Materials().Get(material.asset);
       mat.cubemap = app->GetScene().m_Skybox;
       app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, mat, m_CurrentFrameIndex);
       app->m_AssetManager.Meshes().Get(mesh.asset).vertexBuffer.Draw(m_CommandBuffer.GetCurrentBuffer());
     });
+
+    if (!app->m_Scene.HasComponent<CameraComponent>(app->m_Scene.GetActiveCamera())) return;
+    auto cameraEntity = (app->m_Scene.m_Registry.get<CameraComponent, TransformComponent>(app->m_Scene.GetActiveCamera()));
+    auto transform = std::get<TransformComponent &>(cameraEntity);
+    glm::mat4 camDir = glm::mat4_cast(transform.rotation);
+    if (app->GetScene().m_Skybox)
+      m_SkyBox.Draw(m_CurrentFrameIndex, &app->GetAssetManager().CubeMaps().Get(app->GetScene().m_Skybox).m_CubeTexture, m_CommandBuffer.GetCurrentBuffer(), camDir, m_PerFrameData.ubo.proj);
   }
 
   void Render::SetUpCamera(Application* app)

@@ -31,21 +31,12 @@ layout(set = 1, binding = 8) uniform samplerCube cubemapTexture;
 
 layout(location = 0) out vec4 outColor;
 
-vec3 ACESFilm(vec3 x)
-{
-  const float a = 2.51;
-  const float b = 0.03;
-  const float c = 2.43;
-  const float d = 0.59;
-  const float e = 0.14;
-  return clamp((x*(a*x+b)) / (x*(c*x+d)+e), 0.0, 1.0);
-}
+#include "post.glsl"
 
 void main() {
   float base = float(u_Material.textureMask & 1);
   vec3 col = texture(baseColorTexture, inTexCoord).xyz * base + u_Material.albedo * (1 - base);
   outColor = vec4(col * max(dot(normalize(vec3(0.5, 1, 0.5)), inNormal), 0.1), 1.0);
-  outColor = vec4(texture(cubemapTexture, vec3(inTexCoord, 0.0)).xyz, 1.0);
 
   vec3 viewDir = normalize(u_Data.cameraPosition - inPosition);
   vec3 reflectDir = reflect(-viewDir, normalize(inNormal));
@@ -57,5 +48,5 @@ void main() {
 
   mapped = ACESFilm(mapped);
   vec3 finalColor = pow(mapped, vec3(1.0/2.2));
-  outColor = vec4(finalColor, 1.0);
+  outColor *= vec4(finalColor, 1.0);
 }

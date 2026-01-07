@@ -9,6 +9,7 @@ namespace YAEngine
   void VulkanPipeline::Init(VkDevice device, VkRenderPass renderPass, const PipelineCreateInfo& info)
   {
     m_Device = device;
+    m_PushConstantSize = info.pushConstantSize;
 
     auto vertShaderCode = ReadFile(info.vertexShaderFile);
     auto fragShaderCode = ReadFile(info.fragmentShaderFile);
@@ -96,7 +97,7 @@ namespace YAEngine
     VkPushConstantRange range{};
     range.stageFlags = VK_SHADER_STAGE_ALL;
     range.offset = 0;
-    range.size = sizeof(glm::mat4);
+    range.size = m_PushConstantSize;
 
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
@@ -113,9 +114,9 @@ namespace YAEngine
 
     VkPipelineDepthStencilStateCreateInfo depthStencil{};
     depthStencil.sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO;
-    depthStencil.depthTestEnable = VK_TRUE;
-    depthStencil.depthWriteEnable = VK_TRUE;
-    depthStencil.depthCompareOp = VK_COMPARE_OP_LESS;
+    depthStencil.depthTestEnable = info.depthTesting ? VK_TRUE : VK_FALSE;
+    depthStencil.depthWriteEnable = info.depthWrite ? VK_TRUE : VK_FALSE;
+    depthStencil.depthCompareOp = info.compareOp;
     depthStencil.depthBoundsTestEnable = VK_FALSE;
     depthStencil.stencilTestEnable = VK_FALSE;
 
@@ -169,15 +170,15 @@ namespace YAEngine
       nullptr);
   }
 
-  void VulkanPipeline::PushConstants(VkCommandBuffer cmd, glm::mat4& matrix)
+  void VulkanPipeline::PushConstants(VkCommandBuffer cmd, void* data)
   {
     vkCmdPushConstants(
       cmd,
       m_PipelineLayout,
       VK_SHADER_STAGE_ALL,
       0,
-      sizeof(glm::mat4),
-      &matrix
+      m_PushConstantSize,
+      data
     );
   }
 

@@ -76,4 +76,6 @@ set(SOURCE_FILES
   Source/Render/VulkanCubicTexture.h
   Source/Assets/CubeMapManager.cpp
   Source/Assets/CubeMapManager.h
+  Source/Render/SkyBox.cpp
+  Source/Render/SkyBox.h
 )

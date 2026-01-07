@@ -11,7 +11,12 @@ namespace YAEngine
     std::string vertexShaderFile;
     std::string geometryShaderFile;
 
+    uint32_t pushConstantSize = sizeof(glm::mat4);
+
+    bool depthTesting = true;
+    bool depthWrite = true;
     bool doubleSided = false;
+    VkCompareOp compareOp = VK_COMPARE_OP_LESS;
 
     // "f2i3u4"
     //    |
@@ -33,7 +38,7 @@ namespace YAEngine
 
     void Bind(VkCommandBuffer commandBuffer);
     void BindDescriptorSets(VkCommandBuffer commandBuffer, const std::vector<VkDescriptorSet>& descriptorSets, uint32_t set);
-    void PushConstants(VkCommandBuffer cmd, glm::mat4& matrix);
+    void PushConstants(VkCommandBuffer cmd, void* data);
 
     VkPipelineLayout GetLayout()
     {
@@ -43,6 +48,7 @@ namespace YAEngine
   private:
     VkPipeline m_Pipeline {};
     VkPipelineLayout m_PipelineLayout {};
+    uint32_t m_PushConstantSize = 0;
 
     static std::vector<char> ReadFile(std::string_view filename);
     static VkShaderModule CreateShaderModule(VkDevice device, const std::vector<char>& code);
