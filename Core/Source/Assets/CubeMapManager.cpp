@@ -15,12 +15,6 @@ namespace YAEngine
 
     if (float* image32 = stbi_loadf(filePath.c_str(), &width, &height, &channels, 4))
     {
-      // std::vector<uint16_t> data16(width * height * 4);
-
-      // for(int i = 0; i < width * height * 4; ++i)
-      // {
-        // data16[i] = glm::packHalf1x16(image32[i]);
-      // }
       texture->m_CubeTexture.Create(image32, width, height);
       stbi_image_free(image32);
 
