@@ -61,5 +61,6 @@ namespace YAEngine
     static void CursorPositionCallback(GLFWwindow* window, double xpos, double ypos);
     static void MouseButtonCallback(GLFWwindow* window, int32_t button, int32_t action, int32_t mods);
     static void FramebufferSizeCallback(GLFWwindow* window, int32_t width, int32_t height);
+    static void MouseScrollCallback(GLFWwindow* window, double xOffset, double yOffset);
   };
 }

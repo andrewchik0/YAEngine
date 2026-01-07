@@ -22,6 +22,7 @@ namespace YAEngine
     onMouseButton = App().Events().Subscribe<MouseButtonEvent>([&](const MouseButtonEvent& e) { OnMouseButton(e); });
     onMouseMove = App().Events().Subscribe<MouseMovedEvent>([&](const MouseMovedEvent& e) { OnMouseMoved(e); });
     onKeyboard = App().Events().Subscribe<KeyEvent>([&](const KeyEvent& e) { OnKeyboard(e); });
+    onMouseScroll = App().Events().Subscribe<MouseWheelEvent>([&](const MouseWheelEvent& e) { OnMouseScroll(e); });
   }
 
   void FreeCamLayer::Destroy()
@@ -29,6 +30,7 @@ namespace YAEngine
     App().Events().Unsubscribe<MouseButtonEvent>(onMouseButton);
     App().Events().Unsubscribe<MouseMovedEvent>(onMouseMove);
     App().Events().Unsubscribe<KeyEvent>(onKeyboard);
+    App().Events().Unsubscribe<MouseButtonEvent>(onMouseScroll);
   }
 
 
@@ -62,7 +64,7 @@ namespace YAEngine
 
     if (velocity != glm::vec3(0.0f))
     {
-      velocity = glm::normalize(velocity) * (float)deltaTime * 2.0f;
+      velocity = glm::normalize(velocity) * (float)deltaTime * 2.0f * speed;
       App().GetScene().GetTransform(freeCam).position += velocity;
     }
   }
@@ -101,4 +103,18 @@ namespace YAEngine
   {
     mousePressed = event.action == GLFW_PRESS;
   }
+
+  void FreeCamLayer::OnMouseScroll(const MouseWheelEvent& event)
+  {
+    if (event.y > 0)
+    {
+      speed *= 1.1f;
+    }
+    else if (event.y < 0)
+    {
+      speed *= 0.9f;
+    }
+    speed = glm::clamp(speed, 0.01f, 1000.0f);
+  }
+
 }

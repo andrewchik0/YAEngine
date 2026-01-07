@@ -28,10 +28,10 @@ namespace YAEngine
     void BindUniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size);
     void BindStorageBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size);
     void BindCombinedImageSampler(
-        uint32_t binding,
-        VkImageView imageView,
-        VkSampler sampler,
-        VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
+      uint32_t binding,
+      VkImageView imageView,
+      VkSampler sampler,
+      VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
 
     VkDescriptorSet Get()

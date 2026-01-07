@@ -44,6 +44,16 @@ namespace YAEngine
       self->m_WindowEventStack.push_back(std::make_unique<ResizeEvent>(width, height));
   }
 
+  void Window::MouseScrollCallback(GLFWwindow* window, double xOffset, double yOffset)
+  {
+    auto* self = static_cast<Window*>(
+      glfwGetWindowUserPointer(window)
+    );
+
+    if (self)
+      self->m_WindowEventStack.push_back(std::make_unique<MouseWheelEvent>(xOffset, yOffset));
+  }
+
   Window::Window(const WindowSpecs& specs)
   {
     m_WindowHeight = specs.height;
@@ -64,6 +74,7 @@ namespace YAEngine
     glfwSetCursorPosCallback(m_WindowHandle, CursorPositionCallback);
     glfwSetMouseButtonCallback(m_WindowHandle, MouseButtonCallback);
     glfwSetFramebufferSizeCallback(m_WindowHandle, FramebufferSizeCallback);
+    glfwSetScrollCallback(m_WindowHandle, MouseScrollCallback);
   }
 
   void Window::Destroy()

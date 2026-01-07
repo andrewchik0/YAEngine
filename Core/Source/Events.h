@@ -7,6 +7,7 @@ namespace YAEngine
     None = 0,
     MouseMoved,
     MouseButton,
+    MouseScroll,
     Key,
     Resize
   };
@@ -28,6 +29,18 @@ namespace YAEngine
       : x(x), y(y)
     {
       type = EventType::MouseMoved;
+    }
+  };
+
+  class MouseWheelEvent : public Event
+  {
+  public:
+    double x, y;
+
+    MouseWheelEvent(double x, double y)
+      : x(x), y(y)
+    {
+      type = EventType::MouseScroll;
     }
   };
 

@@ -75,6 +75,10 @@ namespace YAEngine
         if (!io.WantCaptureMouse)
           m_EventBus.Emit<MouseButtonEvent>(*dynamic_cast<MouseButtonEvent*>(windowEvent.get()));
         break;
+      case EventType::MouseScroll:
+        if (!io.WantCaptureMouse)
+            m_EventBus.Emit<MouseWheelEvent>(*dynamic_cast<MouseWheelEvent*>(windowEvent.get()));
+        break;
       case EventType::MouseMoved:
         m_EventBus.Emit<MouseMovedEvent>(*dynamic_cast<MouseMovedEvent*>(windowEvent.get()));
         break;
