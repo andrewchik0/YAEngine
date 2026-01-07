@@ -75,13 +75,14 @@ namespace YAEngine
 
     template<typename T>
     requires std::is_base_of<Layer, T>::value
-    void GetLayer()
+    T* GetLayer()
     {
       for (const auto& layer : m_LayerStack)
       {
         if (auto casted = dynamic_cast<T*>(layer.get()))
           return casted;
       }
+      return nullptr;
     }
 
     void RenderUI()

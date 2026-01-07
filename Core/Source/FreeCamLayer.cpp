@@ -36,6 +36,8 @@ namespace YAEngine
 
   void FreeCamLayer::Update(double deltaTime)
   {
+    if (App().GetScene().GetActiveCamera() != freeCam) return;
+
     if (mousePressed)
     {
       yaw   -= float(deltaX * deltaTime) * 2.0f;

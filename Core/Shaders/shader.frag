@@ -41,7 +41,7 @@ void main() {
   vec3 viewDir = normalize(u_Data.cameraPosition - inPosition);
   vec3 reflectDir = reflect(-viewDir, normalize(inNormal));
 
-  vec3 hdrColor = texture(cubemapTexture, reflectDir).rgb;
+  vec3 hdrColor = textureLod(cubemapTexture, reflectDir, 4).rgb;
 
   float exposure = 0.1;
   vec3 mapped = hdrColor * exposure;

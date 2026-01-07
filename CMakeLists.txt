@@ -12,5 +12,5 @@ find_program(GLSLC_EXECUTABLE
 )
 
 add_subdirectory(Core)
-add_subdirectory(App)
+add_subdirectory(RacingDemo)
 add_subdirectory(Tools/CompileShaders)
