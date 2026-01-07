@@ -3,6 +3,7 @@
 #include <entt/entt.hpp>
 
 #include "Components.h"
+#include "Assets/CubeMapManager.h"
 
 namespace YAEngine
 {
@@ -71,10 +72,16 @@ namespace YAEngine
     void UpdateWorldTransform(entt::entity e);
     void SetDoubleSided(Entity e);
 
+    void SetSkybox(CubeMapHandle handle)
+    {
+      m_Skybox = handle;
+    }
+
   private:
     entt::registry m_Registry;
 
     entt::entity m_ActiveCamera = entt::null;
+    CubeMapHandle m_Skybox {};
 
     glm::mat4 ComposeLocal(const TransformComponent& t);
 

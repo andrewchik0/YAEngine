@@ -30,7 +30,8 @@ namespace YAEngine
             { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-            { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT }
+            { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
@@ -120,6 +121,12 @@ namespace YAEngine
       auto height = app->GetAssetManager().Textures().Get(material.heightTexture).m_VulkanTexture;
       m_DescriptorSets[currentFrame].BindCombinedImageSampler(7, height.GetView(), height.GetSampler());
       textureMask |= (1 << 6);
+    }
+    if (app->GetAssetManager().CubeMaps().Has(material.cubemap))
+    {
+      auto cubemap = app->GetAssetManager().CubeMaps().Get(material.cubemap).m_CubeTexture;
+      m_DescriptorSets[currentFrame].BindCombinedImageSampler(8, cubemap.GetView(), cubemap.GetSampler());
+      textureMask |= (1 << 7);
     }
 
     data.albedo = material.albedo;

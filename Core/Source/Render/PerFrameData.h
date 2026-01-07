@@ -13,7 +13,9 @@ namespace YAEngine
     {
       glm::mat4 view;
       glm::mat4 proj;
+      glm::vec3 cameraPosition;
       float time;
+      glm::vec3 cameraDirection;
     } ubo;
 
     void Init(VkDevice device, VmaAllocator allocator, VkDescriptorPool pool, uint32_t maxFramesInFlight);

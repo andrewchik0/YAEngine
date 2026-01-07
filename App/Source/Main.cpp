@@ -54,10 +54,13 @@ public:
 
   void Init() override
   {
+    auto skyHandle = App().GetAssetManager().CubeMaps().Load(APP_WORKING_DIR "/Assets/Textures/sky.hdr");
     auto monkeyHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/monkey.obj");
     auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf");
     monkey = App().GetAssetManager().Models().Get(monkeyHandle).rootEntity;
     car = App().GetAssetManager().Models().Get(carHandle).rootEntity;
+
+    App().GetScene().SetSkybox(skyHandle);
 
     auto textureHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Textures/Checkerboard.png");
     auto meshHandle = App().GetAssetManager().Meshes().Load(vertices, indices);

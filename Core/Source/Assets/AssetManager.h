@@ -1,4 +1,5 @@
 #pragma once
+#include "CubeMapManager.h"
 #include "MaterialManager.h"
 #include "MeshManager.h"
 #include "ModelManager.h"
@@ -34,6 +35,11 @@ namespace YAEngine
       return m_ModelManager;
     }
 
+    CubeMapManager& CubeMaps()
+    {
+      return m_CubeMapManager;
+    }
+
     void DestroyAll();
 
   private:
@@ -42,5 +48,6 @@ namespace YAEngine
     TextureManager m_TextureManager;
     MaterialManager m_MaterialManager;
     ModelManager m_ModelManager {};
+    CubeMapManager m_CubeMapManager;
   };
 }

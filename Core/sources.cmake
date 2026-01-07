@@ -72,4 +72,8 @@ set(SOURCE_FILES
   Source/Render/VulkanImGui.h
   Vendor/ImGui/imgui_impl_glfw.cpp
   Vendor/ImGui/imgui_impl_vulkan.cpp
+  Source/Render/VulkanCubicTexture.cpp
+  Source/Render/VulkanCubicTexture.h
+  Source/Assets/CubeMapManager.cpp
+  Source/Assets/CubeMapManager.h
 )

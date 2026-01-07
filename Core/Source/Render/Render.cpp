@@ -70,12 +70,15 @@ namespace YAEngine
       ).graphicsFamily.value(),
       m_RenderPass.Get()
     );
+
+    VulkanCubicTexture::InitCubicTextures(m_Device.Get(), m_Allocator.Get(), m_CommandBuffer, m_DescriptorPool.Get());
   }
 
   void Render::Destroy()
   {
     m_Sync.Destroy();
 
+    VulkanCubicTexture::DestroyCubicTextures();
     m_ImGUI.Destroy();
     m_CommandBuffer.Destroy();
     m_ForwardPipeline.Destroy();
@@ -172,7 +175,9 @@ namespace YAEngine
       currentPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
       currentPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), transform.world);
       currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(m_CurrentFrameIndex)}, 1);
-      app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, app->GetAssetManager().Materials().Get(material.asset), m_CurrentFrameIndex);
+      auto& mat = app->GetAssetManager().Materials().Get(material.asset);
+      mat.cubemap = app->GetScene().m_Skybox;
+      app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, mat, m_CurrentFrameIndex);
       app->m_AssetManager.Meshes().Get(mesh.asset).vertexBuffer.Draw(m_CommandBuffer.GetCurrentBuffer());
     });
   }
@@ -201,5 +206,6 @@ namespace YAEngine
 
     m_PerFrameData.ubo.view = view;
     m_PerFrameData.ubo.proj = proj;
+    m_PerFrameData.ubo.cameraPosition = transform.position;
   }
 }

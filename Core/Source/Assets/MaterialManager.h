@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AssetManagerBase.h"
+#include "CubeMapManager.h"
 
 #include "TextureManager.h"
 #include "Render/VulkanMaterial.h"
@@ -22,6 +23,7 @@ namespace YAEngine
     TextureHandle emissiveTexture;
     TextureHandle normalTexture;
     TextureHandle heightTexture;
+    CubeMapHandle cubemap;
   private:
 
     VulkanMaterial m_VulkanMaterial;
