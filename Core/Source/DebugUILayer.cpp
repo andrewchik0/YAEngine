@@ -131,6 +131,9 @@ namespace YAEngine
       if (ImGui::DragFloat3("Scale", &tc.scale.x, 0.1f, 0.001f, 1000.0f))
         dirty = true;
 
+      ImGui::Text("MinBB: (%.1f, %.1f, %.1f)", tc.minBB.x, tc.minBB.y, tc.minBB.z);
+      ImGui::Text("MaxBB: (%.1f, %.1f, %.1f)", tc.maxBB.x, tc.maxBB.y, tc.maxBB.z);
+
       if (dirty)
         App().GetScene().MarkDirty(s_SelectedEntity);
     }

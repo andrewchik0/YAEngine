@@ -48,7 +48,7 @@ void main() {
 
   vec3 hdrColor = textureLod(cubemapTexture, reflectDir, 4).rgb;
 
-  float exposure = 0.4;
+  float exposure = 0.6;
   vec3 mapped = hdrColor * exposure;
 
   mapped = ACESFilm(mapped);

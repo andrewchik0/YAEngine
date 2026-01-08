@@ -50,6 +50,42 @@ namespace YAEngine
     return m_Registry.get<TransformComponent>(e);
   }
 
+  Name& Scene::GetName(Entity e)
+  {
+    return m_Registry.get<Name>(e);
+  }
+
+  Entity Scene::GetChildByName(Entity entity, Name name)
+  {
+    auto currentEntityName = GetName(entity);
+    if (currentEntityName == name)
+      return entity;
+
+    auto firstChild = GetTransform(entity).firstChild;
+    if (firstChild != entt::null)
+    {
+      auto child = GetChildByName(firstChild, name);
+      if (child != entt::null)
+        return child;
+    }
+
+    auto sibling = GetTransform(entity).nextSibling;
+    while (sibling != entt::null)
+    {
+      auto child = GetChildByName(sibling, name);
+
+      if (child != entt::null)
+      {
+        auto childName = GetName(child);
+        if (childName == name)
+          return child;
+      }
+      sibling = GetTransform(sibling).nextSibling;
+    }
+
+    return entt::null;
+  }
+
   void Scene::MarkDirty(Entity e)
   {
     auto& t = m_Registry.get<TransformComponent>(e);

@@ -18,6 +18,7 @@ namespace YAEngine
     void SetParent(Entity child, Entity parent);
 
     TransformComponent& GetTransform(Entity e);
+    Name& GetName(Entity e);
 
     template<typename T, typename... Args>
     T& AddComponent(Entity e, Args&&... args)
@@ -50,6 +51,8 @@ namespace YAEngine
 
       throw std::runtime_error("Entity does not have requested component");
     }
+
+    Entity GetChildByName(Entity entity, Name name);
 
     template<typename... Ts>
     auto GetView()

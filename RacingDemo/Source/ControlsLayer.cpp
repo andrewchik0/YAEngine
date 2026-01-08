@@ -34,6 +34,8 @@ void ControlsLayer::Update(double dt)
   else
     speed -= drag * dt * (speed > 0 ? 1 : speed < 0 ? -1 : 0);
 
+  if (speed < 0.001 && speed > -0.001) speed = 0;
+
   speed = glm::clamp(speed, -maxSpeedBack, maxSpeed);
 
   double turnSpeed = glm::radians(260.0 - speed / maxSpeed * 160.0);
@@ -85,5 +87,29 @@ void ControlsLayer::Update(double dt)
 
     double lerpSpeed = 5.0;
     cam.fov = float(glm::mix(double(cam.fov), targetFov, 1.0 - std::exp(-lerpSpeed * dt)));
+  }
+
+  auto& wheels = App().GetLayer<AppLayer>()->wheels;
+
+  float wheelRadius = 0.29f;
+
+  for (int i = 0; i < wheels.size(); i++)
+  {
+    auto& wheel = wheels[i];
+    auto& tc = App().GetScene().GetTransform(wheel);
+
+    glm::quat baseRot = App().GetLayer<AppLayer>()->wheelStates[i].baseRot;
+
+    App().GetLayer<AppLayer>()->wheelStates[i].spinAngle += (speed / wheelRadius) * dt;
+
+    glm::quat steerRot = glm::identity<glm::quat>();
+    if (i == 0 || i == 1)
+    {
+      steerRot = glm::angleAxis(wheelsSteer * 10.0f, glm::dvec3(0,1,0));
+    }
+
+    glm::quat spinRot = glm::angleAxis(App().GetLayer<AppLayer>()->wheelStates[i].spinAngle, glm::dvec3(1,0,0));
+
+    tc.rotation = steerRot * baseRot * spinRot;
   }
 }

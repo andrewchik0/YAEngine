@@ -18,6 +18,9 @@ namespace YAEngine
     glm::mat4 local { 1.0f };
     glm::mat4 world { 1.0f };
 
+    glm::vec3 minBB;
+    glm::vec3 maxBB;
+
     bool dirty = true;
   };
 

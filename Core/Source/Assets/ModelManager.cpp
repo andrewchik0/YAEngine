@@ -1,6 +1,7 @@
 #include "ModelManager.h"
 
 #include <filesystem>
+#include <limits>
 
 #include "AssetManager.h"
 #include "Scene/Scene.h"
@@ -34,6 +35,8 @@ namespace YAEngine
     model->rootEntity = m_Scene->CreateEntity(std::filesystem::path(path).filename().string());
 
     m_Scene->GetTransform(model->rootEntity).firstChild = ProcessNode(*model, model->rootEntity, scene->mRootNode, scene);
+    m_Scene->GetTransform(model->rootEntity).minBB = m_Scene->GetTransform(m_Scene->GetTransform(model->rootEntity).firstChild).minBB;
+    m_Scene->GetTransform(model->rootEntity).maxBB = m_Scene->GetTransform(m_Scene->GetTransform(model->rootEntity).firstChild).maxBB;
 
     return AssetManagerBase::Load(std::move(model));
   }
@@ -61,6 +64,9 @@ namespace YAEngine
 
     Entity prevChild = entt::null;
 
+    glm::vec3 nodeMinBB( std::numeric_limits<float>::max());
+    glm::vec3 nodeMaxBB(-std::numeric_limits<float>::max());
+
     for (size_t i = 0; i < node->mNumMeshes; ++i)
     {
       aiMesh* ai_mesh = scene->mMeshes[node->mMeshes[i]];
@@ -73,6 +79,9 @@ namespace YAEngine
       mt.world  = glm::mat4(1.0f);
       mt.dirty  = true;
 
+      nodeMinBB = glm::min(nodeMinBB, mt.minBB);
+      nodeMaxBB = glm::max(nodeMaxBB, mt.maxBB);
+
       if (prevChild == entt::null)
         tc.firstChild = meshEntity;
       else
@@ -83,6 +92,11 @@ namespace YAEngine
     for (size_t i = 0; i < node->mNumChildren; ++i)
     {
       auto child = ProcessNode(model, nodeEntity, node->mChildren[i], scene);
+      auto& childTransform = m_Scene->GetTransform(child);
+
+      nodeMinBB = glm::min(nodeMinBB, childTransform.minBB);
+      nodeMaxBB = glm::max(nodeMaxBB, childTransform.maxBB);
+
       if (prevChild == entt::null)
         tc.firstChild = child;
       else
@@ -90,6 +104,10 @@ namespace YAEngine
 
       prevChild = child;
     }
+
+    tc.minBB = nodeMinBB;
+    tc.maxBB = nodeMaxBB;
+
     return nodeEntity;
   }
 
@@ -156,6 +174,8 @@ namespace YAEngine
 
     auto meshHandle = m_AssetManager->Meshes().Load(vertices, indices);
     m_Scene->AddComponent<MeshComponent>(entity, meshHandle);
+
+    ComputeMeshBB(mesh, m_Scene->GetTransform(entity).minBB, m_Scene->GetTransform(entity).maxBB);
     return entity;
   }
 
@@ -255,4 +275,22 @@ namespace YAEngine
     return ""; // No texture found
   }
 
+  void ModelManager::ComputeMeshBB(const aiMesh* mesh, glm::vec3& outMin, glm::vec3& outMax)
+  {
+    outMin = glm::vec3(std::numeric_limits<float>::max());
+    outMax = glm::vec3(std::numeric_limits<float>::lowest());
+
+    for (unsigned int i = 0; i < mesh->mNumVertices; i++)
+    {
+      aiVector3D v = mesh->mVertices[i];
+
+      if (v.x < outMin.x) outMin.x = v.x;
+      if (v.y < outMin.y) outMin.y = v.y;
+      if (v.z < outMin.z) outMin.z = v.z;
+
+      if (v.x > outMax.x) outMax.x = v.x;
+      if (v.y > outMax.y) outMax.y = v.y;
+      if (v.z > outMax.z) outMax.z = v.z;
+    }
+  }
 }

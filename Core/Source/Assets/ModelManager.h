@@ -49,5 +49,7 @@ namespace YAEngine
     Entity ProcessMesh(Model& model, aiMesh* mesh, const aiScene* scene);
     void ProcessMaterial(Model& model, Entity& mesh, const aiMaterial* material);
     std::string GetTexturePath(const aiMaterial* mat, aiTextureType type);
+
+    void ComputeMeshBB(const aiMesh* mesh, glm::vec3& outMin, glm::vec3& outMax);
   };
 }
