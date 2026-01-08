@@ -56,12 +56,21 @@ void ControlsLayer::Update(double dt)
   glm::dquat camRot = App().GetScene().GetTransform(camera).rotation;
   glm::dquat targetRot = rotation * extraRot;
 
-  double t = 0.03;
+  double camSmooth = 8.0;
+  double t = 1.0 - std::exp(-camSmooth * dt);
+
   camRot = glm::slerp(camRot, targetRot, t);
   App().GetScene().GetTransform(camera).rotation = camRot;
 
+  double normSpeed = glm::clamp(speed / maxSpeed, 0.0, 1.0);
+  double backFactor = glm::smoothstep(0.5, 1.0, normSpeed);
+
+  glm::dvec3 dynamicOffset = cameraOffset;
+  dynamicOffset.z *= glm::mix(1.0, 0.6, backFactor);
+
+  glm::dvec3 targetPos = position + rotation * dynamicOffset;
+
   glm::dvec3 camPos = App().GetScene().GetTransform(camera).position;
-  glm::dvec3 targetPos = position + rotation * cameraOffset;
   camPos = glm::mix(camPos, targetPos, t);
   App().GetScene().GetTransform(camera).position = camPos;
 
@@ -75,6 +84,6 @@ void ControlsLayer::Update(double dt)
     double targetFov = glm::mix(minFov, maxFov, factor);
 
     double lerpSpeed = 5.0;
-    cam.fov = glm::mix(double(cam.fov), targetFov, 1.0 - std::exp(-lerpSpeed * dt));
+    cam.fov = float(glm::mix(double(cam.fov), targetFov, 1.0 - std::exp(-lerpSpeed * dt)));
   }
 }

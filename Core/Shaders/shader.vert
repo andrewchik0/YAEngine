@@ -3,12 +3,12 @@
 layout(location = 0) in vec3 inPosition;
 layout(location = 1) in vec2 inTexCoord;
 layout(location = 2) in vec3 inNormal;
-layout(location = 3) in vec3 inTangent;
-layout(location = 4) in vec3 inBitangent;
+layout(location = 3) in vec4 inTangent;
 
 layout(location = 0) out vec2 outTexCoord;
 layout(location = 1) out vec3 outNormal;
 layout(location = 2) out vec3 outPosition;
+layout(location = 3) out mat3 outTBN;
 
 layout(set = 0, binding = 0) uniform PerFrameUBO {
   mat4 view;
@@ -28,4 +28,14 @@ void main() {
   outTexCoord = inTexCoord;
   outPosition = vec3(pc.world * vec4(inPosition, 1.0));
   outNormal = normalize(mat3(pc.world) * inNormal);
+
+  mat3 normalMatrix = transpose(inverse(mat3(pc.world)));
+
+  vec3 N = normalize(normalMatrix * inNormal);
+  vec3 T = normalize(normalMatrix * inTangent.xyz);
+
+  T = normalize(T - N * dot(T, N));
+  vec3 B = cross(N, T) * inTangent.w;
+
+  outTBN = mat3(T, B, N);
 }

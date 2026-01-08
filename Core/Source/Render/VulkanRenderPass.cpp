@@ -183,7 +183,7 @@ namespace YAEngine
   void VulkanRenderPass::Begin(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkExtent2D swapChainExtent)
   {
     VkClearValue clearValues[2];
-    clearValues[0].color = {{0.2f, 0.4f, 0.8f, 1.0f}};
+    clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
     clearValues[1].depthStencil = {1.0f, 0};
 
     VkRenderPassBeginInfo renderPassInfo{};

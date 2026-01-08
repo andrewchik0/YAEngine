@@ -19,8 +19,8 @@ namespace YAEngine
     Assimp::Importer importer;
     const aiScene* scene =
       importer.ReadFile(path,
-                        aiProcess_CalcTangentSpace | aiProcess_Triangulate | aiProcess_GenUVCoords | aiProcess_FlipUVs |
-                        aiProcess_GenNormals | aiProcess_Triangulate);
+                        aiProcess_Triangulate | aiProcess_GenUVCoords | aiProcess_FlipUVs |
+                        aiProcess_GenNormals);
 
     if (scene == nullptr)
     {
@@ -119,15 +119,17 @@ namespace YAEngine
 
       if (mesh->HasTangentsAndBitangents())
       {
-        glm::vec4 tangent = glm::vec4(mesh->mTangents[i].x, mesh->mTangents[i].y, mesh->mTangents[i].z, 0.0f);
-        glm::vec4 bitangent = glm::vec4(mesh->mBitangents[i].x, mesh->mBitangents[i].y, mesh->mBitangents[i].z, 0.0f);
-        vertex.tangent = glm::normalize(tangent);
-        vertex.bitangent = glm::normalize(bitangent);
+        glm::vec3 T = glm::normalize(glm::vec3(mesh->mTangents[i].x, mesh->mTangents[i].y, mesh->mTangents[i].z));
+        glm::vec3 B = glm::normalize(glm::vec3(mesh->mBitangents[i].x, mesh->mBitangents[i].y, mesh->mBitangents[i].z));
+        glm::vec3 N = glm::normalize(glm::vec3(mesh->mNormals[i].x, mesh->mNormals[i].y, mesh->mNormals[i].z));
+
+        float w = (glm::dot(glm::cross(N, T), B) < 0.0f) ? -1.0f : 1.0f;
+
+        vertex.tangent = glm::vec4(T, w);
       }
       else
       {
-        vertex.tangent = glm::vec4(1, 0, 0, 0);
-        vertex.bitangent = glm::vec4(0, 1, 0, 0);
+        vertex.tangent = glm::vec4(1.0f, 0.0f, 0.0f, 0.0f);
       }
 
       if (mesh->HasTextureCoords(0))

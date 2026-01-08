@@ -10,8 +10,7 @@ namespace YAEngine
     glm::vec3 position;
     glm::vec2 tex;
     glm::vec3 normal;
-    glm::vec3 tangent;
-    glm::vec3 bitangent;
+    glm::vec4 tangent;
   };
 
   class VulkanVertexBuffer

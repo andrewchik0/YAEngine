@@ -40,8 +40,8 @@ namespace YAEngine
 
     if (mousePressed)
     {
-      yaw   -= float(deltaX * deltaTime) * 2.0f;
-      pitch -= float(deltaY * deltaTime) * 2.0f;
+      yaw   -= float(deltaX) * .0015f;
+      pitch -= float(deltaY) * .0015f;
 
       deltaX = 0.0f;
       deltaY = 0.0f;

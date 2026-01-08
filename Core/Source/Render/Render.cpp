@@ -47,7 +47,7 @@ namespace YAEngine
     PipelineCreateInfo forwardInfo = {
       .fragmentShaderFile = "shader.frag",
       .vertexShaderFile = "shader.vert",
-      .vertexInputFormat = "f3f2f3f3f3",
+      .vertexInputFormat = "f3f2f3f4",
       .sets = std::vector({
         m_PerFrameData.GetLayout(),
         m_DefaultMaterial.GetLayout(),
