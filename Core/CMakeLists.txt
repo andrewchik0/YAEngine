@@ -1,7 +1,9 @@
 include(dependencies.cmake)
 include(sources.cmake)
 
-add_library(Core STATIC)
+add_library(Core STATIC
+  Source/Render/VulkanFramebuffer.cpp
+  Source/Render/VulkanFramebuffer.h)
 target_sources(Core PRIVATE ${SOURCE_FILES})
 
 set_target_properties(Core PROPERTIES LINKER_LANGUAGE CXX)

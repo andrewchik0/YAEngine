@@ -32,7 +32,7 @@ public:
 
     camera = App().GetScene().CreateEntity("camera");
     App().GetScene().AddComponent<YAEngine::CameraComponent>(camera);
-    cameraOffset = glm::vec3(0.0, 1.7, -3.6);
+    cameraOffset = glm::vec3(0.0, 1.9, -3.6);
 
     glm::dvec3 eulerDegrees = glm::vec3(160.0, -0.0, -180.0);
     glm::dvec3 eulerRadians = glm::radians(eulerDegrees);

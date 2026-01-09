@@ -240,7 +240,7 @@ namespace YAEngine
     mat.sg = hasSG;
 
     if (!baseColorTexture.empty())
-      mat.baseColorTexture = m_AssetManager->Textures().Load((model.basePath / baseColorTexture).string());
+      mat.baseColorTexture = m_AssetManager->Textures().Load((model.basePath / baseColorTexture).string(), &mat.hasAlpha);
     if (!metallicTexture.empty())
       mat.metallicTexture = m_AssetManager->Textures().Load((model.basePath / metallicTexture).string());
     if (!roughnessTexture.empty())

@@ -7,12 +7,13 @@
 
 namespace YAEngine
 {
-  void VulkanSwapChain::Init(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, GLFWwindow* window)
+  void VulkanSwapChain::Init(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, GLFWwindow* window, VmaAllocator allocator)
   {
     m_Device = device;
     m_Surface = surface;
     m_PhysicalDevice = physicalDevice;
     m_Window = window;
+    m_Allocator = allocator;
 
     SwapChainSupportDetails swapChainSupport = VulkanPhysicalDevice::QuerySwapChainSupport(m_PhysicalDevice, m_Surface);
 
@@ -150,16 +151,99 @@ namespace YAEngine
     }
   }
 
-  void VulkanSwapChain::CreateFrameBuffers(VkRenderPass renderPass, VkImageView depthView, VkImageView multisampleView)
+  void VulkanSwapChain::CreateFrameBuffers(VkRenderPass renderPass, uint32_t width, uint32_t height)
   {
     m_RenderPass = renderPass;
     m_SwapChainFrameBuffers.resize(m_SwapChainImageViews.size());
 
+    VkImageCreateInfo multisamplingImageInfo{};
+    multisamplingImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    multisamplingImageInfo.imageType = VK_IMAGE_TYPE_2D;
+    multisamplingImageInfo.extent.width  = width;
+    multisamplingImageInfo.extent.height = height;
+    multisamplingImageInfo.extent.depth  = 1;
+    multisamplingImageInfo.mipLevels = 1;
+    multisamplingImageInfo.arrayLayers = 1;
+    multisamplingImageInfo.format = m_SwapChainImageFormat;
+    multisamplingImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    multisamplingImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    multisamplingImageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    multisamplingImageInfo.samples = VK_SAMPLE_COUNT_4_BIT;
+    multisamplingImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo multisamplingAllocInfo{};
+    multisamplingAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    vmaCreateImage(
+      m_Allocator,
+      &multisamplingImageInfo,
+      &multisamplingAllocInfo,
+      &m_MultisampleImage,
+      &m_MultisampleImageAllocation,
+      nullptr
+    );
+
+    VkImageViewCreateInfo multisamplingViewInfo{};
+    multisamplingViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    multisamplingViewInfo.image = m_MultisampleImage;
+    multisamplingViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    multisamplingViewInfo.format = m_SwapChainImageFormat;
+
+    multisamplingViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    multisamplingViewInfo.subresourceRange.baseMipLevel = 0;
+    multisamplingViewInfo.subresourceRange.levelCount = 1;
+    multisamplingViewInfo.subresourceRange.baseArrayLayer = 0;
+    multisamplingViewInfo.subresourceRange.layerCount = 1;
+
+    vkCreateImageView(
+      m_Device,
+      &multisamplingViewInfo,
+      nullptr,
+      &m_MultisampleImageView
+    );
+
+    VkImageCreateInfo depthImageInfo{};
+    depthImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    depthImageInfo.imageType = VK_IMAGE_TYPE_2D;
+    depthImageInfo.extent.width = width;
+    depthImageInfo.extent.height = height;
+    depthImageInfo.extent.depth = 1;
+    depthImageInfo.mipLevels = 1;
+    depthImageInfo.arrayLayers = 1;
+    depthImageInfo.format = VK_FORMAT_D32_SFLOAT;
+    depthImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
+    depthImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    depthImageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
+    depthImageInfo.samples = VK_SAMPLE_COUNT_4_BIT;
+    depthImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    if (vmaCreateImage(m_Allocator, &depthImageInfo, &allocInfo, &m_DepthImage, &m_DepthImageAllocation, nullptr) != VK_SUCCESS)
+      throw std::runtime_error("Failed to create depth image!");
+
+    VkImageViewCreateInfo depthViewInfo{};
+    depthViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+    depthViewInfo.image = m_DepthImage;
+    depthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+    depthViewInfo.format = VK_FORMAT_D32_SFLOAT;
+    depthViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    depthViewInfo.subresourceRange.baseMipLevel = 0;
+    depthViewInfo.subresourceRange.levelCount = 1;
+    depthViewInfo.subresourceRange.baseArrayLayer = 0;
+    depthViewInfo.subresourceRange.layerCount = 1;
+
+    if (vkCreateImageView(m_Device, &depthViewInfo, nullptr, &m_DepthImageView) != VK_SUCCESS)
+    {
+      throw std::runtime_error("Failed to create depth image view!");
+    }
+
     for (size_t i = 0; i < m_SwapChainImageViews.size(); i++)
     {
       VkImageView attachments[] = {
-        multisampleView,
-        depthView,
+        m_MultisampleImageView,
+        m_DepthImageView,
         m_SwapChainImageViews[i],
       };
 
@@ -181,6 +265,12 @@ namespace YAEngine
 
   void VulkanSwapChain::Destroy()
   {
+    vkDestroyImageView(m_Device, m_DepthImageView, nullptr);
+    vmaDestroyImage(m_Allocator, m_DepthImage, m_DepthImageAllocation);
+
+    vkDestroyImageView(m_Device, m_MultisampleImageView, nullptr);
+    vmaDestroyImage(m_Allocator, m_MultisampleImage, m_MultisampleImageAllocation);
+
     for (auto framebuffer : m_SwapChainFrameBuffers)
     {
       vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
@@ -193,20 +283,14 @@ namespace YAEngine
     vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
   }
 
-  void VulkanSwapChain::Recreate(VkRenderPass renderPass, VkImageView depthView, VkImageView multisampleView)
+  void VulkanSwapChain::Recreate(VkRenderPass renderPass, uint32_t width, uint32_t height)
   {
     m_RenderPass = renderPass;
-    int width = 0, height = 0;
-    glfwGetFramebufferSize(m_Window, &width, &height);
-    while (width == 0 || height == 0) {
-      glfwGetFramebufferSize(m_Window, &width, &height);
-      glfwWaitEvents();
-    }
 
     vkDeviceWaitIdle(m_Device);
 
     Destroy();
-    Init(m_Device, m_PhysicalDevice, m_Surface, m_Window);
-    CreateFrameBuffers(m_RenderPass, depthView, multisampleView);
+    Init(m_Device, m_PhysicalDevice, m_Surface, m_Window, m_Allocator);
+    CreateFrameBuffers(m_RenderPass, width, height);
   }
 }

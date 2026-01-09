@@ -15,6 +15,7 @@ namespace YAEngine
 
     bool depthTesting = true;
     bool depthWrite = true;
+    bool blending = false;
     bool doubleSided = false;
     VkCompareOp compareOp = VK_COMPARE_OP_LESS;
 

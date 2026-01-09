@@ -4,46 +4,12 @@
 
 namespace YAEngine
 {
-  void VulkanRenderPass::Init(VkDevice device, VkFormat swapChainImageFormat, VmaAllocator allocator, uint32_t width, uint32_t height)
+  void VulkanRenderPass::Init(VkDevice device, VkFormat swapChainImageFormat, VmaAllocator allocator, VkImageLayout finalImageLayout)
   {
     m_Device = device;
     m_SwapChainImageFormat = swapChainImageFormat;
     m_Allocator = allocator;
-
-    VkImageCreateInfo depthImageInfo{};
-    depthImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    depthImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    depthImageInfo.extent.width = width;
-    depthImageInfo.extent.height = height;
-    depthImageInfo.extent.depth = 1;
-    depthImageInfo.mipLevels = 1;
-    depthImageInfo.arrayLayers = 1;
-    depthImageInfo.format = VK_FORMAT_D32_SFLOAT;
-    depthImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    depthImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthImageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    depthImageInfo.samples = VK_SAMPLE_COUNT_4_BIT;
-    depthImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo allocInfo{};
-    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    if (vmaCreateImage(allocator, &depthImageInfo, &allocInfo, &m_DepthImage, &m_DepthImageAllocation, nullptr) != VK_SUCCESS)
-      throw std::runtime_error("Failed to create depth image!");
-
-    VkImageViewCreateInfo depthViewInfo{};
-    depthViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    depthViewInfo.image = m_DepthImage;
-    depthViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    depthViewInfo.format = VK_FORMAT_D32_SFLOAT;
-    depthViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-    depthViewInfo.subresourceRange.baseMipLevel = 0;
-    depthViewInfo.subresourceRange.levelCount = 1;
-    depthViewInfo.subresourceRange.baseArrayLayer = 0;
-    depthViewInfo.subresourceRange.layerCount = 1;
-
-    if (vkCreateImageView(device, &depthViewInfo, nullptr, &m_DepthImageView) != VK_SUCCESS)
-      throw std::runtime_error("Failed to create depth image view!");
+    m_ImageLayout = finalImageLayout;
 
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = VK_FORMAT_D32_SFLOAT;
@@ -65,7 +31,7 @@ namespace YAEngine
     resolveAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     resolveAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     resolveAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    resolveAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    resolveAttachment.finalLayout = finalImageLayout;
 
     VkAttachmentReference resolveRef{};
     resolveRef.attachment = 2;
@@ -79,7 +45,7 @@ namespace YAEngine
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    colorAttachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+    colorAttachment.finalLayout = finalImageLayout;
 
     VkAttachmentReference colorAttachmentRef{};
     colorAttachmentRef.attachment = 0;
@@ -99,52 +65,6 @@ namespace YAEngine
     dependency.srcAccessMask = 0;
     dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
     dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-    VkImageCreateInfo multisamplingImageInfo{};
-    multisamplingImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    multisamplingImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    multisamplingImageInfo.extent.width  = width;
-    multisamplingImageInfo.extent.height = height;
-    multisamplingImageInfo.extent.depth  = 1;
-    multisamplingImageInfo.mipLevels = 1;
-    multisamplingImageInfo.arrayLayers = 1;
-    multisamplingImageInfo.format = swapChainImageFormat;
-    multisamplingImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    multisamplingImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    multisamplingImageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    multisamplingImageInfo.samples = VK_SAMPLE_COUNT_4_BIT;
-    multisamplingImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo multisamplingAllocInfo{};
-    multisamplingAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    vmaCreateImage(
-      m_Allocator,
-      &multisamplingImageInfo,
-      &multisamplingAllocInfo,
-      &m_MultisampleImage,
-      &m_MultisampleImageAllocation,
-      nullptr
-    );
-
-    VkImageViewCreateInfo multisamplingViewInfo{};
-    multisamplingViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    multisamplingViewInfo.image = m_MultisampleImage;
-    multisamplingViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    multisamplingViewInfo.format = swapChainImageFormat;
-
-    multisamplingViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    multisamplingViewInfo.subresourceRange.baseMipLevel = 0;
-    multisamplingViewInfo.subresourceRange.levelCount = 1;
-    multisamplingViewInfo.subresourceRange.baseArrayLayer = 0;
-    multisamplingViewInfo.subresourceRange.layerCount = 1;
-
-    vkCreateImageView(
-      m_Device,
-      &multisamplingViewInfo,
-      nullptr,
-      &m_MultisampleImageView
-    );
 
     VkAttachmentDescription attachments[] = { colorAttachment, depthAttachment, resolveAttachment };
     VkRenderPassCreateInfo renderPassInfo{};
@@ -166,18 +86,12 @@ namespace YAEngine
   {
     vkDeviceWaitIdle(m_Device);
     vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
-
-    vkDestroyImageView(m_Device, m_DepthImageView, nullptr);
-    vmaDestroyImage(m_Allocator, m_DepthImage, m_DepthImageAllocation);
-
-    vkDestroyImageView(m_Device, m_MultisampleImageView, nullptr);
-    vmaDestroyImage(m_Allocator, m_MultisampleImage, m_MultisampleImageAllocation);
   }
 
-  void VulkanRenderPass::Recreate(uint32_t width, uint32_t height)
+  void VulkanRenderPass::Recreate()
   {
     Destroy();
-    Init(m_Device, m_SwapChainImageFormat, m_Allocator, width, height);
+    Init(m_Device, m_SwapChainImageFormat, m_Allocator, m_ImageLayout);
   }
 
   void VulkanRenderPass::Begin(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkExtent2D swapChainExtent)

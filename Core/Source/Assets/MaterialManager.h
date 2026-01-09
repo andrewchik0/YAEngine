@@ -15,6 +15,7 @@ namespace YAEngine
     float roughness;
     float specular;
     bool sg;
+    bool hasAlpha;
 
     TextureHandle baseColorTexture;
     TextureHandle metallicTexture;

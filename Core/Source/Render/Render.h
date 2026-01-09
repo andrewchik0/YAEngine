@@ -8,6 +8,7 @@
 #include "SkyBox.h"
 #include "VulkanCommandBuffer.h"
 #include "VulkanDescriptorPool.h"
+#include "VulkanFramebuffer.h"
 #include "VulkanImGui.h"
 #include "VulkanMemoryAllocator.h"
 #include "VulkanPhysicalDevice.h"
@@ -28,6 +29,8 @@ namespace YAEngine
 
     void Draw(Application* app);
 
+    void DrawQuad();
+
   private:
 
     void SetViewportAndScissor();
@@ -42,14 +45,21 @@ namespace YAEngine
     PerFrameData m_PerFrameData {};
     SkyBox m_SkyBox;
 
+    VulkanFramebuffer m_MainPassFrameBuffer;
+    VulkanDescriptorSet m_SwapChainDescriptorSet;
+
     VulkanInstance m_VulkanInstance;
     VulkanPhysicalDevice m_PhysicalDevice;
     VulkanDevice m_Device;
     VulkanSurface m_Surface;
     VulkanSwapChain m_SwapChain;
-    VulkanRenderPass m_RenderPass;
+    VulkanRenderPass m_MainRenderPass;
+    VulkanRenderPass m_SwapchainRenderPass;
+
     VulkanPipeline m_ForwardPipeline;
     VulkanPipeline m_ForwardPipelineDoubleSided;
+    VulkanPipeline m_QuadPipeline;
+
     VulkanCommandBuffer m_CommandBuffer;
     VulkanSync m_Sync;
     VulkanMemoryAllocator m_Allocator;

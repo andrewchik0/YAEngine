@@ -34,14 +34,20 @@ layout(location = 0) out vec4 outColor;
 
 #include "post.glsl"
 
+float Hash(vec2 p)
+{
+  return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+}
+
+
 void main() {
   float hasNormal = float((u_Material.textureMask >> 5) & 1);
   vec3 n_ts = texture(normalTexture, inTexCoord).rgb * 2.0 - 1.0;
   vec3 normal = normalize(inTBN * n_ts) * hasNormal + (1.0 - hasNormal) * inNormal;
 
   float base = float(u_Material.textureMask & 1);
-  vec3 col = texture(baseColorTexture, inTexCoord).xyz * base + u_Material.albedo * (1 - base);
-  outColor = vec4(col * max(dot(normalize(vec3(0.5, 1, 0.5)), normal), 0.1), 1.0);
+  vec4 col = texture(baseColorTexture, inTexCoord) * base + vec4(u_Material.albedo, 1.0) * (1 - base);
+  outColor = vec4(col.xyz * max(dot(normalize(vec3(0.5, 1, 0.5)), normal), 0.1), 1.0);
 
   vec3 viewDir = normalize(u_Data.cameraPosition - inPosition);
   vec3 reflectDir = reflect(-viewDir, normalize(normal));
@@ -53,5 +59,11 @@ void main() {
 
   mapped = ACESFilm(mapped);
   vec3 finalColor = pow(mapped, vec3(1.0/2.2));
+
+  float r = Hash(gl_FragCoord.xy + u_Data.time * 17.0);
+
+  if (r > col.a)
+    discard;
+
   outColor *= vec4(finalColor, 1.0);
 }

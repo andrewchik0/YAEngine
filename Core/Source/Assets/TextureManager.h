@@ -22,8 +22,10 @@ namespace YAEngine
   public:
 
     [[nodiscard]]
-    TextureHandle Load(const std::string& filePath);
+    TextureHandle Load(const std::string& filePath, bool* hasAlpha = nullptr);
     void Destroy(TextureHandle handle);
+
+    bool CheckAlpha(void* data, uint32_t width, uint32_t height);
 
     void DestroyAll();
 
