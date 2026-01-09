@@ -36,17 +36,6 @@ namespace YAEngine
       return (uint32_t)m_SwapChainImages.size();
     }
 
-    VkImageView GetDepthView()
-    {
-      return m_DepthImageView;
-    }
-
-    VkImageView GetMultisampleView()
-    {
-      return m_MultisampleImageView;
-    }
-
-
   private:
     VkSwapchainKHR m_SwapChain {};
     std::vector<VkImage> m_SwapChainImages;
@@ -58,10 +47,6 @@ namespace YAEngine
     VkImage m_DepthImage {};
     VmaAllocation m_DepthImageAllocation {};
     VkImageView m_DepthImageView {};
-
-    VkImage m_MultisampleImage {};
-    VmaAllocation m_MultisampleImageAllocation {};
-    VkImageView m_MultisampleImageView {};
 
     VkSurfaceFormatKHR ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats);
     VkPresentModeKHR ChooseSwapPresentMode(const std::vector<VkPresentModeKHR>& availablePresentModes);

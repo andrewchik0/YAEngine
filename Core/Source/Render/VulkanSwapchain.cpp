@@ -156,52 +156,6 @@ namespace YAEngine
     m_RenderPass = renderPass;
     m_SwapChainFrameBuffers.resize(m_SwapChainImageViews.size());
 
-    VkImageCreateInfo multisamplingImageInfo{};
-    multisamplingImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-    multisamplingImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    multisamplingImageInfo.extent.width  = width;
-    multisamplingImageInfo.extent.height = height;
-    multisamplingImageInfo.extent.depth  = 1;
-    multisamplingImageInfo.mipLevels = 1;
-    multisamplingImageInfo.arrayLayers = 1;
-    multisamplingImageInfo.format = m_SwapChainImageFormat;
-    multisamplingImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
-    multisamplingImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    multisamplingImageInfo.usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    multisamplingImageInfo.samples = VK_SAMPLE_COUNT_4_BIT;
-    multisamplingImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo multisamplingAllocInfo{};
-    multisamplingAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
-
-    vmaCreateImage(
-      m_Allocator,
-      &multisamplingImageInfo,
-      &multisamplingAllocInfo,
-      &m_MultisampleImage,
-      &m_MultisampleImageAllocation,
-      nullptr
-    );
-
-    VkImageViewCreateInfo multisamplingViewInfo{};
-    multisamplingViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-    multisamplingViewInfo.image = m_MultisampleImage;
-    multisamplingViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-    multisamplingViewInfo.format = m_SwapChainImageFormat;
-
-    multisamplingViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    multisamplingViewInfo.subresourceRange.baseMipLevel = 0;
-    multisamplingViewInfo.subresourceRange.levelCount = 1;
-    multisamplingViewInfo.subresourceRange.baseArrayLayer = 0;
-    multisamplingViewInfo.subresourceRange.layerCount = 1;
-
-    vkCreateImageView(
-      m_Device,
-      &multisamplingViewInfo,
-      nullptr,
-      &m_MultisampleImageView
-    );
-
     VkImageCreateInfo depthImageInfo{};
     depthImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     depthImageInfo.imageType = VK_IMAGE_TYPE_2D;
@@ -214,7 +168,7 @@ namespace YAEngine
     depthImageInfo.tiling = VK_IMAGE_TILING_OPTIMAL;
     depthImageInfo.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
     depthImageInfo.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT;
-    depthImageInfo.samples = VK_SAMPLE_COUNT_4_BIT;
+    depthImageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     depthImageInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
     VmaAllocationCreateInfo allocInfo{};
@@ -242,15 +196,14 @@ namespace YAEngine
     for (size_t i = 0; i < m_SwapChainImageViews.size(); i++)
     {
       VkImageView attachments[] = {
-        m_MultisampleImageView,
-        m_DepthImageView,
         m_SwapChainImageViews[i],
+        m_DepthImageView,
       };
 
       VkFramebufferCreateInfo framebufferInfo{};
       framebufferInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
       framebufferInfo.renderPass = m_RenderPass;
-      framebufferInfo.attachmentCount = 3;
+      framebufferInfo.attachmentCount = 2;
       framebufferInfo.pAttachments = attachments;
       framebufferInfo.width = m_SwapChainExtent.width;
       framebufferInfo.height = m_SwapChainExtent.height;
@@ -267,9 +220,6 @@ namespace YAEngine
   {
     vkDestroyImageView(m_Device, m_DepthImageView, nullptr);
     vmaDestroyImage(m_Allocator, m_DepthImage, m_DepthImageAllocation);
-
-    vkDestroyImageView(m_Device, m_MultisampleImageView, nullptr);
-    vmaDestroyImage(m_Allocator, m_MultisampleImage, m_MultisampleImageAllocation);
 
     for (auto framebuffer : m_SwapChainFrameBuffers)
     {

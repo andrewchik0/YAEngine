@@ -26,9 +26,9 @@ namespace YAEngine
     m_SwapChain.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), window, m_Allocator.Get());
     int width, height;
     glfwGetWindowSize(window, &width, &height);
-    m_MainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    m_MainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, true);
 
-    m_SwapchainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    m_SwapchainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
     m_SwapChain.CreateFrameBuffers(m_SwapchainRenderPass.Get(), width, height);
 
     m_CommandBuffer.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), s_MaxFramesInFlight);
@@ -72,13 +72,15 @@ namespace YAEngine
     PipelineCreateInfo quadInfo = {
       .fragmentShaderFile = "quad.frag",
       .vertexShaderFile = "quad.vert",
+      .depthTesting = false,
+      .multisample = false,
       .vertexInputFormat = "",
       .sets = std::vector({
         m_SwapChainDescriptorSet.GetLayout(),
       })
     };
 
-    m_QuadPipeline.Init(m_Device.Get(), m_MainRenderPass.Get(), quadInfo);
+    m_QuadPipeline.Init(m_Device.Get(), m_SwapchainRenderPass.Get(), quadInfo);
 
     m_MainPassFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_MainRenderPass.Get(), width, height, m_SwapChain.GetFormat());
 
@@ -94,7 +96,7 @@ namespace YAEngine
         m_PhysicalDevice.Get(),
         m_Surface.Get()
       ).graphicsFamily.value(),
-      m_MainRenderPass.Get()
+      m_SwapchainRenderPass.Get()
     );
 
     VulkanCubicTexture::InitCubicTextures(m_Device.Get(), m_Allocator.Get(), m_CommandBuffer, m_DescriptorPool.Get());

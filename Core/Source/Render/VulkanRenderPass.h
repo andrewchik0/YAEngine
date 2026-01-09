@@ -6,7 +6,7 @@ namespace YAEngine
   {
   public:
 
-    void Init(VkDevice device, VkFormat swapChainImageFormat, VmaAllocator allocator, VkImageLayout finalImageLayout);
+    void Init(VkDevice device, VkFormat swapChainImageFormat, VmaAllocator allocator, VkImageLayout finalImageLayout, bool multisampleBuffer);
     void Destroy();
     void Recreate();
 
@@ -22,6 +22,7 @@ namespace YAEngine
 
     VkRenderPass m_RenderPass {};
     VkImageLayout m_ImageLayout {};
+    bool m_Multisample {};
 
     VkDevice m_Device {};
     VkFormat m_SwapChainImageFormat {};
