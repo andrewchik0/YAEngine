@@ -4,17 +4,16 @@
 
 namespace YAEngine
 {
-  void VulkanRenderPass::Init(VkDevice device, VkFormat swapChainImageFormat, VmaAllocator allocator, VkImageLayout finalImageLayout, bool multisampleBuffer)
+  void VulkanRenderPass::Init(VkDevice device, VkFormat swapChainImageFormat, VmaAllocator allocator, VkImageLayout finalImageLayout, bool clear)
   {
     m_Device = device;
     m_SwapChainImageFormat = swapChainImageFormat;
     m_Allocator = allocator;
     m_ImageLayout = finalImageLayout;
-    m_Multisample = multisampleBuffer;
 
     VkAttachmentDescription depthAttachment{};
     depthAttachment.format = VK_FORMAT_D32_SFLOAT;
-    depthAttachment.samples = multisampleBuffer ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT;
+    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
     depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
     depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
     depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
@@ -26,26 +25,14 @@ namespace YAEngine
     depthAttachmentRef.attachment = 1;
     depthAttachmentRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-    VkAttachmentDescription resolveAttachment{};
-    resolveAttachment.format = swapChainImageFormat;
-    resolveAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    resolveAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    resolveAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    resolveAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    resolveAttachment.finalLayout = finalImageLayout;
-
-    VkAttachmentReference resolveRef{};
-    resolveRef.attachment = 2;
-    resolveRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
     VkAttachmentDescription colorAttachment{};
     colorAttachment.format = swapChainImageFormat;
-    colorAttachment.samples = multisampleBuffer ? VK_SAMPLE_COUNT_4_BIT : VK_SAMPLE_COUNT_1_BIT;
-    colorAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    colorAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+    colorAttachment.loadOp = clear ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
     colorAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
     colorAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
     colorAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    colorAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    colorAttachment.initialLayout = clear ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
     colorAttachment.finalLayout = finalImageLayout;
 
     VkAttachmentReference colorAttachmentRef{};
@@ -57,7 +44,6 @@ namespace YAEngine
     subpass.colorAttachmentCount = 1;
     subpass.pColorAttachments = &colorAttachmentRef;
     subpass.pDepthStencilAttachment = &depthAttachmentRef;
-    subpass.pResolveAttachments = multisampleBuffer ? &resolveRef : nullptr;
 
     VkSubpassDependency dependency{};
     dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
@@ -70,12 +56,10 @@ namespace YAEngine
     VkAttachmentDescription attachments[3];
     attachments[0] = colorAttachment;
     attachments[1] = depthAttachment;
-    if (multisampleBuffer)
-      attachments[2] = resolveAttachment;
 
     VkRenderPassCreateInfo renderPassInfo{};
     renderPassInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    renderPassInfo.attachmentCount = 2 + multisampleBuffer;
+    renderPassInfo.attachmentCount = 2;
     renderPassInfo.pAttachments = attachments;
     renderPassInfo.subpassCount = 1;
     renderPassInfo.pSubpasses = &subpass;
@@ -94,10 +78,10 @@ namespace YAEngine
     vkDestroyRenderPass(m_Device, m_RenderPass, nullptr);
   }
 
-  void VulkanRenderPass::Recreate()
+  void VulkanRenderPass::Recreate(bool clear)
   {
     Destroy();
-    Init(m_Device, m_SwapChainImageFormat, m_Allocator, m_ImageLayout, m_Multisample);
+    Init(m_Device, m_SwapChainImageFormat, m_Allocator, m_ImageLayout, clear);
   }
 
   void VulkanRenderPass::Begin(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkExtent2D swapChainExtent)

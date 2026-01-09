@@ -39,6 +39,8 @@ namespace YAEngine
     void SetUpCamera(Application* app);
 
     uint32_t m_CurrentFrameIndex = 0;
+    uint64_t m_GlobalFrameIndex = 0;
+    uint32_t m_TAAIndex = 0;
     static uint32_t s_MaxFramesInFlight;
     bool b_Resized = false;
 
@@ -48,17 +50,22 @@ namespace YAEngine
     VulkanFramebuffer m_MainPassFrameBuffer;
     VulkanDescriptorSet m_SwapChainDescriptorSet;
 
+    std::array<VulkanFramebuffer, 2> m_HistoryFrameBuffers;
+    VulkanDescriptorSet m_TAADescriptorSet;
+
     VulkanInstance m_VulkanInstance;
     VulkanPhysicalDevice m_PhysicalDevice;
     VulkanDevice m_Device;
     VulkanSurface m_Surface;
     VulkanSwapChain m_SwapChain;
     VulkanRenderPass m_MainRenderPass;
-    VulkanRenderPass m_SwapchainRenderPass;
+    VulkanRenderPass m_TAARenderPass;
+    VulkanRenderPass m_SwapChainRenderPass;
 
     VulkanPipeline m_ForwardPipeline;
     VulkanPipeline m_ForwardPipelineDoubleSided;
     VulkanPipeline m_QuadPipeline;
+    VulkanPipeline m_TAAPipeline;
 
     VulkanCommandBuffer m_CommandBuffer;
     VulkanSync m_Sync;

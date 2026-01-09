@@ -69,7 +69,7 @@ namespace YAEngine
     m_Pipeline.PushConstants(commandBuffer, matrices.data());
 
     m_Pipeline.BindDescriptorSets(commandBuffer, { m_DescriptorSets[currentFrame].Get() }, 0);
-    m_DescriptorSets[currentFrame].BindCombinedImageSampler(0, cube->GetView(), cube->GetSampler());
+    m_DescriptorSets[currentFrame].WriteCombinedImageSampler(0, cube->GetView(), cube->GetSampler());
 
     VulkanCubicTexture::DrawCube(commandBuffer);
   }

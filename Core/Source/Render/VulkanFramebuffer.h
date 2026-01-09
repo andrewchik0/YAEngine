@@ -34,6 +34,11 @@ namespace YAEngine
       return m_Sampler;
     }
 
+    VkImage& GetImage()
+    {
+      return m_Image;
+    }
+
   private:
 
     VkFramebuffer m_Framebuffer {};
@@ -43,10 +48,6 @@ namespace YAEngine
     VkImageLayout m_ImageLayout {};
     VkSampler m_Sampler {};
     VmaAllocation m_ImageAllocation {};
-
-    VkImageView m_MultisampleImageView {};
-    VkImage m_MultisampleImage {};
-    VmaAllocation m_MultisampleImageAllocation {};
 
     VkImageView m_DepthImageView {};
     VkImage m_DepthImage {};

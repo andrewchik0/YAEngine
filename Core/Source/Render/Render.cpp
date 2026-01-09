@@ -26,10 +26,11 @@ namespace YAEngine
     m_SwapChain.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), window, m_Allocator.Get());
     int width, height;
     glfwGetWindowSize(window, &width, &height);
-    m_MainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, true);
+    m_MainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    m_TAARenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
-    m_SwapchainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, false);
-    m_SwapChain.CreateFrameBuffers(m_SwapchainRenderPass.Get(), width, height);
+    m_SwapChainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    m_SwapChain.CreateFrameBuffers(m_SwapChainRenderPass.Get(), width, height);
 
     m_CommandBuffer.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), s_MaxFramesInFlight);
 
@@ -68,22 +69,55 @@ namespace YAEngine
       }
     };
     m_SwapChainDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), desc);
+    SetDescription taaDesc = {
+      .set = 0,
+      .bindings = {
+        {
+          { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        }
+      }
+    };
+    m_TAADescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), taaDesc);
 
     PipelineCreateInfo quadInfo = {
       .fragmentShaderFile = "quad.frag",
       .vertexShaderFile = "quad.vert",
       .depthTesting = false,
-      .multisample = false,
       .vertexInputFormat = "",
       .sets = std::vector({
         m_SwapChainDescriptorSet.GetLayout(),
       })
     };
 
-    m_QuadPipeline.Init(m_Device.Get(), m_SwapchainRenderPass.Get(), quadInfo);
+    m_QuadPipeline.Init(m_Device.Get(), m_SwapChainRenderPass.Get(), quadInfo);
+    quadInfo.fragmentShaderFile = "taa.frag";
+    quadInfo.sets = std::vector({ m_TAADescriptorSet.GetLayout() });
+    m_TAAPipeline.Init(m_Device.Get(), m_SwapChainRenderPass.Get(), quadInfo);
 
     m_MainPassFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_MainRenderPass.Get(), width, height, m_SwapChain.GetFormat());
+    for (auto& buffer : m_HistoryFrameBuffers)
+    {
+      buffer.Init(m_Device.Get(), m_Allocator.Get(), m_TAARenderPass.Get(), width, height, m_SwapChain.GetFormat());
+      auto cmd = m_CommandBuffer.BeginSingleTimeCommands();
+      buffer.Begin(cmd);
+      VkClearValue clearValues[2];
+      clearValues[0].color = {0.0f, 0.0f, 0.0f, 0.0f};
+      clearValues[1].depthStencil = {1.0f, 0};
+      VkRenderPassBeginInfo rpBegin{};
+      rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+      rpBegin.renderPass = m_TAARenderPass.Get();
+      rpBegin.framebuffer = buffer.Get();
+      rpBegin.renderArea.extent.width = width;
+      rpBegin.renderArea.extent.height = height;
+      rpBegin.clearValueCount = 2;
+      rpBegin.pClearValues = clearValues;
 
+      vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+      vkCmdEndRenderPass(cmd);
+      buffer.End(cmd);
+      m_CommandBuffer.EndSingleTimeCommands(cmd);
+    }
 
     m_ImGUI.Init(
       window,
@@ -96,12 +130,14 @@ namespace YAEngine
         m_PhysicalDevice.Get(),
         m_Surface.Get()
       ).graphicsFamily.value(),
-      m_SwapchainRenderPass.Get()
+      m_SwapChainRenderPass.Get()
     );
 
     VulkanCubicTexture::InitCubicTextures(m_Device.Get(), m_Allocator.Get(), m_CommandBuffer, m_DescriptorPool.Get());
 
     m_SkyBox.Init(m_Device.Get(), m_DescriptorPool.Get(), m_MainRenderPass.Get(), s_MaxFramesInFlight);
+
+    vkDeviceWaitIdle(m_Device.Get());
   }
 
   void Render::Destroy()
@@ -112,17 +148,24 @@ namespace YAEngine
     VulkanCubicTexture::DestroyCubicTextures();
     m_ImGUI.Destroy();
     m_MainPassFrameBuffer.Destroy();
+    for (auto& buffer : m_HistoryFrameBuffers)
+    {
+      buffer.Destroy();
+    }
     m_SwapChainDescriptorSet.Destroy();
+    m_TAADescriptorSet.Destroy();
     m_CommandBuffer.Destroy();
     m_ForwardPipeline.Destroy();
     m_ForwardPipelineDoubleSided.Destroy();
     m_QuadPipeline.Destroy();
+    m_TAAPipeline.Destroy();
     m_DefaultMaterial.Destroy();
     m_PerFrameData.Destroy();
     m_DescriptorPool.Destroy();
     m_SwapChain.Destroy();
     m_MainRenderPass.Destroy();
-    m_SwapchainRenderPass.Destroy();
+    m_SwapChainRenderPass.Destroy();
+    m_TAARenderPass.Destroy();
     m_Allocator.Destroy();
     m_Device.Destroy();
     m_Surface.Destroy();
@@ -135,8 +178,32 @@ namespace YAEngine
     m_MainRenderPass.Recreate();
     m_MainPassFrameBuffer.Recreate(m_MainRenderPass.Get(), width, height);
 
-    m_SwapchainRenderPass.Recreate();
-    m_SwapChain.Recreate(m_SwapchainRenderPass.Get(), width, height);
+    m_TAARenderPass.Recreate();
+    for (auto& buffer : m_HistoryFrameBuffers)
+    {
+      buffer.Recreate(m_TAARenderPass.Get(), width, height);
+      auto cmd = m_CommandBuffer.BeginSingleTimeCommands();
+      buffer.Begin(cmd);
+      VkClearValue clearValues[2];
+      clearValues[0].color = {0.0f, 0.0f, 0.0f, 0.0f};
+      clearValues[1].depthStencil = {1.0f, 0};
+      VkRenderPassBeginInfo rpBegin{};
+      rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+      rpBegin.renderPass = m_TAARenderPass.Get();
+      rpBegin.framebuffer = buffer.Get();
+      rpBegin.renderArea.extent.width = width;
+      rpBegin.renderArea.extent.height = height;
+      rpBegin.clearValueCount = 2;
+      rpBegin.pClearValues = clearValues;
+
+      vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+      vkCmdEndRenderPass(cmd);
+      buffer.End(cmd);
+      m_CommandBuffer.EndSingleTimeCommands(cmd);
+    }
+
+    m_SwapChainRenderPass.Recreate();
+    m_SwapChain.Recreate(m_SwapChainRenderPass.Get(), width, height);
   }
 
   void Render::Draw(Application *app)
@@ -170,12 +237,23 @@ namespace YAEngine
     m_MainRenderPass.End(m_CommandBuffer.GetCurrentBuffer());
     m_MainPassFrameBuffer.End(m_CommandBuffer.GetCurrentBuffer());
 
-    m_SwapchainRenderPass.Begin(m_CommandBuffer.GetCurrentBuffer(), m_SwapChain.GetFramebuffer(imageIndex), m_SwapChain.GetExt());
+    auto prevIndex = m_TAAIndex == 0 ? 1 : 0;
+    m_HistoryFrameBuffers[m_TAAIndex].Begin(m_CommandBuffer.GetCurrentBuffer());
+    m_TAARenderPass.Begin(m_CommandBuffer.GetCurrentBuffer(), m_HistoryFrameBuffers[m_TAAIndex].Get(), m_SwapChain.GetExt());
+    m_TAAPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
+    m_TAADescriptorSet.WriteCombinedImageSampler(0, m_MainPassFrameBuffer.GetImageView(), m_MainPassFrameBuffer.GetSampler(), m_MainPassFrameBuffer.GetLayout());
+    m_TAADescriptorSet.WriteCombinedImageSampler(1, m_HistoryFrameBuffers[prevIndex].GetImageView(), m_HistoryFrameBuffers[prevIndex].GetSampler(), m_HistoryFrameBuffers[prevIndex].GetLayout());
+    m_TAAPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_TAADescriptorSet.Get() }, 0);
+    DrawQuad();
+    m_TAARenderPass.End(m_CommandBuffer.GetCurrentBuffer());
+    m_HistoryFrameBuffers[m_TAAIndex].End(m_CommandBuffer.GetCurrentBuffer());
+
+    m_SwapChainRenderPass.Begin(m_CommandBuffer.GetCurrentBuffer(), m_SwapChain.GetFramebuffer(imageIndex), m_SwapChain.GetExt());
     SetViewportAndScissor();
 
     m_QuadPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
     m_QuadPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_SwapChainDescriptorSet.Get() }, 0);
-    m_SwapChainDescriptorSet.BindCombinedImageSampler(0, m_MainPassFrameBuffer.GetImageView(), m_MainPassFrameBuffer.GetSampler(), m_MainPassFrameBuffer.GetLayout());
+    m_SwapChainDescriptorSet.WriteCombinedImageSampler(0, m_HistoryFrameBuffers[m_TAAIndex].GetImageView(), m_HistoryFrameBuffers[m_TAAIndex].GetSampler(), m_HistoryFrameBuffers[m_TAAIndex].GetLayout());
     DrawQuad();
 
     ImGui_ImplVulkan_NewFrame();
@@ -185,7 +263,7 @@ namespace YAEngine
     ImGui::Render();
     ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), m_CommandBuffer.GetCurrentBuffer());
 
-    m_SwapchainRenderPass.End(m_CommandBuffer.GetCurrentBuffer());
+    m_SwapChainRenderPass.End(m_CommandBuffer.GetCurrentBuffer());
 
     m_CommandBuffer.End(m_CurrentFrameIndex);
     result = m_Sync.Submit(m_CommandBuffer.GetCurrentBuffer(), m_SwapChain.Get(), imageIndex, b_Resized);
@@ -194,6 +272,8 @@ namespace YAEngine
       Resize(app->m_Window.GetWidth(), app->m_Window.GetHeight());
     }
     m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % s_MaxFramesInFlight;
+    m_TAAIndex = (m_TAAIndex + 1) % 2;
+    m_GlobalFrameIndex++;
   }
 
   void Render::SetViewportAndScissor()

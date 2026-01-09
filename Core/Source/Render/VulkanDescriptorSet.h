@@ -25,9 +25,9 @@ namespace YAEngine
     void Init(VkDevice device, VkDescriptorPool descriptorPool, VkDescriptorSetLayout descriptorSetLayout);
     void Destroy();
 
-    void BindUniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size);
-    void BindStorageBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size);
-    void BindCombinedImageSampler(
+    void WriteUniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size);
+    void WriteStorageBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size);
+    void WriteCombinedImageSampler(
       uint32_t binding,
       VkImageView imageView,
       VkSampler sampler,

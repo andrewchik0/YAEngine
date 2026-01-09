@@ -17,7 +17,6 @@ namespace YAEngine
     bool depthWrite = true;
     bool blending = false;
     bool doubleSided = false;
-    bool multisample = true;
     VkCompareOp compareOp = VK_COMPARE_OP_LESS;
 
     // "f2i3u4"

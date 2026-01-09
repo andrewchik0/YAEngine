@@ -29,7 +29,7 @@ namespace YAEngine
         m_DescriptorSets[i].Init(device, pool, layout);
       }
       m_UniformBuffers[i].Create(m_Device, allocator, sizeof(__PerFrameUBO));
-      m_DescriptorSets[i].BindUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(__PerFrameUBO));
+      m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(__PerFrameUBO));
     }
   }
 

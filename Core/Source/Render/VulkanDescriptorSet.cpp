@@ -63,7 +63,7 @@ namespace YAEngine
     }
   }
 
-  void VulkanDescriptorSet::BindUniformBuffer(
+  void VulkanDescriptorSet::WriteUniformBuffer(
     uint32_t binding,
     VkBuffer buffer,
     VkDeviceSize size)
@@ -85,7 +85,7 @@ namespace YAEngine
     vkUpdateDescriptorSets(m_Device, 1, &write, 0, nullptr);
   }
 
-  void VulkanDescriptorSet::BindStorageBuffer(
+  void VulkanDescriptorSet::WriteStorageBuffer(
     uint32_t binding,
     VkBuffer buffer,
     VkDeviceSize size)
@@ -106,7 +106,7 @@ namespace YAEngine
     vkUpdateDescriptorSets(m_Device, 1, &write, 0, nullptr);
   }
 
-  void VulkanDescriptorSet::BindCombinedImageSampler(
+  void VulkanDescriptorSet::WriteCombinedImageSampler(
     uint32_t binding,
     VkImageView imageView,
     VkSampler sampler,

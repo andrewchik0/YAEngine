@@ -60,10 +60,15 @@ void main() {
   mapped = ACESFilm(mapped);
   vec3 finalColor = pow(mapped, vec3(1.0/2.2));
 
-  float r = Hash(gl_FragCoord.xy + u_Data.time * 17.0);
+  float r = Hash(vec2(length(u_Data.cameraPosition), u_Data.cameraDirection.x + u_Data.cameraDirection.z) + inTexCoord + vec2(u_Data.time));
 
   if (r > col.a)
+  {
     discard;
-
-  outColor *= vec4(finalColor, 1.0);
+  }
+  else
+  {
+    outColor *= vec4(finalColor, 1.0);
+    outColor *= col.a;
+  }
 }
