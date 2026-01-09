@@ -237,7 +237,7 @@ namespace YAEngine
     m_MainRenderPass.End(m_CommandBuffer.GetCurrentBuffer());
     m_MainPassFrameBuffer.End(m_CommandBuffer.GetCurrentBuffer());
 
-    auto prevIndex = m_TAAIndex == 0 ? 1 : 0;
+    auto prevIndex = m_TAAIndex == 1 ? 0 : m_TAAIndex + 1;
     m_HistoryFrameBuffers[m_TAAIndex].Begin(m_CommandBuffer.GetCurrentBuffer());
     m_TAARenderPass.Begin(m_CommandBuffer.GetCurrentBuffer(), m_HistoryFrameBuffers[m_TAAIndex].Get(), m_SwapChain.GetExt());
     m_TAAPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
