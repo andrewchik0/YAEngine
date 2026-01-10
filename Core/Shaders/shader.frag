@@ -51,8 +51,6 @@ void main() {
   float roughness = texture(metallicTexture, inTexCoord).g;
   float metallic = texture(metallicTexture, inTexCoord).b;
 
-  float r = Hash(vec2(length(u_Data.cameraPosition), u_Data.cameraDirection.x + u_Data.cameraDirection.z) + inTexCoord + vec2(u_Data.time));
-
   vec3 N = normalize(normal);
   vec3 V = normalize(u_Data.cameraPosition - inPosition);
   vec3 R = reflect(-V, N);
@@ -83,7 +81,7 @@ void main() {
 
   outColor = vec4(finalColor, 1.0);
 
-  if (r > albedo.a)
+  if (albedo.a < 0.5)
   {
     discard;
   }
