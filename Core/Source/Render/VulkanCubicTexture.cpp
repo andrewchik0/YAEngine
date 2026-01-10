@@ -198,9 +198,70 @@ namespace YAEngine
 
     auto cmdBuffer = s_CommandBuffer->BeginSingleTimeCommands();
 
+    uint32_t mipW = 2048;
+    uint32_t mipH = 2048;
+
+    TransitionImageEx(cmdBuffer, m_CubemapImage,
+      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+      0, 1, 0, 6);
+
+    for (uint32_t i = 1; i < 10; i++)
+    {
+      TransitionImageEx(
+        cmdBuffer,
+        m_CubemapImage,
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        i,
+        1,
+        0,
+        6
+      );
+
+      VkImageBlit blit{};
+      blit.srcSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit.srcSubresource.mipLevel = i - 1;
+      blit.srcSubresource.baseArrayLayer = 0;
+      blit.srcSubresource.layerCount = 6;
+
+      blit.dstSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      blit.dstSubresource.mipLevel = i;
+      blit.dstSubresource.baseArrayLayer = 0;
+      blit.dstSubresource.layerCount = 6;
+
+      blit.srcOffsets[0] = { 0, 0, 0 };
+      blit.srcOffsets[1] = { int32_t(mipW), int32_t(mipH), 1 };
+
+      mipW = std::max(1u, mipW >> 1);
+      mipH = std::max(1u, mipH >> 1);
+
+      blit.dstOffsets[0] = { 0, 0, 0 };
+      blit.dstOffsets[1] = { int32_t(mipW), int32_t(mipH), 1 };
+
+      vkCmdBlitImage(
+        cmdBuffer,
+        m_CubemapImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        m_CubemapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &blit,
+        VK_FILTER_LINEAR
+      );
+
+      TransitionImageEx(
+        cmdBuffer,
+        m_CubemapImage,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        i,
+        1,
+        0,
+        6
+      );
+    }
+
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+    barrier.oldLayout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
     barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
@@ -223,8 +284,6 @@ namespace YAEngine
         1, &barrier
     );
 
-    s_CommandBuffer->EndSingleTimeCommands(cmdBuffer);
-
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
 
@@ -246,12 +305,14 @@ namespace YAEngine
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     samplerInfo.mipLodBias = 0.0f;
     samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 0.0f;
+    samplerInfo.maxLod = 10.0f;
 
     if (vkCreateSampler(s_Device, &samplerInfo, nullptr, &m_CubeMapSampler) != VK_SUCCESS)
     {
       throw std::runtime_error("Failed to create texture sampler!");
     }
+
+    s_CommandBuffer->EndSingleTimeCommands(cmdBuffer);
   }
 
   void VulkanCubicTexture::Destroy()
@@ -277,6 +338,28 @@ namespace YAEngine
     uint32_t mipLevels,
     uint32_t layerCount)
   {
+    TransitionImageEx(
+        cmd,
+        image,
+        oldLayout,
+        newLayout,
+        0,
+        mipLevels,
+        0,
+        layerCount
+    );
+  }
+
+  void VulkanCubicTexture::TransitionImageEx(
+    VkCommandBuffer cmd,
+    VkImage image,
+    VkImageLayout oldLayout,
+    VkImageLayout newLayout,
+    uint32_t baseMip,
+    uint32_t mipCount,
+    uint32_t baseLayer,
+    uint32_t layerCount)
+  {
     VkImageMemoryBarrier barrier{};
     barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
     barrier.oldLayout = oldLayout;
@@ -284,37 +367,18 @@ namespace YAEngine
     barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
     barrier.image = image;
+
     barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = mipLevels;
-    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.baseMipLevel = baseMip;
+    barrier.subresourceRange.levelCount = mipCount;
+    barrier.subresourceRange.baseArrayLayer = baseLayer;
     barrier.subresourceRange.layerCount = layerCount;
 
-    VkPipelineStageFlags srcStage;
-    VkPipelineStageFlags dstStage;
+    VkPipelineStageFlags srcStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    VkPipelineStageFlags dstStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
 
-    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED &&
-        newLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-    {
-      barrier.srcAccessMask = 0;
-      barrier.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-      srcStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-      dstStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    }
-    else if (oldLayout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
-             newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-    {
-      barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-      barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-
-      srcStage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-      dstStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    }
-    else
-    {
-      throw std::runtime_error("unsupported layout transition!");
-    }
+    barrier.srcAccessMask = 0;
+    barrier.dstAccessMask = 0;
 
     vkCmdPipelineBarrier(
         cmd,

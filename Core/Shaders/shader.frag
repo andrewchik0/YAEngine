@@ -47,12 +47,15 @@ void main() {
 
   float base = float(u_Material.textureMask & 1);
   vec4 col = texture(baseColorTexture, inTexCoord) * base + vec4(u_Material.albedo, 1.0) * (1 - base);
+
+  float roughness = texture(metallicTexture, inTexCoord).g;
+
   outColor = vec4(col.xyz * max(dot(normalize(vec3(0.5, 1, 0.5)), normal), 0.1), 1.0);
 
   vec3 viewDir = normalize(u_Data.cameraPosition - inPosition);
   vec3 reflectDir = reflect(-viewDir, normalize(normal));
 
-  vec3 hdrColor = textureLod(cubemapTexture, reflectDir, 4).rgb;
+  vec3 hdrColor = textureLod(cubemapTexture, reflectDir, int(roughness * 10)).rgb * col;
 
   float exposure = 0.6;
   vec3 mapped = hdrColor * exposure;
@@ -68,7 +71,7 @@ void main() {
   }
   else
   {
-    outColor *= vec4(finalColor, 1.0);
+    outColor = vec4(finalColor, 1.0);
     outColor *= col.a;
   }
 }

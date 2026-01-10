@@ -58,6 +58,8 @@ namespace YAEngine
     static void InitRenderPass();
     static void InitPipeline();
     static void TransitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels, uint32_t layerCount);
+    static void TransitionImageEx(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
+                           uint32_t baseMip, uint32_t mipCount, uint32_t baseLayer, uint32_t layerCount);
     static void CreateVertexBuffer(VulkanCommandBuffer commandBuffer);
   };
 }

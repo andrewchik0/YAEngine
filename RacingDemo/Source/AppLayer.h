@@ -41,7 +41,7 @@ public:
     0, 1, 2, 1, 3, 2
   };
 
-  YAEngine::Entity car;
+  YAEngine::Entity car, road;
 
   YAEngine::SubscriptionId key;
 
@@ -67,25 +67,12 @@ public:
     App().GetScene().SetSkybox(App().GetAssetManager().CubeMaps().Load(APP_WORKING_DIR "/Assets/Textures/sky.hdr"));
 
     auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf");
+    auto roadHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/road/scene.gltf");
     car = App().GetAssetManager().Models().Get(carHandle).rootEntity;
+    road = App().GetAssetManager().Models().Get(roadHandle).rootEntity;
 
-    auto rubberAlbedoHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/Rubber/synth-rubber-albedo.png");
-    auto rubberMetallicHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/Rubber/synth-rubber-metalness.png");
-    auto rubberNormalHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/Rubber/synth-rubber-normal.png");
-    auto rubberRoughnessHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/Rubber/synth-rubber-roughness.png");
-
-    auto meshHandle = App().GetAssetManager().Meshes().Load(vertices, indices);
-    auto materialHandle = App().GetAssetManager().Materials().Create();
-
-    App().GetAssetManager().Materials().Get(materialHandle).baseColorTexture = rubberAlbedoHandle;
-    App().GetAssetManager().Materials().Get(materialHandle).normalTexture = rubberNormalHandle;
-    App().GetAssetManager().Materials().Get(materialHandle).roughnessTexture = rubberRoughnessHandle;
-    App().GetAssetManager().Materials().Get(materialHandle).metallicTexture = rubberMetallicHandle;
-
-    auto entity = App().GetScene().CreateEntity("Plane");
-    App().GetScene().AddComponent<YAEngine::MeshComponent>(entity, meshHandle);
-    App().GetScene().AddComponent<YAEngine::MaterialComponent>(entity, materialHandle);
-
+    App().GetScene().GetTransform(road).position.y = -0.3f;
+    App().GetScene().GetTransform(road).scale = glm::vec3(0.5f);
     App().GetScene().GetTransform(car).position.y = -1.07f;
     App().GetScene().SetDoubleSided(car);
 
