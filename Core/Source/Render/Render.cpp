@@ -6,6 +6,8 @@
 #include "Application.h"
 #include "VulkanVertexBuffer.h"
 
+#include "Utils/Utils.h"
+
 namespace YAEngine
 {
   uint32_t Render::s_MaxFramesInFlight = 2;
@@ -323,15 +325,20 @@ namespace YAEngine
 
   void Render::SetUpCamera(Application* app)
   {
-    if (!app->m_Scene.HasComponent<CameraComponent>(app->m_Scene.GetActiveCamera())) return;
+    if (!app->m_Scene.HasComponent<CameraComponent>(app->m_Scene.GetActiveCamera()))
+      return;
 
-    auto cameraEntity = (app->m_Scene.m_Registry.get<CameraComponent, TransformComponent>(app->m_Scene.GetActiveCamera()));
-    auto transform = std::get<TransformComponent &>(cameraEntity);
-    auto camera = std::get<CameraComponent &>(cameraEntity);
+    auto cameraEntity =
+      app->m_Scene.m_Registry.get<CameraComponent, TransformComponent>(
+        app->m_Scene.GetActiveCamera());
+
+    auto& transform = std::get<TransformComponent&>(cameraEntity);
+    auto& camera    = std::get<CameraComponent&>(cameraEntity);
 
     glm::mat4 world =
       glm::translate(glm::mat4(1.0f), transform.position) *
       glm::mat4_cast(transform.rotation);
+
     glm::mat4 view = glm::inverse(world);
 
     glm::mat4 proj = glm::perspective(
@@ -342,6 +349,14 @@ namespace YAEngine
     );
 
     proj[1][1] *= -1.0f;
+
+    glm::vec2 jitter = GetTAAJitter(m_GlobalFrameIndex);
+
+    jitter.x /= float(app->GetWindow().GetWidth());
+    jitter.y /= float(app->GetWindow().GetHeight());
+
+    proj[2][0] += jitter.x;
+    proj[2][1] += jitter.y;
 
     m_PerFrameData.ubo.view = view;
     m_PerFrameData.ubo.proj = proj;

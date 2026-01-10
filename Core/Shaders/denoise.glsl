@@ -5,8 +5,8 @@
 
 // CONFIG
 
-#define EMA_IIR_INVERSE_CUTOFF_FREQUENCY        (0.2)      // 0.0 - 0.999
-#define VARIANCE_CLIPPING_COLOR_BOX_SIGMA       (0.975)      // 0.5 - 1.0
+#define EMA_IIR_INVERSE_CUTOFF_FREQUENCY        (0.25)      // 0.0 - 0.999
+#define VARIANCE_CLIPPING_COLOR_BOX_SIGMA       (0.979)      // 0.5 - 1.0
 
 // ------------------------------------------------------------------------- //
 

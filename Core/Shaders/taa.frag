@@ -11,7 +11,7 @@ layout(set = 0, binding = 1) uniform sampler2D history;
 void main()
 {
   vec2 normalizedSpaceUV = uv;
-  vec3 new = SAMPLE_RGB(frame, normalizedSpaceUV);
+  vec3 new = mix(texture(frame, uv).rgb, texture(history, uv).rgb, 0.3);
 
   new = RGBToYCoCg(new);
 
@@ -28,18 +28,6 @@ void main()
   filtered = mix(new, historyCol, EMA_IIR_INVERSE_CUTOFF_FREQUENCY);
   filtered = YCoCgToRGB(filtered);
 
-  vec3 result = vec3(0);
-
-  for (int i = -1; i <= 1; i++)
-  {
-    for (int j = -1; j <= 1; j++)
-    {
-      vec2 xy = uv;
-      xy += vec2(i, j) / vec2(2560, 1360);
-      result += mix(filtered, texture(history, xy).rgb, 0.5);
-    }
-  }
-
-  result /= 9;
-  outColor = vec4(mix(filtered, texture(history, uv).rgb, 0.5).rgb, 1.0);
+  vec3 result = mix(filtered, texture(history, uv).rgb, 0.3);
+  outColor = vec4(result, 1.0);
 }

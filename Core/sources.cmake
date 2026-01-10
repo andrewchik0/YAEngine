@@ -78,4 +78,5 @@ set(SOURCE_FILES
   Source/Assets/CubeMapManager.h
   Source/Render/SkyBox.cpp
   Source/Render/SkyBox.h
+  Source/Utils/Utils.h
 )
