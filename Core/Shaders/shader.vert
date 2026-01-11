@@ -16,6 +16,8 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   vec3 cameraPosition;
   float time;
   vec3 cameraDirection;
+  float gamma;
+  float exposure;
 } u_Data;
 
 layout(push_constant) uniform PushConstants

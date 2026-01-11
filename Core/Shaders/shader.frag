@@ -11,6 +11,8 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   vec3 cameraPosition;
   float time;
   vec3 cameraDirection;
+  float gamma;
+  float exposure;
 } u_Data;
 
 layout(set = 1, binding = 0) uniform PerMaterialUBO {
@@ -72,8 +74,8 @@ void main() {
 
   vec3 color = diffuse + specular;
 
-  float exposure = 0.8;
-  float gamma = 1.1;
+  float exposure = u_Data.exposure;
+  float gamma = u_Data.gamma;
   vec3 mapped = color * exposure;
 
   mapped = ACESFilm(mapped);

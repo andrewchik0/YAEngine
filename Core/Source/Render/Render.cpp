@@ -182,6 +182,8 @@ namespace YAEngine
 
     SetUpCamera(app);
     m_PerFrameData.ubo.time = (float)app->m_Timer.GetTime();
+    m_PerFrameData.ubo.gamma = m_Gamma;
+    m_PerFrameData.ubo.exposure = m_Exposure;
 
     m_CommandBuffer.Set(m_CurrentFrameIndex);
 

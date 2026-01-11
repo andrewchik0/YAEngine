@@ -49,6 +49,9 @@ namespace YAEngine
       return m_InstanceBuffer.Allocate(size);
     }
 
+    float m_Gamma = 1.1f;
+    float m_Exposure = 0.8f;
+
   private:
 
     void SetViewportAndScissor();

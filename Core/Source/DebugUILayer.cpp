@@ -29,6 +29,9 @@ namespace YAEngine
 
         ImGui::Text("FPS: %.1f", fps);
         ImGui::Text("Frame time: %.2fms", App().GetTimer().GetDeltaTime() * 1000.0f);
+        ImGui::Separator();
+        ImGui::DragFloat("Gamma", &App().GetRender().m_Gamma, 0.01f, 0.0f, 10.0f);
+        ImGui::DragFloat("Exposure", &App().GetRender().m_Exposure, 0.01f, 0.0f, 10.0f);
         ImGui::EndTabItem();
       }
 
