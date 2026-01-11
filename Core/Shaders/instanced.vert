@@ -26,12 +26,13 @@ layout(set = 2, binding = 0) readonly buffer Instances
 layout(push_constant) uniform PushConstants
 {
   mat4 world;
+  int offset;
 } pc;
 
 void main() {
-  gl_Position = u_Data.proj * u_Data.view * pc.world * instances.data[gl_InstanceIndex] * vec4(inPosition, 1.0);
+  gl_Position = u_Data.proj * u_Data.view * pc.world * instances.data[gl_InstanceIndex + pc.offset] * vec4(inPosition, 1.0);
   outTexCoord = inTexCoord;
-  outPosition = vec3(pc.world * instances.data[gl_InstanceIndex] * vec4(inPosition, 1.0));
+  outPosition = vec3(pc.world * instances.data[gl_InstanceIndex + pc.offset] * vec4(inPosition, 1.0));
   outNormal = normalize(mat3(pc.world) * inNormal);
 
   mat3 normalMatrix = transpose(inverse(mat3(pc.world)));

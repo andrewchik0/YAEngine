@@ -29,7 +29,7 @@ namespace YAEngine
     float fov = glm::radians(58.31f);
     float aspectRatio = 16.0f / 9.0f;
     float nearPlane = 0.01f;
-    float farPlane = 1000.0f;
+    float farPlane = 2000.0f;
 
     void Resize(float width, float height)
     {
@@ -42,6 +42,7 @@ namespace YAEngine
     MeshHandle asset {};
     bool shouldRender = true;
     bool doubleSided = false;
+    bool noShading = false;
   };
 
 

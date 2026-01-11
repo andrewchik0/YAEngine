@@ -41,43 +41,8 @@ float Hash(vec2 p)
 
 
 void main() {
-  float hasNormal = float((u_Material.textureMask >> 5) & 1);
-  vec3 n_ts = texture(normalTexture, inTexCoord).rgb * 2.0 - 1.0;
-  vec3 normal = normalize(inTBN * n_ts) * hasNormal + (1.0 - hasNormal) * inNormal;
-
   float base = float(u_Material.textureMask & 1);
   vec4 albedo = texture(baseColorTexture, inTexCoord) * base + vec4(u_Material.albedo, 1.0) * (1 - base);
-
-  float roughness = texture(metallicTexture, inTexCoord).g + u_Material.roughness;
-  float metallic = texture(metallicTexture, inTexCoord).b;
-
-  vec3 N = normalize(normal);
-  vec3 V = normalize(u_Data.cameraPosition - inPosition);
-  vec3 R = reflect(-V, N);
-
-  float NdotV = max(dot(N, V), 0.0);
-
-  vec3 F0 = mix(vec3(0.04), albedo.rgb, metallic);
-  vec3 F  = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
-
-  F = mix(F, F * 0.3, 1.0 - metallic);
-
-  float maxMip = 10.0;
-  vec3 env = textureLod(cubemapTexture, R, roughness * maxMip).rgb;
-  env *= 0.05;
-
-  vec3 specular = env * F;
-
-  vec3 diffuse = albedo.rgb * 0.3 * (1.0 - metallic);
-
-  vec3 color = diffuse + specular;
-
-  float exposure = 0.8;
-  float gamma = 1.1;
-  vec3 mapped = color * exposure;
-
-  mapped = ACESFilm(mapped);
-  vec3 finalColor = pow(mapped, vec3(1.0 / gamma));
 
   if (albedo.a < 0.5)
   {
@@ -85,7 +50,6 @@ void main() {
   }
   else
   {
-    outColor = vec4(finalColor, 1.0);
-    outColor *= albedo.a;
+    outColor = vec4(albedo.rgb, 1.0);
   }
 }

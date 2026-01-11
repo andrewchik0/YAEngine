@@ -74,6 +74,7 @@ namespace YAEngine
     void Update();
     void UpdateWorldTransform(entt::entity e);
     void SetDoubleSided(Entity e);
+    void NoShading(Entity e);
 
     void SetSkybox(CubeMapHandle handle)
     {

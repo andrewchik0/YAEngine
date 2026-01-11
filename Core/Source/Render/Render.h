@@ -87,6 +87,7 @@ namespace YAEngine
     VulkanRenderPass m_SwapChainRenderPass;
 
     VulkanPipeline m_ForwardPipeline;
+    VulkanPipeline m_ForwardPipelineNoShading;
     VulkanPipeline m_ForwardPipelineDoubleSided;
     VulkanPipeline m_ForwardPipelineInstanced;
     VulkanPipeline m_ForwardPipelineDoubleSidedInstanced;

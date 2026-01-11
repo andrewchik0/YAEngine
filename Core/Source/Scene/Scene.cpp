@@ -168,24 +168,41 @@ namespace YAEngine
 
   void Scene::SetDoubleSided(Entity e)
   {
+    auto& tc = GetTransform(e);
+
     if (HasComponent<MeshComponent>(e))
     {
       GetComponent<MeshComponent>(e).doubleSided = true;
     }
 
-    auto next = GetTransform(e).nextSibling;
-    while (next != entt::null)
+    if (tc.firstChild != entt::null)
     {
-      if (HasComponent<MeshComponent>(next))
-      {
-        GetComponent<MeshComponent>(next).doubleSided = true;
-      }
-      next = GetTransform(next).nextSibling;
+      SetDoubleSided(tc.firstChild);
     }
 
-    if (GetTransform(e).firstChild != entt::null)
+    if (tc.nextSibling != entt::null)
     {
-      SetDoubleSided(GetTransform(e).firstChild);
+      SetDoubleSided(tc.nextSibling);
+    }
+  }
+
+  void Scene::NoShading(Entity e)
+  {
+    auto& tc = GetTransform(e);
+
+    if (HasComponent<MeshComponent>(e))
+    {
+      GetComponent<MeshComponent>(e).noShading = true;
+    }
+
+    if (tc.firstChild != entt::null)
+    {
+      NoShading(tc.firstChild);
+    }
+
+    if (tc.nextSibling != entt::null)
+    {
+      NoShading(tc.nextSibling);
     }
   }
 

@@ -5,43 +5,15 @@
 #include "FreeCamLayer.h"
 #include "DebugUILayer.h"
 
+#include "Vertices.h"
+
 class AppLayer : public YAEngine::Layer
 {
 public:
   AppLayer() = default;
 
-  std::vector<YAEngine::Vertex> vertices = {
-    {
-      { -50, -1.0, -50 },
-      { 0, 0 },
-      { 0, 1, 0 },
-      { 0, 0, 1, 1.0 },
-    },
-    {
-      { -50, -1.0, 50 },
-      { 0, 50 },
-      { 0, 1, 0 },
-      { 0, 0, 1, 1.0 },
-    },
-    {
-      { 50, -1.0, -50 },
-      { 50, 0 },
-      { 0, 1, 0 },
-      { 0, 0, 1, 1.0 },
-    },
-    {
-      { 50, -1.0, 50 },
-      { 50, 50 },
-      { 0, 1, 0 },
-      { 0, 0, 1, 1.0 },
-    }
-  };
 
-  std::vector<uint32_t> indices = {
-    0, 1, 2, 1, 3, 2
-  };
-
-  YAEngine::Entity car, road;
+  YAEngine::Entity car, road, trees;
 
   YAEngine::SubscriptionId key;
 
@@ -66,33 +38,111 @@ public:
   {
     App().GetScene().SetSkybox(App().GetAssetManager().CubeMaps().Load(APP_WORKING_DIR "/Assets/Textures/sky.hdr"));
 
-    auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf");
-
-    std::vector<glm::mat4> instances;
-    for (size_t i = 0; i < 50; i++)
-    {
-      instances.push_back(glm::translate(glm::mat4(1.0), glm::vec3(i * 1617.3, 0.0f, 0.0f)));
-    }
-
-    auto roadHandle = App().GetAssetManager().Models().LoadInstanced(APP_WORKING_DIR "/Assets/Models/road/scene.gltf", instances);
-    car = App().GetAssetManager().Models().Get(carHandle).rootEntity;
-    road = App().GetAssetManager().Models().Get(roadHandle).rootEntity;
-
-    App().GetScene().GetTransform(road).position.y = -0.3f;
-    App().GetScene().GetTransform(road).scale = glm::vec3(0.5f);
-    App().GetScene().GetTransform(car).position.y = -1.07f;
-    App().GetScene().SetDoubleSided(car);
-
     key = App().Events().Subscribe<YAEngine::KeyEvent>([&](auto e) { OnKeyBoard(e); });
 
-    wheels[0] = App().GetScene().GetChildByName(car, "wheel-left-front");
-    wheels[1] = App().GetScene().GetChildByName(car, "wheel-right-front");
-    wheels[2] = App().GetScene().GetChildByName(car, "wheel-left-back");
-    wheels[3] = App().GetScene().GetChildByName(car, "wheel-right-back");
-    wheelStates[0].baseRot = App().GetScene().GetTransform(wheels[0]).rotation;
-    wheelStates[1].baseRot = App().GetScene().GetTransform(wheels[1]).rotation;
-    wheelStates[2].baseRot = App().GetScene().GetTransform(wheels[2]).rotation;
-    wheelStates[3].baseRot = App().GetScene().GetTransform(wheels[3]).rotation;
+    {
+      std::vector<glm::mat4> instances;
+      for (int i = -50; i < 50; i++)
+      {
+        instances.push_back(glm::translate(glm::mat4(1.0), glm::vec3(i * 1617.3, 0.0f, 0.0f)));
+      }
+      auto roadHandle = App().GetAssetManager().Models().LoadInstanced(APP_WORKING_DIR "/Assets/Models/road/scene.gltf", instances);
+      road = App().GetAssetManager().Models().Get(roadHandle).rootEntity;
+      App().GetScene().GetTransform(road).position.y = 0;
+      App().GetScene().GetTransform(road).scale = glm::vec3(0.5f);
+      App().GetScene().SetDoubleSided(road);
+    }
+
+    {
+      auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf");
+      car = App().GetAssetManager().Models().Get(carHandle).rootEntity;
+      wheels[0] = App().GetScene().GetChildByName(car, "wheel-left-front");
+      wheels[1] = App().GetScene().GetChildByName(car, "wheel-right-front");
+      wheels[2] = App().GetScene().GetChildByName(car, "wheel-left-back");
+      wheels[3] = App().GetScene().GetChildByName(car, "wheel-right-back");
+      wheelStates[0].baseRot = App().GetScene().GetTransform(wheels[0]).rotation;
+      wheelStates[1].baseRot = App().GetScene().GetTransform(wheels[1]).rotation;
+      wheelStates[2].baseRot = App().GetScene().GetTransform(wheels[2]).rotation;
+      wheelStates[3].baseRot = App().GetScene().GetTransform(wheels[3]).rotation;
+      App().GetScene().GetTransform(car).position.y = -0.82f;
+      App().GetScene().SetDoubleSided(car);
+    }
+
+
+    {
+      auto albedoHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/grass_albedo.png");
+      auto normalHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/grass_normal.png");
+      auto roughnessHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/grass_roughness.png");
+
+      auto meshHandle = App().GetAssetManager().Meshes().Load(vertices, indices);
+      auto materialHandle = App().GetAssetManager().Materials().Create();
+
+      App().GetAssetManager().Materials().Get(materialHandle).baseColorTexture = albedoHandle;
+      App().GetAssetManager().Materials().Get(materialHandle).normalTexture = normalHandle;
+      App().GetAssetManager().Materials().Get(materialHandle).roughnessTexture = roughnessHandle;
+
+      auto entity = App().GetScene().CreateEntity("Plane");
+      App().GetScene().AddComponent<YAEngine::MeshComponent>(entity, meshHandle);
+      App().GetScene().AddComponent<YAEngine::MaterialComponent>(entity, materialHandle);
+      App().GetScene().GetTransform(entity).position.y = 0.20f;
+    }
+
+    {
+      std::vector<glm::mat4> instances;
+      for (int i = -150; i < 150; i++)
+        for (int j = -3; j <= 3; j++)
+        {
+          if (i > -45 && i < 45) continue;
+          if (j >= -1 && j <= 1) continue;
+
+          auto randomScale = (float)std::rand() / RAND_MAX / 2.0f;
+          auto scale = glm::scale(glm::mat4(1.0), glm::vec3(0.3f + randomScale));
+
+          auto randomOffset = glm::vec2((float)std::rand() / RAND_MAX * 10.0f, (float)std::rand() / RAND_MAX * 10.0f);
+          auto translate = glm::translate(glm::mat4(1.0), glm::vec3(i * 10 + randomOffset.x, randomOffset.y + j * 10.0f, -.8f));
+
+          auto randomRotation = (float)std::rand() / RAND_MAX * 360.0f;
+          auto rotate = glm::rotate(glm::mat4(1.0), glm::radians(randomRotation), glm::vec3(0.0f, 0.0f, 1.0f));
+
+          instances.push_back(translate * scale * rotate);
+        }
+      for (int i = -55; i < 55; i++)
+        for (int j = -25; j < 25; j++)
+        {
+          if (i > -45 && i < 45) continue;
+          if (j >= -1 && j <= 1) continue;
+
+          auto randomScale = (float)std::rand() / RAND_MAX / 2.0f;
+          auto scale = glm::scale(glm::mat4(1.0), glm::vec3(0.3f + randomScale));
+
+          auto randomOffset = glm::vec2((float)std::rand() / RAND_MAX * 10.0f, (float)std::rand() / RAND_MAX * 10.0f);
+          auto translate = glm::translate(glm::mat4(1.0), glm::vec3(i * 10 + randomOffset.x, randomOffset.y + j * 10.0f, -.8f));
+
+          auto randomRotation = (float)std::rand() / RAND_MAX * 360.0f;
+          auto rotate = glm::rotate(glm::mat4(1.0), glm::radians(randomRotation), glm::vec3(0.0f, 0.0f, 1.0f));
+
+          instances.push_back(translate * scale * rotate);
+        }
+      for (int j = -35; j < 35; j++)
+        for (int i = -50; i < 50; i++)
+        {
+          if (j > -25 && j < 25) continue;
+
+          auto randomScale = (float)std::rand() / RAND_MAX / 2.0f;
+          auto scale = glm::scale(glm::mat4(1.0), glm::vec3(0.3f + randomScale));
+
+          auto randomOffset = glm::vec2((float)std::rand() / RAND_MAX * 10.0f, (float)std::rand() / RAND_MAX * 10.0f);
+          auto translate = glm::translate(glm::mat4(1.0), glm::vec3(i * 10 + randomOffset.x, randomOffset.y + j * 10.0f, -.8f));
+
+          auto randomRotation = (float)std::rand() / RAND_MAX * 360.0f;
+          auto rotate = glm::rotate(glm::mat4(1.0), glm::radians(randomRotation), glm::vec3(0.0f, 0.0f, 1.0f));
+
+          instances.push_back(translate * scale * rotate);
+        }
+      auto treeHandle = App().GetAssetManager().Models().LoadInstanced(APP_WORKING_DIR "/Assets/Models/tree/scene.gltf", instances);
+      trees = App().GetAssetManager().Models().Get(treeHandle).rootEntity;
+      App().GetScene().SetDoubleSided(trees);
+    }
   }
 
   void Destroy() override

@@ -153,14 +153,20 @@ namespace YAEngine
 
     if (scene.HasComponent<MeshComponent>(s_SelectedEntity))
     {
-      auto meshComponent = scene.GetComponent<MeshComponent>(s_SelectedEntity);
+      auto& meshComponent = scene.GetComponent<MeshComponent>(s_SelectedEntity);
       ImGui::Checkbox(
         "Render",
         &meshComponent.shouldRender
       );
+      ImGui::Text("Double sided: %i", meshComponent.doubleSided);
+      ImGui::Text("No shading: %i", meshComponent.noShading);
+
       auto mesh = App().GetAssetManager().Meshes().Get(meshComponent.asset);
-      ImGui::Text("Instance count: %i", mesh.instanceData->size());
-      ImGui::Text("Offset: %i", mesh.offset);
+      if (mesh.instanceData != nullptr)
+      {
+        ImGui::Text("Instance count: %i", mesh.instanceData->size());
+        ImGui::Text("Offset: %i", mesh.offset);
+      }
     }
   }
 }

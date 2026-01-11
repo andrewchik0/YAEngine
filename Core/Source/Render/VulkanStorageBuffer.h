@@ -19,7 +19,7 @@ namespace YAEngine
     template<typename T>
     void Update(uint32_t offset, const T* data, uint32_t size)
     {
-      std::memcpy(m_Data, data, size);
+      std::memcpy(static_cast<uint8_t*>(m_Data) + offset, data, size);
       vmaFlushAllocation(s_Allocator, m_Allocation, offset, size);
     }
 

@@ -21,6 +21,7 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
 layout(push_constant) uniform PushConstants
 {
   mat4 world;
+  int offset;
 } pc;
 
 void main() {

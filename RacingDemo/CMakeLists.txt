@@ -3,6 +3,7 @@ set(SOURCES
   Source/ControlsLayer.h
   Source/ControlsLayer.cpp
   Source/AppLayer.h
+  Source/Vertices.h
 )
 
 add_executable(RacingDemo)

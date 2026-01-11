@@ -21,7 +21,7 @@ namespace YAEngine
     glm::radians(90.0f),
     1.0f,
     0.1f,
-    10.0f
+    9.0f
   );
   const glm::vec3 cubeVertices[36] = {
     // +X
@@ -62,9 +62,9 @@ namespace YAEngine
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent = { 2048, 2048, 1 };
+    imageInfo.extent = { 1024, 1024, 1 };
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.mipLevels = 10;
+    imageInfo.mipLevels = 9;
     imageInfo.arrayLayers = 6;
     imageInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     imageInfo.usage =
@@ -86,7 +86,7 @@ namespace YAEngine
 
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 10;
+    viewInfo.subresourceRange.levelCount = 9;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 6;
 
@@ -116,8 +116,8 @@ namespace YAEngine
       fb.renderPass = s_RenderPass;
       fb.attachmentCount = 1;
       fb.pAttachments = &m_FaceViews[face];
-      fb.width  = 2048;
-      fb.height = 2048;
+      fb.width  = 1024;
+      fb.height = 1024;
       fb.layers = 1;
 
       vkCreateFramebuffer(s_Device, &fb, nullptr, &m_FrameBuffers[face]);
@@ -129,7 +129,7 @@ namespace YAEngine
       m_CubemapImage,
       VK_IMAGE_LAYOUT_UNDEFINED,
       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-      10,
+      9,
       6
     );
     s_CommandBuffer->EndSingleTimeCommands(cmd);
@@ -166,7 +166,7 @@ namespace YAEngine
       rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
       rp.renderPass = s_RenderPass;
       rp.framebuffer = m_FrameBuffers[face];
-      rp.renderArea.extent = { 2048, 2048 };
+      rp.renderArea.extent = { 1024, 1024 };
 
       VkClearValue clear{};
       clear.color = { 0, 0, 0, 1 };
@@ -180,8 +180,8 @@ namespace YAEngine
       vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               s_PipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
-      VkViewport vp{ 0, 0, (float)2048, (float)2048, 0, 1 };
-      VkRect2D scissor{ {0,0}, {2048, 2048} };
+      VkViewport vp{ 0, 0, (float)1024, (float)1024, 0, 1 };
+      VkRect2D scissor{ {0,0}, {1024, 1024} };
       vkCmdSetViewport(cmd, 0, 1, &vp);
       vkCmdSetScissor(cmd, 0, 1, &scissor);
 
@@ -198,15 +198,15 @@ namespace YAEngine
 
     auto cmdBuffer = s_CommandBuffer->BeginSingleTimeCommands();
 
-    uint32_t mipW = 2048;
-    uint32_t mipH = 2048;
+    uint32_t mipW = 1024;
+    uint32_t mipH = 1024;
 
     TransitionImageEx(cmdBuffer, m_CubemapImage,
       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
       VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
       0, 1, 0, 6);
 
-    for (uint32_t i = 1; i < 10; i++)
+    for (uint32_t i = 1; i < 9; i++)
     {
       TransitionImageEx(
         cmdBuffer,
@@ -268,7 +268,7 @@ namespace YAEngine
     barrier.image = m_CubemapImage;
     barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 10;
+    barrier.subresourceRange.levelCount = 9;
     barrier.subresourceRange.baseArrayLayer = 0;
     barrier.subresourceRange.layerCount = 6;
     barrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
@@ -305,7 +305,7 @@ namespace YAEngine
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     samplerInfo.mipLodBias = 0.0f;
     samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 10.0f;
+    samplerInfo.maxLod = 9.0f;
 
     if (vkCreateSampler(s_Device, &samplerInfo, nullptr, &m_CubeMapSampler) != VK_SUCCESS)
     {

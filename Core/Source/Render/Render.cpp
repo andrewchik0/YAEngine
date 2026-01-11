@@ -118,6 +118,7 @@ namespace YAEngine
     m_ForwardPipelineInstanced.Destroy();
     m_ForwardPipelineDoubleSidedInstanced.Destroy();
     m_InstanceDescriptorSet.Destroy();
+    m_ForwardPipelineNoShading.Destroy();
     m_InstanceBuffer.Destroy();
     m_QuadPipeline.Destroy();
     m_TAAPipeline.Destroy();
@@ -264,12 +265,22 @@ namespace YAEngine
     {
       if (!mesh.shouldRender) return;
 
-      auto& currentPipeline = app->m_AssetManager.Meshes().Get(mesh.asset).instanceData == nullptr
-        ? mesh.doubleSided ? m_ForwardPipelineDoubleSided : m_ForwardPipeline
-        : mesh.doubleSided ? m_ForwardPipelineDoubleSidedInstanced : m_ForwardPipelineInstanced;
+      auto& currentPipeline = mesh.noShading ? m_ForwardPipelineNoShading :
+        app->m_AssetManager.Meshes().Get(mesh.asset).instanceData == nullptr
+          ? mesh.doubleSided ? m_ForwardPipelineDoubleSided : m_ForwardPipeline
+          : mesh.doubleSided ? m_ForwardPipelineDoubleSidedInstanced : m_ForwardPipelineInstanced;
 
       currentPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
-      currentPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), &transform.world);
+
+      struct _
+      {
+        glm::mat4 model;
+        int offset = 0;
+      } data;
+      data.model = transform.world;
+      data.offset = app->m_AssetManager.Meshes().Get(mesh.asset).offset / sizeof(glm::mat4);
+      currentPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), &data);
+
       currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(m_CurrentFrameIndex)}, 1);
       uint32_t instanceCount = 1;
       if (app->m_AssetManager.Meshes().Get(mesh.asset).instanceData != nullptr)
@@ -343,12 +354,14 @@ namespace YAEngine
       }
     };
     m_InstanceDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), instanceDesc);
-    m_InstanceBuffer.Create(256 * sizeof(glm::mat4));
-    m_InstanceDescriptorSet.WriteStorageBuffer(0, m_InstanceBuffer.Get(), 256 * sizeof(glm::mat4));
+    constexpr auto MAX_INSTANCES = 10000;
+    m_InstanceBuffer.Create(MAX_INSTANCES * sizeof(glm::mat4));
+    m_InstanceDescriptorSet.WriteStorageBuffer(0, m_InstanceBuffer.Get(), MAX_INSTANCES * sizeof(glm::mat4));
 
     PipelineCreateInfo forwardInfo = {
       .fragmentShaderFile = "shader.frag",
       .vertexShaderFile = "shader.vert",
+      .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
       .vertexInputFormat = "f3f2f3f4",
       .sets = std::vector({
         m_PerFrameData.GetLayout(),
@@ -364,6 +377,11 @@ namespace YAEngine
     m_ForwardPipelineDoubleSidedInstanced.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
     forwardInfo.doubleSided = false;
     m_ForwardPipelineInstanced.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+
+    forwardInfo.doubleSided = true;
+    forwardInfo.fragmentShaderFile = "no_shading.frag";
+    forwardInfo.vertexShaderFile = "shader.vert";
+    m_ForwardPipelineNoShading.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
 
     SetDescription desc = {
       .set = 0,
