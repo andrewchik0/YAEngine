@@ -14,12 +14,25 @@
 #include "VulkanPhysicalDevice.h"
 #include "VulkanPipeline.h"
 #include "VulkanRenderPass.h"
+#include "VulkanStorageBuffer.h"
 #include "VulkanSurface.h"
 #include "VulkanSwapchain.h"
 #include "VulkanSync.h"
+#include "Assets/MeshManager.h"
 
 namespace YAEngine
 {
+  struct InstanceData
+  {
+    glm::mat4 model;
+  };
+
+  struct MeshBatch
+  {
+    MeshHandle* mesh;
+    std::vector<InstanceData> instances;
+  };
+
   class Render
   {
   public:
@@ -31,12 +44,18 @@ namespace YAEngine
 
     void DrawQuad();
 
+    uint32_t AllocateInstanceData(uint32_t size)
+    {
+      return m_InstanceBuffer.Allocate(size);
+    }
+
   private:
 
     void SetViewportAndScissor();
 
     void DrawMeshes(Application* app);
     void SetUpCamera(Application* app);
+    void InitPipelines();
 
     uint32_t m_CurrentFrameIndex = 0;
     uint64_t m_GlobalFrameIndex = 0;
@@ -47,11 +66,16 @@ namespace YAEngine
     PerFrameData m_PerFrameData {};
     SkyBox m_SkyBox;
 
+    std::unordered_map<MeshHandle, MeshBatch> m_Batches;
+
     VulkanFramebuffer m_MainPassFrameBuffer;
     VulkanDescriptorSet m_SwapChainDescriptorSet;
 
     std::array<VulkanFramebuffer, 2> m_HistoryFrameBuffers;
     VulkanDescriptorSet m_TAADescriptorSet;
+
+    VulkanDescriptorSet m_InstanceDescriptorSet;
+    VulkanStorageBuffer m_InstanceBuffer;
 
     VulkanInstance m_VulkanInstance;
     VulkanPhysicalDevice m_PhysicalDevice;
@@ -64,6 +88,8 @@ namespace YAEngine
 
     VulkanPipeline m_ForwardPipeline;
     VulkanPipeline m_ForwardPipelineDoubleSided;
+    VulkanPipeline m_ForwardPipelineInstanced;
+    VulkanPipeline m_ForwardPipelineDoubleSidedInstanced;
     VulkanPipeline m_QuadPipeline;
     VulkanPipeline m_TAAPipeline;
 

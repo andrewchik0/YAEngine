@@ -13,6 +13,8 @@
 #include <assimp/scene.h>
 #include <assimp/pbrmaterial.h>
 
+#include "Application.h"
+
 namespace YAEngine
 {
   ModelHandle ModelManager::Load(const std::string& path)
@@ -39,6 +41,58 @@ namespace YAEngine
     m_Scene->GetTransform(model->rootEntity).maxBB = m_Scene->GetTransform(m_Scene->GetTransform(model->rootEntity).firstChild).maxBB;
 
     return AssetManagerBase::Load(std::move(model));
+  }
+
+  ModelHandle ModelManager::LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances)
+  {
+    auto handle = Load(path);
+
+    auto& model = Get(handle);
+
+    model.modelMatrices = instances;
+    model.offset = Application::Get().GetRender().AllocateInstanceData(uint32_t(instances.size() * sizeof(glm::mat4)));
+
+    TraverseInstanceData(model.rootEntity, &model.modelMatrices, model.offset);
+
+    return handle;
+
+  }
+
+  void ModelManager::Destroy(Model& model)
+  {
+  }
+
+  void ModelManager::DestroyAll()
+  {
+    for (auto& model : GetAll())
+    {
+      Destroy(*model.second);
+    }
+  }
+
+  void ModelManager::TraverseInstanceData(Entity entity, std::vector<glm::mat4>* instanceData, uint32_t offset)
+  {
+    auto& tc = m_Scene->GetTransform(entity);
+
+    if (m_Scene->HasComponent<MeshComponent>(entity))
+    {
+      auto& mesh = m_AssetManager->Meshes().Get(
+        m_Scene->GetComponent<MeshComponent>(entity).asset
+      );
+
+      mesh.instanceData = instanceData;
+      mesh.offset = offset;
+    }
+
+    if (tc.firstChild != entt::null)
+    {
+      TraverseInstanceData(tc.firstChild, instanceData, offset);
+    }
+
+    if (tc.nextSibling != entt::null)
+    {
+      TraverseInstanceData(tc.nextSibling, instanceData, offset);
+    }
   }
 
   Entity ModelManager::ProcessNode(Model& model, Entity& parent, aiNode* node, const aiScene* scene)

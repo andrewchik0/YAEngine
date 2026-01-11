@@ -86,9 +86,12 @@ namespace YAEngine
         {
           float width = static_cast<float>(dynamic_cast<ResizeEvent*>(windowEvent.get())->width);
           float height = static_cast<float>(dynamic_cast<ResizeEvent*>(windowEvent.get())->height);
-          m_Render.Resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-          m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(width, height);
-          m_EventBus.Emit<ResizeEvent>(*dynamic_cast<ResizeEvent*>(windowEvent.get()));
+          if (width != 0.0f && height != 0.0f)
+          {
+            m_Render.Resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
+            m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(width, height);
+            m_EventBus.Emit<ResizeEvent>(*dynamic_cast<ResizeEvent*>(windowEvent.get()));
+          }
           break;
         }
       default: break;

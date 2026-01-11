@@ -9,9 +9,13 @@ namespace YAEngine
   {
   private:
     VulkanVertexBuffer vertexBuffer;
+    std::vector<glm::mat4>* instanceData = nullptr;
+    uint32_t offset = 0;
 
     friend class MeshManager;
     friend class Render;
+    friend class ModelManager;
+    friend class DebugUILayer;
   };
 
   using MeshHandle = AssetHandle;

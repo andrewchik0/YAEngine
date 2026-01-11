@@ -22,7 +22,7 @@ namespace YAEngine
     void Create(void* inputData, size_t vertexCount, uint32_t vertexSize, const std::vector<uint32_t>& indices);
     void Destroy();
 
-    void Draw(VkCommandBuffer cmd);
+    void Draw(VkCommandBuffer cmd, uint32_t instanceCount = 1);
 
     VkBuffer Get()
     {

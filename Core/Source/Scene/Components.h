@@ -39,7 +39,7 @@ namespace YAEngine
 
   struct MeshComponent
   {
-    MeshHandle asset;
+    MeshHandle asset {};
     bool shouldRender = true;
     bool doubleSided = false;
   };

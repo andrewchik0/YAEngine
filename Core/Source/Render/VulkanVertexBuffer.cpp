@@ -76,12 +76,12 @@ namespace YAEngine
     vmaDestroyBuffer(s_GraphicsAllocator, m_IndicesBuffer, m_IndicesAlloc);
   }
 
-  void VulkanVertexBuffer::Draw(VkCommandBuffer cmd)
+  void VulkanVertexBuffer::Draw(VkCommandBuffer cmd, uint32_t instanceCount)
   {
     VkDeviceSize offsets[] = { 0 };
     vkCmdBindIndexBuffer(cmd, m_IndicesBuffer, 0, VK_INDEX_TYPE_UINT32);
     vkCmdBindVertexBuffers(cmd, 0, 1, &m_VerticesBuffer, offsets);
-    vkCmdDrawIndexed(cmd, static_cast<uint32_t>(m_IndicesCount), 1, 0, 0, 0);
+    vkCmdDrawIndexed(cmd, static_cast<uint32_t>(m_IndicesCount), instanceCount, 0, 0, 0);
   }
 
   void VulkanVertexBuffer::CreateIndicesBuffer(const std::vector<uint32_t>& indices)

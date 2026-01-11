@@ -67,7 +67,14 @@ public:
     App().GetScene().SetSkybox(App().GetAssetManager().CubeMaps().Load(APP_WORKING_DIR "/Assets/Textures/sky.hdr"));
 
     auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf");
-    auto roadHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/road/scene.gltf");
+
+    std::vector<glm::mat4> instances;
+    for (size_t i = 0; i < 50; i++)
+    {
+      instances.push_back(glm::translate(glm::mat4(1.0), glm::vec3(i * 1617.3, 0.0f, 0.0f)));
+    }
+
+    auto roadHandle = App().GetAssetManager().Models().LoadInstanced(APP_WORKING_DIR "/Assets/Models/road/scene.gltf", instances);
     car = App().GetAssetManager().Models().Get(carHandle).rootEntity;
     road = App().GetAssetManager().Models().Get(roadHandle).rootEntity;
 

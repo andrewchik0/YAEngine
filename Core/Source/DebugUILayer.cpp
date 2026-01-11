@@ -153,10 +153,14 @@ namespace YAEngine
 
     if (scene.HasComponent<MeshComponent>(s_SelectedEntity))
     {
+      auto meshComponent = scene.GetComponent<MeshComponent>(s_SelectedEntity);
       ImGui::Checkbox(
         "Render",
-        &scene.GetComponent<MeshComponent>(s_SelectedEntity).shouldRender
+        &meshComponent.shouldRender
       );
+      auto mesh = App().GetAssetManager().Meshes().Get(meshComponent.asset);
+      ImGui::Text("Instance count: %i", mesh.instanceData->size());
+      ImGui::Text("Offset: %i", mesh.offset);
     }
   }
 }

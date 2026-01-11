@@ -72,7 +72,7 @@ void main() {
 
   vec3 color = diffuse + specular;
 
-  float exposure = 0.5;
+  float exposure = 0.7;
   float gamma = 1.2;
   vec3 mapped = color * exposure;
 

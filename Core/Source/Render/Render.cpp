@@ -49,53 +49,9 @@ namespace YAEngine
 
     m_PerFrameData.Init(m_Device.Get(), m_Allocator.Get(), m_DescriptorPool.Get(), s_MaxFramesInFlight);
 
-    PipelineCreateInfo forwardInfo = {
-      .fragmentShaderFile = "shader.frag",
-      .vertexShaderFile = "shader.vert",
-      .vertexInputFormat = "f3f2f3f4",
-      .sets = std::vector({
-        m_PerFrameData.GetLayout(),
-        m_DefaultMaterial.GetLayout(),
-      })
-    };
-    m_ForwardPipeline.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
-    forwardInfo.doubleSided = true;
-    m_ForwardPipelineDoubleSided.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+    VulkanStorageBuffer::InitBuffers(m_Device.Get(), m_Allocator.Get());
 
-    SetDescription desc = {
-      .set = 0,
-      .bindings = {
-        {
-          { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-        }
-      }
-    };
-    m_SwapChainDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), desc);
-    SetDescription taaDesc = {
-      .set = 0,
-      .bindings = {
-        {
-          { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-        }
-      }
-    };
-    m_TAADescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), taaDesc);
-
-    PipelineCreateInfo quadInfo = {
-      .fragmentShaderFile = "quad.frag",
-      .vertexShaderFile = "quad.vert",
-      .depthTesting = false,
-      .vertexInputFormat = "",
-      .sets = std::vector({
-        m_SwapChainDescriptorSet.GetLayout(),
-      })
-    };
-
-    m_QuadPipeline.Init(m_Device.Get(), m_SwapChainRenderPass.Get(), quadInfo);
-    quadInfo.fragmentShaderFile = "taa.frag";
-    quadInfo.sets = std::vector({ m_TAADescriptorSet.GetLayout() });
-    m_TAAPipeline.Init(m_Device.Get(), m_SwapChainRenderPass.Get(), quadInfo);
+    InitPipelines();
 
     m_MainPassFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_MainRenderPass.Get(), width, height, m_SwapChain.GetFormat());
     for (auto& buffer : m_HistoryFrameBuffers)
@@ -159,6 +115,10 @@ namespace YAEngine
     m_CommandBuffer.Destroy();
     m_ForwardPipeline.Destroy();
     m_ForwardPipelineDoubleSided.Destroy();
+    m_ForwardPipelineInstanced.Destroy();
+    m_ForwardPipelineDoubleSidedInstanced.Destroy();
+    m_InstanceDescriptorSet.Destroy();
+    m_InstanceBuffer.Destroy();
     m_QuadPipeline.Destroy();
     m_TAAPipeline.Destroy();
     m_DefaultMaterial.Destroy();
@@ -304,15 +264,26 @@ namespace YAEngine
     {
       if (!mesh.shouldRender) return;
 
-      auto& currentPipeline = mesh.doubleSided ? m_ForwardPipelineDoubleSided : m_ForwardPipeline;
+      auto& currentPipeline = app->m_AssetManager.Meshes().Get(mesh.asset).instanceData == nullptr
+        ? mesh.doubleSided ? m_ForwardPipelineDoubleSided : m_ForwardPipeline
+        : mesh.doubleSided ? m_ForwardPipelineDoubleSidedInstanced : m_ForwardPipelineInstanced;
 
       currentPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
       currentPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), &transform.world);
       currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(m_CurrentFrameIndex)}, 1);
+      uint32_t instanceCount = 1;
+      if (app->m_AssetManager.Meshes().Get(mesh.asset).instanceData != nullptr)
+      {
+        instanceCount = uint32_t(app->m_AssetManager.Meshes().Get(mesh.asset).instanceData->size());
+        currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_InstanceDescriptorSet.Get() }, 2);
+        m_InstanceBuffer.Update(app->m_AssetManager.Meshes().Get(mesh.asset).offset, app->m_AssetManager.Meshes().Get(mesh.asset).instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
+      }
+
       auto& mat = app->GetAssetManager().Materials().Get(material.asset);
       mat.cubemap = app->GetScene().m_Skybox;
       app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, mat, m_CurrentFrameIndex);
-      app->m_AssetManager.Meshes().Get(mesh.asset).vertexBuffer.Draw(m_CommandBuffer.GetCurrentBuffer());
+
+      app->m_AssetManager.Meshes().Get(mesh.asset).vertexBuffer.Draw(m_CommandBuffer.GetCurrentBuffer(), instanceCount);
     });
 
     if (!app->m_Scene.HasComponent<CameraComponent>(app->m_Scene.GetActiveCamera())) return;
@@ -361,6 +332,73 @@ namespace YAEngine
     m_PerFrameData.ubo.view = view;
     m_PerFrameData.ubo.proj = proj;
     m_PerFrameData.ubo.cameraPosition = transform.position;
+  }
+
+  void Render::InitPipelines()
+  {
+    SetDescription instanceDesc = {
+      .set = 2,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT }
+      }
+    };
+    m_InstanceDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), instanceDesc);
+    m_InstanceBuffer.Create(256 * sizeof(glm::mat4));
+    m_InstanceDescriptorSet.WriteStorageBuffer(0, m_InstanceBuffer.Get(), 256 * sizeof(glm::mat4));
+
+    PipelineCreateInfo forwardInfo = {
+      .fragmentShaderFile = "shader.frag",
+      .vertexShaderFile = "shader.vert",
+      .vertexInputFormat = "f3f2f3f4",
+      .sets = std::vector({
+        m_PerFrameData.GetLayout(),
+        m_DefaultMaterial.GetLayout(),
+      })
+    };
+    m_ForwardPipeline.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+    forwardInfo.doubleSided = true;
+    m_ForwardPipelineDoubleSided.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+
+    forwardInfo.sets.push_back(m_InstanceDescriptorSet.GetLayout());
+    forwardInfo.vertexShaderFile = "instanced.vert",
+    m_ForwardPipelineDoubleSidedInstanced.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+    forwardInfo.doubleSided = false;
+    m_ForwardPipelineInstanced.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+
+    SetDescription desc = {
+      .set = 0,
+      .bindings = {
+        {
+          { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        }
+      }
+    };
+    m_SwapChainDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), desc);
+    SetDescription taaDesc = {
+      .set = 0,
+      .bindings = {
+        {
+          { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        }
+      }
+    };
+    m_TAADescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), taaDesc);
+
+    PipelineCreateInfo quadInfo = {
+      .fragmentShaderFile = "quad.frag",
+      .vertexShaderFile = "quad.vert",
+      .depthTesting = false,
+      .vertexInputFormat = "",
+      .sets = std::vector({
+        m_SwapChainDescriptorSet.GetLayout(),
+      })
+    };
+
+    m_QuadPipeline.Init(m_Device.Get(), m_SwapChainRenderPass.Get(), quadInfo);
+    quadInfo.fragmentShaderFile = "taa.frag";
+    quadInfo.sets = std::vector({ m_TAADescriptorSet.GetLayout() });
+    m_TAAPipeline.Init(m_Device.Get(), m_SwapChainRenderPass.Get(), quadInfo);
   }
 
   void Render::DrawQuad()

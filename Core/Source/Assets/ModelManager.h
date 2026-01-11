@@ -19,6 +19,10 @@ namespace YAEngine
   struct Model
   {
     Entity rootEntity;
+
+    std::vector<glm::mat4> modelMatrices;
+    uint32_t offset = 0;
+
   private:
     std::filesystem::path basePath;
 
@@ -39,6 +43,10 @@ namespace YAEngine
     }
 
     ModelHandle Load(const std::string& path);
+    ModelHandle LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances);
+
+    void Destroy(Model& model);
+    void DestroyAll();
 
   private:
 
@@ -51,5 +59,7 @@ namespace YAEngine
     std::string GetTexturePath(const aiMaterial* mat, aiTextureType type);
 
     void ComputeMeshBB(const aiMesh* mesh, glm::vec3& outMin, glm::vec3& outMax);
+
+    void TraverseInstanceData(Entity entity, std::vector<glm::mat4>* instanceData, uint32_t offset);
   };
 }

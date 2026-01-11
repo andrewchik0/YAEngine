@@ -98,6 +98,11 @@ namespace YAEngine
       return m_Timer;
     }
 
+    Render& GetRender()
+    {
+      return m_Render;
+    }
+
   private:
 
     explicit Application(const ApplicationSpecs& specs);

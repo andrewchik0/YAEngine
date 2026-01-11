@@ -15,6 +15,7 @@ namespace YAEngine
     m_TextureManager.DestroyAll();
     m_MaterialManager.DestroyAll();
     m_CubeMapManager.DestroyAll();
+    m_ModelManager.DestroyAll();
   }
 }
 
