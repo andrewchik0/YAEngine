@@ -32,6 +32,8 @@ namespace YAEngine
             { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
@@ -126,11 +128,15 @@ namespace YAEngine
     {
       auto cubemap = app->GetAssetManager().CubeMaps().Get(material.cubemap).m_CubeTexture;
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(8, cubemap.GetView(), cubemap.GetSampler());
+      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(9, VulkanCubicTexture::m_BRDFLut.GetView(), VulkanCubicTexture::m_BRDFLut.GetSampler());
+      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(10, cubemap.GetIrradianceView(), cubemap.GetIrradianceSampler());
       textureMask |= (1 << 7);
     }
+    textureMask |= (material.combinedTextures << 8);
 
     data.albedo = material.albedo;
     data.specular = material.specular;
+    data.metallic = material.metallic;
     data.roughness = material.roughness;
     data.emissivity = material.emissivity;
     data.textureMask = textureMask;

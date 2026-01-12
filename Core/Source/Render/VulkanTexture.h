@@ -12,7 +12,7 @@ namespace YAEngine
 
     static void InitTextures(VkDevice device, VkQueue queue, VulkanCommandBuffer& commandBuffer, VmaAllocator allocator);
 
-    void Load(void* data, uint32_t width, uint32_t height, uint32_t pixelSize, VkFormat format);
+    void Load(void* data, uint32_t width, uint32_t height, uint32_t pixelSize, VkFormat format, bool repeat = true);
     void Destroy();
 
     VkImageView GetView()

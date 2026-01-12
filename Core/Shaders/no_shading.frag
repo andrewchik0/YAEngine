@@ -20,6 +20,7 @@ layout(set = 1, binding = 0) uniform PerMaterialUBO {
   float roughness;
   vec3 emissivity;
   float specular;
+  float metallic;
   int textureMask;
   int sg;
 } u_Material;

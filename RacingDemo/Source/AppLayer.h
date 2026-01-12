@@ -7,6 +7,8 @@
 
 #include "Vertices.h"
 
+#define TEST
+
 class AppLayer : public YAEngine::Layer
 {
 public:
@@ -29,7 +31,9 @@ public:
   void OnBeforeInit() override
   {
     App().GetWindow().Maximize();
+#ifndef TEST
     App().PushLayer<ControlsLayer>();
+#endif
     App().PushLayer<YAEngine::FreeCamLayer>();
     App().PushLayer<YAEngine::DebugUILayer>();
   }
@@ -40,13 +44,14 @@ public:
 
     key = App().Events().Subscribe<YAEngine::KeyEvent>([&](auto e) { OnKeyBoard(e); });
 
+#ifndef TEST
     {
       std::vector<glm::mat4> instances;
       for (int i = -50; i < 50; i++)
       {
         instances.push_back(glm::translate(glm::mat4(1.0), glm::vec3(i * 1617.3, 0.0f, 0.0f)));
       }
-      auto roadHandle = App().GetAssetManager().Models().LoadInstanced(APP_WORKING_DIR "/Assets/Models/road/scene.gltf", instances);
+      auto roadHandle = App().GetAssetManager().Models().LoadInstanced(APP_WORKING_DIR "/Assets/Models/road/scene.gltf", instances, true);
       road = App().GetAssetManager().Models().Get(roadHandle).rootEntity;
       App().GetScene().GetTransform(road).position.y = 0;
       App().GetScene().GetTransform(road).scale = glm::vec3(0.5f);
@@ -54,7 +59,7 @@ public:
     }
 
     {
-      auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf");
+      auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf", true);
       car = App().GetAssetManager().Models().Get(carHandle).rootEntity;
       wheels[0] = App().GetScene().GetChildByName(car, "wheel-left-front");
       wheels[1] = App().GetScene().GetChildByName(car, "wheel-right-front");
@@ -143,6 +148,30 @@ public:
       trees = App().GetAssetManager().Models().Get(treeHandle).rootEntity;
       App().GetScene().SetDoubleSided(trees);
     }
+#endif
+
+#ifdef TEST
+    {
+      for (int i = 0; i < 10; i++)
+      {
+        for (int j = 0; j < 10; j++)
+        {
+          auto mesh = GenerateSphere(1.0, 40, 40);
+          auto meshHandle = App().GetAssetManager().Meshes().Load(mesh.vertices, mesh.indices);
+          auto materialHandle = App().GetAssetManager().Materials().Create();
+
+          App().GetAssetManager().Materials().Get(materialHandle).albedo = glm::vec3(0.5, 0.0, 0.0);
+          App().GetAssetManager().Materials().Get(materialHandle).roughness = i / 9.0f;
+          App().GetAssetManager().Materials().Get(materialHandle).metallic = j / 9.0f;
+
+          auto entity = App().GetScene().CreateEntity("Sphere" + i * 10 + j);
+          App().GetScene().AddComponent<YAEngine::MeshComponent>(entity, meshHandle);
+          App().GetScene().AddComponent<YAEngine::MaterialComponent>(entity, materialHandle);
+          App().GetScene().GetTransform(entity).position = glm::vec3(i * 3.0f, j * 3.0f, 0.0f);
+        }
+      }
+    }
+#endif
   }
 
   void Destroy() override

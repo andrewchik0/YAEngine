@@ -6,8 +6,8 @@ namespace YAEngine
   {
     m_Device = device;
     std::vector<VkDescriptorPoolSize> poolSizes = {
-      { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 100 },
-      { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 100 },
+      { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 500 },
+      { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 200 },
       { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 50 }
     };
 
@@ -15,7 +15,7 @@ namespace YAEngine
     poolInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
     poolInfo.poolSizeCount = static_cast<uint32_t>(poolSizes.size());
     poolInfo.pPoolSizes = poolSizes.data();
-    poolInfo.maxSets = 100;
+    poolInfo.maxSets = 500;
 
     if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &m_DescriptorPool) != VK_SUCCESS)
     {

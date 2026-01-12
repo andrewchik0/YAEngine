@@ -17,7 +17,7 @@
 
 namespace YAEngine
 {
-  ModelHandle ModelManager::Load(const std::string& path)
+  ModelHandle ModelManager::Load(const std::string& path, bool combinedTextures)
   {
     Assimp::Importer importer;
     const aiScene* scene =
@@ -36,16 +36,16 @@ namespace YAEngine
 
     model->rootEntity = m_Scene->CreateEntity(std::filesystem::path(path).filename().string());
 
-    m_Scene->GetTransform(model->rootEntity).firstChild = ProcessNode(*model, model->rootEntity, scene->mRootNode, scene);
+    m_Scene->GetTransform(model->rootEntity).firstChild = ProcessNode(*model, model->rootEntity, scene->mRootNode, scene, combinedTextures);
     m_Scene->GetTransform(model->rootEntity).minBB = m_Scene->GetTransform(m_Scene->GetTransform(model->rootEntity).firstChild).minBB;
     m_Scene->GetTransform(model->rootEntity).maxBB = m_Scene->GetTransform(m_Scene->GetTransform(model->rootEntity).firstChild).maxBB;
 
     return AssetManagerBase::Load(std::move(model));
   }
 
-  ModelHandle ModelManager::LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances)
+  ModelHandle ModelManager::LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances, bool combinedTextures)
   {
-    auto handle = Load(path);
+    auto handle = Load(path, combinedTextures);
 
     auto& model = Get(handle);
 
@@ -95,7 +95,7 @@ namespace YAEngine
     }
   }
 
-  Entity ModelManager::ProcessNode(Model& model, Entity& parent, aiNode* node, const aiScene* scene)
+  Entity ModelManager::ProcessNode(Model& model, Entity& parent, aiNode* node, const aiScene* scene, bool combinedTextures)
   {
     auto nodeEntity = m_Scene->CreateEntity(node->mName.C_Str());
     auto& tc = m_Scene->GetTransform(nodeEntity);
@@ -125,7 +125,7 @@ namespace YAEngine
     {
       aiMesh* ai_mesh = scene->mMeshes[node->mMeshes[i]];
 
-      entt::entity meshEntity = ProcessMesh(model, ai_mesh, scene);
+      entt::entity meshEntity = ProcessMesh(model, ai_mesh, scene, combinedTextures);
 
       auto& mt = m_Scene->GetTransform(meshEntity);
       mt.parent = nodeEntity;
@@ -145,7 +145,7 @@ namespace YAEngine
     }
     for (size_t i = 0; i < node->mNumChildren; ++i)
     {
-      auto child = ProcessNode(model, nodeEntity, node->mChildren[i], scene);
+      auto child = ProcessNode(model, nodeEntity, node->mChildren[i], scene, combinedTextures);
       auto& childTransform = m_Scene->GetTransform(child);
 
       nodeMinBB = glm::min(nodeMinBB, childTransform.minBB);
@@ -165,12 +165,12 @@ namespace YAEngine
     return nodeEntity;
   }
 
-  Entity ModelManager::ProcessMesh(Model& model, aiMesh* mesh, const aiScene* scene)
+  Entity ModelManager::ProcessMesh(Model& model, aiMesh* mesh, const aiScene* scene, bool combinedTextures)
   {
     Entity entity = m_Scene->CreateEntity(mesh->mName.C_Str());
 
     aiMaterial* aiMat = scene->mMaterials[mesh->mMaterialIndex];
-    ProcessMaterial(model, entity, aiMat);
+    ProcessMaterial(model, entity, aiMat, combinedTextures);
 
     std::vector<Vertex> vertices;
     std::vector<uint32_t> indices;
@@ -233,7 +233,7 @@ namespace YAEngine
     return entity;
   }
 
-  void ModelManager::ProcessMaterial(Model& model, Entity& mesh, const aiMaterial* material)
+  void ModelManager::ProcessMaterial(Model& model, Entity& mesh, const aiMaterial* material, bool combinedTextures)
   {
     auto materialHandle = m_AssetManager->Materials().Create();
     auto& mat = m_AssetManager->Materials().Get(materialHandle);
@@ -292,6 +292,7 @@ namespace YAEngine
     mat.roughness = roughness;
     mat.specular = specular.r;
     mat.sg = hasSG;
+    mat.combinedTextures = combinedTextures;
 
     if (!baseColorTexture.empty())
       mat.baseColorTexture = m_AssetManager->Textures().Load((model.basePath / baseColorTexture).string(), &mat.hasAlpha);

@@ -17,6 +17,7 @@ namespace YAEngine
       float roughness;
       glm::vec3 emissivity;
       float specular;
+      float metallic;
       int textureMask;
       int sg;
     } data;

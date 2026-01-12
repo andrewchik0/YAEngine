@@ -49,7 +49,8 @@ namespace YAEngine
     allocInfo.descriptorSetCount = 1;
     allocInfo.pSetLayouts = &m_DescriptorSetLayout;
 
-    if (vkAllocateDescriptorSets(m_Device, &allocInfo, &m_DescriptorSet) != VK_SUCCESS)
+    int result = 0;
+    if ((result = vkAllocateDescriptorSets(m_Device, &allocInfo, &m_DescriptorSet)) != VK_SUCCESS)
     {
       throw std::runtime_error("failed to allocate descriptor set!");
     }

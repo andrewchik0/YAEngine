@@ -20,6 +20,7 @@ layout(set = 1, binding = 0) uniform PerMaterialUBO {
   float roughness;
   vec3 emissivity;
   float specular;
+  float metallic;
   int textureMask;
   int sg;
 } u_Material;
@@ -31,54 +32,65 @@ layout(set = 1, binding = 5) uniform sampler2D emissiveTexture;
 layout(set = 1, binding = 6) uniform sampler2D normalTexture;
 layout(set = 1, binding = 7) uniform sampler2D heightTexture;
 layout(set = 1, binding = 8) uniform samplerCube cubemapTexture;
+layout(set = 1, binding = 9) uniform sampler2D brdfTexture;
+layout(set = 1, binding = 10) uniform samplerCube irradianceCubemap;
 
 layout(location = 0) out vec4 outColor;
 
 #include "post.glsl"
 
-float Hash(vec2 p)
+vec3 fresnel_schlick_roughness(float cosTheta, vec3 F0, float roughness)
 {
-  return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
+  return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
 
-
 void main() {
-  float hasNormal = float((u_Material.textureMask >> 5) & 1);
+  float hasNormalMap = float((u_Material.textureMask >> 5) & 1);
   vec3 n_ts = texture(normalTexture, inTexCoord).rgb * 2.0 - 1.0;
-  vec3 normal = normalize(inTBN * n_ts) * hasNormal + (1.0 - hasNormal) * inNormal;
+  vec3 normal = mix(inNormal, normalize(inTBN * n_ts), hasNormalMap);
 
-  float base = float(u_Material.textureMask & 1);
-  vec4 albedo = texture(baseColorTexture, inTexCoord) * base + vec4(u_Material.albedo, 1.0) * (1 - base);
+  float hasAlbedoTexture = float(u_Material.textureMask & 1);
+  vec4 albedo = mix(vec4(u_Material.albedo, 1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
 
-  float roughness = texture(metallicTexture, inTexCoord).g + u_Material.roughness;
-  float metallic = texture(metallicTexture, inTexCoord).b;
+  float hasMetallicTexture = float((u_Material.textureMask >> 5) & 1);
+  float metallic = mix(u_Material.metallic, texture(metallicTexture, inTexCoord).b, hasMetallicTexture);
 
-  vec3 N = normalize(normal);
-  vec3 V = normalize(u_Data.cameraPosition - inPosition);
-  vec3 R = reflect(-V, N);
+  float combinedTextures = float((u_Material.textureMask >> 8) & 1);
 
-  float NdotV = max(dot(N, V), 0.0);
+  float hasRoughnessTexture = float((u_Material.textureMask >> 2) & 1);
+  float roughness = mix(
+    mix(u_Material.roughness, texture(roughnessTexture, inTexCoord).r, hasRoughnessTexture),
+    texture(metallicTexture, inTexCoord).g,
+    combinedTextures
+  );
 
-  vec3 F0 = mix(vec3(0.04), albedo.rgb, metallic);
-  vec3 F  = F0 + (1.0 - F0) * pow(1.0 - NdotV, 5.0);
+  vec3 viewVec = normalize(u_Data.cameraPosition - inPosition);
 
-  F = mix(F, F * 0.3, 1.0 - metallic);
+  float NdotV = clamp(dot(normal, viewVec), 0.01, 0.99);
+  vec3 f0 = mix(vec3(0.04), albedo.rgb, metallic);
+  vec3 F = fresnel_schlick_roughness(NdotV, f0, roughness);
 
-  float maxMip = 10.0;
-  vec3 env = textureLod(cubemapTexture, R, roughness * maxMip).rgb;
-  env *= 0.05;
+  vec3 kD = 1.0 - F;
+  kD *= (1 - metallic);
 
-  vec3 specular = env * F;
+  vec3 irradiance = texture(irradianceCubemap, normal).rgb;
+  vec3 diffuse = irradiance * albedo.rgb;
 
-  vec3 diffuse = albedo.rgb * 0.3 * (1.0 - metallic);
+  vec3 R = reflect(-viewVec, normal);
+  const float MAX_REFLECTION_LOD = 9.0;
+  vec3 prefilteredColor = textureLod(cubemapTexture, R, roughness * MAX_REFLECTION_LOD).rgb;
+  vec2 brdf = texture(brdfTexture, vec2(NdotV, clamp(roughness, 0.01, .99))).rg;
+  vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
-  vec3 color = diffuse + specular;
+  vec3 ambient = kD * diffuse + specular;
+  vec3 resultColor = ambient;
+  resultColor = max(resultColor, vec3(0));
 
   float exposure = u_Data.exposure;
   float gamma = u_Data.gamma;
-  vec3 mapped = color * exposure;
+  vec3 mapped = resultColor * exposure;
 
-  mapped = ACESFilm(mapped);
+//  mapped = ACESFilm(mapped);
   vec3 finalColor = pow(mapped, vec3(1.0 / gamma));
 
   if (albedo.a < 0.5)
@@ -87,7 +99,6 @@ void main() {
   }
   else
   {
-    outColor = vec4(finalColor, 1.0);
-    outColor *= albedo.a;
+    outColor = vec4(vec3(resultColor), 1.0);
   }
 }

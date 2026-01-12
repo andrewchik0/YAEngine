@@ -29,8 +29,24 @@ namespace YAEngine
       return m_CubeMapSampler;
     }
 
+    VkImageView GetIrradianceView()
+    {
+      return m_IrradianceImageView;
+    }
+
+    VkImage GetIrradianceImage()
+    {
+      return m_IrradianceImage;
+    }
+
+    VkSampler GetIrradianceSampler()
+    {
+      return m_IrradianceSampler;
+    }
+
     static void DrawCube(VkCommandBuffer cmd);
 
+    static VulkanTexture m_BRDFLut;
   private:
 
     VulkanTexture m_EquirectTexture;
@@ -42,21 +58,40 @@ namespace YAEngine
     VkImageView m_FaceViews[6] {};
     VkFramebuffer m_FrameBuffers[6] {};
 
-    static VkDevice s_Device;
-    static VmaAllocator s_MemoryAllocator;
-    static VkRenderPass s_RenderPass;
+    VkImage m_IrradianceImage {};
+    VkImageView m_IrradianceImageView {};
+    VmaAllocation m_IrradianceImageAllocation {};
+    VkSampler m_IrradianceSampler {};
+    VkImageView m_IrradianceFaceViews[6] {};
+    VkFramebuffer m_IrradianceFrameBuffers[6] {};
+
+    void ComputeIrradiance();
+
     static glm::mat4 s_Views[6];
     static glm::mat4 s_Projection;
+    static VkBuffer s_VertexBuffer;
+    static VmaAllocation s_VertexBufferAllocation;
+
+    static VmaAllocator s_MemoryAllocator;
+
+    static VkRenderPass s_RenderPass;
     static VkDescriptorSetLayout s_DescriptorSetLayout;
     static VkPipelineLayout s_PipelineLayout;
     static VkPipeline s_Pipeline;
-    static VkBuffer s_VertexBuffer;
-    static VmaAllocation s_VertexBufferAllocation;
+
+    static VkRenderPass s_IrradianceRenderPass;
+    static VkDescriptorSetLayout s_IrradianceDescriptorSetLayout;
+    static VkPipelineLayout s_IrradiancePipelineLayout;
+    static VkPipeline s_IrradiancePipeline;
+
+    static VkDevice s_Device;
     static VulkanCommandBuffer* s_CommandBuffer;
     static VkDescriptorPool s_DescriptorPool;
 
     static void InitRenderPass();
     static void InitPipeline();
+    static void InitIrradianceRenderPass();
+    static void InitIrradiancePipeline();
     static void TransitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels, uint32_t layerCount);
     static void TransitionImageEx(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
                            uint32_t baseMip, uint32_t mipCount, uint32_t baseLayer, uint32_t layerCount);

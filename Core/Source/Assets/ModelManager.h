@@ -42,8 +42,8 @@ namespace YAEngine
     {
     }
 
-    ModelHandle Load(const std::string& path);
-    ModelHandle LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances);
+    ModelHandle Load(const std::string& path, bool combinedTextures = false);
+    ModelHandle LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances, bool combinedTextures = false);
 
     void Destroy(Model& model);
     void DestroyAll();
@@ -53,9 +53,9 @@ namespace YAEngine
     Scene* m_Scene;
     AssetManager* m_AssetManager;
 
-    Entity ProcessNode(Model& model, Entity& parent, aiNode* node, const aiScene* scene);
-    Entity ProcessMesh(Model& model, aiMesh* mesh, const aiScene* scene);
-    void ProcessMaterial(Model& model, Entity& mesh, const aiMaterial* material);
+    Entity ProcessNode(Model& model, Entity& parent, aiNode* node, const aiScene* scene, bool combinedTextures);
+    Entity ProcessMesh(Model& model, aiMesh* mesh, const aiScene* scene, bool combinedTextures);
+    void ProcessMaterial(Model& model, Entity& mesh, const aiMaterial* material, bool combinedTextures);
     std::string GetTexturePath(const aiMaterial* mat, aiTextureType type);
 
     void ComputeMeshBB(const aiMesh* mesh, glm::vec3& outMin, glm::vec3& outMax);
