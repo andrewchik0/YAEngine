@@ -16,6 +16,20 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   int currentTexture;
 } u_Data;
 
+struct Light
+{
+  vec3 position;
+  float cutOff;
+  vec3 color;
+  float outerCutOff;
+};
+
+layout(set = 2, binding = 0) readonly buffer Lights
+{
+  Light lights[2];
+  int lightsCount;
+} u_Lights;
+
 layout(set = 1, binding = 0) uniform PerMaterialUBO {
   vec3 albedo;
   float roughness;
@@ -39,8 +53,9 @@ layout(set = 1, binding = 10) uniform samplerCube irradianceCubemap;
 layout(location = 0) out vec4 outColor;
 
 #include "post.glsl"
+#include "pbr.glsl"
 
-vec3 fresnel_schlick_roughness(float cosTheta, vec3 F0, float roughness)
+vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
 {
   return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
 }
@@ -73,7 +88,28 @@ void main() {
 
   float NdotV = clamp(max(dot(normal, viewVec), -dot(normal, viewVec)), 0.01, 0.99);
   vec3 f0 = mix(vec3(0.04), albedo.rgb, metallic);
-  vec3 F = fresnel_schlick_roughness(NdotV, f0, roughness);
+
+  vec3 resultColor = vec3(0);
+
+  const int lightCount = 0;
+  for (int i = 0; i < lightCount; ++i)
+  {
+    vec3 lightDir = normalize(u_Lights.lights[i].position - inPosition);
+    vec3 lightColor = u_Lights.lights[i].color / (length(lightDir) * length(lightDir));
+    vec3 halfWayVec = normalize(viewVec + lightDir);
+
+    vec3 spotDir = normalize(vec3(0, 1, 0));
+    float cutOff = cos(radians(u_Lights.lights[i].cutOff));
+    float outerCutOff = cos(radians(u_Lights.lights[i].outerCutOff));
+
+    float theta = dot(lightDir, normalize(spotDir));
+    float epsilon = (cutOff - outerCutOff);
+    float intensity = clamp((theta - outerCutOff) / epsilon, 0.0, 1.0);
+
+    resultColor += PBR(lightDir, lightColor, halfWayVec, viewVec, normal, f0, dot(normal, viewVec), metallic, albedo.rgb, roughness * roughness, vec3(0.0)) * intensity;
+  }
+
+  vec3 F = fresnelSchlickRoughness(NdotV, f0, roughness);
 
   vec3 kD = 1.0 - F;
   kD *= (1 - metallic);
@@ -88,15 +124,14 @@ void main() {
   vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
   vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0, 0.8));
-  vec3 resultColor = ambient;
-  resultColor = max(resultColor, vec3(0));
+  resultColor += max(ambient, vec3(0));
 
   vec3 mapped = resultColor * exposure;
 
-//  mapped = mapped / (mapped + vec3(1.0));
+  mapped = pow(mapped, vec3(1.0 / gamma));
 
-//  mapped = ACESFilm(mapped);
-  vec3 finalColor = pow(mapped, vec3(1.0 / gamma));
+  mapped = ACESFilm(mapped);
+//  vec3 finalColor = pow(mapped, vec3(1.0 / gamma));
 
   if (albedo.a < 0.5)
   {
@@ -104,7 +139,7 @@ void main() {
   }
   else
   {
-    outColor = vec4(vec3(finalColor), 1.0);
+    outColor = vec4(vec3(mapped), 1.0);
   }
 
   if (bool(u_Data.currentTexture))

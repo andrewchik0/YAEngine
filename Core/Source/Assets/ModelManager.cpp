@@ -301,7 +301,7 @@ namespace YAEngine
     if (!roughnessTexture.empty())
       mat.roughnessTexture = m_AssetManager->Textures().Load((model.basePath / roughnessTexture).string());
     else if (hasSG && !specularTexture.empty())
-      mat.roughnessTexture = m_AssetManager->Textures().Load((model.basePath / roughnessTexture).string());
+      mat.roughnessTexture = m_AssetManager->Textures().Load((model.basePath / specularTexture).string());
     if (!specularTexture.empty())
       mat.specularTexture = m_AssetManager->Textures().Load((model.basePath / specularTexture).string());
     if (!emissiveTexture.empty())

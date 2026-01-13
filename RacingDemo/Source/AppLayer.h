@@ -45,19 +45,8 @@ public:
     key = App().Events().Subscribe<YAEngine::KeyEvent>([&](auto e) { OnKeyBoard(e); });
 
 #ifndef TEST
-    {
-      std::vector<glm::mat4> instances;
-      for (int i = -50; i < 50; i++)
-      {
-        instances.push_back(glm::translate(glm::mat4(1.0), glm::vec3(i * 1617.3, 0.0f, 0.0f)));
-      }
-      auto roadHandle = App().GetAssetManager().Models().LoadInstanced(APP_WORKING_DIR "/Assets/Models/road/scene.gltf", instances, true);
-      road = App().GetAssetManager().Models().Get(roadHandle).rootEntity;
-      App().GetScene().GetTransform(road).position.y = 0;
-      App().GetScene().GetTransform(road).scale = glm::vec3(0.5f);
-      App().GetScene().SetDoubleSided(road);
-    }
-
+    App().GetRender().m_Gamma = 1.48f;
+    App().GetRender().m_Exposure = 1.24f;
     {
       auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf", true);
       car = App().GetAssetManager().Models().Get(carHandle).rootEntity;
@@ -73,11 +62,11 @@ public:
       App().GetScene().SetDoubleSided(car);
     }
 
-
     {
-      auto albedoHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/grass_albedo.png");
-      auto normalHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/grass_normal.png");
-      auto roughnessHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/grass_roughness.png");
+      auto albedoHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_albedo.png");
+      auto normalHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_normal.png");
+      auto roughnessHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_roughness.png");
+      auto metallicHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_metallic.png");
 
       auto meshHandle = App().GetAssetManager().Meshes().Load(vertices, indices);
       auto materialHandle = App().GetAssetManager().Materials().Create();
@@ -85,68 +74,12 @@ public:
       App().GetAssetManager().Materials().Get(materialHandle).baseColorTexture = albedoHandle;
       App().GetAssetManager().Materials().Get(materialHandle).normalTexture = normalHandle;
       App().GetAssetManager().Materials().Get(materialHandle).roughnessTexture = roughnessHandle;
+      App().GetAssetManager().Materials().Get(materialHandle).metallicTexture = metallicHandle;
 
       auto entity = App().GetScene().CreateEntity("Plane");
       App().GetScene().AddComponent<YAEngine::MeshComponent>(entity, meshHandle);
       App().GetScene().AddComponent<YAEngine::MaterialComponent>(entity, materialHandle);
       App().GetScene().GetTransform(entity).position.y = 0.20f;
-    }
-
-    {
-      std::vector<glm::mat4> instances;
-      for (int i = -150; i < 150; i++)
-        for (int j = -3; j <= 3; j++)
-        {
-          if (i > -45 && i < 45) continue;
-          if (j >= -1 && j <= 1) continue;
-
-          auto randomScale = (float)std::rand() / RAND_MAX / 2.0f;
-          auto scale = glm::scale(glm::mat4(1.0), glm::vec3(0.3f + randomScale));
-
-          auto randomOffset = glm::vec2((float)std::rand() / RAND_MAX * 10.0f, (float)std::rand() / RAND_MAX * 10.0f);
-          auto translate = glm::translate(glm::mat4(1.0), glm::vec3(i * 10 + randomOffset.x, randomOffset.y + j * 10.0f, -.8f));
-
-          auto randomRotation = (float)std::rand() / RAND_MAX * 360.0f;
-          auto rotate = glm::rotate(glm::mat4(1.0), glm::radians(randomRotation), glm::vec3(0.0f, 0.0f, 1.0f));
-
-          instances.push_back(translate * scale * rotate);
-        }
-      for (int i = -55; i < 55; i++)
-        for (int j = -25; j < 25; j++)
-        {
-          if (i > -45 && i < 45) continue;
-          if (j >= -1 && j <= 1) continue;
-
-          auto randomScale = (float)std::rand() / RAND_MAX / 2.0f;
-          auto scale = glm::scale(glm::mat4(1.0), glm::vec3(0.3f + randomScale));
-
-          auto randomOffset = glm::vec2((float)std::rand() / RAND_MAX * 10.0f, (float)std::rand() / RAND_MAX * 10.0f);
-          auto translate = glm::translate(glm::mat4(1.0), glm::vec3(i * 10 + randomOffset.x, randomOffset.y + j * 10.0f, -.8f));
-
-          auto randomRotation = (float)std::rand() / RAND_MAX * 360.0f;
-          auto rotate = glm::rotate(glm::mat4(1.0), glm::radians(randomRotation), glm::vec3(0.0f, 0.0f, 1.0f));
-
-          instances.push_back(translate * scale * rotate);
-        }
-      for (int j = -35; j < 35; j++)
-        for (int i = -50; i < 50; i++)
-        {
-          if (j > -25 && j < 25) continue;
-
-          auto randomScale = (float)std::rand() / RAND_MAX / 2.0f;
-          auto scale = glm::scale(glm::mat4(1.0), glm::vec3(0.3f + randomScale));
-
-          auto randomOffset = glm::vec2((float)std::rand() / RAND_MAX * 10.0f, (float)std::rand() / RAND_MAX * 10.0f);
-          auto translate = glm::translate(glm::mat4(1.0), glm::vec3(i * 10 + randomOffset.x, randomOffset.y + j * 10.0f, -.8f));
-
-          auto randomRotation = (float)std::rand() / RAND_MAX * 360.0f;
-          auto rotate = glm::rotate(glm::mat4(1.0), glm::radians(randomRotation), glm::vec3(0.0f, 0.0f, 1.0f));
-
-          instances.push_back(translate * scale * rotate);
-        }
-      auto treeHandle = App().GetAssetManager().Models().LoadInstanced(APP_WORKING_DIR "/Assets/Models/tree/scene.gltf", instances);
-      trees = App().GetAssetManager().Models().Get(treeHandle).rootEntity;
-      App().GetScene().SetDoubleSided(trees);
     }
 #endif
 
@@ -173,6 +106,16 @@ public:
       }
     }
 #endif
+
+    App().GetRender().m_Lights.lights[0].color = glm::vec3(0.0f, 20.0f, 0.0f);
+    App().GetRender().m_Lights.lights[0].position = glm::vec3(0.0f, 20.0f, 10.0f);
+    App().GetRender().m_Lights.lights[0].cutOff = 60.0f;
+    App().GetRender().m_Lights.lights[0].outerCutOff = 90.0f;
+
+    App().GetRender().m_Lights.lights[1].color = glm::vec3(20.0f, 0.0f, 0.0f);
+    App().GetRender().m_Lights.lights[1].position = glm::vec3(0.0f, 20.0f, -10.0f);
+    App().GetRender().m_Lights.lights[1].cutOff = 60.0f;
+    App().GetRender().m_Lights.lights[1].outerCutOff = 90.0f;
   }
 
   void Destroy() override

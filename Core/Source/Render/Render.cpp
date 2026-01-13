@@ -118,6 +118,8 @@ namespace YAEngine
     m_ForwardPipelineInstanced.Destroy();
     m_ForwardPipelineDoubleSidedInstanced.Destroy();
     m_InstanceDescriptorSet.Destroy();
+    m_LightsDescriptorSet.Destroy();
+    m_LightsBuffer.Destroy();
     m_ForwardPipelineNoShading.Destroy();
     m_InstanceBuffer.Destroy();
     m_QuadPipeline.Destroy();
@@ -185,6 +187,7 @@ namespace YAEngine
     m_PerFrameData.ubo.gamma = m_Gamma;
     m_PerFrameData.ubo.exposure = m_Exposure;
     m_PerFrameData.ubo.currentTexture = m_CurrentTexture;
+    m_LightsBuffer.Update(0, &m_Lights, sizeof(Light) * MAX_LIGHTS + sizeof(int));
 
     m_CommandBuffer.Set(m_CurrentFrameIndex);
 
@@ -285,11 +288,12 @@ namespace YAEngine
       currentPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), &data);
 
       currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(m_CurrentFrameIndex)}, 1);
+      currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_LightsDescriptorSet.Get() }, 2);
       uint32_t instanceCount = 1;
       if (app->m_AssetManager.Meshes().Get(mesh.asset).instanceData != nullptr)
       {
         instanceCount = uint32_t(app->m_AssetManager.Meshes().Get(mesh.asset).instanceData->size());
-        currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_InstanceDescriptorSet.Get() }, 2);
+        currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_InstanceDescriptorSet.Get() }, 3);
         m_InstanceBuffer.Update(app->m_AssetManager.Meshes().Get(mesh.asset).offset, app->m_AssetManager.Meshes().Get(mesh.asset).instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
       }
 
@@ -351,7 +355,7 @@ namespace YAEngine
   void Render::InitPipelines()
   {
     SetDescription instanceDesc = {
-      .set = 2,
+      .set = 3,
       .bindings = {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT }
       }
@@ -361,6 +365,16 @@ namespace YAEngine
     m_InstanceBuffer.Create(MAX_INSTANCES * sizeof(glm::mat4));
     m_InstanceDescriptorSet.WriteStorageBuffer(0, m_InstanceBuffer.Get(), MAX_INSTANCES * sizeof(glm::mat4));
 
+    SetDescription lightsDesc = {
+      .set = 2,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT }
+      }
+    };
+    m_LightsDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), lightsDesc);
+    m_LightsBuffer.Create(MAX_LIGHTS * sizeof(Light) + sizeof(int));
+    m_LightsDescriptorSet.WriteStorageBuffer(0, m_LightsBuffer.Get(), MAX_LIGHTS * sizeof(Light) + sizeof(int));
+
     PipelineCreateInfo forwardInfo = {
       .fragmentShaderFile = "shader.frag",
       .vertexShaderFile = "shader.vert",
@@ -369,6 +383,7 @@ namespace YAEngine
       .sets = std::vector({
         m_PerFrameData.GetLayout(),
         m_DefaultMaterial.GetLayout(),
+        m_LightsDescriptorSet.GetLayout(),
       })
     };
     m_ForwardPipeline.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);

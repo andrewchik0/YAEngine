@@ -21,7 +21,7 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   int currentTexture;
 } u_Data;
 
-layout(set = 2, binding = 0) readonly buffer Instances
+layout(set = 3, binding = 0) readonly buffer Instances
 {
   mat4 data[];
 } instances;

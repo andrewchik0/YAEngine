@@ -33,6 +33,16 @@ namespace YAEngine
         ImGui::DragFloat("Gamma", &App().GetRender().m_Gamma, 0.01f, 0.0f, 10.0f);
         ImGui::DragFloat("Exposure", &App().GetRender().m_Exposure, 0.01f, 0.0f, 10.0f);
         ImGui::InputInt("Current Texture", &App().GetRender().m_CurrentTexture);
+
+        ImGui::Separator();
+        for (int i = 0; i < App().GetRender().m_Lights.lightsCount; i++)
+        {
+          ImGui::DragFloat(("Light cutoff " + std::to_string(i)).c_str(), &App().GetRender().m_Lights.lights[i].cutOff, 0.01f, 0.0f, 120.0f);
+          ImGui::DragFloat(("Light outer cutoff " + std::to_string(i)).c_str(), &App().GetRender().m_Lights.lights[i].outerCutOff, 0.01f, 0.0f, 120.0f);
+          ImGui::DragFloat3(("Light color " + std::to_string(i)).c_str(), &App().GetRender().m_Lights.lights[i].color.r, 0.01f, -120.0f, 120.0f);
+          ImGui::DragFloat3(("Light position " + std::to_string(i)).c_str(), &App().GetRender().m_Lights.lights[i].position.r, 0.01f, -120.0f, 120.0f);
+          ImGui::Separator();
+        }
         ImGui::EndTabItem();
       }
 

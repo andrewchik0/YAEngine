@@ -33,6 +33,14 @@ namespace YAEngine
     std::vector<InstanceData> instances;
   };
 
+  struct Light
+  {
+    glm::vec3 position;
+    float cutOff;
+    glm::vec3 color;
+    float outerCutOff;
+  };
+
   class Render
   {
   public:
@@ -53,6 +61,13 @@ namespace YAEngine
     float m_Exposure = 1.0f;
 
     int m_CurrentTexture = 0;
+
+    static constexpr size_t MAX_LIGHTS = 2;
+    struct
+    {
+      Light lights[MAX_LIGHTS];
+      int lightsCount = MAX_LIGHTS;
+    } m_Lights;
 
   private:
 
@@ -81,6 +96,9 @@ namespace YAEngine
 
     VulkanDescriptorSet m_InstanceDescriptorSet;
     VulkanStorageBuffer m_InstanceBuffer;
+
+    VulkanDescriptorSet m_LightsDescriptorSet;
+    VulkanStorageBuffer m_LightsBuffer;
 
     VulkanInstance m_VulkanInstance;
     VulkanPhysicalDevice m_PhysicalDevice;
