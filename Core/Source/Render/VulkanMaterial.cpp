@@ -127,7 +127,7 @@ namespace YAEngine
     if (app->GetAssetManager().CubeMaps().Has(material.cubemap))
     {
       auto cubemap = app->GetAssetManager().CubeMaps().Get(material.cubemap).m_CubeTexture;
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(8, cubemap.GetView(), cubemap.GetSampler());
+      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(8, cubemap.GetPrefilterView(), cubemap.GetPrefilterSampler());
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(9, VulkanCubicTexture::m_BRDFLut.GetView(), VulkanCubicTexture::m_BRDFLut.GetSampler());
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(10, cubemap.GetIrradianceView(), cubemap.GetIrradianceSampler());
       textureMask |= (1 << 7);

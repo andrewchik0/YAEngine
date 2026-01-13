@@ -32,6 +32,7 @@ namespace YAEngine
         ImGui::Separator();
         ImGui::DragFloat("Gamma", &App().GetRender().m_Gamma, 0.01f, 0.0f, 10.0f);
         ImGui::DragFloat("Exposure", &App().GetRender().m_Exposure, 0.01f, 0.0f, 10.0f);
+        ImGui::InputInt("Current Texture", &App().GetRender().m_CurrentTexture);
         ImGui::EndTabItem();
       }
 

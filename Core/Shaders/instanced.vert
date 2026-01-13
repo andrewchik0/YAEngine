@@ -18,6 +18,7 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   vec3 cameraDirection;
   float gamma;
   float exposure;
+  int currentTexture;
 } u_Data;
 
 layout(set = 2, binding = 0) readonly buffer Instances
@@ -35,9 +36,9 @@ void main() {
   gl_Position = u_Data.proj * u_Data.view * pc.world * instances.data[gl_InstanceIndex + pc.offset] * vec4(inPosition, 1.0);
   outTexCoord = inTexCoord;
   outPosition = vec3(pc.world * instances.data[gl_InstanceIndex + pc.offset] * vec4(inPosition, 1.0));
-  outNormal = normalize(mat3(pc.world) * inNormal);
+  outNormal = normalize(mat3(pc.world * instances.data[gl_InstanceIndex + pc.offset]) * inNormal);
 
-  mat3 normalMatrix = transpose(inverse(mat3(pc.world)));
+  mat3 normalMatrix = transpose(inverse(mat3(pc.world * instances.data[gl_InstanceIndex + pc.offset])));
 
   vec3 N = normalize(normalMatrix * inNormal);
   vec3 T = normalize(normalMatrix * inTangent.xyz);

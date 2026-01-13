@@ -44,6 +44,21 @@ namespace YAEngine
       return m_IrradianceSampler;
     }
 
+    VkImageView GetPrefilterView()
+    {
+      return m_PrefilterImageView;
+    }
+
+    VkImage GetPrefilterImage()
+    {
+      return m_PrefilterImage;
+    }
+
+    VkSampler GetPrefilterSampler()
+    {
+      return m_PrefilterSampler;
+    }
+
     static void DrawCube(VkCommandBuffer cmd);
 
     static VulkanTexture m_BRDFLut;
@@ -65,7 +80,15 @@ namespace YAEngine
     VkImageView m_IrradianceFaceViews[6] {};
     VkFramebuffer m_IrradianceFrameBuffers[6] {};
 
+    VkImage m_PrefilterImage {};
+    VkImageView m_PrefilterImageView {};
+    VmaAllocation m_PrefilterImageAllocation {};
+    VkSampler m_PrefilterSampler {};
+    VkImageView m_PrefilterFaceViews[6 * 10] {};
+    VkFramebuffer m_PrefilterFrameBuffers[6 * 10] {};
+
     void ComputeIrradiance();
+    void ComputePrefilter();
 
     static glm::mat4 s_Views[6];
     static glm::mat4 s_Projection;
@@ -84,6 +107,11 @@ namespace YAEngine
     static VkPipelineLayout s_IrradiancePipelineLayout;
     static VkPipeline s_IrradiancePipeline;
 
+    static VkRenderPass s_PrefilterRenderPass;
+    static VkDescriptorSetLayout s_PrefilterDescriptorSetLayout;
+    static VkPipelineLayout s_PrefilterPipelineLayout;
+    static VkPipeline s_PrefilterPipeline;
+
     static VkDevice s_Device;
     static VulkanCommandBuffer* s_CommandBuffer;
     static VkDescriptorPool s_DescriptorPool;
@@ -92,6 +120,8 @@ namespace YAEngine
     static void InitPipeline();
     static void InitIrradianceRenderPass();
     static void InitIrradiancePipeline();
+    static void InitPrefilterRenderPass();
+    static void InitPrefilterPipeline();
     static void TransitionImage(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout, uint32_t mipLevels, uint32_t layerCount);
     static void TransitionImageEx(VkCommandBuffer cmd, VkImage image, VkImageLayout oldLayout, VkImageLayout newLayout,
                            uint32_t baseMip, uint32_t mipCount, uint32_t baseLayer, uint32_t layerCount);

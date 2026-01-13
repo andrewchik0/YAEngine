@@ -52,6 +52,8 @@ namespace YAEngine
     float m_Gamma = 2.2f;
     float m_Exposure = 1.0f;
 
+    int m_CurrentTexture = 0;
+
   private:
 
     void SetViewportAndScissor();

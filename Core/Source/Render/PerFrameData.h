@@ -18,6 +18,7 @@ namespace YAEngine
       glm::vec3 cameraDirection;
       float gamma;
       float exposure;
+      int currentTexture;
     } ubo;
 
     void Init(VkDevice device, VmaAllocator allocator, VkDescriptorPool pool, uint32_t maxFramesInFlight);

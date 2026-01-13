@@ -7,7 +7,7 @@
 
 #include "Vertices.h"
 
-#define TEST
+// #define TEST
 
 class AppLayer : public YAEngine::Layer
 {
@@ -17,16 +17,16 @@ public:
 
   YAEngine::Entity car, road, trees;
 
-  YAEngine::SubscriptionId key;
+  YAEngine::SubscriptionId key {};
 
-  std::array<YAEngine::Entity, 4> wheels;
+  std::array<YAEngine::Entity, 4> wheels {};
 
   struct WheelState
   {
     glm::dquat baseRot;
     double spinAngle;
   };
-  std::array<WheelState, 4> wheelStates;
+  std::array<WheelState, 4> wheelStates {};
 
   void OnBeforeInit() override
   {
@@ -168,6 +168,7 @@ public:
           App().GetScene().AddComponent<YAEngine::MeshComponent>(entity, meshHandle);
           App().GetScene().AddComponent<YAEngine::MaterialComponent>(entity, materialHandle);
           App().GetScene().GetTransform(entity).position = glm::vec3(i * 3.0f, j * 3.0f, 0.0f);
+          App().GetScene().SetDoubleSided(entity);
         }
       }
     }

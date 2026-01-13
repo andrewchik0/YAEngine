@@ -13,6 +13,7 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   vec3 cameraDirection;
   float gamma;
   float exposure;
+  int currentTexture;
 } u_Data;
 
 layout(set = 1, binding = 0) uniform PerMaterialUBO {
@@ -31,7 +32,7 @@ layout(set = 1, binding = 4) uniform sampler2D specularTexture;
 layout(set = 1, binding = 5) uniform sampler2D emissiveTexture;
 layout(set = 1, binding = 6) uniform sampler2D normalTexture;
 layout(set = 1, binding = 7) uniform sampler2D heightTexture;
-layout(set = 1, binding = 8) uniform samplerCube cubemapTexture;
+layout(set = 1, binding = 8) uniform samplerCube prefilterTexture;
 layout(set = 1, binding = 9) uniform sampler2D brdfTexture;
 layout(set = 1, binding = 10) uniform samplerCube irradianceCubemap;
 
@@ -45,12 +46,16 @@ vec3 fresnel_schlick_roughness(float cosTheta, vec3 F0, float roughness)
 }
 
 void main() {
+  float exposure = u_Data.exposure;
+  float gamma = u_Data.gamma;
+
   float hasNormalMap = float((u_Material.textureMask >> 5) & 1);
   vec3 n_ts = texture(normalTexture, inTexCoord).rgb * 2.0 - 1.0;
   vec3 normal = mix(inNormal, normalize(inTBN * n_ts), hasNormalMap);
 
   float hasAlbedoTexture = float(u_Material.textureMask & 1);
   vec4 albedo = mix(vec4(u_Material.albedo, 1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
+  albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
 
   float hasMetallicTexture = float((u_Material.textureMask >> 5) & 1);
   float metallic = mix(u_Material.metallic, texture(metallicTexture, inTexCoord).b, hasMetallicTexture);
@@ -66,7 +71,7 @@ void main() {
 
   vec3 viewVec = normalize(u_Data.cameraPosition - inPosition);
 
-  float NdotV = clamp(dot(normal, viewVec), 0.01, 0.99);
+  float NdotV = clamp(max(dot(normal, viewVec), -dot(normal, viewVec)), 0.01, 0.99);
   vec3 f0 = mix(vec3(0.04), albedo.rgb, metallic);
   vec3 F = fresnel_schlick_roughness(NdotV, f0, roughness);
 
@@ -78,17 +83,17 @@ void main() {
 
   vec3 R = reflect(-viewVec, normal);
   const float MAX_REFLECTION_LOD = 9.0;
-  vec3 prefilteredColor = textureLod(cubemapTexture, R, roughness * MAX_REFLECTION_LOD).rgb;
+  vec3 prefilteredColor = textureLod(prefilterTexture, R, roughness * MAX_REFLECTION_LOD).rgb;
   vec2 brdf = texture(brdfTexture, vec2(NdotV, clamp(roughness, 0.01, .99))).rg;
   vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
-  vec3 ambient = kD * diffuse + specular;
+  vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0, 0.8));
   vec3 resultColor = ambient;
   resultColor = max(resultColor, vec3(0));
 
-  float exposure = u_Data.exposure;
-  float gamma = u_Data.gamma;
   vec3 mapped = resultColor * exposure;
+
+//  mapped = mapped / (mapped + vec3(1.0));
 
 //  mapped = ACESFilm(mapped);
   vec3 finalColor = pow(mapped, vec3(1.0 / gamma));
@@ -99,6 +104,25 @@ void main() {
   }
   else
   {
-    outColor = vec4(vec3(resultColor), 1.0);
+    outColor = vec4(vec3(finalColor), 1.0);
+  }
+
+  if (bool(u_Data.currentTexture))
+  {
+    switch (u_Data.currentTexture)
+    {
+    case 1:
+      outColor = vec4(albedo.rgb, 1.0);
+      break;
+    case 2:
+      outColor = vec4(vec3(metallic), 1.0);
+      break;
+    case 3:
+      outColor = vec4(vec3(roughness), 1.0);
+      break;
+    case 4:
+      outColor = vec4(vec3(normal), 1.0);
+      break;
+    }
   }
 }

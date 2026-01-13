@@ -13,6 +13,7 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   vec3 cameraDirection;
   float gamma;
   float exposure;
+  int currentTexture;
 } u_Data;
 
 layout(set = 1, binding = 0) uniform PerMaterialUBO {

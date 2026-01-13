@@ -184,6 +184,7 @@ namespace YAEngine
     m_PerFrameData.ubo.time = (float)app->m_Timer.GetTime();
     m_PerFrameData.ubo.gamma = m_Gamma;
     m_PerFrameData.ubo.exposure = m_Exposure;
+    m_PerFrameData.ubo.currentTexture = m_CurrentTexture;
 
     m_CommandBuffer.Set(m_CurrentFrameIndex);
 
