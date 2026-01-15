@@ -90,7 +90,7 @@ namespace YAEngine
     auto& scene = App().GetScene();
 
     auto& tc   = scene.GetComponent<TransformComponent>(entity);
-    auto& name = scene.GetComponent<Name>(entity);
+    auto& name = scene.GetName(entity);
 
     ImGuiTreeNodeFlags flags =
         ImGuiTreeNodeFlags_OpenOnArrow |

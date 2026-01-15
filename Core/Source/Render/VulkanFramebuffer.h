@@ -6,7 +6,7 @@ namespace YAEngine
   {
   public:
 
-    void Init(VkDevice device, VmaAllocator allocator, VkRenderPass renderPass, uint32_t width, uint32_t height, VkFormat format);
+    void Init(VkDevice device, VmaAllocator allocator, VkRenderPass renderPass, uint32_t width, uint32_t height, VkFormat format, bool secondaryImageBuffer = false);
     void Destroy();
 
     void Begin(VkCommandBuffer cmd);
@@ -39,7 +39,49 @@ namespace YAEngine
       return m_Image;
     }
 
+    VkImageView& GetDepthImageView()
+    {
+      return m_DepthImageView;
+    }
+
+    VkImageLayout& GetDepthLayout()
+    {
+      return m_DepthImageLayout;
+    }
+
+    VkSampler& GetDepthSampler()
+    {
+      return m_DepthSampler;
+    }
+
+    VkImage& GetDepthImage()
+    {
+      return m_DepthImage;
+    }
+
+    VkImageView& GetSecondaryImageView()
+    {
+      return m_SecondaryImageView;
+    }
+
+    VkImageLayout& GetSecondaryLayout()
+    {
+      return m_SecondaryImageLayout;
+    }
+
+    VkSampler& GetSecondarySampler()
+    {
+      return m_SecondarySampler;
+    }
+
+    VkImage& GetSecondaryImage()
+    {
+      return m_SecondaryImage;
+    }
+
   private:
+
+    bool b_SecondaryBuffer = false;
 
     VkFramebuffer m_Framebuffer {};
 
@@ -51,7 +93,15 @@ namespace YAEngine
 
     VkImageView m_DepthImageView {};
     VkImage m_DepthImage {};
+    VkImageLayout m_DepthImageLayout {};
+    VkSampler m_DepthSampler {};
     VmaAllocation m_DepthImageAllocation {};
+
+    VkImageView m_SecondaryImageView {};
+    VkImage m_SecondaryImage {};
+    VkImageLayout m_SecondaryImageLayout {};
+    VkSampler m_SecondarySampler {};
+    VmaAllocation m_SecondaryImageAllocation {};
 
     VkRenderPass m_RenderPass {};
 

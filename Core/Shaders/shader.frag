@@ -14,6 +14,8 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   float gamma;
   float exposure;
   int currentTexture;
+  float near;
+  float far;
 } u_Data;
 
 struct Light
@@ -51,6 +53,7 @@ layout(set = 1, binding = 9) uniform sampler2D brdfTexture;
 layout(set = 1, binding = 10) uniform samplerCube irradianceCubemap;
 
 layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outNormal;
 
 #include "post.glsl"
 #include "pbr.glsl"
@@ -140,6 +143,7 @@ void main() {
   else
   {
     outColor = vec4(vec3(mapped), 1.0);
+    outNormal = vec4(normal, 1.0);
   }
 
   if (bool(u_Data.currentTexture))

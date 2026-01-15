@@ -14,6 +14,8 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   float gamma;
   float exposure;
   int currentTexture;
+  float near;
+  float far;
 } u_Data;
 
 layout(set = 1, binding = 0) uniform PerMaterialUBO {
@@ -35,6 +37,7 @@ layout(set = 1, binding = 7) uniform sampler2D heightTexture;
 layout(set = 1, binding = 8) uniform samplerCube cubemapTexture;
 
 layout(location = 0) out vec4 outColor;
+layout(location = 1) out vec4 outNormal;
 
 #include "post.glsl"
 
@@ -55,5 +58,6 @@ void main() {
   else
   {
     outColor = vec4(albedo.rgb, 1.0);
+    outNormal = vec4(inNormal, 1.0);
   }
 }

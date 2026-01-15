@@ -28,7 +28,8 @@ namespace YAEngine
     m_SwapChain.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), window, m_Allocator.Get());
     int width, height;
     glfwGetWindowSize(window, &width, &height);
-    m_MainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+    m_MainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, true, true);
+    m_SSRRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     m_TAARenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
     m_SwapChainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
@@ -53,7 +54,8 @@ namespace YAEngine
 
     InitPipelines();
 
-    m_MainPassFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_MainRenderPass.Get(), width, height, m_SwapChain.GetFormat());
+    m_MainPassFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_MainRenderPass.Get(), width, height, m_SwapChain.GetFormat(), true);
+    m_SSRFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_SSRRenderPass.Get(), width, height, m_SwapChain.GetFormat());
     for (auto& buffer : m_HistoryFrameBuffers)
     {
       buffer.Init(m_Device.Get(), m_Allocator.Get(), m_TAARenderPass.Get(), width, height, m_SwapChain.GetFormat());
@@ -112,6 +114,13 @@ namespace YAEngine
     }
     m_SwapChainDescriptorSet.Destroy();
     m_TAADescriptorSet.Destroy();
+    for (auto& set : m_SSRPassDescriptorSets)
+    {
+      set.Destroy();
+    }
+    m_SSRPipeline.Destroy();
+    m_SSRFrameBuffer.Destroy();
+    m_SSRRenderPass.Destroy();
     m_CommandBuffer.Destroy();
     m_ForwardPipeline.Destroy();
     m_ForwardPipelineDoubleSided.Destroy();
@@ -140,8 +149,11 @@ namespace YAEngine
   void Render::Resize(uint32_t width, uint32_t height)
   {
     b_Resized = false;
-    m_MainRenderPass.Recreate();
+    m_MainRenderPass.Recreate(true, true);
     m_MainPassFrameBuffer.Recreate(m_MainRenderPass.Get(), width, height);
+
+    m_SSRRenderPass.Recreate();
+    m_SSRFrameBuffer.Recreate(m_SSRRenderPass.Get(), width, height);
 
     m_TAARenderPass.Recreate();
     for (auto& buffer : m_HistoryFrameBuffers)
@@ -206,11 +218,23 @@ namespace YAEngine
     m_MainRenderPass.End(m_CommandBuffer.GetCurrentBuffer());
     m_MainPassFrameBuffer.End(m_CommandBuffer.GetCurrentBuffer());
 
+    m_SSRFrameBuffer.Begin(m_CommandBuffer.GetCurrentBuffer());
+    m_SSRRenderPass.Begin(m_CommandBuffer.GetCurrentBuffer(), m_SSRFrameBuffer.Get(), m_SwapChain.GetExt());
+    m_SSRPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
+    m_SSRPassDescriptorSets[m_CurrentFrameIndex].WriteCombinedImageSampler(0, m_MainPassFrameBuffer.GetImageView(), m_MainPassFrameBuffer.GetSampler(), m_MainPassFrameBuffer.GetLayout());
+    m_SSRPassDescriptorSets[m_CurrentFrameIndex].WriteCombinedImageSampler(1, m_MainPassFrameBuffer.GetDepthImageView(), m_MainPassFrameBuffer.GetDepthSampler(), m_MainPassFrameBuffer.GetDepthLayout());
+    m_SSRPassDescriptorSets[m_CurrentFrameIndex].WriteCombinedImageSampler(2, m_MainPassFrameBuffer.GetSecondaryImageView(), m_MainPassFrameBuffer.GetSecondarySampler(), m_MainPassFrameBuffer.GetSecondaryLayout());
+    m_SSRPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_PerFrameData.GetDescriptorSet(m_CurrentFrameIndex) }, 0);
+    m_SSRPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_SSRPassDescriptorSets[m_CurrentFrameIndex].Get() }, 1);
+    DrawQuad();
+    m_SSRRenderPass.End(m_CommandBuffer.GetCurrentBuffer());
+    m_SSRFrameBuffer.End(m_CommandBuffer.GetCurrentBuffer());
+
     auto prevIndex = m_TAAIndex == 1 ? 0 : m_TAAIndex + 1;
     m_HistoryFrameBuffers[m_TAAIndex].Begin(m_CommandBuffer.GetCurrentBuffer());
     m_TAARenderPass.Begin(m_CommandBuffer.GetCurrentBuffer(), m_HistoryFrameBuffers[m_TAAIndex].Get(), m_SwapChain.GetExt());
     m_TAAPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
-    m_TAADescriptorSet.WriteCombinedImageSampler(0, m_MainPassFrameBuffer.GetImageView(), m_MainPassFrameBuffer.GetSampler(), m_MainPassFrameBuffer.GetLayout());
+    m_TAADescriptorSet.WriteCombinedImageSampler(0, m_SSRFrameBuffer.GetImageView(), m_SSRFrameBuffer.GetSampler(), m_SSRFrameBuffer.GetLayout());
     m_TAADescriptorSet.WriteCombinedImageSampler(1, m_HistoryFrameBuffers[prevIndex].GetImageView(), m_HistoryFrameBuffers[prevIndex].GetSampler(), m_HistoryFrameBuffers[prevIndex].GetLayout());
     m_TAAPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_TAADescriptorSet.Get() }, 0);
     DrawQuad();
@@ -349,6 +373,8 @@ namespace YAEngine
 
     m_PerFrameData.ubo.view = view;
     m_PerFrameData.ubo.proj = proj;
+    m_PerFrameData.ubo.nearPlane = camera.nearPlane;
+    m_PerFrameData.ubo.farPlane = camera.farPlane;
     m_PerFrameData.ubo.cameraPosition = transform.position;
   }
 
@@ -379,6 +405,7 @@ namespace YAEngine
       .fragmentShaderFile = "shader.frag",
       .vertexShaderFile = "shader.vert",
       .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+      .secondaryAttachment = true,
       .vertexInputFormat = "f3f2f3f4",
       .sets = std::vector({
         m_PerFrameData.GetLayout(),
@@ -435,6 +462,33 @@ namespace YAEngine
     quadInfo.fragmentShaderFile = "taa.frag";
     quadInfo.sets = std::vector({ m_TAADescriptorSet.GetLayout() });
     m_TAAPipeline.Init(m_Device.Get(), m_SwapChainRenderPass.Get(), quadInfo);
+
+    m_SSRPassDescriptorSets.resize(s_MaxFramesInFlight);
+    for (size_t i = 0; i < s_MaxFramesInFlight; i++)
+    {
+      SetDescription ssrDesc = {
+        .set = 1,
+        .bindings = {
+          {
+            { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          }
+        }
+      };
+      m_SSRPassDescriptorSets[i].Init(m_Device.Get(), m_DescriptorPool.Get(), ssrDesc);
+    }
+    PipelineCreateInfo ssrDesc = {
+      .fragmentShaderFile = "ssr.frag",
+      .vertexShaderFile = "quad.vert",
+      .depthTesting = false,
+      .vertexInputFormat = "",
+      .sets = std::vector({
+        m_PerFrameData.GetLayout(),
+        m_SSRPassDescriptorSets[0].GetLayout(),
+      })
+    };
+    m_SSRPipeline.Init(m_Device.Get(), m_SSRRenderPass.Get(), ssrDesc);
   }
 
   void Render::DrawQuad()

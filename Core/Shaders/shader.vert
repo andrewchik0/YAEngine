@@ -19,6 +19,8 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   float gamma;
   float exposure;
   int currentTexture;
+  float near;
+  float far;
 } u_Data;
 
 layout(push_constant) uniform PushConstants

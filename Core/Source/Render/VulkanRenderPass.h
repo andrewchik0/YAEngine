@@ -6,9 +6,9 @@ namespace YAEngine
   {
   public:
 
-    void Init(VkDevice device, VkFormat swapChainImageFormat, VmaAllocator allocator, VkImageLayout finalImageLayout, bool clear = true);
+    void Init(VkDevice device, VkFormat swapChainImageFormat, VmaAllocator allocator, VkImageLayout finalImageLayout, bool clear = true, bool secondaryBuffer = false);
     void Destroy();
-    void Recreate(bool clear = true);
+    void Recreate(bool clear = true, bool secondaryBuffer = false);
 
     void Begin(VkCommandBuffer commandBuffer, VkFramebuffer framebuffer, VkExtent2D swapChainExtent);
     void End(VkCommandBuffer commandBuffer);
@@ -19,6 +19,8 @@ namespace YAEngine
     }
 
   private:
+
+    bool b_SecondaryBuffer = false;
 
     VkRenderPass m_RenderPass {};
     VkImageLayout m_ImageLayout {};

@@ -91,6 +91,9 @@ namespace YAEngine
     VulkanFramebuffer m_MainPassFrameBuffer;
     VulkanDescriptorSet m_SwapChainDescriptorSet;
 
+    VulkanFramebuffer m_SSRFrameBuffer;
+    std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
+
     std::array<VulkanFramebuffer, 2> m_HistoryFrameBuffers;
     VulkanDescriptorSet m_TAADescriptorSet;
 
@@ -108,6 +111,7 @@ namespace YAEngine
     VulkanRenderPass m_MainRenderPass;
     VulkanRenderPass m_TAARenderPass;
     VulkanRenderPass m_SwapChainRenderPass;
+    VulkanRenderPass m_SSRRenderPass;
 
     VulkanPipeline m_ForwardPipeline;
     VulkanPipeline m_ForwardPipelineNoShading;
@@ -116,6 +120,7 @@ namespace YAEngine
     VulkanPipeline m_ForwardPipelineDoubleSidedInstanced;
     VulkanPipeline m_QuadPipeline;
     VulkanPipeline m_TAAPipeline;
+    VulkanPipeline m_SSRPipeline;
 
     VulkanCommandBuffer m_CommandBuffer;
     VulkanSync m_Sync;
