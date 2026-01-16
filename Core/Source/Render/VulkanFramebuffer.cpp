@@ -76,27 +76,27 @@ namespace YAEngine
 
     if (secondaryImageBuffer)
     {
-      VkImageCreateInfo secondaryImageView{};
-      secondaryImageView.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
-      secondaryImageView.imageType = VK_IMAGE_TYPE_2D;
-      secondaryImageView.extent.width  = width;
-      secondaryImageView.extent.height = height;
-      secondaryImageView.extent.depth  = 1;
-      secondaryImageView.mipLevels = 1;
-      secondaryImageView.arrayLayers = 1;
-      secondaryImageView.format = m_Format;
-      secondaryImageView.tiling = VK_IMAGE_TILING_OPTIMAL;
-      secondaryImageView.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-      secondaryImageView.usage =
+      VkImageCreateInfo secondaryImage{};
+      secondaryImage.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+      secondaryImage.imageType = VK_IMAGE_TYPE_2D;
+      secondaryImage.extent.width  = width;
+      secondaryImage.extent.height = height;
+      secondaryImage.extent.depth  = 1;
+      secondaryImage.mipLevels = 1;
+      secondaryImage.arrayLayers = 1;
+      secondaryImage.format = m_Format;
+      secondaryImage.tiling = VK_IMAGE_TILING_OPTIMAL;
+      secondaryImage.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+      secondaryImage.usage =
           VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT |
           VK_IMAGE_USAGE_SAMPLED_BIT;
-      secondaryImageView.samples = VK_SAMPLE_COUNT_1_BIT;
-      secondaryImageView.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+      secondaryImage.samples = VK_SAMPLE_COUNT_1_BIT;
+      secondaryImage.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
       VmaAllocationCreateInfo secondaryAllocInfo {};
       secondaryAllocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-      if (vmaCreateImage(m_Allocator, &secondaryImageView, &secondaryAllocInfo, &m_SecondaryImage, &m_SecondaryImageAllocation, nullptr) != VK_SUCCESS)
+      if (vmaCreateImage(m_Allocator, &secondaryImage, &secondaryAllocInfo, &m_SecondaryImage, &m_SecondaryImageAllocation, nullptr) != VK_SUCCESS)
       {
         throw std::runtime_error("failed to create framebuffer image!");
       }
@@ -124,22 +124,22 @@ namespace YAEngine
 
     if (secondaryImageBuffer)
     {
-      VkImageViewCreateInfo secondaryInfo{};
-      secondaryInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-      secondaryInfo.image = m_SecondaryImage;
-      secondaryInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
-      secondaryInfo.format = m_Format;
-      secondaryInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
-      secondaryInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
-      secondaryInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
-      secondaryInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
-      secondaryInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-      secondaryInfo.subresourceRange.baseMipLevel = 0;
-      secondaryInfo.subresourceRange.levelCount = 1;
-      secondaryInfo.subresourceRange.baseArrayLayer = 0;
-      secondaryInfo.subresourceRange.layerCount = 1;
+      VkImageViewCreateInfo secondaryViewInfo{};
+      secondaryViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      secondaryViewInfo.image = m_SecondaryImage;
+      secondaryViewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      secondaryViewInfo.format = m_Format;
+      secondaryViewInfo.components.r = VK_COMPONENT_SWIZZLE_IDENTITY;
+      secondaryViewInfo.components.g = VK_COMPONENT_SWIZZLE_IDENTITY;
+      secondaryViewInfo.components.b = VK_COMPONENT_SWIZZLE_IDENTITY;
+      secondaryViewInfo.components.a = VK_COMPONENT_SWIZZLE_IDENTITY;
+      secondaryViewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      secondaryViewInfo.subresourceRange.baseMipLevel = 0;
+      secondaryViewInfo.subresourceRange.levelCount = 1;
+      secondaryViewInfo.subresourceRange.baseArrayLayer = 0;
+      secondaryViewInfo.subresourceRange.layerCount = 1;
 
-      if (vkCreateImageView(device, &secondaryInfo, nullptr, &m_SecondaryImageView) != VK_SUCCESS)
+      if (vkCreateImageView(device, &secondaryViewInfo, nullptr, &m_SecondaryImageView) != VK_SUCCESS)
       {
         throw std::runtime_error("failed to create image views!");
       }

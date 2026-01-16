@@ -21,6 +21,9 @@ namespace YAEngine
       int currentTexture;
       float nearPlane;
       float farPlane;
+      float fov;
+      int screenWidth;
+      int screenHeight;
     } ubo;
 
     void Init(VkDevice device, VmaAllocator allocator, VkDescriptorPool pool, uint32_t maxFramesInFlight);

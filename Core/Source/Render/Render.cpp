@@ -28,7 +28,7 @@ namespace YAEngine
     m_SwapChain.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), window, m_Allocator.Get());
     int width, height;
     glfwGetWindowSize(window, &width, &height);
-    m_MainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, true, true);
+    m_MainRenderPass.Init(m_Device.Get(), VK_FORMAT_R16G16B16A16_SFLOAT, m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, true, true);
     m_SSRRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     m_TAARenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
@@ -54,7 +54,7 @@ namespace YAEngine
 
     InitPipelines();
 
-    m_MainPassFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_MainRenderPass.Get(), width, height, m_SwapChain.GetFormat(), true);
+    m_MainPassFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_MainRenderPass.Get(), width, height, VK_FORMAT_R16G16B16A16_SFLOAT, true);
     m_SSRFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_SSRRenderPass.Get(), width, height, m_SwapChain.GetFormat());
     for (auto& buffer : m_HistoryFrameBuffers)
     {
@@ -199,6 +199,8 @@ namespace YAEngine
     m_PerFrameData.ubo.gamma = m_Gamma;
     m_PerFrameData.ubo.exposure = m_Exposure;
     m_PerFrameData.ubo.currentTexture = m_CurrentTexture;
+    m_PerFrameData.ubo.screenWidth = int(app->m_Window.GetWidth());
+    m_PerFrameData.ubo.screenHeight = int(app->m_Window.GetHeight());
     m_LightsBuffer.Update(0, &m_Lights, sizeof(Light) * MAX_LIGHTS + sizeof(int));
 
     m_CommandBuffer.Set(m_CurrentFrameIndex);
@@ -376,6 +378,8 @@ namespace YAEngine
     m_PerFrameData.ubo.nearPlane = camera.nearPlane;
     m_PerFrameData.ubo.farPlane = camera.farPlane;
     m_PerFrameData.ubo.cameraPosition = transform.position;
+    m_PerFrameData.ubo.cameraDirection = glm::normalize(-glm::vec3(world[2]));
+    m_PerFrameData.ubo.fov = camera.fov;
   }
 
   void Render::InitPipelines()

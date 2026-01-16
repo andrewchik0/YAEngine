@@ -101,7 +101,7 @@ public:
           App().GetScene().AddComponent<YAEngine::MeshComponent>(entity, meshHandle);
           App().GetScene().AddComponent<YAEngine::MaterialComponent>(entity, materialHandle);
           App().GetScene().GetTransform(entity).position = glm::vec3(i * 3.0f, j * 3.0f, 0.0f);
-          App().GetScene().SetDoubleSided(entity);
+          // App().GetScene().SetDoubleSided(entity);
         }
       }
     }

@@ -21,6 +21,9 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   int currentTexture;
   float near;
   float far;
+  float fov;
+  int screenWidth;
+  int screenHeight;
 } u_Data;
 
 layout(push_constant) uniform PushConstants
