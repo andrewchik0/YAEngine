@@ -2,6 +2,7 @@
 
 #include "RenderContext.h"
 #include "VulkanCommandBuffer.h"
+#include "VulkanDescriptorPool.h"
 #include "VulkanPipeline.h"
 #include "ImageBarrier.h"
 
@@ -746,16 +747,7 @@ namespace YAEngine
     descriptorImageInfo.imageView   = m_EquirectTexture.GetView();
     descriptorImageInfo.sampler     = m_EquirectTexture.GetSampler();
 
-    VkDescriptorSetLayout layouts[] = { res.descriptorSetLayout };
-
-    VkDescriptorSetAllocateInfo descriptorAllocInfo{};
-    descriptorAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorAllocInfo.descriptorPool = ctx.descriptorPool;
-    descriptorAllocInfo.descriptorSetCount = 1;
-    descriptorAllocInfo.pSetLayouts = layouts;
-
-    VkDescriptorSet descriptorSet;
-    vkAllocateDescriptorSets(ctx.device, &descriptorAllocInfo, &descriptorSet);
+    VkDescriptorSet descriptorSet = ctx.descriptorPool->Allocate(res.descriptorSetLayout);
 
     VkWriteDescriptorSet write{};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -950,16 +942,7 @@ namespace YAEngine
     descriptorImageInfo.imageView   = GetView();
     descriptorImageInfo.sampler     = GetSampler();
 
-    VkDescriptorSetLayout layouts[] = { res.irradianceDescriptorSetLayout };
-
-    VkDescriptorSetAllocateInfo descriptorAllocInfo{};
-    descriptorAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorAllocInfo.descriptorPool = ctx.descriptorPool;
-    descriptorAllocInfo.descriptorSetCount = 1;
-    descriptorAllocInfo.pSetLayouts = layouts;
-
-    VkDescriptorSet descriptorSet;
-    vkAllocateDescriptorSets(ctx.device, &descriptorAllocInfo, &descriptorSet);
+    VkDescriptorSet descriptorSet = ctx.descriptorPool->Allocate(res.irradianceDescriptorSetLayout);
 
     VkWriteDescriptorSet write{};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
@@ -1119,16 +1102,7 @@ namespace YAEngine
     descriptorImageInfo.imageView   = GetView();
     descriptorImageInfo.sampler     = GetSampler();
 
-    VkDescriptorSetLayout layouts[] = { res.prefilterDescriptorSetLayout };
-
-    VkDescriptorSetAllocateInfo descriptorAllocInfo{};
-    descriptorAllocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    descriptorAllocInfo.descriptorPool = ctx.descriptorPool;
-    descriptorAllocInfo.descriptorSetCount = 1;
-    descriptorAllocInfo.pSetLayouts = layouts;
-
-    VkDescriptorSet descriptorSet;
-    vkAllocateDescriptorSets(ctx.device, &descriptorAllocInfo, &descriptorSet);
+    VkDescriptorSet descriptorSet = ctx.descriptorPool->Allocate(res.prefilterDescriptorSetLayout);
 
     VkWriteDescriptorSet write{};
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;

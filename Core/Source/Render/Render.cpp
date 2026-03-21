@@ -4,120 +4,290 @@
 #include <ImGui/imgui_impl_vulkan.h>
 
 #include "Application.h"
+#include "ImageBarrier.h"
 #include "VulkanVertexBuffer.h"
 
 #include "Utils/Utils.h"
 
 namespace YAEngine
 {
-  uint32_t Render::s_MaxFramesInFlight = 2;
-
-  void Render::Init(GLFWwindow* window, const RenderSpecs &specs)
+  void Render::SetupRenderGraph(uint32_t width, uint32_t height)
   {
-    s_MaxFramesInFlight = specs.maxFramesInFlight;
+    auto& ctx = m_Backend.GetContext();
+    auto swapFormat = m_Backend.GetSwapChain().GetFormat();
 
-    m_VulkanInstance.Init(specs);
+    m_Graph.Init(ctx, {width, height});
 
-    m_Surface.Init(m_VulkanInstance.Get(), window);
+    // --- Resources ---
+    m_MainColor = m_Graph.CreateResource({
+      .name = "mainColor",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT
+    });
+    m_MainNormals = m_Graph.CreateResource({
+      .name = "mainNormals",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT
+    });
+    m_MainDepth = m_Graph.CreateResource({
+      .name = "mainDepth",
+      .format = VK_FORMAT_D32_SFLOAT,
+      .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
+    });
+    m_SSRColor = m_Graph.CreateResource({
+      .name = "ssrColor",
+      .format = swapFormat
+    });
+    m_TAAHistory0 = m_Graph.CreateResource({
+      .name = "taaHistory0",
+      .format = swapFormat,
+      .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+    });
+    m_TAAHistory1 = m_Graph.CreateResource({
+      .name = "taaHistory1",
+      .format = swapFormat,
+      .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
+    });
 
-    m_PhysicalDevice.Init(m_VulkanInstance.Get(), m_Surface.Get());
-    m_Device.Init(m_VulkanInstance, m_PhysicalDevice, m_Surface.Get());
+    // --- Passes ---
+    m_MainPassIndex = m_Graph.AddPass({
+      .name = "MainPass",
+      .inputs = {},
+      .colorOutputs = {m_MainColor, m_MainNormals},
+      .depthOutput = m_MainDepth,
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        m_PerFrameData.SetUp(currentFrame);
 
-    m_Allocator.Init(m_VulkanInstance.Get(), m_Device.Get(), m_PhysicalDevice.Get());
+        m_ForwardPipeline.Bind(ctx.cmd);
+        m_ForwardPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_ForwardPipelineDoubleSided.Bind(ctx.cmd);
+        m_ForwardPipelineDoubleSided.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        SetViewportAndScissor();
 
-    m_SwapChain.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), window, m_Allocator.Get());
-    int width, height;
-    glfwGetWindowSize(window, &width, &height);
-    m_MainRenderPass.Init(m_Device.Get(), VK_FORMAT_R16G16B16A16_SFLOAT, m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, true, true);
-    m_SSRRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-    m_TAARenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        DrawMeshes(m_CurrentApp);
+      }
+    });
 
-    m_SwapChainRenderPass.Init(m_Device.Get(), m_SwapChain.GetFormat(), m_Allocator.Get(), VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
-    m_SwapChain.CreateFrameBuffers(m_SwapChainRenderPass.Get(), width, height);
+    m_SSRPassIndex = m_Graph.AddPass({
+      .name = "SSRPass",
+      .inputs = {m_MainColor, m_MainDepth, m_MainNormals},
+      .colorOutputs = {m_SSRColor},
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
 
-    m_CommandBuffer.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), s_MaxFramesInFlight);
+        auto& mainColor = m_Graph.GetResource(m_MainColor);
+        auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+        auto& mainNormals = m_Graph.GetResource(m_MainNormals);
 
-    m_Sync.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), m_SwapChain.GetImageCount());
-    m_CommandBuffer.SetGraphicsQueue(m_Sync.GetQueue());
+        m_SSRPipeline.Bind(ctx.cmd);
+        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
+          mainColor.GetView(), mainColor.GetSampler(), mainColor.GetLayout());
+        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          mainDepth.GetView(), mainDepth.GetSampler(), mainDepth.GetLayout());
+        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
+          mainNormals.GetView(), mainNormals.GetSampler(), mainNormals.GetLayout());
 
-    m_Context.device = m_Device.Get();
-    m_Context.allocator = m_Allocator.Get();
-    m_Context.graphicsQueue = m_Sync.GetQueue();
-    m_Context.commandBuffer = &m_CommandBuffer;
-    m_Context.descriptorPool = m_DescriptorPool.Get();
-    m_Context.maxFramesInFlight = s_MaxFramesInFlight;
+        m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_SSRPassDescriptorSets[currentFrame].Get()}, 1);
+        DrawQuad();
+      }
+    });
 
-    m_DescriptorPool.Init(m_Device.Get());
-    m_Context.descriptorPool = m_DescriptorPool.Get();
+    m_TAAPassIndex = m_Graph.AddPass({
+      .name = "TAAPass",
+      .inputs = {m_SSRColor, m_TAAHistory1},
+      .colorOutputs = {m_TAAHistory0},
+      .externalFramebuffer = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto& ssrColor = m_Graph.GetResource(m_SSRColor);
+        auto historyReadHandle = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
+        auto& historyPrev = m_Graph.GetResource(historyReadHandle);
 
-    uint32_t whitePixel = 0xFFFFFFFF;
-    m_NoneTexture.Load(m_Context, &whitePixel, 1, 1, 4, VK_FORMAT_R8G8B8A8_SRGB);
+        m_TAAPipeline.Bind(ctx.cmd);
+        m_TAADescriptorSet.WriteCombinedImageSampler(0,
+          ssrColor.GetView(), ssrColor.GetSampler(), ssrColor.GetLayout());
+        m_TAADescriptorSet.WriteCombinedImageSampler(1,
+          historyPrev.GetView(), historyPrev.GetSampler(), historyPrev.GetLayout());
+        m_TAAPipeline.BindDescriptorSets(ctx.cmd, {m_TAADescriptorSet.Get()}, 0);
+        DrawQuad();
+      }
+    });
 
-    m_DefaultMaterial.Init(m_Context, m_NoneTexture);
+    m_SwapchainPassIndex = m_Graph.AddPass({
+      .name = "SwapchainPass",
+      .inputs = {m_TAAHistory0},
+      .colorOutputs = {},
+      .externalFramebuffer = true,
+      .externalFormat = swapFormat,
+      .finalColorLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+      .execute = [this](const RGExecuteContext& ctx) {
+        SetViewportAndScissor();
 
-    m_PerFrameData.Init(m_Context);
+        auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
+        auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
 
-    InitPipelines();
+        m_QuadPipeline.Bind(ctx.cmd);
+        m_SwapChainDescriptorSet.WriteCombinedImageSampler(0,
+          historyCurrent.GetView(), historyCurrent.GetSampler(), historyCurrent.GetLayout());
+        m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSet.Get()}, 0);
+        DrawQuad();
 
-    m_MainPassFrameBuffer.Init(m_Context, m_MainRenderPass.Get(), width, height, VK_FORMAT_R16G16B16A16_SFLOAT, true);
-    m_SSRFrameBuffer.Init(m_Context, m_SSRRenderPass.Get(), width, height, m_SwapChain.GetFormat());
-    for (auto& buffer : m_HistoryFrameBuffers)
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        m_CurrentApp->RenderUI();
+        ImGui::Render();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), ctx.cmd);
+      }
+    });
+
+    m_Graph.Compile();
+  }
+
+  void Render::CreateTAAFramebuffers()
+  {
+    auto& ctx = m_Backend.GetContext();
+
+    // Create depth image shared by both TAA framebuffers
+    ImageDesc depthDesc;
+    depthDesc.width = m_Graph.GetExtent().width;
+    depthDesc.height = m_Graph.GetExtent().height;
+    depthDesc.format = VK_FORMAT_D32_SFLOAT;
+    depthDesc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
+    depthDesc.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
+    m_TAADepth.Init(ctx, depthDesc);
+
+    VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
+
+    for (uint32_t i = 0; i < 2; i++)
     {
-      buffer.Init(m_Context, m_TAARenderPass.Get(), width, height, m_SwapChain.GetFormat());
-      auto cmd = m_CommandBuffer.BeginSingleTimeCommands();
-      buffer.Begin(cmd);
-      VkClearValue clearValues[2];
-      clearValues[0].color = {0.0f, 0.0f, 0.0f, 0.0f};
+      RGHandle historyHandle = (i == 0) ? m_TAAHistory0 : m_TAAHistory1;
+
+      VkImageView views[2] = {
+        m_Graph.GetResource(historyHandle).GetView(),
+        m_TAADepth.GetView()
+      };
+
+      VkFramebufferCreateInfo fbInfo{};
+      fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+      fbInfo.renderPass = taaRP;
+      fbInfo.attachmentCount = 2;
+      fbInfo.pAttachments = views;
+      fbInfo.width = m_Graph.GetExtent().width;
+      fbInfo.height = m_Graph.GetExtent().height;
+      fbInfo.layers = 1;
+
+      if (vkCreateFramebuffer(ctx.device, &fbInfo, nullptr, &m_TAAFramebuffers[i]) != VK_SUCCESS)
+      {
+        throw std::runtime_error("Failed to create TAA framebuffer!");
+      }
+    }
+  }
+
+  void Render::ClearHistoryBuffers()
+  {
+    VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
+    auto extent = m_Backend.GetSwapChain().GetExt();
+
+    auto cmd = m_Backend.GetCommandBuffer().BeginSingleTimeCommands();
+
+    // Transition depth once
+    TransitionImageLayout(cmd, m_TAADepth.GetImage(),
+      VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+      VK_IMAGE_ASPECT_DEPTH_BIT);
+
+    for (uint32_t i = 0; i < 2; i++)
+    {
+      auto handle = (i == 0) ? m_TAAHistory0 : m_TAAHistory1;
+      auto& image = m_Graph.GetResource(handle);
+
+      // Render pass with loadOp=CLEAR will clear the contents
+      // initialLayout=UNDEFINED is fine here since we don't need previous contents
+      VkClearValue clearValues[2] = {};
+      clearValues[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
       clearValues[1].depthStencil = {1.0f, 0};
+
       VkRenderPassBeginInfo rpBegin{};
       rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      rpBegin.renderPass = m_TAARenderPass.Get();
-      rpBegin.framebuffer = buffer.Get();
-      rpBegin.renderArea.extent.width = width;
-      rpBegin.renderArea.extent.height = height;
+      rpBegin.renderPass = taaRP;
+      rpBegin.framebuffer = m_TAAFramebuffers[i];
+      rpBegin.renderArea.extent = extent;
       rpBegin.clearValueCount = 2;
       rpBegin.pClearValues = clearValues;
 
       vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
       vkCmdEndRenderPass(cmd);
-      buffer.End(cmd);
-      m_CommandBuffer.EndSingleTimeCommands(cmd);
+
+      // After render pass with finalLayout=COLOR_ATTACHMENT_OPTIMAL,
+      // transition to SHADER_READ_ONLY for first frame's use
+      TransitionImageLayout(cmd, image.GetImage(),
+        VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+      image.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      m_Graph.SetResourceLayout(handle, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
-    m_ImGUI.Init(
-      window,
-      m_VulkanInstance.Get(),
-      m_PhysicalDevice.Get(),
-      m_Device.Get(),
-      m_Sync.GetQueue(),
-      m_SwapChain.GetImageCount(),
-      VulkanPhysicalDevice::FindQueueFamilies(
-        m_PhysicalDevice.Get(),
-        m_Surface.Get()
-      ).graphicsFamily.value(),
-      m_SwapChainRenderPass.Get()
-    );
+    m_Backend.GetCommandBuffer().EndSingleTimeCommands(cmd);
+  }
 
-    m_CubicResources.Init(m_Context);
+  void Render::Init(GLFWwindow* window, const RenderSpecs &specs)
+  {
+    m_Backend.Init(window, specs);
+    auto& ctx = m_Backend.GetContext();
 
-    m_SkyBox.Init(m_Context, m_MainRenderPass.Get());
+    int width, height;
+    glfwGetWindowSize(window, &width, &height);
 
-    vkDeviceWaitIdle(m_Device.Get());
+    uint32_t whitePixel = 0xFFFFFFFF;
+    m_NoneTexture.Load(ctx, &whitePixel, 1, 1, 4, VK_FORMAT_R8G8B8A8_SRGB);
+
+    m_DefaultMaterial.Init(ctx, m_NoneTexture);
+    m_PerFrameData.Init(ctx);
+
+    // Setup and compile render graph
+    SetupRenderGraph(width, height);
+
+    // Create TAA external framebuffers (ping-pong)
+    CreateTAAFramebuffers();
+
+    // Create swapchain framebuffers using graph's render pass
+    m_Backend.GetSwapChain().CreateFrameBuffers(
+      m_Graph.GetPassRenderPass(m_SwapchainPassIndex), width, height);
+
+    // Clear TAA history buffers
+    ClearHistoryBuffers();
+
+    // Init pipelines using graph's render passes
+    InitPipelines();
+
+    m_Backend.InitImGui(window, m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
+
+    m_CubicResources.Init(ctx);
+    m_SkyBox.Init(ctx, m_Graph.GetPassRenderPass(m_MainPassIndex));
+
+    vkDeviceWaitIdle(ctx.device);
   }
 
   void Render::Destroy()
   {
-    m_Sync.Destroy();
+    vkDeviceWaitIdle(m_Backend.GetContext().device);
+
+    auto& ctx = m_Backend.GetContext();
 
     m_SkyBox.Destroy();
-    m_CubicResources.Destroy(m_Context);
-    m_NoneTexture.Destroy(m_Context);
-    m_ImGUI.Destroy();
-    m_MainPassFrameBuffer.Destroy(m_Context);
-    for (auto& buffer : m_HistoryFrameBuffers)
+    m_CubicResources.Destroy(ctx);
+    m_NoneTexture.Destroy(ctx);
+
+    // Destroy TAA external framebuffers
+    for (auto& fb : m_TAAFramebuffers)
     {
-      buffer.Destroy(m_Context);
+      if (fb != VK_NULL_HANDLE)
+      {
+        vkDestroyFramebuffer(ctx.device, fb, nullptr);
+        fb = VK_NULL_HANDLE;
+      }
     }
+    m_TAADepth.Destroy(ctx);
+
     m_SwapChainDescriptorSet.Destroy();
     m_TAADescriptorSet.Destroy();
     for (auto& set : m_SSRPassDescriptorSets)
@@ -125,190 +295,134 @@ namespace YAEngine
       set.Destroy();
     }
     m_SSRPipeline.Destroy();
-    m_SSRFrameBuffer.Destroy(m_Context);
-    m_SSRRenderPass.Destroy();
-    m_CommandBuffer.Destroy();
     m_ForwardPipeline.Destroy();
     m_ForwardPipelineDoubleSided.Destroy();
     m_ForwardPipelineInstanced.Destroy();
     m_ForwardPipelineDoubleSidedInstanced.Destroy();
+    m_ForwardPipelineNoShading.Destroy();
     m_InstanceDescriptorSet.Destroy();
     m_LightsDescriptorSet.Destroy();
-    m_LightsBuffer.Destroy(m_Context);
-    m_ForwardPipelineNoShading.Destroy();
-    m_InstanceBuffer.Destroy(m_Context);
+    m_LightsBuffer.Destroy(ctx);
+    m_InstanceBuffer.Destroy(ctx);
     m_QuadPipeline.Destroy();
     m_TAAPipeline.Destroy();
-    m_DefaultMaterial.Destroy(m_Context);
-    m_PerFrameData.Destroy(m_Context);
-    m_DescriptorPool.Destroy();
-    m_SwapChain.Destroy();
-    m_MainRenderPass.Destroy();
-    m_SwapChainRenderPass.Destroy();
-    m_TAARenderPass.Destroy();
-    m_Allocator.Destroy();
-    m_Device.Destroy();
-    m_Surface.Destroy();
-    m_VulkanInstance.Destroy();
+    m_DefaultMaterial.Destroy(ctx);
+    m_PerFrameData.Destroy(ctx);
+
+    m_Graph.Destroy();
+    m_Backend.Destroy();
   }
 
   void Render::Resize(uint32_t width, uint32_t height)
   {
     b_Resized = false;
-    m_MainRenderPass.Recreate(true, true);
-    m_MainPassFrameBuffer.Recreate(m_Context, m_MainRenderPass.Get(), width, height);
+    auto& ctx = m_Backend.GetContext();
 
-    m_SSRRenderPass.Recreate();
-    m_SSRFrameBuffer.Recreate(m_Context, m_SSRRenderPass.Get(), width, height);
+    // Resize graph (recreates managed resources and non-external framebuffers)
+    m_Graph.Resize({width, height});
 
-    m_TAARenderPass.Recreate();
-    for (auto& buffer : m_HistoryFrameBuffers)
+    // Recreate TAA external framebuffers
+    for (auto& fb : m_TAAFramebuffers)
     {
-      buffer.Recreate(m_Context, m_TAARenderPass.Get(), width, height);
-      auto cmd = m_CommandBuffer.BeginSingleTimeCommands();
-      buffer.Begin(cmd);
-      VkClearValue clearValues[2];
-      clearValues[0].color = {0.0f, 0.0f, 0.0f, 0.0f};
-      clearValues[1].depthStencil = {1.0f, 0};
-      VkRenderPassBeginInfo rpBegin{};
-      rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      rpBegin.renderPass = m_TAARenderPass.Get();
-      rpBegin.framebuffer = buffer.Get();
-      rpBegin.renderArea.extent.width = width;
-      rpBegin.renderArea.extent.height = height;
-      rpBegin.clearValueCount = 2;
-      rpBegin.pClearValues = clearValues;
-
-      vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
-      vkCmdEndRenderPass(cmd);
-      buffer.End(cmd);
-      m_CommandBuffer.EndSingleTimeCommands(cmd);
+      if (fb != VK_NULL_HANDLE)
+      {
+        vkDestroyFramebuffer(ctx.device, fb, nullptr);
+        fb = VK_NULL_HANDLE;
+      }
     }
+    m_TAADepth.Destroy(ctx);
+    CreateTAAFramebuffers();
 
-    m_SwapChainRenderPass.Recreate();
-    m_SwapChain.Recreate(m_SwapChainRenderPass.Get(), width, height);
+    // Recreate swapchain
+    m_Backend.GetSwapChain().Recreate(
+      m_Graph.GetPassRenderPass(m_SwapchainPassIndex), width, height);
+
+    // Clear history buffers
+    ClearHistoryBuffers();
   }
 
   void Render::Draw(Application *app)
   {
-    uint32_t imageIndex;
-    auto result = m_Sync.WaitIdle(m_SwapChain.Get(), &imageIndex);
-
-    if (!result)
+    auto imageIndex = m_Backend.BeginFrame();
+    if (!imageIndex)
     {
-      Resize(app->m_Window.GetWidth(), app->m_Window.GetHeight());
+      Resize(app->GetWindow().GetWidth(), app->GetWindow().GetHeight());
       return;
     }
 
+    m_CurrentApp = app;
+    auto cmd = m_Backend.GetCurrentCommandBuffer();
+
     SetUpCamera(app);
-    m_PerFrameData.ubo.time = (float)app->m_Timer.GetTime();
+    m_PerFrameData.ubo.time = (float)app->GetTimer().GetTime();
     m_PerFrameData.ubo.gamma = m_Gamma;
     m_PerFrameData.ubo.exposure = m_Exposure;
     m_PerFrameData.ubo.currentTexture = m_CurrentTexture;
-    m_PerFrameData.ubo.screenWidth = int(app->m_Window.GetWidth());
-    m_PerFrameData.ubo.screenHeight = int(app->m_Window.GetHeight());
+    m_PerFrameData.ubo.screenWidth = int(app->GetWindow().GetWidth());
+    m_PerFrameData.ubo.screenHeight = int(app->GetWindow().GetHeight());
     m_LightsBuffer.Update(0, &m_Lights, sizeof(Light) * MAX_LIGHTS + sizeof(int));
 
-    m_CommandBuffer.Set(m_CurrentFrameIndex);
+    // Configure render graph for this frame (TAA ping-pong + swapchain)
+    auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
+    auto historyRead = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
 
-    m_MainPassFrameBuffer.Begin(m_CommandBuffer.GetCurrentBuffer());
-    m_MainRenderPass.Begin(m_CommandBuffer.GetCurrentBuffer(), m_MainPassFrameBuffer.Get(), m_SwapChain.GetExt());
-    m_PerFrameData.SetUp(m_CurrentFrameIndex);
+    m_Graph.SetPassInput(m_TAAPassIndex, 1, historyRead);
+    m_Graph.SetPassColorOutput(m_TAAPassIndex, 0, historyWrite);
+    m_Graph.SetPassFramebuffer(m_TAAPassIndex, m_TAAFramebuffers[m_TAAIndex]);
 
-    m_ForwardPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
-    m_ForwardPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_PerFrameData.GetDescriptorSet(m_CurrentFrameIndex) }, 0);
-    m_ForwardPipelineDoubleSided.Bind(m_CommandBuffer.GetCurrentBuffer());
-    m_ForwardPipelineDoubleSided.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_PerFrameData.GetDescriptorSet(m_CurrentFrameIndex) }, 0);
-    SetViewportAndScissor();
+    m_Graph.SetPassInput(m_SwapchainPassIndex, 0, historyWrite);
+    m_Graph.SetPassFramebuffer(m_SwapchainPassIndex,
+      m_Backend.GetSwapChain().GetFramebuffer(*imageIndex));
 
-    DrawMeshes(app);
+    // Execute all passes
+    m_Graph.Execute(cmd);
 
-    m_MainRenderPass.End(m_CommandBuffer.GetCurrentBuffer());
-    m_MainPassFrameBuffer.End(m_CommandBuffer.GetCurrentBuffer());
-
-    m_SSRFrameBuffer.Begin(m_CommandBuffer.GetCurrentBuffer());
-    m_SSRRenderPass.Begin(m_CommandBuffer.GetCurrentBuffer(), m_SSRFrameBuffer.Get(), m_SwapChain.GetExt());
-    m_SSRPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
-    m_SSRPassDescriptorSets[m_CurrentFrameIndex].WriteCombinedImageSampler(0, m_MainPassFrameBuffer.GetImageView(), m_MainPassFrameBuffer.GetSampler(), m_MainPassFrameBuffer.GetLayout());
-    m_SSRPassDescriptorSets[m_CurrentFrameIndex].WriteCombinedImageSampler(1, m_MainPassFrameBuffer.GetDepthImageView(), m_MainPassFrameBuffer.GetDepthSampler(), m_MainPassFrameBuffer.GetDepthLayout());
-    m_SSRPassDescriptorSets[m_CurrentFrameIndex].WriteCombinedImageSampler(2, m_MainPassFrameBuffer.GetSecondaryImageView(), m_MainPassFrameBuffer.GetSecondarySampler(), m_MainPassFrameBuffer.GetSecondaryLayout());
-    m_SSRPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_PerFrameData.GetDescriptorSet(m_CurrentFrameIndex) }, 0);
-    m_SSRPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_SSRPassDescriptorSets[m_CurrentFrameIndex].Get() }, 1);
-    DrawQuad();
-    m_SSRRenderPass.End(m_CommandBuffer.GetCurrentBuffer());
-    m_SSRFrameBuffer.End(m_CommandBuffer.GetCurrentBuffer());
-
-    auto prevIndex = m_TAAIndex == 1 ? 0 : m_TAAIndex + 1;
-    m_HistoryFrameBuffers[m_TAAIndex].Begin(m_CommandBuffer.GetCurrentBuffer());
-    m_TAARenderPass.Begin(m_CommandBuffer.GetCurrentBuffer(), m_HistoryFrameBuffers[m_TAAIndex].Get(), m_SwapChain.GetExt());
-    m_TAAPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
-    m_TAADescriptorSet.WriteCombinedImageSampler(0, m_SSRFrameBuffer.GetImageView(), m_SSRFrameBuffer.GetSampler(), m_SSRFrameBuffer.GetLayout());
-    m_TAADescriptorSet.WriteCombinedImageSampler(1, m_HistoryFrameBuffers[prevIndex].GetImageView(), m_HistoryFrameBuffers[prevIndex].GetSampler(), m_HistoryFrameBuffers[prevIndex].GetLayout());
-    m_TAAPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_TAADescriptorSet.Get() }, 0);
-    DrawQuad();
-    m_TAARenderPass.End(m_CommandBuffer.GetCurrentBuffer());
-    m_HistoryFrameBuffers[m_TAAIndex].End(m_CommandBuffer.GetCurrentBuffer());
-
-    m_SwapChainRenderPass.Begin(m_CommandBuffer.GetCurrentBuffer(), m_SwapChain.GetFramebuffer(imageIndex), m_SwapChain.GetExt());
-    SetViewportAndScissor();
-
-    m_QuadPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
-    m_QuadPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_SwapChainDescriptorSet.Get() }, 0);
-    m_SwapChainDescriptorSet.WriteCombinedImageSampler(0, m_HistoryFrameBuffers[m_TAAIndex].GetImageView(), m_HistoryFrameBuffers[m_TAAIndex].GetSampler(), m_HistoryFrameBuffers[m_TAAIndex].GetLayout());
-    DrawQuad();
-
-    ImGui_ImplVulkan_NewFrame();
-    ImGui_ImplGlfw_NewFrame();
-    ImGui::NewFrame();
-    app->RenderUI();
-    ImGui::Render();
-    ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), m_CommandBuffer.GetCurrentBuffer());
-
-    m_SwapChainRenderPass.End(m_CommandBuffer.GetCurrentBuffer());
-
-    m_CommandBuffer.End(m_CurrentFrameIndex);
-    result = m_Sync.Submit(m_CommandBuffer.GetCurrentBuffer(), m_SwapChain.Get(), imageIndex, b_Resized);
-    if (!result)
+    if (!m_Backend.EndFrame(*imageIndex, b_Resized))
     {
-      Resize(app->m_Window.GetWidth(), app->m_Window.GetHeight());
+      Resize(app->GetWindow().GetWidth(), app->GetWindow().GetHeight());
     }
-    m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % s_MaxFramesInFlight;
     m_TAAIndex = (m_TAAIndex + 1) % 2;
     m_GlobalFrameIndex++;
+    m_CurrentApp = nullptr;
   }
 
   void Render::SetViewportAndScissor()
   {
+    auto cmd = m_Backend.GetCurrentCommandBuffer();
+
     VkViewport viewport{};
     viewport.x = 0.0f;
     viewport.y = 0.0f;
-    viewport.width = (float) m_SwapChain.GetExt().width;
-    viewport.height = (float) m_SwapChain.GetExt().height;
+    viewport.width = (float) m_Backend.GetSwapChain().GetExt().width;
+    viewport.height = (float) m_Backend.GetSwapChain().GetExt().height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(m_CommandBuffer.GetCurrentBuffer(), 0, 1, &viewport);
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
 
     VkRect2D scissor{};
     scissor.offset = {0, 0};
-    scissor.extent = m_SwapChain.GetExt();
-    vkCmdSetScissor(m_CommandBuffer.GetCurrentBuffer(), 0, 1, &scissor);
+    scissor.extent = m_Backend.GetSwapChain().GetExt();
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
 
   }
 
   void Render::DrawMeshes(Application* app)
   {
-    auto view = app->m_Scene.m_Registry.view<MeshComponent, TransformComponent, MaterialComponent>();
+    auto currentFrame = m_Backend.GetCurrentFrameIndex();
+    auto cmd = m_Backend.GetCurrentCommandBuffer();
+
+    auto view = app->GetScene().GetView<MeshComponent, TransformComponent, MaterialComponent>();
 
     view.each([&](MeshComponent mesh, TransformComponent transform, MaterialComponent material)
     {
       if (!mesh.shouldRender) return;
 
       auto& currentPipeline = mesh.noShading ? m_ForwardPipelineNoShading :
-        app->m_AssetManager.Meshes().Get(mesh.asset).instanceData == nullptr
+        app->GetAssetManager().Meshes().Get(mesh.asset).instanceData == nullptr
           ? mesh.doubleSided ? m_ForwardPipelineDoubleSided : m_ForwardPipeline
           : mesh.doubleSided ? m_ForwardPipelineDoubleSidedInstanced : m_ForwardPipelineInstanced;
 
-      currentPipeline.Bind(m_CommandBuffer.GetCurrentBuffer());
+      currentPipeline.Bind(cmd);
 
       struct _
       {
@@ -316,45 +430,41 @@ namespace YAEngine
         int offset = 0;
       } data;
       data.model = transform.world;
-      data.offset = app->m_AssetManager.Meshes().Get(mesh.asset).offset / sizeof(glm::mat4);
-      currentPipeline.PushConstants(m_CommandBuffer.GetCurrentBuffer(), &data);
+      data.offset = app->GetAssetManager().Meshes().Get(mesh.asset).offset / sizeof(glm::mat4);
+      currentPipeline.PushConstants(cmd, &data);
 
-      currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(m_CurrentFrameIndex)}, 1);
-      currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_LightsDescriptorSet.Get() }, 2);
+      currentPipeline.BindDescriptorSets(cmd, {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(currentFrame)}, 1);
+      currentPipeline.BindDescriptorSets(cmd, { m_LightsDescriptorSet.Get() }, 2);
       uint32_t instanceCount = 1;
-      if (app->m_AssetManager.Meshes().Get(mesh.asset).instanceData != nullptr)
+      if (app->GetAssetManager().Meshes().Get(mesh.asset).instanceData != nullptr)
       {
-        instanceCount = uint32_t(app->m_AssetManager.Meshes().Get(mesh.asset).instanceData->size());
-        currentPipeline.BindDescriptorSets(m_CommandBuffer.GetCurrentBuffer(), { m_InstanceDescriptorSet.Get() }, 3);
-        m_InstanceBuffer.Update(app->m_AssetManager.Meshes().Get(mesh.asset).offset, app->m_AssetManager.Meshes().Get(mesh.asset).instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
+        instanceCount = uint32_t(app->GetAssetManager().Meshes().Get(mesh.asset).instanceData->size());
+        currentPipeline.BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 3);
+        m_InstanceBuffer.Update(app->GetAssetManager().Meshes().Get(mesh.asset).offset, app->GetAssetManager().Meshes().Get(mesh.asset).instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
       }
 
       auto& mat = app->GetAssetManager().Materials().Get(material.asset);
-      mat.cubemap = app->GetScene().m_Skybox;
-      app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, mat, m_CurrentFrameIndex, m_NoneTexture);
+      mat.cubemap = app->GetScene().GetSkybox();
+      app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, mat, currentFrame, m_NoneTexture);
 
-      app->m_AssetManager.Meshes().Get(mesh.asset).vertexBuffer.Draw(m_CommandBuffer.GetCurrentBuffer(), instanceCount);
+      app->GetAssetManager().Meshes().Get(mesh.asset).vertexBuffer.Draw(cmd, instanceCount);
     });
 
-    if (!app->m_Scene.HasComponent<CameraComponent>(app->m_Scene.GetActiveCamera())) return;
-    auto cameraEntity = (app->m_Scene.m_Registry.get<CameraComponent, TransformComponent>(app->m_Scene.GetActiveCamera()));
-    auto transform = std::get<TransformComponent &>(cameraEntity);
-    glm::mat4 camDir = glm::mat4_cast(transform.rotation);
-    if (app->GetScene().m_Skybox)
-      m_SkyBox.Draw(m_CurrentFrameIndex, &app->GetAssetManager().CubeMaps().Get(app->GetScene().m_Skybox).m_CubeTexture, m_CommandBuffer.GetCurrentBuffer(), camDir, m_PerFrameData.ubo.proj, m_CubicResources);
+    if (!app->GetScene().HasComponent<CameraComponent>(app->GetScene().GetActiveCamera())) return;
+    auto& camCamera = app->GetScene().GetComponent<CameraComponent>(app->GetScene().GetActiveCamera());
+    auto& camTransform = app->GetScene().GetComponent<TransformComponent>(app->GetScene().GetActiveCamera());
+    glm::mat4 camDir = glm::mat4_cast(camTransform.rotation);
+    if (app->GetScene().GetSkybox())
+      m_SkyBox.Draw(currentFrame, &app->GetAssetManager().CubeMaps().Get(app->GetScene().GetSkybox()).m_CubeTexture, cmd, camDir, m_PerFrameData.ubo.proj, m_CubicResources);
   }
 
   void Render::SetUpCamera(Application* app)
   {
-    if (!app->m_Scene.HasComponent<CameraComponent>(app->m_Scene.GetActiveCamera()))
+    if (!app->GetScene().HasComponent<CameraComponent>(app->GetScene().GetActiveCamera()))
       return;
 
-    auto cameraEntity =
-      app->m_Scene.m_Registry.get<CameraComponent, TransformComponent>(
-        app->m_Scene.GetActiveCamera());
-
-    auto& transform = std::get<TransformComponent&>(cameraEntity);
-    auto& camera    = std::get<CameraComponent&>(cameraEntity);
+    auto& transform = app->GetScene().GetComponent<TransformComponent>(app->GetScene().GetActiveCamera());
+    auto& camera    = app->GetScene().GetComponent<CameraComponent>(app->GetScene().GetActiveCamera());
 
     glm::mat4 world =
       glm::translate(glm::mat4(1.0f), transform.position) *
@@ -390,15 +500,18 @@ namespace YAEngine
 
   void Render::InitPipelines()
   {
+    auto& ctx = m_Backend.GetContext();
+    auto pipelineCache = ctx.pipelineCache;
+
     SetDescription instanceDesc = {
       .set = 3,
       .bindings = {
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT }
       }
     };
-    m_InstanceDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), instanceDesc);
+    m_InstanceDescriptorSet.Init(ctx, instanceDesc);
     constexpr auto MAX_INSTANCES = 10000;
-    m_InstanceBuffer.Create(m_Context, MAX_INSTANCES * sizeof(glm::mat4));
+    m_InstanceBuffer.Create(ctx, MAX_INSTANCES * sizeof(glm::mat4));
     m_InstanceDescriptorSet.WriteStorageBuffer(0, m_InstanceBuffer.Get(), MAX_INSTANCES * sizeof(glm::mat4));
 
     SetDescription lightsDesc = {
@@ -407,9 +520,12 @@ namespace YAEngine
         { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT }
       }
     };
-    m_LightsDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), lightsDesc);
-    m_LightsBuffer.Create(m_Context, MAX_LIGHTS * sizeof(Light) + sizeof(int));
+    m_LightsDescriptorSet.Init(ctx, lightsDesc);
+    m_LightsBuffer.Create(ctx, MAX_LIGHTS * sizeof(Light) + sizeof(int));
     m_LightsDescriptorSet.WriteStorageBuffer(0, m_LightsBuffer.Get(), MAX_LIGHTS * sizeof(Light) + sizeof(int));
+
+    // Forward pipelines — use graph's main pass render pass
+    VkRenderPass mainRP = m_Graph.GetPassRenderPass(m_MainPassIndex);
 
     PipelineCreateInfo forwardInfo = {
       .fragmentShaderFile = "shader.frag",
@@ -423,21 +539,22 @@ namespace YAEngine
         m_LightsDescriptorSet.GetLayout(),
       })
     };
-    m_ForwardPipeline.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+    m_ForwardPipeline.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
     forwardInfo.doubleSided = true;
-    m_ForwardPipelineDoubleSided.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+    m_ForwardPipelineDoubleSided.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
     forwardInfo.sets.push_back(m_InstanceDescriptorSet.GetLayout());
     forwardInfo.vertexShaderFile = "instanced.vert",
-    m_ForwardPipelineDoubleSidedInstanced.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+    m_ForwardPipelineDoubleSidedInstanced.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
     forwardInfo.doubleSided = false;
-    m_ForwardPipelineInstanced.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+    m_ForwardPipelineInstanced.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
     forwardInfo.doubleSided = true;
     forwardInfo.fragmentShaderFile = "no_shading.frag";
     forwardInfo.vertexShaderFile = "shader.vert";
-    m_ForwardPipelineNoShading.Init(m_Device.Get(), m_MainRenderPass.Get(), forwardInfo);
+    m_ForwardPipelineNoShading.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
+    // Swapchain descriptor set
     SetDescription desc = {
       .set = 0,
       .bindings = {
@@ -446,7 +563,9 @@ namespace YAEngine
         }
       }
     };
-    m_SwapChainDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), desc);
+    m_SwapChainDescriptorSet.Init(ctx, desc);
+
+    // TAA descriptor set
     SetDescription taaDesc = {
       .set = 0,
       .bindings = {
@@ -456,7 +575,10 @@ namespace YAEngine
         }
       }
     };
-    m_TAADescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), taaDesc);
+    m_TAADescriptorSet.Init(ctx, taaDesc);
+
+    // Quad pipeline — use swapchain render pass
+    VkRenderPass swapRP = m_Graph.GetPassRenderPass(m_SwapchainPassIndex);
 
     PipelineCreateInfo quadInfo = {
       .fragmentShaderFile = "quad.frag",
@@ -468,13 +590,19 @@ namespace YAEngine
       })
     };
 
-    m_QuadPipeline.Init(m_Device.Get(), m_SwapChainRenderPass.Get(), quadInfo);
+    m_QuadPipeline.Init(ctx.device, swapRP, quadInfo, pipelineCache);
+
+    // TAA pipeline — use TAA render pass (compatible format)
+    VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
     quadInfo.fragmentShaderFile = "taa.frag";
     quadInfo.sets = std::vector({ m_TAADescriptorSet.GetLayout() });
-    m_TAAPipeline.Init(m_Device.Get(), m_SwapChainRenderPass.Get(), quadInfo);
+    m_TAAPipeline.Init(ctx.device, taaRP, quadInfo, pipelineCache);
 
-    m_SSRPassDescriptorSets.resize(s_MaxFramesInFlight);
-    for (size_t i = 0; i < s_MaxFramesInFlight; i++)
+    // SSR descriptor sets and pipeline
+    VkRenderPass ssrRP = m_Graph.GetPassRenderPass(m_SSRPassIndex);
+
+    m_SSRPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
     {
       SetDescription ssrDesc = {
         .set = 1,
@@ -486,7 +614,7 @@ namespace YAEngine
           }
         }
       };
-      m_SSRPassDescriptorSets[i].Init(m_Device.Get(), m_DescriptorPool.Get(), ssrDesc);
+      m_SSRPassDescriptorSets[i].Init(ctx, ssrDesc);
     }
     PipelineCreateInfo ssrDesc = {
       .fragmentShaderFile = "ssr.frag",
@@ -498,11 +626,11 @@ namespace YAEngine
         m_SSRPassDescriptorSets[0].GetLayout(),
       })
     };
-    m_SSRPipeline.Init(m_Device.Get(), m_SSRRenderPass.Get(), ssrDesc);
+    m_SSRPipeline.Init(ctx.device, ssrRP, ssrDesc, pipelineCache);
   }
 
   void Render::DrawQuad()
   {
-    vkCmdDraw(m_CommandBuffer.GetCurrentBuffer(), 3, 1, 0, 0);
+    vkCmdDraw(m_Backend.GetCurrentCommandBuffer(), 3, 1, 0, 0);
   }
 }

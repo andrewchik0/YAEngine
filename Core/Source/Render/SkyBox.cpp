@@ -22,12 +22,12 @@ namespace YAEngine
       };
       if (i == 0)
       {
-        m_DescriptorSets[i].Init(ctx.device, ctx.descriptorPool, desc);
+        m_DescriptorSets[i].Init(ctx, desc);
         layout = m_DescriptorSets[i].GetLayout();
       }
       else
       {
-        m_DescriptorSets[i].Init(ctx.device, ctx.descriptorPool, layout);
+        m_DescriptorSets[i].Init(ctx, layout);
       }
     }
 
@@ -44,7 +44,7 @@ namespace YAEngine
       m_DescriptorSets[0].GetLayout()
     };
 
-    m_Pipeline.Init(ctx.device, renderPass, info);
+    m_Pipeline.Init(ctx.device, renderPass, info, ctx.pipelineCache);
   }
 
   void SkyBox::Destroy()

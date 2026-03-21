@@ -1,25 +1,13 @@
 #pragma once
 
 #include "PerFrameData.h"
-#include "RenderContext.h"
+#include "RenderBackend.h"
+#include "RenderGraph.h"
 #include "VulkanCubicTexture.h"
 #include "VulkanMaterial.h"
-#include "VulkanDevice.h"
-#include "VulkanInstance.h"
-#include "RenderSpecs.h"
 #include "SkyBox.h"
-#include "VulkanCommandBuffer.h"
-#include "VulkanDescriptorPool.h"
-#include "VulkanFramebuffer.h"
-#include "VulkanImGui.h"
-#include "VulkanMemoryAllocator.h"
-#include "VulkanPhysicalDevice.h"
 #include "VulkanPipeline.h"
-#include "VulkanRenderPass.h"
 #include "VulkanStorageBuffer.h"
-#include "VulkanSurface.h"
-#include "VulkanSwapchain.h"
-#include "VulkanSync.h"
 #include "Assets/MeshManager.h"
 
 namespace YAEngine
@@ -79,24 +67,43 @@ namespace YAEngine
     void SetUpCamera(Application* app);
     void InitPipelines();
 
-    uint32_t m_CurrentFrameIndex = 0;
+    void SetupRenderGraph(uint32_t width, uint32_t height);
+    void CreateTAAFramebuffers();
+    void ClearHistoryBuffers();
+
+    RenderBackend m_Backend;
+    RenderGraph m_Graph;
+
+    // Render graph resource handles
+    RGHandle m_MainColor {};
+    RGHandle m_MainNormals {};
+    RGHandle m_MainDepth {};
+    RGHandle m_SSRColor {};
+    RGHandle m_TAAHistory0 {};
+    RGHandle m_TAAHistory1 {};
+
+    // Pass indices
+    uint32_t m_MainPassIndex {};
+    uint32_t m_SSRPassIndex {};
+    uint32_t m_TAAPassIndex {};
+    uint32_t m_SwapchainPassIndex {};
+
+    // TAA external framebuffers (ping-pong)
+    VulkanImage m_TAADepth;
+    std::array<VkFramebuffer, 2> m_TAAFramebuffers {};
+
     uint64_t m_GlobalFrameIndex = 0;
     uint32_t m_TAAIndex = 0;
-    static uint32_t s_MaxFramesInFlight;
     bool b_Resized = false;
+    Application* m_CurrentApp = nullptr;
 
     PerFrameData m_PerFrameData {};
     SkyBox m_SkyBox;
 
     std::unordered_map<MeshHandle, MeshBatch> m_Batches;
 
-    VulkanFramebuffer m_MainPassFrameBuffer;
     VulkanDescriptorSet m_SwapChainDescriptorSet;
-
-    VulkanFramebuffer m_SSRFrameBuffer;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
-
-    std::array<VulkanFramebuffer, 2> m_HistoryFrameBuffers;
     VulkanDescriptorSet m_TAADescriptorSet;
 
     VulkanDescriptorSet m_InstanceDescriptorSet;
@@ -104,16 +111,6 @@ namespace YAEngine
 
     VulkanDescriptorSet m_LightsDescriptorSet;
     VulkanStorageBuffer m_LightsBuffer;
-
-    VulkanInstance m_VulkanInstance;
-    VulkanPhysicalDevice m_PhysicalDevice;
-    VulkanDevice m_Device;
-    VulkanSurface m_Surface;
-    VulkanSwapChain m_SwapChain;
-    VulkanRenderPass m_MainRenderPass;
-    VulkanRenderPass m_TAARenderPass;
-    VulkanRenderPass m_SwapChainRenderPass;
-    VulkanRenderPass m_SSRRenderPass;
 
     VulkanPipeline m_ForwardPipeline;
     VulkanPipeline m_ForwardPipelineNoShading;
@@ -124,19 +121,12 @@ namespace YAEngine
     VulkanPipeline m_TAAPipeline;
     VulkanPipeline m_SSRPipeline;
 
-    VulkanCommandBuffer m_CommandBuffer;
-    VulkanSync m_Sync;
-    VulkanMemoryAllocator m_Allocator;
-    VulkanDescriptorPool m_DescriptorPool;
     VulkanMaterial m_DefaultMaterial {};
-    VulkanImGui m_ImGUI {};
-
-    RenderContext m_Context {};
     VulkanTexture m_NoneTexture;
     CubicTextureResources m_CubicResources;
 
   public:
-    const RenderContext& GetContext() const { return m_Context; }
+    const RenderContext& GetContext() const { return m_Backend.GetContext(); }
     const VulkanTexture& GetNoneTexture() const { return m_NoneTexture; }
     CubicTextureResources& GetCubicResources() { return m_CubicResources; }
   };

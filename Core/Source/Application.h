@@ -120,7 +120,6 @@ namespace YAEngine
     EventBus m_EventBus;
 
     friend class Scene;
-    friend class Render;
 
     void HandleEvents();
     void InitLayers();

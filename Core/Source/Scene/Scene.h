@@ -81,6 +81,11 @@ namespace YAEngine
       m_Skybox = handle;
     }
 
+    CubeMapHandle GetSkybox() const
+    {
+      return m_Skybox;
+    }
+
   private:
     entt::registry m_Registry;
 
@@ -89,7 +94,6 @@ namespace YAEngine
 
     glm::mat4 ComposeLocal(const TransformComponent& t);
 
-    friend class Render;
   };
 
 }

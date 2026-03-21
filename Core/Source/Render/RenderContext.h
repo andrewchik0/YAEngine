@@ -5,6 +5,8 @@
 namespace YAEngine
 {
   class VulkanCommandBuffer;
+  class VulkanDescriptorPool;
+  class DescriptorLayoutCache;
 
   struct RenderContext
   {
@@ -12,7 +14,9 @@ namespace YAEngine
     VmaAllocator allocator {};
     VkQueue graphicsQueue {};
     VulkanCommandBuffer* commandBuffer {};
-    VkDescriptorPool descriptorPool {};
+    VulkanDescriptorPool* descriptorPool {};
     uint32_t maxFramesInFlight {};
+    VkPipelineCache pipelineCache {};
+    DescriptorLayoutCache* layoutCache {};
   };
 }

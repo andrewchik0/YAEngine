@@ -22,12 +22,12 @@ namespace YAEngine
       };
       if (i == 0)
       {
-        m_DescriptorSets[i].Init(ctx.device, ctx.descriptorPool, desc);
+        m_DescriptorSets[i].Init(ctx, desc);
         layout = m_DescriptorSets[i].GetLayout();
       }
       else
       {
-        m_DescriptorSets[i].Init(ctx.device, ctx.descriptorPool, layout);
+        m_DescriptorSets[i].Init(ctx, layout);
       }
       m_UniformBuffers[i].Create(ctx, sizeof(__PerFrameUBO));
       m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(__PerFrameUBO));

@@ -79,4 +79,20 @@ set(SOURCE_FILES
   Source/Render/SkyBox.cpp
   Source/Render/SkyBox.h
   Source/Utils/Utils.h
+  Source/Render/VulkanFramebuffer.cpp
+  Source/Render/VulkanFramebuffer.h
+  Source/Render/VulkanStorageBuffer.cpp
+  Source/Render/VulkanStorageBuffer.h
+  Source/Render/RenderContext.h
+  Source/Render/ImageBarrier.h
+  Source/Render/VulkanBuffer.cpp
+  Source/Render/VulkanBuffer.h
+  Source/Render/VulkanImage.cpp
+  Source/Render/VulkanImage.h
+  Source/Render/RenderBackend.cpp
+  Source/Render/RenderBackend.h
+  Source/Render/DescriptorLayoutCache.cpp
+  Source/Render/DescriptorLayoutCache.h
+  Source/Render/RenderGraph.cpp
+  Source/Render/RenderGraph.h
 )

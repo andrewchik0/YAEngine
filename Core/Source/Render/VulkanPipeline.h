@@ -35,7 +35,7 @@ namespace YAEngine
   {
   public:
 
-    void Init(VkDevice device, VkRenderPass renderPass, const PipelineCreateInfo& info);
+    void Init(VkDevice device, VkRenderPass renderPass, const PipelineCreateInfo& info, VkPipelineCache pipelineCache = VK_NULL_HANDLE);
     void Destroy();
 
     void Bind(VkCommandBuffer commandBuffer);

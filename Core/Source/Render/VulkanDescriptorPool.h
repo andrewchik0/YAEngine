@@ -9,14 +9,18 @@ namespace YAEngine
     void Init(VkDevice device);
     void Destroy();
 
+    VkDescriptorSet Allocate(VkDescriptorSetLayout layout);
+
     VkDescriptorPool Get()
     {
-      return m_DescriptorPool;
+      return m_Pools.empty() ? VK_NULL_HANDLE : m_Pools[0];
     }
 
   private:
 
-    VkDescriptorPool m_DescriptorPool {};
+    void CreatePool();
+
+    std::vector<VkDescriptorPool> m_Pools;
     VkDevice m_Device {};
   };
 }

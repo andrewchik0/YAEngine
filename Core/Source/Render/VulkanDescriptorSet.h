@@ -4,6 +4,8 @@
 
 namespace YAEngine
 {
+  struct RenderContext;
+
   struct BindingDescription
   {
     uint32_t binding;
@@ -21,8 +23,8 @@ namespace YAEngine
   {
   public:
 
-    void Init(VkDevice device, VkDescriptorPool descriptorPool, const SetDescription& setDescription);
-    void Init(VkDevice device, VkDescriptorPool descriptorPool, VkDescriptorSetLayout descriptorSetLayout);
+    void Init(const RenderContext& ctx, const SetDescription& setDescription);
+    void Init(const RenderContext& ctx, VkDescriptorSetLayout descriptorSetLayout);
     void Destroy();
 
     void WriteUniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size);
@@ -49,7 +51,6 @@ namespace YAEngine
     VkDevice m_Device {};
     VkDescriptorSetLayout m_DescriptorSetLayout {};
     VkDescriptorSet m_DescriptorSet {};
-    VkDescriptorPool m_DescriptorPool {};
 
     bool b_OwnsLayout = false;
   };

@@ -1,58 +1,65 @@
 #include "VulkanDescriptorSet.h"
 
+#include "DescriptorLayoutCache.h"
+#include "RenderContext.h"
+#include "VulkanDescriptorPool.h"
+
 namespace YAEngine
 {
-  void VulkanDescriptorSet::Init(VkDevice device, VkDescriptorPool descriptorPool, const SetDescription& setDescription)
+  void VulkanDescriptorSet::Init(const RenderContext& ctx, const SetDescription& setDescription)
   {
-    m_Device = device;
-    m_DescriptorPool = descriptorPool;
-    b_OwnsLayout = true;
+    m_Device = ctx.device;
 
-    std::vector<VkDescriptorSetLayoutBinding> vkBindings;
-    vkBindings.reserve(setDescription.bindings.size());
-
-    for (const BindingDescription& b : setDescription.bindings)
+    if (ctx.layoutCache)
     {
-      VkDescriptorSetLayoutBinding binding{};
-      binding.binding = b.binding;
-      binding.descriptorType = b.type;
-      binding.descriptorCount = 1;
-      binding.stageFlags = b.stages;
-      binding.pImmutableSamplers = nullptr;
+      m_DescriptorSetLayout = ctx.layoutCache->GetOrCreate(ctx.device, setDescription.bindings);
+      b_OwnsLayout = false;
+    }
+    else
+    {
+      b_OwnsLayout = true;
 
-      vkBindings.push_back(binding);
+      std::vector<VkDescriptorSetLayoutBinding> vkBindings;
+      vkBindings.reserve(setDescription.bindings.size());
+
+      for (const BindingDescription& b : setDescription.bindings)
+      {
+        VkDescriptorSetLayoutBinding binding{};
+        binding.binding = b.binding;
+        binding.descriptorType = b.type;
+        binding.descriptorCount = 1;
+        binding.stageFlags = b.stages;
+        binding.pImmutableSamplers = nullptr;
+
+        vkBindings.push_back(binding);
+      }
+
+      VkDescriptorSetLayoutCreateInfo info{};
+      info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+      info.bindingCount = static_cast<uint32_t>(vkBindings.size());
+      info.pBindings = vkBindings.data();
+
+      if (vkCreateDescriptorSetLayout(m_Device, &info, nullptr, &m_DescriptorSetLayout) != VK_SUCCESS)
+      {
+        throw std::runtime_error("failed to create descriptor set layout!");
+      }
     }
 
-    VkDescriptorSetLayoutCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    info.bindingCount = static_cast<uint32_t>(vkBindings.size());
-    info.pBindings = vkBindings.data();
-
-    if (vkCreateDescriptorSetLayout(m_Device, &info, nullptr, &m_DescriptorSetLayout) != VK_SUCCESS)
-    {
-      throw std::runtime_error("failed to create descriptor set layout!");
-    }
-
-    Init(device, descriptorPool, m_DescriptorSetLayout);
+    Init(ctx, m_DescriptorSetLayout);
   }
 
-  void VulkanDescriptorSet::Init(VkDevice device, VkDescriptorPool descriptorPool,
-    VkDescriptorSetLayout descriptorSetLayout)
+  void VulkanDescriptorSet::Init(const RenderContext& ctx, VkDescriptorSetLayout descriptorSetLayout)
   {
-    m_Device = device;
-    m_DescriptorPool = descriptorPool;
+    m_Device = ctx.device;
     m_DescriptorSetLayout = descriptorSetLayout;
 
-    VkDescriptorSetAllocateInfo allocInfo{};
-    allocInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-    allocInfo.descriptorPool = descriptorPool;
-    allocInfo.descriptorSetCount = 1;
-    allocInfo.pSetLayouts = &m_DescriptorSetLayout;
-
-    int result = 0;
-    if ((result = vkAllocateDescriptorSets(m_Device, &allocInfo, &m_DescriptorSet)) != VK_SUCCESS)
+    if (ctx.descriptorPool)
     {
-      throw std::runtime_error("failed to allocate descriptor set!");
+      m_DescriptorSet = ctx.descriptorPool->Allocate(descriptorSetLayout);
+    }
+    else
+    {
+      throw std::runtime_error("descriptor pool is null in RenderContext!");
     }
   }
 
