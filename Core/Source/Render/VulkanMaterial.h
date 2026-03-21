@@ -1,4 +1,5 @@
 #pragma once
+
 #include "VulkanDescriptorSet.h"
 #include "VulkanTexture.h"
 #include "VulkanUniformBuffer.h"
@@ -6,6 +7,7 @@
 namespace YAEngine
 {
   struct Material;
+  struct RenderContext;
 
   class VulkanMaterial
   {
@@ -22,9 +24,8 @@ namespace YAEngine
       int sg;
     } data;
 
-    static void InitMaterials(VkDevice device, VkDescriptorPool pool, VmaAllocator allocator, uint32_t maxFramesInFlight);
-    void Init();
-    void Destroy();
+    void Init(const RenderContext& ctx, const VulkanTexture& noneTexture);
+    void Destroy(const RenderContext& ctx);
 
     VkDescriptorSetLayout GetLayout()
     {
@@ -36,17 +37,11 @@ namespace YAEngine
       return m_DescriptorSets[currentFrame].Get();
     }
 
-    void Bind(Application* app, Material& material, uint32_t currentFrame);
+    void Bind(Application* app, Material& material, uint32_t currentFrame, const VulkanTexture& noneTexture);
 
   private:
 
     std::vector<VulkanDescriptorSet> m_DescriptorSets;
     std::vector<VulkanUniformBuffer> m_UniformBuffers;
-
-    static uint32_t s_MaxFramesInFlight;
-    static VkDevice s_Device;
-    static VkDescriptorPool s_Pool;
-    static VmaAllocator s_Allocator;
-    static VulkanTexture s_NoneTexture;
   };
 }

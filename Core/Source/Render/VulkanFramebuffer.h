@@ -1,112 +1,53 @@
 #pragma once
 
+#include "Pch.h"
+#include "VulkanImage.h"
+
 namespace YAEngine
 {
+  struct RenderContext;
+
   class VulkanFramebuffer
   {
   public:
 
-    void Init(VkDevice device, VmaAllocator allocator, VkRenderPass renderPass, uint32_t width, uint32_t height, VkFormat format, bool secondaryImageBuffer = false);
-    void Destroy();
+    void Init(const RenderContext& ctx, VkRenderPass renderPass, uint32_t width, uint32_t height, VkFormat format, bool secondaryImageBuffer = false);
+    void Destroy(const RenderContext& ctx);
 
     void Begin(VkCommandBuffer cmd);
     void End(VkCommandBuffer cmd);
 
-    void Recreate(VkRenderPass renderPass, uint32_t width, uint32_t height);
+    void Recreate(const RenderContext& ctx, VkRenderPass renderPass, uint32_t width, uint32_t height);
 
-    VkFramebuffer& Get()
-    {
-      return m_Framebuffer;
-    }
+    VkFramebuffer& Get() { return m_Framebuffer; }
 
-    VkImageView& GetImageView()
-    {
-      return m_ImageView;
-    }
+    VkImageView GetImageView() { return m_ColorAttachment.GetView(); }
+    VkImageLayout GetLayout() { return m_ColorAttachment.GetLayout(); }
+    VkSampler GetSampler() { return m_ColorAttachment.GetSampler(); }
+    VkImage GetImage() { return m_ColorAttachment.GetImage(); }
 
-    VkImageLayout& GetLayout()
-    {
-      return m_ImageLayout;
-    }
+    VkImageView GetDepthImageView() { return m_DepthAttachment.GetView(); }
+    VkImageLayout GetDepthLayout() { return m_DepthAttachment.GetLayout(); }
+    VkSampler GetDepthSampler() { return m_DepthAttachment.GetSampler(); }
+    VkImage GetDepthImage() { return m_DepthAttachment.GetImage(); }
 
-    VkSampler& GetSampler()
-    {
-      return m_Sampler;
-    }
-
-    VkImage& GetImage()
-    {
-      return m_Image;
-    }
-
-    VkImageView& GetDepthImageView()
-    {
-      return m_DepthImageView;
-    }
-
-    VkImageLayout& GetDepthLayout()
-    {
-      return m_DepthImageLayout;
-    }
-
-    VkSampler& GetDepthSampler()
-    {
-      return m_DepthSampler;
-    }
-
-    VkImage& GetDepthImage()
-    {
-      return m_DepthImage;
-    }
-
-    VkImageView& GetSecondaryImageView()
-    {
-      return m_SecondaryImageView;
-    }
-
-    VkImageLayout& GetSecondaryLayout()
-    {
-      return m_SecondaryImageLayout;
-    }
-
-    VkSampler& GetSecondarySampler()
-    {
-      return m_SecondarySampler;
-    }
-
-    VkImage& GetSecondaryImage()
-    {
-      return m_SecondaryImage;
-    }
+    VkImageView GetSecondaryImageView() { return m_SecondaryAttachment.GetView(); }
+    VkImageLayout GetSecondaryLayout() { return m_SecondaryAttachment.GetLayout(); }
+    VkSampler GetSecondarySampler() { return m_SecondaryAttachment.GetSampler(); }
+    VkImage GetSecondaryImage() { return m_SecondaryAttachment.GetImage(); }
 
   private:
 
-    bool b_SecondaryBuffer = false;
+    bool b_HasSecondary = false;
 
     VkFramebuffer m_Framebuffer {};
 
-    VkImage m_Image {};
-    VkImageView m_ImageView {};
-    VkImageLayout m_ImageLayout {};
-    VkSampler m_Sampler {};
-    VmaAllocation m_ImageAllocation {};
-
-    VkImageView m_DepthImageView {};
-    VkImage m_DepthImage {};
-    VkImageLayout m_DepthImageLayout {};
-    VkSampler m_DepthSampler {};
-    VmaAllocation m_DepthImageAllocation {};
-
-    VkImageView m_SecondaryImageView {};
-    VkImage m_SecondaryImage {};
-    VkImageLayout m_SecondaryImageLayout {};
-    VkSampler m_SecondarySampler {};
-    VmaAllocation m_SecondaryImageAllocation {};
+    VulkanImage m_ColorAttachment;
+    VulkanImage m_DepthAttachment;
+    VulkanImage m_SecondaryAttachment;
 
     VkRenderPass m_RenderPass {};
-
     VkFormat m_Format {};
-    VmaAllocator m_Allocator {};
     VkDevice m_Device {};
   };
 }

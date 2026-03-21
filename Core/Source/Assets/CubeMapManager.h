@@ -4,6 +4,9 @@
 
 namespace YAEngine
 {
+  struct RenderContext;
+  struct CubicTextureResources;
+
   struct CubeMap
   {
   private:
@@ -19,6 +22,13 @@ namespace YAEngine
   class CubeMapManager : public AssetManagerBase<CubeMap>
   {
   public:
+
+    void SetRenderContext(const RenderContext& ctx, CubicTextureResources& cubicRes)
+    {
+      m_Ctx = &ctx;
+      m_CubicRes = &cubicRes;
+    }
+
     [[nodiscard]]
     CubeMapHandle Load(const std::string& filePath);
     void Destroy(CubeMapHandle handle);
@@ -26,5 +36,7 @@ namespace YAEngine
     void DestroyAll();
 
   private:
+    const RenderContext* m_Ctx = nullptr;
+    CubicTextureResources* m_CubicRes = nullptr;
   };
 }

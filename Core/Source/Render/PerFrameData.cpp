@@ -1,15 +1,16 @@
 #include "PerFrameData.h"
 
+#include "RenderContext.h"
+
 namespace YAEngine
 {
-  void PerFrameData::Init(VkDevice device, VmaAllocator allocator, VkDescriptorPool pool, uint32_t maxFramesInFlight)
+  void PerFrameData::Init(const RenderContext& ctx)
   {
-    m_Device = device;
-    m_DescriptorSets.resize(maxFramesInFlight);
-    m_UniformBuffers.resize(maxFramesInFlight);
+    m_DescriptorSets.resize(ctx.maxFramesInFlight);
+    m_UniformBuffers.resize(ctx.maxFramesInFlight);
 
     VkDescriptorSetLayout layout = nullptr;
-    for (size_t i = 0; i < maxFramesInFlight; i++)
+    for (size_t i = 0; i < ctx.maxFramesInFlight; i++)
     {
       SetDescription desc = {
         .set = 0,
@@ -21,19 +22,19 @@ namespace YAEngine
       };
       if (i == 0)
       {
-        m_DescriptorSets[i].Init(device, pool, desc);
+        m_DescriptorSets[i].Init(ctx.device, ctx.descriptorPool, desc);
         layout = m_DescriptorSets[i].GetLayout();
       }
       else
       {
-        m_DescriptorSets[i].Init(device, pool, layout);
+        m_DescriptorSets[i].Init(ctx.device, ctx.descriptorPool, layout);
       }
-      m_UniformBuffers[i].Create(m_Device, allocator, sizeof(__PerFrameUBO));
+      m_UniformBuffers[i].Create(ctx, sizeof(__PerFrameUBO));
       m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(__PerFrameUBO));
     }
   }
 
-  void PerFrameData::Destroy()
+  void PerFrameData::Destroy(const RenderContext& ctx)
   {
     for (auto& set : m_DescriptorSets)
     {
@@ -41,7 +42,7 @@ namespace YAEngine
     }
     for (auto& ubo : m_UniformBuffers)
     {
-      ubo.Destroy();
+      ubo.Destroy(ctx);
     }
   }
 
@@ -49,5 +50,4 @@ namespace YAEngine
   {
     m_UniformBuffers[frameIndex].Update(ubo);
   }
-
 }

@@ -7,6 +7,10 @@
 
 namespace YAEngine
 {
+  struct RenderContext;
+  struct CubicTextureResources;
+  class VulkanTexture;
+
   class AssetManager
   {
   public:
@@ -14,6 +18,7 @@ namespace YAEngine
     AssetManager() = default;
 
     void Init();
+    void SetRenderContext(const RenderContext& ctx, const VulkanTexture& noneTexture, CubicTextureResources& cubicResources);
 
     MeshManager& Meshes()
     {

@@ -5,6 +5,8 @@
 
 namespace YAEngine
 {
+  struct RenderContext;
+
   class PerFrameData
   {
   public:
@@ -26,8 +28,8 @@ namespace YAEngine
       int screenHeight;
     } ubo;
 
-    void Init(VkDevice device, VmaAllocator allocator, VkDescriptorPool pool, uint32_t maxFramesInFlight);
-    void Destroy();
+    void Init(const RenderContext& ctx);
+    void Destroy(const RenderContext& ctx);
 
     void SetUp(uint32_t frameIndex);
 
@@ -45,6 +47,5 @@ namespace YAEngine
 
     std::vector<VulkanDescriptorSet> m_DescriptorSets;
     std::vector<VulkanUniformBuffer> m_UniformBuffers;
-    VkDevice m_Device {};
   };
 }

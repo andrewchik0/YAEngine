@@ -1,23 +1,16 @@
 #include "SkyBox.h"
 
-#include "Application.h"
-#include "Application.h"
-#include "Application.h"
-#include "Application.h"
-#include "Application.h"
+#include "RenderContext.h"
 #include "VulkanCubicTexture.h"
 
 namespace YAEngine
 {
-  void SkyBox::Init(VkDevice device, VkDescriptorPool descriptorPool, VkRenderPass renderPass, uint32_t maxFramesInFlight)
+  void SkyBox::Init(const RenderContext& ctx, VkRenderPass renderPass)
   {
-    m_Device = device;
-    m_DescriptorPool = descriptorPool;
-
-    m_DescriptorSets.resize(maxFramesInFlight);
+    m_DescriptorSets.resize(ctx.maxFramesInFlight);
 
     VkDescriptorSetLayout layout = nullptr;
-    for (size_t i = 0; i < maxFramesInFlight; i++)
+    for (size_t i = 0; i < ctx.maxFramesInFlight; i++)
     {
       SetDescription desc = {
         .set = 0,
@@ -29,12 +22,12 @@ namespace YAEngine
       };
       if (i == 0)
       {
-        m_DescriptorSets[i].Init(m_Device, m_DescriptorPool, desc);
+        m_DescriptorSets[i].Init(ctx.device, ctx.descriptorPool, desc);
         layout = m_DescriptorSets[i].GetLayout();
       }
       else
       {
-        m_DescriptorSets[i].Init(m_Device, m_DescriptorPool, layout);
+        m_DescriptorSets[i].Init(ctx.device, ctx.descriptorPool, layout);
       }
     }
 
@@ -51,7 +44,7 @@ namespace YAEngine
       m_DescriptorSets[0].GetLayout()
     };
 
-    m_Pipeline.Init(m_Device, renderPass, info);
+    m_Pipeline.Init(ctx.device, renderPass, info);
   }
 
   void SkyBox::Destroy()
@@ -61,7 +54,7 @@ namespace YAEngine
       set.Destroy();
   }
 
-  void SkyBox::Draw(uint32_t currentFrame, VulkanCubicTexture* cube, VkCommandBuffer commandBuffer, glm::mat4& camDir, glm::mat4& proj)
+  void SkyBox::Draw(uint32_t currentFrame, VulkanCubicTexture* cube, VkCommandBuffer commandBuffer, glm::mat4& camDir, glm::mat4& proj, const CubicTextureResources& res)
   {
     m_Pipeline.Bind(commandBuffer);
     std::array<glm::mat4, 2> matrices;
@@ -72,7 +65,6 @@ namespace YAEngine
     m_Pipeline.BindDescriptorSets(commandBuffer, { m_DescriptorSets[currentFrame].Get() }, 0);
     m_DescriptorSets[currentFrame].WriteCombinedImageSampler(0, cube->GetView(), cube->GetSampler());
 
-    VulkanCubicTexture::DrawCube(commandBuffer);
+    VulkanCubicTexture::DrawCube(commandBuffer, res);
   }
-
 }

@@ -8,6 +8,9 @@
 
 namespace YAEngine
 {
+  struct RenderContext;
+  class VulkanTexture;
+
   struct Material
   {
     glm::vec3 albedo;
@@ -43,9 +46,18 @@ namespace YAEngine
   class MaterialManager : public AssetManagerBase<Material>
   {
   public:
+
+    void SetRenderContext(const RenderContext& ctx, const VulkanTexture& noneTexture)
+    {
+      m_Ctx = &ctx;
+      m_NoneTexture = &noneTexture;
+    }
+
     [[nodiscard]]
     MaterialHandle Create();
     void DestroyAll();
   private:
+    const RenderContext* m_Ctx = nullptr;
+    const VulkanTexture* m_NoneTexture = nullptr;
   };
 }

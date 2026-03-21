@@ -30,6 +30,7 @@ namespace YAEngine
     for (auto& layer : m_LayerStack)
       layer->OnBeforeInit();
     m_AssetManager.Init();
+    m_AssetManager.SetRenderContext(m_Render.GetContext(), m_Render.GetNoneTexture(), m_Render.GetCubicResources());
     int w, h;
     glfwGetWindowSize(m_Window.Get(), &w, &h);
     m_Render.Resize(w, h);

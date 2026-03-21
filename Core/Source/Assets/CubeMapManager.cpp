@@ -2,7 +2,7 @@
 
 #include <StbImage/stb_image.h>
 
-#include "glm/gtc/packing.hpp"
+#include "Render/RenderContext.h"
 
 namespace YAEngine
 {
@@ -15,7 +15,7 @@ namespace YAEngine
 
     if (float* image32 = stbi_loadf(filePath.c_str(), &width, &height, &channels, 4))
     {
-      texture->m_CubeTexture.Create(image32, width, height);
+      texture->m_CubeTexture.Create(*m_Ctx, *m_CubicRes, image32, width, height);
       stbi_image_free(image32);
 
       return AssetManagerBase::Load(std::move(texture));
@@ -28,7 +28,7 @@ namespace YAEngine
 
   void CubeMapManager::Destroy(CubeMapHandle handle)
   {
-    Get(handle).m_CubeTexture.DestroyCubicTextures();
+    Get(handle).m_CubeTexture.Destroy(*m_Ctx);
     Remove(handle);
   }
 
@@ -36,7 +36,7 @@ namespace YAEngine
   {
     for (auto& texture : GetAll())
     {
-      texture.second.get()->m_CubeTexture.Destroy();
+      texture.second.get()->m_CubeTexture.Destroy(*m_Ctx);
     }
     GetAll().clear();
   }

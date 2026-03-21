@@ -4,6 +4,7 @@
 
 namespace YAEngine
 {
+  struct RenderContext;
 
   struct Texture
   {
@@ -21,6 +22,8 @@ namespace YAEngine
   {
   public:
 
+    void SetRenderContext(const RenderContext& ctx) { m_Ctx = &ctx; }
+
     [[nodiscard]]
     TextureHandle Load(const std::string& filePath, bool* hasAlpha = nullptr);
     void Destroy(TextureHandle handle);
@@ -30,5 +33,6 @@ namespace YAEngine
     void DestroyAll();
 
   private:
+    const RenderContext* m_Ctx = nullptr;
   };
 }

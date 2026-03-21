@@ -1,6 +1,8 @@
 #pragma once
 
 #include "PerFrameData.h"
+#include "RenderContext.h"
+#include "VulkanCubicTexture.h"
 #include "VulkanMaterial.h"
 #include "VulkanDevice.h"
 #include "VulkanInstance.h"
@@ -128,5 +130,14 @@ namespace YAEngine
     VulkanDescriptorPool m_DescriptorPool;
     VulkanMaterial m_DefaultMaterial {};
     VulkanImGui m_ImGUI {};
+
+    RenderContext m_Context {};
+    VulkanTexture m_NoneTexture;
+    CubicTextureResources m_CubicResources;
+
+  public:
+    const RenderContext& GetContext() const { return m_Context; }
+    const VulkanTexture& GetNoneTexture() const { return m_NoneTexture; }
+    CubicTextureResources& GetCubicResources() { return m_CubicResources; }
   };
 }

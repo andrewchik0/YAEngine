@@ -1,5 +1,6 @@
 #include "TextureManager.h"
 
+#include "Render/RenderContext.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <StbImage/stb_image.h>
@@ -19,7 +20,7 @@ namespace YAEngine
       {
         *hasAlpha = CheckAlpha(data, width, height);
       }
-      texture->m_VulkanTexture.Load(data, width, height, 4, VK_FORMAT_R8G8B8A8_SRGB);
+      texture->m_VulkanTexture.Load(*m_Ctx, data, width, height, 4, VK_FORMAT_R8G8B8A8_SRGB);
       stbi_image_free(data);
 
       return AssetManagerBase::Load(std::move(texture));
@@ -32,7 +33,7 @@ namespace YAEngine
 
   void TextureManager::Destroy(TextureHandle handle)
   {
-    Get(handle).m_VulkanTexture.Destroy();
+    Get(handle).m_VulkanTexture.Destroy(*m_Ctx);
     Remove(handle);
   }
 
@@ -40,7 +41,7 @@ namespace YAEngine
   {
     for (auto& texture : GetAll())
     {
-      texture.second.get()->m_VulkanTexture.Destroy();
+      texture.second.get()->m_VulkanTexture.Destroy(*m_Ctx);
     }
     GetAll().clear();
   }

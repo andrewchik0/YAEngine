@@ -1,40 +1,27 @@
 #pragma once
 
 #include "Pch.h"
+#include "VulkanImage.h"
 
 namespace YAEngine
 {
-  class VulkanCommandBuffer;
+  struct RenderContext;
 
   class VulkanTexture
   {
   public:
 
-    static void InitTextures(VkDevice device, VkQueue queue, VulkanCommandBuffer& commandBuffer, VmaAllocator allocator);
+    void Load(const RenderContext& ctx, void* data, uint32_t width, uint32_t height, uint32_t pixelSize, VkFormat format, bool repeat = true);
+    void Destroy(const RenderContext& ctx);
 
-    void Load(void* data, uint32_t width, uint32_t height, uint32_t pixelSize, VkFormat format, bool repeat = true);
-    void Destroy();
+    VkImageView GetView() const { return m_Image.GetView(); }
+    VkSampler GetSampler() const { return m_Image.GetSampler(); }
+    VkImage GetImage() const { return m_Image.GetImage(); }
 
-    VkImageView GetView()
-    {
-      return m_TextureImageView;
-    }
-
-    VkSampler GetSampler()
-    {
-      return m_TextureSampler;
-    }
+    bool IsValid() const { return m_Image.IsValid(); }
 
   private:
 
-    VkImage m_TextureImage {};
-    VmaAllocation m_TextureImageAllocation {};
-    VkImageView m_TextureImageView {};
-    VkSampler m_TextureSampler {};
-
-    static VkQueue s_Queue;
-    static VulkanCommandBuffer* s_CommandBuffer;
-    static VmaAllocator s_Allocator;
-    static VkDevice s_Device;
+    VulkanImage m_Image;
   };
 }

@@ -1,37 +1,30 @@
 #pragma once
 
 #include "Pch.h"
+#include "VulkanBuffer.h"
 
 namespace YAEngine
 {
+  struct RenderContext;
+
   class VulkanUniformBuffer
   {
   public:
 
-    void Create(VkDevice device, VmaAllocator allocator, VkDeviceSize bufferSize);
-    void Destroy();
+    void Create(const RenderContext& ctx, VkDeviceSize bufferSize);
+    void Destroy(const RenderContext& ctx);
 
-    VkBuffer Get()
-    {
-      return m_Buffer;
-    }
+    VkBuffer Get() const { return m_Buffer.Get(); }
 
     template<typename T>
     void Update(const T& data)
     {
-      std::memcpy(m_Data, &data, m_BufferSize);
-      vmaFlushAllocation(m_Allocator, m_Allocation, 0, m_BufferSize);
+      m_Buffer.Update(0, &data, static_cast<uint32_t>(m_BufferSize));
     }
 
   private:
 
-    VkBuffer m_Buffer {};
-    VmaAllocation m_Allocation {};
+    VulkanBuffer m_Buffer;
     VkDeviceSize m_BufferSize {};
-
-    VmaAllocator m_Allocator {};
-    VkDevice m_Device {};
-
-    void* m_Data {};
   };
 }

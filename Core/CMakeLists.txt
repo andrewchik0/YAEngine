@@ -5,7 +5,13 @@ add_library(Core STATIC
   Source/Render/VulkanFramebuffer.cpp
   Source/Render/VulkanFramebuffer.h
   Source/Render/VulkanStorageBuffer.cpp
-  Source/Render/VulkanStorageBuffer.h)
+  Source/Render/VulkanStorageBuffer.h
+  Source/Render/RenderContext.h
+  Source/Render/ImageBarrier.h
+  Source/Render/VulkanBuffer.cpp
+  Source/Render/VulkanBuffer.h
+  Source/Render/VulkanImage.cpp
+  Source/Render/VulkanImage.h)
 target_sources(Core PRIVATE ${SOURCE_FILES})
 
 set_target_properties(Core PROPERTIES LINKER_LANGUAGE CXX)

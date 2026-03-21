@@ -1,10 +1,12 @@
 #pragma once
 
 #include "Pch.h"
-#include "VulkanCommandBuffer.h"
+#include "VulkanBuffer.h"
 
 namespace YAEngine
 {
+  struct RenderContext;
+
   struct Vertex
   {
     glm::vec3 position;
@@ -17,32 +19,17 @@ namespace YAEngine
   {
   public:
 
-    static void InitVertexBuffers(VkDevice device, VkQueue queue, VulkanCommandBuffer& commandBuffer, VmaAllocator allocator);
-
-    void Create(void* inputData, size_t vertexCount, uint32_t vertexSize, const std::vector<uint32_t>& indices);
-    void Destroy();
+    void Create(const RenderContext& ctx, const void* inputData, size_t vertexCount, uint32_t vertexSize, const std::vector<uint32_t>& indices);
+    void Destroy(const RenderContext& ctx);
 
     void Draw(VkCommandBuffer cmd, uint32_t instanceCount = 1);
 
-    VkBuffer Get()
-    {
-      return m_VerticesBuffer;
-    }
+    VkBuffer Get() const { return m_VerticesBuffer.Get(); }
 
   private:
 
-    void CreateIndicesBuffer(const std::vector<uint32_t>& indices);
-
-    VkBuffer m_VerticesBuffer {};
-    VmaAllocation m_VerticesAlloc {};
-    VkBuffer m_IndicesBuffer {};
-    VmaAllocation m_IndicesAlloc {};
-    size_t m_VerticesCount {};
+    VulkanBuffer m_VerticesBuffer;
+    VulkanBuffer m_IndicesBuffer;
     size_t m_IndicesCount {};
-
-    static VkQueue s_GraphicsQueue;
-    static VulkanCommandBuffer* s_GraphicsCommandBuffer;
-    static VmaAllocator s_GraphicsAllocator;
-    static VkDevice s_Device;
   };
 }

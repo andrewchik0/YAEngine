@@ -40,25 +40,30 @@ namespace YAEngine
     m_Sync.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), m_SwapChain.GetImageCount());
     m_CommandBuffer.SetGraphicsQueue(m_Sync.GetQueue());
 
-    VulkanTexture::InitTextures(m_Device.Get(), m_Sync.GetQueue(), m_CommandBuffer, m_Allocator.Get());
-    VulkanVertexBuffer::InitVertexBuffers(m_Device.Get(), m_Sync.GetQueue(), m_CommandBuffer, m_Allocator.Get());
+    m_Context.device = m_Device.Get();
+    m_Context.allocator = m_Allocator.Get();
+    m_Context.graphicsQueue = m_Sync.GetQueue();
+    m_Context.commandBuffer = &m_CommandBuffer;
+    m_Context.descriptorPool = m_DescriptorPool.Get();
+    m_Context.maxFramesInFlight = s_MaxFramesInFlight;
 
     m_DescriptorPool.Init(m_Device.Get());
+    m_Context.descriptorPool = m_DescriptorPool.Get();
 
-    VulkanMaterial::InitMaterials(m_Device.Get(), m_DescriptorPool.Get(), m_Allocator.Get(), s_MaxFramesInFlight);
-    m_DefaultMaterial.Init();
+    uint32_t whitePixel = 0xFFFFFFFF;
+    m_NoneTexture.Load(m_Context, &whitePixel, 1, 1, 4, VK_FORMAT_R8G8B8A8_SRGB);
 
-    m_PerFrameData.Init(m_Device.Get(), m_Allocator.Get(), m_DescriptorPool.Get(), s_MaxFramesInFlight);
+    m_DefaultMaterial.Init(m_Context, m_NoneTexture);
 
-    VulkanStorageBuffer::InitBuffers(m_Device.Get(), m_Allocator.Get());
+    m_PerFrameData.Init(m_Context);
 
     InitPipelines();
 
-    m_MainPassFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_MainRenderPass.Get(), width, height, VK_FORMAT_R16G16B16A16_SFLOAT, true);
-    m_SSRFrameBuffer.Init(m_Device.Get(), m_Allocator.Get(), m_SSRRenderPass.Get(), width, height, m_SwapChain.GetFormat());
+    m_MainPassFrameBuffer.Init(m_Context, m_MainRenderPass.Get(), width, height, VK_FORMAT_R16G16B16A16_SFLOAT, true);
+    m_SSRFrameBuffer.Init(m_Context, m_SSRRenderPass.Get(), width, height, m_SwapChain.GetFormat());
     for (auto& buffer : m_HistoryFrameBuffers)
     {
-      buffer.Init(m_Device.Get(), m_Allocator.Get(), m_TAARenderPass.Get(), width, height, m_SwapChain.GetFormat());
+      buffer.Init(m_Context, m_TAARenderPass.Get(), width, height, m_SwapChain.GetFormat());
       auto cmd = m_CommandBuffer.BeginSingleTimeCommands();
       buffer.Begin(cmd);
       VkClearValue clearValues[2];
@@ -93,9 +98,9 @@ namespace YAEngine
       m_SwapChainRenderPass.Get()
     );
 
-    VulkanCubicTexture::InitCubicTextures(m_Device.Get(), m_Allocator.Get(), m_CommandBuffer, m_DescriptorPool.Get());
+    m_CubicResources.Init(m_Context);
 
-    m_SkyBox.Init(m_Device.Get(), m_DescriptorPool.Get(), m_MainRenderPass.Get(), s_MaxFramesInFlight);
+    m_SkyBox.Init(m_Context, m_MainRenderPass.Get());
 
     vkDeviceWaitIdle(m_Device.Get());
   }
@@ -105,12 +110,13 @@ namespace YAEngine
     m_Sync.Destroy();
 
     m_SkyBox.Destroy();
-    VulkanCubicTexture::DestroyCubicTextures();
+    m_CubicResources.Destroy(m_Context);
+    m_NoneTexture.Destroy(m_Context);
     m_ImGUI.Destroy();
-    m_MainPassFrameBuffer.Destroy();
+    m_MainPassFrameBuffer.Destroy(m_Context);
     for (auto& buffer : m_HistoryFrameBuffers)
     {
-      buffer.Destroy();
+      buffer.Destroy(m_Context);
     }
     m_SwapChainDescriptorSet.Destroy();
     m_TAADescriptorSet.Destroy();
@@ -119,7 +125,7 @@ namespace YAEngine
       set.Destroy();
     }
     m_SSRPipeline.Destroy();
-    m_SSRFrameBuffer.Destroy();
+    m_SSRFrameBuffer.Destroy(m_Context);
     m_SSRRenderPass.Destroy();
     m_CommandBuffer.Destroy();
     m_ForwardPipeline.Destroy();
@@ -128,13 +134,13 @@ namespace YAEngine
     m_ForwardPipelineDoubleSidedInstanced.Destroy();
     m_InstanceDescriptorSet.Destroy();
     m_LightsDescriptorSet.Destroy();
-    m_LightsBuffer.Destroy();
+    m_LightsBuffer.Destroy(m_Context);
     m_ForwardPipelineNoShading.Destroy();
-    m_InstanceBuffer.Destroy();
+    m_InstanceBuffer.Destroy(m_Context);
     m_QuadPipeline.Destroy();
     m_TAAPipeline.Destroy();
-    m_DefaultMaterial.Destroy();
-    m_PerFrameData.Destroy();
+    m_DefaultMaterial.Destroy(m_Context);
+    m_PerFrameData.Destroy(m_Context);
     m_DescriptorPool.Destroy();
     m_SwapChain.Destroy();
     m_MainRenderPass.Destroy();
@@ -150,15 +156,15 @@ namespace YAEngine
   {
     b_Resized = false;
     m_MainRenderPass.Recreate(true, true);
-    m_MainPassFrameBuffer.Recreate(m_MainRenderPass.Get(), width, height);
+    m_MainPassFrameBuffer.Recreate(m_Context, m_MainRenderPass.Get(), width, height);
 
     m_SSRRenderPass.Recreate();
-    m_SSRFrameBuffer.Recreate(m_SSRRenderPass.Get(), width, height);
+    m_SSRFrameBuffer.Recreate(m_Context, m_SSRRenderPass.Get(), width, height);
 
     m_TAARenderPass.Recreate();
     for (auto& buffer : m_HistoryFrameBuffers)
     {
-      buffer.Recreate(m_TAARenderPass.Get(), width, height);
+      buffer.Recreate(m_Context, m_TAARenderPass.Get(), width, height);
       auto cmd = m_CommandBuffer.BeginSingleTimeCommands();
       buffer.Begin(cmd);
       VkClearValue clearValues[2];
@@ -325,7 +331,7 @@ namespace YAEngine
 
       auto& mat = app->GetAssetManager().Materials().Get(material.asset);
       mat.cubemap = app->GetScene().m_Skybox;
-      app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, mat, m_CurrentFrameIndex);
+      app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, mat, m_CurrentFrameIndex, m_NoneTexture);
 
       app->m_AssetManager.Meshes().Get(mesh.asset).vertexBuffer.Draw(m_CommandBuffer.GetCurrentBuffer(), instanceCount);
     });
@@ -335,7 +341,7 @@ namespace YAEngine
     auto transform = std::get<TransformComponent &>(cameraEntity);
     glm::mat4 camDir = glm::mat4_cast(transform.rotation);
     if (app->GetScene().m_Skybox)
-      m_SkyBox.Draw(m_CurrentFrameIndex, &app->GetAssetManager().CubeMaps().Get(app->GetScene().m_Skybox).m_CubeTexture, m_CommandBuffer.GetCurrentBuffer(), camDir, m_PerFrameData.ubo.proj);
+      m_SkyBox.Draw(m_CurrentFrameIndex, &app->GetAssetManager().CubeMaps().Get(app->GetScene().m_Skybox).m_CubeTexture, m_CommandBuffer.GetCurrentBuffer(), camDir, m_PerFrameData.ubo.proj, m_CubicResources);
   }
 
   void Render::SetUpCamera(Application* app)
@@ -392,7 +398,7 @@ namespace YAEngine
     };
     m_InstanceDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), instanceDesc);
     constexpr auto MAX_INSTANCES = 10000;
-    m_InstanceBuffer.Create(MAX_INSTANCES * sizeof(glm::mat4));
+    m_InstanceBuffer.Create(m_Context, MAX_INSTANCES * sizeof(glm::mat4));
     m_InstanceDescriptorSet.WriteStorageBuffer(0, m_InstanceBuffer.Get(), MAX_INSTANCES * sizeof(glm::mat4));
 
     SetDescription lightsDesc = {
@@ -402,7 +408,7 @@ namespace YAEngine
       }
     };
     m_LightsDescriptorSet.Init(m_Device.Get(), m_DescriptorPool.Get(), lightsDesc);
-    m_LightsBuffer.Create(MAX_LIGHTS * sizeof(Light) + sizeof(int));
+    m_LightsBuffer.Create(m_Context, MAX_LIGHTS * sizeof(Light) + sizeof(int));
     m_LightsDescriptorSet.WriteStorageBuffer(0, m_LightsBuffer.Get(), MAX_LIGHTS * sizeof(Light) + sizeof(int));
 
     PipelineCreateInfo forwardInfo = {

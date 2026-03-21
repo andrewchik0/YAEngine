@@ -58,6 +58,7 @@ namespace YAEngine
     std::vector<VkVertexInputAttributeDescription> GetVertexInputAttributeDescriptions(std::string_view vertexInput, uint32_t* vertexSize);
 
     friend class VulkanCubicTexture;
+    friend struct CubicTextureResources;
 
     VkDevice m_Device {};
   };
