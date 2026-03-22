@@ -35,7 +35,7 @@ namespace YAEngine
     info.fragmentShaderFile = "sky.frag";
     info.vertexShaderFile = "sky.vert";
     info.vertexInputFormat = "f3";
-    info.secondaryAttachment = true;
+    info.colorAttachmentCount = 5;
     info.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
     info.depthWrite = false;
     info.pushConstantSize = sizeof(glm::mat4) * 2;

@@ -4,10 +4,15 @@ layout(location = 0) in vec2 inTexCoord;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec3 inPosition;
 layout(location = 3) in mat3 inTBN;
+layout(location = 6) in vec4 inCurClipPos;
+layout(location = 7) in vec4 inPrevClipPos;
 
 layout(set = 0, binding = 0) uniform PerFrameUBO {
   mat4 view;
   mat4 proj;
+  mat4 invProj;
+  mat4 prevView;
+  mat4 prevProj;
   vec3 cameraPosition;
   float time;
   vec3 cameraDirection;
@@ -41,8 +46,9 @@ layout(set = 1, binding = 8) uniform samplerCube cubemapTexture;
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outNormal;
-
-#include "post.glsl"
+layout(location = 2) out vec2 outMaterial;
+layout(location = 3) out vec4 outAlbedo;
+layout(location = 4) out vec2 outVelocity;
 
 float Hash(vec2 p)
 {
@@ -54,6 +60,10 @@ void main() {
   float base = float(u_Material.textureMask & 1);
   vec4 albedo = texture(baseColorTexture, inTexCoord) * base + vec4(u_Material.albedo, 1.0) * (1 - base);
 
+  vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;
+  vec2 prevNDC = inPrevClipPos.xy / inPrevClipPos.w;
+  vec2 velocity = (curNDC - prevNDC) * 0.5;
+
   if (albedo.a < 0.5)
   {
     discard;
@@ -62,5 +72,8 @@ void main() {
   {
     outColor = vec4(albedo.rgb, 1.0);
     outNormal = vec4(inNormal, 1.0);
+    outMaterial = vec2(1.0, 0.0);
+    outAlbedo = vec4(albedo.rgb, 1.0);
+    outVelocity = velocity;
   }
 }

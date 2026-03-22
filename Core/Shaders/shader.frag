@@ -4,10 +4,15 @@ layout(location = 0) in vec2 inTexCoord;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec3 inPosition;
 layout(location = 3) in mat3 inTBN;
+layout(location = 6) in vec4 inCurClipPos;
+layout(location = 7) in vec4 inPrevClipPos;
 
 layout(set = 0, binding = 0) uniform PerFrameUBO {
   mat4 view;
   mat4 proj;
+  mat4 invProj;
+  mat4 prevView;
+  mat4 prevProj;
   vec3 cameraPosition;
   float time;
   vec3 cameraDirection;
@@ -57,8 +62,10 @@ layout(set = 1, binding = 10) uniform samplerCube irradianceCubemap;
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outNormal;
+layout(location = 2) out vec2 outMaterial;
+layout(location = 3) out vec4 outAlbedo;
+layout(location = 4) out vec2 outVelocity;
 
-#include "post.glsl"
 #include "pbr.glsl"
 
 vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
@@ -67,7 +74,6 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
 }
 
 void main() {
-  float exposure = u_Data.exposure;
   float gamma = u_Data.gamma;
 
   float hasNormalMap = float((u_Material.textureMask >> 5) & 1);
@@ -132,12 +138,9 @@ void main() {
   vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0, 0.8));
   resultColor += max(ambient, vec3(0));
 
-  vec3 mapped = resultColor * exposure;
-
-  mapped = pow(mapped, vec3(1.0 / gamma));
-
-  mapped = ACESFilm(mapped);
-//  vec3 finalColor = pow(mapped, vec3(1.0 / gamma));
+  vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;
+  vec2 prevNDC = inPrevClipPos.xy / inPrevClipPos.w;
+  vec2 velocity = (curNDC - prevNDC) * 0.5;
 
   if (albedo.a < 0.5)
   {
@@ -145,8 +148,11 @@ void main() {
   }
   else
   {
-    outColor = vec4(vec3(mapped), 1.0);
+    outColor = vec4(resultColor, 1.0);
     outNormal = vec4(normal, 1.0);
+    outMaterial = vec2(roughness, metallic);
+    outAlbedo = vec4(albedo.rgb, 1.0);
+    outVelocity = velocity;
   }
 
   if (bool(u_Data.currentTexture))

@@ -15,6 +15,9 @@ namespace YAEngine
     {
       glm::mat4 view;
       glm::mat4 proj;
+      glm::mat4 invProj;
+      glm::mat4 prevView;
+      glm::mat4 prevProj;
       glm::vec3 cameraPosition;
       float time;
       glm::vec3 cameraDirection;

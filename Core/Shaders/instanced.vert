@@ -9,10 +9,15 @@ layout(location = 0) out vec2 outTexCoord;
 layout(location = 1) out vec3 outNormal;
 layout(location = 2) out vec3 outPosition;
 layout(location = 3) out mat3 outTBN;
+layout(location = 6) out vec4 outCurClipPos;
+layout(location = 7) out vec4 outPrevClipPos;
 
 layout(set = 0, binding = 0) uniform PerFrameUBO {
   mat4 view;
   mat4 proj;
+  mat4 invProj;
+  mat4 prevView;
+  mat4 prevProj;
   vec3 cameraPosition;
   float time;
   vec3 cameraDirection;
@@ -38,9 +43,12 @@ layout(push_constant) uniform PushConstants
 } pc;
 
 void main() {
-  gl_Position = u_Data.proj * u_Data.view * pc.world * instances.data[gl_InstanceIndex + pc.offset] * vec4(inPosition, 1.0);
+  vec4 worldPos = pc.world * instances.data[gl_InstanceIndex + pc.offset] * vec4(inPosition, 1.0);
+  gl_Position = u_Data.proj * u_Data.view * worldPos;
+  outCurClipPos = gl_Position;
+  outPrevClipPos = u_Data.prevProj * u_Data.prevView * worldPos;
   outTexCoord = inTexCoord;
-  outPosition = vec3(pc.world * instances.data[gl_InstanceIndex + pc.offset] * vec4(inPosition, 1.0));
+  outPosition = vec3(worldPos);
   outNormal = normalize(mat3(pc.world * instances.data[gl_InstanceIndex + pc.offset]) * inNormal);
 
   mat3 normalMatrix = transpose(inverse(mat3(pc.world * instances.data[gl_InstanceIndex + pc.offset])));

@@ -70,56 +70,28 @@ namespace YAEngine
     multisampling.sampleShadingEnable = VK_FALSE;
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
-    VkPipelineColorBlendAttachmentState colorBlendAttachment{};
-    colorBlendAttachment.blendEnable = info.blending ? VK_TRUE : VK_FALSE;
-
-    colorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    colorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    colorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-
-    colorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    colorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    colorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
-
-    colorBlendAttachment.colorWriteMask =
+    VkPipelineColorBlendAttachmentState blendTemplate{};
+    blendTemplate.blendEnable = info.blending ? VK_TRUE : VK_FALSE;
+    blendTemplate.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+    blendTemplate.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blendTemplate.colorBlendOp = VK_BLEND_OP_ADD;
+    blendTemplate.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+    blendTemplate.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    blendTemplate.alphaBlendOp = VK_BLEND_OP_ADD;
+    blendTemplate.colorWriteMask =
         VK_COLOR_COMPONENT_R_BIT |
         VK_COLOR_COMPONENT_G_BIT |
         VK_COLOR_COMPONENT_B_BIT |
         VK_COLOR_COMPONENT_A_BIT;
 
-    VkPipelineColorBlendAttachmentState secondaryColorBlendAttachment{};
-    if (info.secondaryAttachment)
-    {
-      secondaryColorBlendAttachment.blendEnable = info.blending ? VK_TRUE : VK_FALSE;
-
-      secondaryColorBlendAttachment.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-      secondaryColorBlendAttachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-      secondaryColorBlendAttachment.colorBlendOp = VK_BLEND_OP_ADD;
-
-      secondaryColorBlendAttachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-      secondaryColorBlendAttachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-      secondaryColorBlendAttachment.alphaBlendOp = VK_BLEND_OP_ADD;
-
-      secondaryColorBlendAttachment.colorWriteMask =
-          VK_COLOR_COMPONENT_R_BIT |
-          VK_COLOR_COMPONENT_G_BIT |
-          VK_COLOR_COMPONENT_B_BIT |
-          VK_COLOR_COMPONENT_A_BIT;
-    }
-
-    VkPipelineColorBlendAttachmentState attachments[2];
-    attachments[0] = colorBlendAttachment;
-    if (info.secondaryAttachment)
-    {
-      attachments[1] = secondaryColorBlendAttachment;
-    }
+    std::vector<VkPipelineColorBlendAttachmentState> attachments(info.colorAttachmentCount, blendTemplate);
 
     VkPipelineColorBlendStateCreateInfo colorBlending{};
     colorBlending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
     colorBlending.logicOpEnable = VK_FALSE;
     colorBlending.logicOp = VK_LOGIC_OP_COPY;
-    colorBlending.attachmentCount = 1 + info.secondaryAttachment;
-    colorBlending.pAttachments = attachments;
+    colorBlending.attachmentCount = info.colorAttachmentCount;
+    colorBlending.pAttachments = attachments.data();
     colorBlending.blendConstants[0] = 0.0f;
     colorBlending.blendConstants[1] = 0.0f;
     colorBlending.blendConstants[2] = 0.0f;

@@ -66,7 +66,10 @@ namespace YAEngine
     RGHandle m_MainColor {};
     RGHandle m_MainNormals {};
     RGHandle m_MainDepth {};
+    RGHandle m_MainMaterial {};
+    RGHandle m_MainAlbedo {};
     RGHandle m_SSRColor {};
+    RGHandle m_MainVelocity {};
     RGHandle m_TAAHistory0 {};
     RGHandle m_TAAHistory1 {};
 
@@ -84,12 +87,15 @@ namespace YAEngine
     uint32_t m_TAAIndex = 0;
     bool b_Resized = false;
 
+    glm::mat4 m_PrevView = glm::mat4(1.0f);
+    glm::mat4 m_PrevProj = glm::mat4(1.0f);
+
     PerFrameData m_PerFrameData {};
     SkyBox m_SkyBox;
 
-    VulkanDescriptorSet m_SwapChainDescriptorSet;
+    std::vector<VulkanDescriptorSet> m_SwapChainDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
-    VulkanDescriptorSet m_TAADescriptorSet;
+    std::vector<VulkanDescriptorSet> m_TAADescriptorSets;
 
     VulkanDescriptorSet m_InstanceDescriptorSet;
     VulkanStorageBuffer m_InstanceBuffer;

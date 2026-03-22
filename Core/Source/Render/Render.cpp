@@ -32,18 +32,30 @@ namespace YAEngine
       .format = VK_FORMAT_D32_SFLOAT,
       .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
     });
+    m_MainMaterial = m_Graph.CreateResource({
+      .name = "mainMaterial",
+      .format = VK_FORMAT_R8G8_UNORM
+    });
+    m_MainAlbedo = m_Graph.CreateResource({
+      .name = "mainAlbedo",
+      .format = VK_FORMAT_R8G8B8A8_UNORM
+    });
+    m_MainVelocity = m_Graph.CreateResource({
+      .name = "mainVelocity",
+      .format = VK_FORMAT_R16G16_SFLOAT
+    });
     m_SSRColor = m_Graph.CreateResource({
       .name = "ssrColor",
-      .format = swapFormat
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT
     });
     m_TAAHistory0 = m_Graph.CreateResource({
       .name = "taaHistory0",
-      .format = swapFormat,
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
       .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
     });
     m_TAAHistory1 = m_Graph.CreateResource({
       .name = "taaHistory1",
-      .format = swapFormat,
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
       .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
     });
 
@@ -51,7 +63,7 @@ namespace YAEngine
     m_MainPassIndex = m_Graph.AddPass({
       .name = "MainPass",
       .inputs = {},
-      .colorOutputs = {m_MainColor, m_MainNormals},
+      .colorOutputs = {m_MainColor, m_MainNormals, m_MainMaterial, m_MainAlbedo, m_MainVelocity},
       .depthOutput = m_MainDepth,
       .execute = [this](const RGExecuteContext& ctx) {
         auto* app = static_cast<Application*>(ctx.userData);
@@ -70,7 +82,7 @@ namespace YAEngine
 
     m_SSRPassIndex = m_Graph.AddPass({
       .name = "SSRPass",
-      .inputs = {m_MainColor, m_MainDepth, m_MainNormals},
+      .inputs = {m_MainColor, m_MainDepth, m_MainNormals, m_MainMaterial, m_MainAlbedo, m_MainVelocity},
       .colorOutputs = {m_SSRColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
@@ -78,6 +90,8 @@ namespace YAEngine
         auto& mainColor = m_Graph.GetResource(m_MainColor);
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
         auto& mainNormals = m_Graph.GetResource(m_MainNormals);
+        auto& mainMaterial = m_Graph.GetResource(m_MainMaterial);
+        auto& mainAlbedo = m_Graph.GetResource(m_MainAlbedo);
 
         m_SSRPipeline.Bind(ctx.cmd);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
@@ -86,6 +100,10 @@ namespace YAEngine
           mainDepth.GetView(), mainDepth.GetSampler(), mainDepth.GetLayout());
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
           mainNormals.GetView(), mainNormals.GetSampler(), mainNormals.GetLayout());
+        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
+          mainMaterial.GetView(), mainMaterial.GetSampler(), mainMaterial.GetLayout());
+        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
+          mainAlbedo.GetView(), mainAlbedo.GetSampler(), mainAlbedo.GetLayout());
 
         m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
         m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_SSRPassDescriptorSets[currentFrame].Get()}, 1);
@@ -95,20 +113,25 @@ namespace YAEngine
 
     m_TAAPassIndex = m_Graph.AddPass({
       .name = "TAAPass",
-      .inputs = {m_SSRColor, m_TAAHistory1},
+      .inputs = {m_SSRColor, m_TAAHistory1, m_MainVelocity},
       .colorOutputs = {m_TAAHistory0},
       .externalFramebuffer = true,
       .execute = [this](const RGExecuteContext& ctx) {
         auto& ssrColor = m_Graph.GetResource(m_SSRColor);
         auto historyReadHandle = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
         auto& historyPrev = m_Graph.GetResource(historyReadHandle);
+        auto& velocity = m_Graph.GetResource(m_MainVelocity);
 
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
         m_TAAPipeline.Bind(ctx.cmd);
-        m_TAADescriptorSet.WriteCombinedImageSampler(0,
+        m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(0,
           ssrColor.GetView(), ssrColor.GetSampler(), ssrColor.GetLayout());
-        m_TAADescriptorSet.WriteCombinedImageSampler(1,
+        m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(1,
           historyPrev.GetView(), historyPrev.GetSampler(), historyPrev.GetLayout());
-        m_TAAPipeline.BindDescriptorSets(ctx.cmd, {m_TAADescriptorSet.Get()}, 0);
+        m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(2,
+          velocity.GetView(), velocity.GetSampler(), velocity.GetLayout());
+        m_TAAPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_TAAPipeline.BindDescriptorSets(ctx.cmd, {m_TAADescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
       }
     });
@@ -127,10 +150,12 @@ namespace YAEngine
         auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
         auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
 
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
         m_QuadPipeline.Bind(ctx.cmd);
-        m_SwapChainDescriptorSet.WriteCombinedImageSampler(0,
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
           historyCurrent.GetView(), historyCurrent.GetSampler(), historyCurrent.GetLayout());
-        m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSet.Get()}, 0);
+        m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
 
         ImGui_ImplVulkan_NewFrame();
@@ -290,8 +315,14 @@ namespace YAEngine
     }
     m_TAADepth.Destroy(ctx);
 
-    m_SwapChainDescriptorSet.Destroy();
-    m_TAADescriptorSet.Destroy();
+    for (auto& set : m_SwapChainDescriptorSets)
+    {
+      set.Destroy();
+    }
+    for (auto& set : m_TAADescriptorSets)
+    {
+      set.Destroy();
+    }
     for (auto& set : m_SSRPassDescriptorSets)
     {
       set.Destroy();
@@ -481,6 +512,12 @@ namespace YAEngine
 
     proj[1][1] *= -1.0f;
 
+    // Store previous frame matrices (unjittered) for reprojection
+    m_PerFrameData.ubo.prevView = m_PrevView;
+    m_PerFrameData.ubo.prevProj = m_PrevProj;
+    m_PrevView = view;
+    m_PrevProj = proj;
+
     glm::vec2 jitter = GetTAAJitter(m_GlobalFrameIndex);
 
     jitter.x /= float(app->GetWindow().GetWidth());
@@ -491,6 +528,7 @@ namespace YAEngine
 
     m_PerFrameData.ubo.view = view;
     m_PerFrameData.ubo.proj = proj;
+    m_PerFrameData.ubo.invProj = glm::inverse(proj);
     m_PerFrameData.ubo.nearPlane = camera.nearPlane;
     m_PerFrameData.ubo.farPlane = camera.farPlane;
     m_PerFrameData.ubo.cameraPosition = transform.position;
@@ -531,7 +569,7 @@ namespace YAEngine
       .fragmentShaderFile = "shader.frag",
       .vertexShaderFile = "shader.vert",
       .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
-      .secondaryAttachment = true,
+      .colorAttachmentCount = 5,
       .vertexInputFormat = "f3f2f3f4",
       .sets = std::vector({
         m_PerFrameData.GetLayout(),
@@ -555,28 +593,37 @@ namespace YAEngine
     forwardInfo.vertexShaderFile = "shader.vert";
     m_ForwardPipelineNoShading.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
-    // Swapchain descriptor set
+    // Swapchain descriptor sets (set 1 — set 0 is PerFrameData)
     SetDescription desc = {
-      .set = 0,
+      .set = 1,
       .bindings = {
         {
           { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
-    m_SwapChainDescriptorSet.Init(ctx, desc);
+    m_SwapChainDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      m_SwapChainDescriptorSets[i].Init(ctx, desc);
+    }
 
-    // TAA descriptor set
+    // TAA descriptor sets (set 1 — set 0 is PerFrameData)
     SetDescription taaDesc = {
-      .set = 0,
+      .set = 1,
       .bindings = {
         {
           { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
-    m_TAADescriptorSet.Init(ctx, taaDesc);
+    m_TAADescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      m_TAADescriptorSets[i].Init(ctx, taaDesc);
+    }
 
     // Quad pipeline — use swapchain render pass
     VkRenderPass swapRP = m_Graph.GetPassRenderPass(m_SwapchainPassIndex);
@@ -587,7 +634,8 @@ namespace YAEngine
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({
-        m_SwapChainDescriptorSet.GetLayout(),
+        m_PerFrameData.GetLayout(),
+        m_SwapChainDescriptorSets[0].GetLayout(),
       })
     };
 
@@ -596,7 +644,7 @@ namespace YAEngine
     // TAA pipeline — use TAA render pass (compatible format)
     VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
     quadInfo.fragmentShaderFile = "taa.frag";
-    quadInfo.sets = std::vector({ m_TAADescriptorSet.GetLayout() });
+    quadInfo.sets = std::vector({ m_PerFrameData.GetLayout(), m_TAADescriptorSets[0].GetLayout() });
     m_TAAPipeline.Init(ctx.device, taaRP, quadInfo, pipelineCache);
 
     // SSR descriptor sets and pipeline
@@ -612,6 +660,8 @@ namespace YAEngine
             { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
