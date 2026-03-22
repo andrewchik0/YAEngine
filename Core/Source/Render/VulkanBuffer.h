@@ -42,6 +42,7 @@ namespace YAEngine
 
     uint32_t Allocate(uint32_t size)
     {
+      assert(m_FilledData + size <= m_Size && "VulkanBuffer::Allocate: out of buffer space");
       uint32_t offset = m_FilledData;
       m_FilledData += size;
       return offset;

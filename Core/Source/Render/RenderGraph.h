@@ -28,6 +28,7 @@ namespace YAEngine
   {
     VkCommandBuffer cmd;
     VkExtent2D extent;
+    void* userData = nullptr;
   };
 
   using RGCallback = std::function<void(const RGExecuteContext&)>;
@@ -64,7 +65,7 @@ namespace YAEngine
     void SetPassInput(uint32_t pass, uint32_t slot, RGHandle resource);
     void SetPassColorOutput(uint32_t pass, uint32_t slot, RGHandle resource);
 
-    void Execute(VkCommandBuffer cmd);
+    void Execute(VkCommandBuffer cmd, void* userData = nullptr);
     void Resize(VkExtent2D newExtent);
 
     VulkanImage& GetResource(RGHandle handle);

@@ -89,6 +89,7 @@ namespace YAEngine
     }
     else
     {
+      assert(false && "TransitionImageLayout: unhandled layout transition");
       barrier.srcAccessMask = 0;
       barrier.dstAccessMask = 0;
     }

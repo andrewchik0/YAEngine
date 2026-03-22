@@ -1,6 +1,5 @@
 #pragma once
 
-#include "VulkanRenderPass.h"
 #include "VulkanTexture.h"
 
 namespace YAEngine

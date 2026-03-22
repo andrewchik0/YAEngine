@@ -23,8 +23,6 @@ set(SOURCE_FILES
   Source/Render/VulkanSwapchain.h
   Source/Render/VulkanPipeline.cpp
   Source/Render/VulkanPipeline.h
-  Source/Render/VulkanRenderPass.cpp
-  Source/Render/VulkanRenderPass.h
   Source/Render/VulkanCommandBuffer.cpp
   Source/Render/VulkanCommandBuffer.h
   Source/Render/VulkanSync.cpp
@@ -52,8 +50,6 @@ set(SOURCE_FILES
   Source/Assets/MeshManager.cpp
   Source/Assets/MeshManager.h
   Source/Assets/AssetManagerBase.h
-  Source/Assets/AssetManager.cpp
-  Source/Assets/AssetManager.h
   Source/Utils/Random.h
   Source/Assets/TextureManager.cpp
   Source/Assets/TextureManager.h
@@ -79,8 +75,6 @@ set(SOURCE_FILES
   Source/Render/SkyBox.cpp
   Source/Render/SkyBox.h
   Source/Utils/Utils.h
-  Source/Render/VulkanFramebuffer.cpp
-  Source/Render/VulkanFramebuffer.h
   Source/Render/VulkanStorageBuffer.cpp
   Source/Render/VulkanStorageBuffer.h
   Source/Render/RenderContext.h

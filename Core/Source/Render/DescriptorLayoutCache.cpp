@@ -42,9 +42,9 @@ namespace YAEngine
       return it->second;
 
     std::vector<VkDescriptorSetLayoutBinding> vkBindings;
-    vkBindings.reserve(bindings.size());
+    vkBindings.reserve(key.bindings.size());
 
-    for (const BindingDescription& b : bindings)
+    for (const BindingDescription& b : key.bindings)
     {
       VkDescriptorSetLayoutBinding binding{};
       binding.binding = b.binding;

@@ -416,11 +416,12 @@ namespace YAEngine
     }
   }
 
-  void RenderGraph::Execute(VkCommandBuffer cmd)
+  void RenderGraph::Execute(VkCommandBuffer cmd, void* userData)
   {
     RGExecuteContext ctx;
     ctx.cmd = cmd;
     ctx.extent = m_Extent;
+    ctx.userData = userData;
 
     for (auto passIndex : m_ExecutionOrder)
     {
@@ -461,10 +462,15 @@ namespace YAEngine
       vkCmdEndRenderPass(cmd);
 
       // Update tracked layouts after render pass
-      for (auto handle : pass.info.colorOutputs)
+      for (size_t i = 0; i < pass.info.colorOutputs.size(); i++)
       {
-        m_CurrentLayouts[handle] = pass.info.finalColorLayout;
-        ResolveResource(handle).SetLayout(pass.info.finalColorLayout);
+        auto handle = pass.info.colorOutputs[i];
+        // Attachment 0 gets finalColorLayout; additional attachments always end as COLOR_ATTACHMENT_OPTIMAL
+        VkImageLayout layout = (i == 0)
+          ? pass.info.finalColorLayout
+          : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+        m_CurrentLayouts[handle] = layout;
+        ResolveResource(handle).SetLayout(layout);
       }
       if (pass.info.depthOutput != RG_INVALID_HANDLE)
       {
@@ -481,18 +487,16 @@ namespace YAEngine
 
   void RenderGraph::SetPassInput(uint32_t pass, uint32_t slot, RGHandle resource)
   {
-    if (slot < m_Passes[pass].info.inputs.size())
-    {
-      m_Passes[pass].info.inputs[slot] = resource;
-    }
+    assert(pass < m_Passes.size() && "SetPassInput: pass index out of range");
+    assert(slot < m_Passes[pass].info.inputs.size() && "SetPassInput: slot out of range");
+    m_Passes[pass].info.inputs[slot] = resource;
   }
 
   void RenderGraph::SetPassColorOutput(uint32_t pass, uint32_t slot, RGHandle resource)
   {
-    if (slot < m_Passes[pass].info.colorOutputs.size())
-    {
-      m_Passes[pass].info.colorOutputs[slot] = resource;
-    }
+    assert(pass < m_Passes.size() && "SetPassColorOutput: pass index out of range");
+    assert(slot < m_Passes[pass].info.colorOutputs.size() && "SetPassColorOutput: slot out of range");
+    m_Passes[pass].info.colorOutputs[slot] = resource;
   }
 
   VulkanImage& RenderGraph::GetResource(RGHandle handle)

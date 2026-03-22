@@ -8,21 +8,9 @@
 #include "SkyBox.h"
 #include "VulkanPipeline.h"
 #include "VulkanStorageBuffer.h"
-#include "Assets/MeshManager.h"
 
 namespace YAEngine
 {
-  struct InstanceData
-  {
-    glm::mat4 model;
-  };
-
-  struct MeshBatch
-  {
-    MeshHandle* mesh;
-    std::vector<InstanceData> instances;
-  };
-
   struct Light
   {
     glm::vec3 position;
@@ -95,12 +83,9 @@ namespace YAEngine
     uint64_t m_GlobalFrameIndex = 0;
     uint32_t m_TAAIndex = 0;
     bool b_Resized = false;
-    Application* m_CurrentApp = nullptr;
 
     PerFrameData m_PerFrameData {};
     SkyBox m_SkyBox;
-
-    std::unordered_map<MeshHandle, MeshBatch> m_Batches;
 
     VulkanDescriptorSet m_SwapChainDescriptorSet;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;

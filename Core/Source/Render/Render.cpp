@@ -54,6 +54,7 @@ namespace YAEngine
       .colorOutputs = {m_MainColor, m_MainNormals},
       .depthOutput = m_MainDepth,
       .execute = [this](const RGExecuteContext& ctx) {
+        auto* app = static_cast<Application*>(ctx.userData);
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         m_PerFrameData.SetUp(currentFrame);
 
@@ -63,7 +64,7 @@ namespace YAEngine
         m_ForwardPipelineDoubleSided.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
         SetViewportAndScissor();
 
-        DrawMeshes(m_CurrentApp);
+        DrawMeshes(app);
       }
     });
 
@@ -120,6 +121,7 @@ namespace YAEngine
       .externalFormat = swapFormat,
       .finalColorLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
       .execute = [this](const RGExecuteContext& ctx) {
+        auto* app = static_cast<Application*>(ctx.userData);
         SetViewportAndScissor();
 
         auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
@@ -134,7 +136,7 @@ namespace YAEngine
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        m_CurrentApp->RenderUI();
+        app->RenderUI();
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), ctx.cmd);
       }
@@ -350,7 +352,6 @@ namespace YAEngine
       return;
     }
 
-    m_CurrentApp = app;
     auto cmd = m_Backend.GetCurrentCommandBuffer();
 
     SetUpCamera(app);
@@ -375,7 +376,7 @@ namespace YAEngine
       m_Backend.GetSwapChain().GetFramebuffer(*imageIndex));
 
     // Execute all passes
-    m_Graph.Execute(cmd);
+    m_Graph.Execute(cmd, app);
 
     if (!m_Backend.EndFrame(*imageIndex, b_Resized))
     {
@@ -383,7 +384,6 @@ namespace YAEngine
     }
     m_TAAIndex = (m_TAAIndex + 1) % 2;
     m_GlobalFrameIndex++;
-    m_CurrentApp = nullptr;
   }
 
   void Render::SetViewportAndScissor()
@@ -549,6 +549,7 @@ namespace YAEngine
     forwardInfo.doubleSided = false;
     m_ForwardPipelineInstanced.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
+    forwardInfo.sets.pop_back();
     forwardInfo.doubleSided = true;
     forwardInfo.fragmentShaderFile = "no_shading.frag";
     forwardInfo.vertexShaderFile = "shader.vert";

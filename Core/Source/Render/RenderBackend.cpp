@@ -21,7 +21,10 @@ namespace YAEngine
 
     VkPipelineCacheCreateInfo cacheInfo{};
     cacheInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
-    vkCreatePipelineCache(m_Device.Get(), &cacheInfo, nullptr, &m_PipelineCache);
+    if (vkCreatePipelineCache(m_Device.Get(), &cacheInfo, nullptr, &m_PipelineCache) != VK_SUCCESS)
+    {
+      throw std::runtime_error("Failed to create pipeline cache!");
+    }
 
     m_Context.device = m_Device.Get();
     m_Context.allocator = m_Allocator.Get();
