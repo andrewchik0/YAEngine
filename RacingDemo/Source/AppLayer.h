@@ -63,6 +63,10 @@ public:
 
       App().GetScene().GetTransform(car).position.y = -0.82f;
       App().GetScene().SetDoubleSided(car);
+
+      auto* controls = App().GetLayer<ControlsLayer>();
+      if (controls)
+        controls->SetTarget(car);
     }
 
     {

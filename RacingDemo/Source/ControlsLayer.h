@@ -12,17 +12,27 @@ public:
   bool arrowUp = false;
   bool arrowDown = false;
 
+  YAEngine::Entity m_Car = entt::null;
+  YAEngine::Entity m_Camera = entt::null;
+
   void OnSceneReady() override
   {
     onKeyboard = App().Events().Subscribe<YAEngine::KeyEvent>([&](auto event) { OnKeyboard(event); });
 
-    auto camera = App().GetScene().CreateEntity("camera");
-    App().GetScene().AddComponent<YAEngine::CameraComponent>(camera);
-    App().GetScene().AddComponent<FollowCameraComponent>(camera);
+    m_Camera = App().GetScene().CreateEntity("camera");
+    App().GetScene().AddComponent<YAEngine::CameraComponent>(m_Camera);
+    App().GetScene().AddComponent<FollowCameraComponent>(m_Camera);
 
     glm::dvec3 eulerDegrees = glm::vec3(160.0, -0.0, -180.0);
     glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
-    App().GetScene().GetTransform(camera).rotation = glm::quat(eulerRadians);
+    App().GetScene().GetTransform(m_Camera).rotation = glm::quat(eulerRadians);
+  }
+
+  void SetTarget(YAEngine::Entity car)
+  {
+    m_Car = car;
+    if (m_Camera != entt::null)
+      App().GetScene().GetComponent<FollowCameraComponent>(m_Camera).target = car;
   }
 
   void OnDetach() override

@@ -2,20 +2,11 @@
 
 void ControlsLayer::Update(double dt)
 {
-  // Find vehicle via ECS
-  auto vehicleView = App().GetScene().GetView<VehicleComponent, YAEngine::TransformComponent>();
+  if (m_Car == entt::null) return;
+  if (!App().GetScene().HasComponent<VehicleComponent>(m_Car)) return;
 
-  YAEngine::Entity car = entt::null;
-  VehicleComponent* vehicle = nullptr;
-
-  for (auto e : vehicleView)
-  {
-    car = e;
-    vehicle = &App().GetScene().GetComponent<VehicleComponent>(e);
-    break;
-  }
-
-  if (car == entt::null) return;
+  auto car = m_Car;
+  auto* vehicle = &App().GetScene().GetComponent<VehicleComponent>(car);
 
   glm::dvec3 position = App().GetScene().GetTransform(car).position;
   glm::dquat rotation = App().GetScene().GetTransform(car).rotation;
@@ -63,14 +54,12 @@ void ControlsLayer::Update(double dt)
   App().GetScene().GetTransform(car).rotation = rotation;
   App().GetScene().MarkDirty(car);
 
-  // Update follow camera via ECS
-  auto camView = App().GetScene().GetView<FollowCameraComponent, YAEngine::CameraComponent, YAEngine::TransformComponent>();
-
-  for (auto camEntity : camView)
+  // Update follow camera
+  if (m_Camera != entt::null && App().GetScene().HasComponent<FollowCameraComponent>(m_Camera))
   {
-    auto& follow = App().GetScene().GetComponent<FollowCameraComponent>(camEntity);
-    auto& cam = App().GetScene().GetComponent<YAEngine::CameraComponent>(camEntity);
-    auto& camTc = App().GetScene().GetTransform(camEntity);
+    auto& follow = App().GetScene().GetComponent<FollowCameraComponent>(m_Camera);
+    auto& cam = App().GetScene().GetComponent<YAEngine::CameraComponent>(m_Camera);
+    auto& camTc = App().GetScene().GetTransform(m_Camera);
 
     glm::dvec3 eulerDegrees = glm::dvec3(160.0, -0.0, -180.0);
     glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
@@ -105,8 +94,6 @@ void ControlsLayer::Update(double dt)
       double lerpSpeed = 5.0;
       cam.fov = float(glm::mix(double(cam.fov), targetFov, 1.0 - std::exp(-lerpSpeed * dt)));
     }
-
-    break;
   }
 
   // Update wheels via ECS
