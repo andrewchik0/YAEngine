@@ -63,52 +63,54 @@ namespace YAEngine
   void VulkanMaterial::Bind(Application* app, Material& material, uint32_t currentFrame, const VulkanTexture& noneTexture)
   {
     int textureMask = 0;
+    auto& textures = app->GetAssetManager().Textures();
+    auto& cubeMaps = app->GetAssetManager().CubeMaps();
 
-    if (app->GetAssetManager().Textures().Has(material.baseColorTexture))
+    if (textures.Has(material.baseColorTexture))
     {
-      auto& base = app->GetAssetManager().Textures().Get(material.baseColorTexture).m_VulkanTexture;
+      auto& base = textures.GetVulkanTexture(material.baseColorTexture);
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(1, base.GetView(), base.GetSampler());
       textureMask |= (1 << 0);
     }
-    if (app->GetAssetManager().Textures().Has(material.metallicTexture))
+    if (textures.Has(material.metallicTexture))
     {
-      auto& metallic = app->GetAssetManager().Textures().Get(material.metallicTexture).m_VulkanTexture;
+      auto& metallic = textures.GetVulkanTexture(material.metallicTexture);
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(2, metallic.GetView(), metallic.GetSampler());
       textureMask |= (1 << 1);
     }
-    if (app->GetAssetManager().Textures().Has(material.roughnessTexture))
+    if (textures.Has(material.roughnessTexture))
     {
-      auto& roughness = app->GetAssetManager().Textures().Get(material.roughnessTexture).m_VulkanTexture;
+      auto& roughness = textures.GetVulkanTexture(material.roughnessTexture);
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(3, roughness.GetView(), roughness.GetSampler());
       textureMask |= (1 << 2);
     }
-    if (app->GetAssetManager().Textures().Has(material.specularTexture))
+    if (textures.Has(material.specularTexture))
     {
-      auto& specular = app->GetAssetManager().Textures().Get(material.specularTexture).m_VulkanTexture;
+      auto& specular = textures.GetVulkanTexture(material.specularTexture);
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(4, specular.GetView(), specular.GetSampler());
       textureMask |= (1 << 3);
     }
-    if (app->GetAssetManager().Textures().Has(material.emissiveTexture))
+    if (textures.Has(material.emissiveTexture))
     {
-      auto& emissive = app->GetAssetManager().Textures().Get(material.emissiveTexture).m_VulkanTexture;
+      auto& emissive = textures.GetVulkanTexture(material.emissiveTexture);
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(5, emissive.GetView(), emissive.GetSampler());
       textureMask |= (1 << 4);
     }
-    if (app->GetAssetManager().Textures().Has(material.normalTexture))
+    if (textures.Has(material.normalTexture))
     {
-      auto& normal = app->GetAssetManager().Textures().Get(material.normalTexture).m_VulkanTexture;
+      auto& normal = textures.GetVulkanTexture(material.normalTexture);
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(6, normal.GetView(), normal.GetSampler());
       textureMask |= (1 << 5);
     }
-    if (app->GetAssetManager().Textures().Has(material.heightTexture))
+    if (textures.Has(material.heightTexture))
     {
-      auto& height = app->GetAssetManager().Textures().Get(material.heightTexture).m_VulkanTexture;
+      auto& height = textures.GetVulkanTexture(material.heightTexture);
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(7, height.GetView(), height.GetSampler());
       textureMask |= (1 << 6);
     }
-    if (app->GetAssetManager().CubeMaps().Has(material.cubemap))
+    if (cubeMaps.Has(material.cubemap))
     {
-      auto& cubemap = app->GetAssetManager().CubeMaps().Get(material.cubemap).m_CubeTexture;
+      auto& cubemap = cubeMaps.GetVulkanCubicTexture(material.cubemap);
       auto& brdfLut = app->GetRender().GetCubicResources().brdfLut;
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(8, cubemap.GetPrefilterView(), cubemap.GetPrefilterSampler());
       m_DescriptorSets[currentFrame].WriteCombinedImageSampler(9, brdfLut.GetView(), brdfLut.GetSampler());

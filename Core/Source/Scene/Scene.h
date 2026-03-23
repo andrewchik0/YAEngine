@@ -15,6 +15,7 @@ namespace YAEngine
   public:
 
     [[nodiscard]] Entity CreateEntity(std::string_view name);
+    void DestroyEntity(Entity e);
     void SetParent(Entity child, Entity parent);
 
     TransformComponent& GetTransform(Entity e);

@@ -50,6 +50,9 @@ set(SOURCE_FILES
   Source/Assets/MeshManager.cpp
   Source/Assets/MeshManager.h
   Source/Assets/AssetManagerBase.h
+  Source/Assets/IAssetManager.h
+  Source/Assets/Handle.h
+  Source/Assets/SlotMap.h
   Source/Utils/Random.h
   Source/Assets/TextureManager.cpp
   Source/Assets/TextureManager.h
@@ -59,6 +62,11 @@ set(SOURCE_FILES
   Source/FreeCamLayer.h
   Source/FreeCamLayer.cpp
   Source/Utils/Timer.h
+  Source/Assets/ModelDescription.h
+  Source/Assets/ModelImporter.cpp
+  Source/Assets/ModelImporter.h
+  Source/Assets/ModelBuilder.cpp
+  Source/Assets/ModelBuilder.h
   Source/Assets/ModelManager.cpp
   Source/Assets/ModelManager.h
   Source/EventBus.h

@@ -1,5 +1,6 @@
 #pragma once
 #include "AssetManagerBase.h"
+#include "IAssetManager.h"
 #include "Render/VulkanCubicTexture.h"
 
 namespace YAEngine
@@ -12,31 +13,33 @@ namespace YAEngine
   private:
     VulkanCubicTexture m_CubeTexture;
 
-    friend class Render;
     friend class CubeMapManager;
-    friend class VulkanMaterial;
   };
 
-  using CubeMapHandle = AssetHandle;
-
-  class CubeMapManager : public AssetManagerBase<CubeMap>
+  class CubeMapManager : public AssetManagerBase<CubeMap, CubeMapTag>, public IAssetManager
   {
   public:
 
-    void SetRenderContext(const RenderContext& ctx, CubicTextureResources& cubicRes)
+    void SetRenderContext(const AssetManagerInitInfo& info) override
     {
-      m_Ctx = &ctx;
-      m_CubicRes = &cubicRes;
+      m_Ctx = info.ctx;
+      m_CubicRes = info.cubicResources;
     }
 
     [[nodiscard]]
     CubeMapHandle Load(const std::string& filePath);
     void Destroy(CubeMapHandle handle);
 
-    void DestroyAll();
+    void DestroyAll() override;
+
+    VulkanCubicTexture& GetVulkanCubicTexture(CubeMapHandle handle)
+    {
+      return Get(handle).m_CubeTexture;
+    }
 
   private:
     const RenderContext* m_Ctx = nullptr;
     CubicTextureResources* m_CubicRes = nullptr;
+    std::unordered_map<std::string, CubeMapHandle> m_Cache;
   };
 }

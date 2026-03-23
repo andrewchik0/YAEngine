@@ -8,15 +8,20 @@ namespace YAEngine
   {
     auto material = std::make_unique<Material>();
     material->m_VulkanMaterial.Init(*m_Ctx, *m_NoneTexture);
-    return AssetManagerBase::Load(std::move(material));
+    return Store(std::move(material));
+  }
+
+  void MaterialManager::Destroy(MaterialHandle handle)
+  {
+    Get(handle).m_VulkanMaterial.Destroy(*m_Ctx);
+    Remove(handle);
   }
 
   void MaterialManager::DestroyAll()
   {
-    for (auto& mat : GetAll())
-    {
-      mat.second->m_VulkanMaterial.Destroy(*m_Ctx);
-    }
-    GetAll().clear();
+    ForEach([this](Material& mat) {
+      mat.m_VulkanMaterial.Destroy(*m_Ctx);
+    });
+    Clear();
   }
 }

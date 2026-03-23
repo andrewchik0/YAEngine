@@ -1,5 +1,7 @@
 #include "TextureManager.h"
 
+#include <filesystem>
+
 #include "Render/RenderContext.h"
 
 #define STB_IMAGE_IMPLEMENTATION
@@ -9,12 +11,19 @@ namespace YAEngine
 {
   TextureHandle TextureManager::Load(const std::string& path, bool* hasAlpha, bool linear)
   {
+    auto canonical = std::filesystem::weakly_canonical(path).string();
+    CacheKey key { canonical, linear };
+
+    auto it = m_Cache.find(key);
+    if (it != m_Cache.end() && Has(it->second))
+    {
+      return it->second;
+    }
+
     auto texture = std::make_unique<Texture>();
     int32_t width, height, channels;
 
-    auto filePath = path;
-
-    if (void* data = stbi_load(filePath.c_str(), &width, &height, &channels, 4))
+    if (void* data = stbi_load(path.c_str(), &width, &height, &channels, 4))
     {
       if (hasAlpha != nullptr)
       {
@@ -24,7 +33,9 @@ namespace YAEngine
       texture->m_VulkanTexture.Load(*m_Ctx, data, width, height, 4, format);
       stbi_image_free(data);
 
-      return AssetManagerBase::Load(std::move(texture));
+      auto handle = Store(std::move(texture));
+      m_Cache[key] = handle;
+      return handle;
     }
     else
     {
@@ -36,15 +47,19 @@ namespace YAEngine
   {
     Get(handle).m_VulkanTexture.Destroy(*m_Ctx);
     Remove(handle);
+
+    std::erase_if(m_Cache, [&](const auto& pair) {
+      return pair.second == handle;
+    });
   }
 
   void TextureManager::DestroyAll()
   {
-    for (auto& texture : GetAll())
-    {
-      texture.second.get()->m_VulkanTexture.Destroy(*m_Ctx);
-    }
-    GetAll().clear();
+    ForEach([this](Texture& texture) {
+      texture.m_VulkanTexture.Destroy(*m_Ctx);
+    });
+    Clear();
+    m_Cache.clear();
   }
 
   bool TextureManager::CheckAlpha(void* data, uint32_t width, uint32_t height)

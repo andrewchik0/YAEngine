@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AssetManagerBase.h"
+#include "IAssetManager.h"
 #include "CubeMapManager.h"
 
 #include "TextureManager.h"
@@ -35,27 +36,27 @@ namespace YAEngine
     VulkanMaterial m_VulkanMaterial;
 
     friend class MaterialManager;
-    friend class ModelManager;
-    friend class VulkanMaterial;
-    friend class AssetManager;
-    friend class Render;
   };
 
-  using MaterialHandle = AssetHandle;
-
-  class MaterialManager : public AssetManagerBase<Material>
+  class MaterialManager : public AssetManagerBase<Material, MaterialTag>, public IAssetManager
   {
   public:
 
-    void SetRenderContext(const RenderContext& ctx, const VulkanTexture& noneTexture)
+    void SetRenderContext(const AssetManagerInitInfo& info) override
     {
-      m_Ctx = &ctx;
-      m_NoneTexture = &noneTexture;
+      m_Ctx = info.ctx;
+      m_NoneTexture = info.noneTexture;
     }
 
     [[nodiscard]]
     MaterialHandle Create();
-    void DestroyAll();
+    void Destroy(MaterialHandle handle);
+    void DestroyAll() override;
+
+    VulkanMaterial& GetVulkanMaterial(MaterialHandle handle)
+    {
+      return Get(handle).m_VulkanMaterial;
+    }
   private:
     const RenderContext* m_Ctx = nullptr;
     const VulkanTexture* m_NoneTexture = nullptr;

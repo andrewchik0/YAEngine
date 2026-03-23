@@ -4,25 +4,39 @@
 
 namespace YAEngine
 {
+  AssetManager::AssetManager()
+  {
+    Register<TextureManager>();
+    Register<MeshManager>();
+    Register<MaterialManager>();
+    Register<CubeMapManager>();
+    Register<ModelManager>();
+  }
+
   void AssetManager::Init()
   {
-    m_ModelManager = ModelManager(&Application::Get().GetScene(), this);
+    Models() = ModelManager(&Application::Get().GetScene(), this);
   }
 
   void AssetManager::SetRenderContext(const RenderContext& ctx, const VulkanTexture& noneTexture, CubicTextureResources& cubicResources)
   {
-    m_TextureManager.SetRenderContext(ctx);
-    m_MeshManager.SetRenderContext(ctx);
-    m_MaterialManager.SetRenderContext(ctx, noneTexture);
-    m_CubeMapManager.SetRenderContext(ctx, cubicResources);
+    AssetManagerInitInfo info {
+      .ctx = &ctx,
+      .noneTexture = &noneTexture,
+      .cubicResources = &cubicResources
+    };
+
+    for (auto& [typeIdx, manager] : m_Registry)
+    {
+      manager->SetRenderContext(info);
+    }
   }
 
   void AssetManager::DestroyAll()
   {
-    m_MeshManager.DestroyAll();
-    m_TextureManager.DestroyAll();
-    m_MaterialManager.DestroyAll();
-    m_CubeMapManager.DestroyAll();
-    m_ModelManager.DestroyAll();
+    for (auto it = m_DestroyOrder.rbegin(); it != m_DestroyOrder.rend(); ++it)
+    {
+      (*it)->DestroyAll();
+    }
   }
 }

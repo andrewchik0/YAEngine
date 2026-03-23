@@ -12,6 +12,36 @@ namespace YAEngine
     return e;
   }
 
+  void Scene::DestroyEntity(Entity e)
+  {
+    auto& tc = m_Registry.get<TransformComponent>(e);
+
+    Entity child = tc.firstChild;
+    while (child != entt::null)
+    {
+      Entity next = m_Registry.get<TransformComponent>(child).nextSibling;
+      DestroyEntity(child);
+      child = next;
+    }
+
+    if (tc.parent != entt::null)
+    {
+      auto& parentTc = m_Registry.get<TransformComponent>(tc.parent);
+      entt::entity* link = &parentTc.firstChild;
+      while (*link != entt::null)
+      {
+        if (*link == e)
+        {
+          *link = tc.nextSibling;
+          break;
+        }
+        link = &m_Registry.get<TransformComponent>(*link).nextSibling;
+      }
+    }
+
+    m_Registry.destroy(e);
+  }
+
   void Scene::SetParent(Entity child, Entity parent)
   {
     auto& childT = m_Registry.get<TransformComponent>(child);

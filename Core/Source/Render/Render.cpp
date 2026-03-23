@@ -444,6 +444,9 @@ namespace YAEngine
   {
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     auto cmd = m_Backend.GetCurrentCommandBuffer();
+    auto& meshManager = app->GetAssetManager().Meshes();
+    auto& materialManager = app->GetAssetManager().Materials();
+    auto& cubeMapManager = app->GetAssetManager().CubeMaps();
 
     auto view = app->GetScene().GetView<MeshComponent, TransformComponent, MaterialComponent>();
 
@@ -451,8 +454,10 @@ namespace YAEngine
     {
       if (!mesh.shouldRender) return;
 
+      auto* instanceData = meshManager.GetInstanceData(mesh.asset);
+
       auto& currentPipeline = mesh.noShading ? m_ForwardPipelineNoShading :
-        app->GetAssetManager().Meshes().Get(mesh.asset).instanceData == nullptr
+        instanceData == nullptr
           ? mesh.doubleSided ? m_ForwardPipelineDoubleSided : m_ForwardPipeline
           : mesh.doubleSided ? m_ForwardPipelineDoubleSidedInstanced : m_ForwardPipelineInstanced;
 
@@ -464,32 +469,31 @@ namespace YAEngine
         int offset = 0;
       } data;
       data.model = transform.world;
-      data.offset = app->GetAssetManager().Meshes().Get(mesh.asset).offset / sizeof(glm::mat4);
+      data.offset = meshManager.GetInstanceOffset(mesh.asset) / sizeof(glm::mat4);
       currentPipeline.PushConstants(cmd, &data);
 
-      currentPipeline.BindDescriptorSets(cmd, {app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.GetDescriptorSet(currentFrame)}, 1);
+      currentPipeline.BindDescriptorSets(cmd, {materialManager.GetVulkanMaterial(material.asset).GetDescriptorSet(currentFrame)}, 1);
       currentPipeline.BindDescriptorSets(cmd, { m_LightsDescriptorSet.Get() }, 2);
       uint32_t instanceCount = 1;
-      if (app->GetAssetManager().Meshes().Get(mesh.asset).instanceData != nullptr)
+      if (instanceData != nullptr)
       {
-        instanceCount = uint32_t(app->GetAssetManager().Meshes().Get(mesh.asset).instanceData->size());
+        instanceCount = uint32_t(instanceData->size());
         currentPipeline.BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 3);
-        m_InstanceBuffer.Update(app->GetAssetManager().Meshes().Get(mesh.asset).offset, app->GetAssetManager().Meshes().Get(mesh.asset).instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
+        m_InstanceBuffer.Update(meshManager.GetInstanceOffset(mesh.asset), instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
       }
 
-      auto& mat = app->GetAssetManager().Materials().Get(material.asset);
+      auto& mat = materialManager.Get(material.asset);
       mat.cubemap = app->GetScene().GetSkybox();
-      app->GetAssetManager().Materials().Get(material.asset).m_VulkanMaterial.Bind(app, mat, currentFrame, m_NoneTexture);
+      materialManager.GetVulkanMaterial(material.asset).Bind(app, mat, currentFrame, m_NoneTexture);
 
-      app->GetAssetManager().Meshes().Get(mesh.asset).vertexBuffer.Draw(cmd, instanceCount);
+      meshManager.GetVertexBuffer(mesh.asset).Draw(cmd, instanceCount);
     });
 
     if (!app->GetScene().HasComponent<CameraComponent>(app->GetScene().GetActiveCamera())) return;
-    auto& camCamera = app->GetScene().GetComponent<CameraComponent>(app->GetScene().GetActiveCamera());
     auto& camTransform = app->GetScene().GetComponent<TransformComponent>(app->GetScene().GetActiveCamera());
     glm::mat4 camDir = glm::mat4_cast(camTransform.rotation);
     if (app->GetScene().GetSkybox())
-      m_SkyBox.Draw(currentFrame, &app->GetAssetManager().CubeMaps().Get(app->GetScene().GetSkybox()).m_CubeTexture, cmd, camDir, m_PerFrameData.ubo.proj, m_CubicResources);
+      m_SkyBox.Draw(currentFrame, &cubeMapManager.GetVulkanCubicTexture(app->GetScene().GetSkybox()), cmd, camDir, m_PerFrameData.ubo.proj, m_CubicResources);
   }
 
   void Render::SetUpCamera(Application* app)

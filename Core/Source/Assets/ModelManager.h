@@ -2,14 +2,11 @@
 #include <filesystem>
 
 #include "AssetManagerBase.h"
+#include "IAssetManager.h"
+#include "ModelBuilder.h"
+#include "ModelImporter.h"
 
 #include "Scene/Scene.h"
-
-enum aiTextureType : int;
-struct aiNode;
-struct aiScene;
-struct aiMaterial;
-struct aiMesh;
 
 class Scene;
 class AssetManager;
@@ -23,22 +20,18 @@ namespace YAEngine
     std::vector<glm::mat4> modelMatrices;
     uint32_t offset = 0;
 
-  private:
-    std::filesystem::path basePath;
-
-    friend class Render;
     friend class ModelManager;
   };
 
-  using ModelHandle = AssetHandle;
-
-  class ModelManager : public AssetManagerBase<Model>
+  class ModelManager : public AssetManagerBase<Model, ModelTag>, public IAssetManager
   {
   public:
 
+    void SetRenderContext(const AssetManagerInitInfo&) override {}
+
     ModelManager() = default;
     ModelManager(Scene* scene, AssetManager* assetManager)
-      : m_Scene(scene), m_AssetManager(assetManager)
+      : m_Scene(scene), m_AssetManager(assetManager), m_Builder(scene, assetManager)
     {
     }
 
@@ -46,20 +39,15 @@ namespace YAEngine
     ModelHandle LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances, bool combinedTextures = false);
 
     void Destroy(Model& model);
-    void DestroyAll();
+    void DestroyAll() override;
 
   private:
 
-    Scene* m_Scene;
-    AssetManager* m_AssetManager;
+    Scene* m_Scene = nullptr;
+    AssetManager* m_AssetManager = nullptr;
+    ModelBuilder m_Builder {};
 
-    Entity ProcessNode(Model& model, Entity& parent, aiNode* node, const aiScene* scene, bool combinedTextures);
-    Entity ProcessMesh(Model& model, aiMesh* mesh, const aiScene* scene, bool combinedTextures);
-    void ProcessMaterial(Model& model, Entity& mesh, const aiMaterial* material, bool combinedTextures);
-    std::string GetTexturePath(const aiMaterial* mat, aiTextureType type);
-
-    void ComputeMeshBB(const aiMesh* mesh, glm::vec3& outMin, glm::vec3& outMax);
-
+    void DestroyEntityAssets(Entity entity);
     void TraverseInstanceData(Entity entity, std::vector<glm::mat4>* instanceData, uint32_t offset);
   };
 }

@@ -1,52 +1,55 @@
 #pragma once
 
-#include "Pch.h"
-#include "Utils/Random.h"
+#include "Handle.h"
+#include "SlotMap.h"
 
 namespace YAEngine
 {
-  class Asset
-  {
-  public:
-    virtual ~Asset() = default;
-  };
-
-  using AssetHandle = uint32_t;
-
-  template<typename T>
+  template<typename T, typename Tag>
   class AssetManagerBase
   {
   public:
+    using HandleType = Handle<Tag>;
 
-    T& Get(AssetHandle handle)
+    T& Get(HandleType handle)
     {
-      return *m_Assets.at(handle);
+      T* ptr = m_Assets.Get(handle.index, handle.generation);
+      assert(ptr != nullptr);
+      return *ptr;
     }
 
-    bool Has(AssetHandle handle)
+    bool Has(HandleType handle) const
     {
-      return m_Assets.contains(handle);
+      return m_Assets.Has(handle.index, handle.generation);
     }
 
-    std::unordered_map<AssetHandle, std::unique_ptr<T>>& GetAll()
+    template<typename Fn>
+    void ForEach(Fn&& fn)
     {
-      return m_Assets;
+      m_Assets.ForEach(std::forward<Fn>(fn));
     }
 
-    AssetHandle Load(std::unique_ptr<T> asset)
+    uint32_t Size() const { return m_Assets.Size(); }
+
+  protected:
+
+    HandleType Store(std::unique_ptr<T> asset)
     {
-      AssetHandle newHandle = random<uint32_t>();
-      m_Assets.emplace(newHandle, std::move(asset));
-      return newHandle;
+      auto key = m_Assets.Insert(std::move(asset));
+      return { key.index, key.generation };
     }
 
-    void Remove(AssetHandle handle)
+    void Remove(HandleType handle)
     {
-      m_Assets.erase(handle);
+      m_Assets.Remove(handle.index, handle.generation);
+    }
+
+    void Clear()
+    {
+      m_Assets.Clear();
     }
 
   private:
-    std::unordered_map<AssetHandle, std::unique_ptr<T>> m_Assets;
-
+    SlotMap<T> m_Assets;
   };
 }
