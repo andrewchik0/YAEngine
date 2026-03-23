@@ -1,20 +1,23 @@
 #include "VulkanSurface.h"
 
-#include <iostream>
+#include "Log.h"
 
 namespace YAEngine
 {
   void VulkanSurface::Init(VkInstance instance, GLFWwindow* window)
   {
     if (!window)
+    {
+      YA_LOG_ERROR("Render", "GLFW window not created");
       throw std::runtime_error("GLFW window not created!");
+    }
 
     m_Window = window;
     m_Instance = instance;
 
     if (VkResult result = glfwCreateWindowSurface(m_Instance, window, nullptr, &m_Surface); result != VK_SUCCESS)
     {
-      std::cerr << "glfwCreateWindowSurface failed with code: " << result << std::endl;
+      YA_LOG_ERROR("Render", "glfwCreateWindowSurface failed with code: %d", result);
       throw std::runtime_error("failed to create window surface!");
     }
   }

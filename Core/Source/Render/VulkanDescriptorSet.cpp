@@ -3,6 +3,7 @@
 #include "DescriptorLayoutCache.h"
 #include "RenderContext.h"
 #include "VulkanDescriptorPool.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -41,6 +42,7 @@ namespace YAEngine
 
       if (vkCreateDescriptorSetLayout(m_Device, &info, nullptr, &m_DescriptorSetLayout) != VK_SUCCESS)
       {
+        YA_LOG_ERROR("Render", "Failed to create descriptor set layout");
         throw std::runtime_error("failed to create descriptor set layout!");
       }
     }
@@ -59,6 +61,7 @@ namespace YAEngine
     }
     else
     {
+      YA_LOG_ERROR("Render", "Descriptor pool is null in RenderContext");
       throw std::runtime_error("descriptor pool is null in RenderContext!");
     }
   }

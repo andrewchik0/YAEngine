@@ -3,6 +3,7 @@
 #include <filesystem>
 
 #include "Render/RenderContext.h"
+#include "Log.h"
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <StbImage/stb_image.h>
@@ -39,6 +40,7 @@ namespace YAEngine
     }
     else
     {
+      YA_LOG_ERROR("Assets", "Failed to load texture: %s", path.c_str());
       throw std::runtime_error("Texture file does not exist!");
     }
   }

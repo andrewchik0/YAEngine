@@ -1,6 +1,7 @@
 #include "VulkanImage.h"
 
 #include "RenderContext.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -30,6 +31,7 @@ namespace YAEngine
 
     if (vmaCreateImage(ctx.allocator, &imageInfo, &allocInfo, &m_Image, &m_Allocation, nullptr) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create image");
       throw std::runtime_error("Failed to create image!");
     }
 
@@ -46,6 +48,7 @@ namespace YAEngine
 
     if (vkCreateImageView(ctx.device, &viewInfo, nullptr, &m_View) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create image view");
       throw std::runtime_error("Failed to create image view!");
     }
 
@@ -71,6 +74,7 @@ namespace YAEngine
 
       if (vkCreateSampler(ctx.device, &samplerInfo, nullptr, &m_Sampler) != VK_SUCCESS)
       {
+        YA_LOG_ERROR("Render", "Failed to create sampler");
         throw std::runtime_error("Failed to create sampler!");
       }
     }

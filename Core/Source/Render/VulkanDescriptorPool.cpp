@@ -1,5 +1,7 @@
 #include "VulkanDescriptorPool.h"
 
+#include "Log.h"
+
 namespace YAEngine
 {
   void VulkanDescriptorPool::Init(VkDevice device)
@@ -25,6 +27,7 @@ namespace YAEngine
     VkDescriptorPool pool;
     if (vkCreateDescriptorPool(m_Device, &poolInfo, nullptr, &pool) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create descriptor pool");
       throw std::runtime_error("failed to create descriptor pool!");
     }
     m_Pools.push_back(pool);
@@ -47,11 +50,13 @@ namespace YAEngine
       allocInfo.descriptorPool = m_Pools.back();
       if (vkAllocateDescriptorSets(m_Device, &allocInfo, &set) != VK_SUCCESS)
       {
+        YA_LOG_ERROR("Render", "Failed to allocate descriptor set from new pool");
         throw std::runtime_error("failed to allocate descriptor set from new pool!");
       }
     }
     else if (result != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to allocate descriptor set, VkResult = %d", result);
       throw std::runtime_error("failed to allocate descriptor set!");
     }
 

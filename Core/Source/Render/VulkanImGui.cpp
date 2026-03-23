@@ -4,13 +4,14 @@
 #include <imgui_impl_glfw.h>
 
 #include "ImGui/imgui_impl_vulkan.h"
+#include "Log.h"
 
 namespace YAEngine
 {
   static void CkeckVkResult(VkResult err)
   {
     if (err == VK_SUCCESS) return;
-    fprintf(stderr, "[Vulkan] Error: VkResult = %d\n", err);
+    YA_LOG_ERROR("Vulkan", "VkResult = %d", err);
     if (err < 0)
       abort();
   }

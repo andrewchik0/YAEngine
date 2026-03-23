@@ -4,6 +4,7 @@
 #include <limits>
 
 #include "VulkanPhysicalDevice.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -61,6 +62,7 @@ namespace YAEngine
 
     if (vkCreateSwapchainKHR(m_Device, &createInfo, nullptr, &m_SwapChain) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create swap chain");
       throw std::runtime_error("failed to create swap chain!");
     }
 
@@ -146,6 +148,7 @@ namespace YAEngine
 
       if (vkCreateImageView(device, &createInfo, nullptr, &m_SwapChainImageViews[i]) != VK_SUCCESS)
       {
+        YA_LOG_ERROR("Render", "Failed to create swapchain image view %zu", i);
         throw std::runtime_error("failed to create image views!");
       }
     }
@@ -175,7 +178,10 @@ namespace YAEngine
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
     if (vmaCreateImage(m_Allocator, &depthImageInfo, &allocInfo, &m_DepthImage, &m_DepthImageAllocation, nullptr) != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to create depth image");
       throw std::runtime_error("Failed to create depth image!");
+    }
 
     VkImageViewCreateInfo depthViewInfo{};
     depthViewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -190,6 +196,7 @@ namespace YAEngine
 
     if (vkCreateImageView(m_Device, &depthViewInfo, nullptr, &m_DepthImageView) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create depth image view");
       throw std::runtime_error("Failed to create depth image view!");
     }
 
@@ -211,6 +218,7 @@ namespace YAEngine
 
       if (vkCreateFramebuffer(m_Device, &framebufferInfo, nullptr, &m_SwapChainFrameBuffers[i]) != VK_SUCCESS)
       {
+        YA_LOG_ERROR("Render", "Failed to create swapchain framebuffer %zu", i);
         throw std::runtime_error("failed to create framebuffer!");
       }
     }

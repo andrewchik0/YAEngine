@@ -6,6 +6,7 @@
 #include "Application.h"
 #include "ImageBarrier.h"
 #include "VulkanVertexBuffer.h"
+#include "Log.h"
 
 #include "Utils/Utils.h"
 
@@ -205,6 +206,7 @@ namespace YAEngine
 
       if (vkCreateFramebuffer(ctx.device, &fbInfo, nullptr, &m_TAAFramebuffers[i]) != VK_SUCCESS)
       {
+        YA_LOG_ERROR("Render", "Failed to create TAA framebuffer %d", i);
         throw std::runtime_error("Failed to create TAA framebuffer!");
       }
     }

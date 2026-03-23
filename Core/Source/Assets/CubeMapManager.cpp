@@ -4,6 +4,7 @@
 #include <StbImage/stb_image.h>
 
 #include "Render/RenderContext.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -31,6 +32,7 @@ namespace YAEngine
     }
     else
     {
+      YA_LOG_ERROR("Assets", "Failed to load cubemap: %s", path.c_str());
       throw std::runtime_error("Texture file does not exist!");
     }
   }

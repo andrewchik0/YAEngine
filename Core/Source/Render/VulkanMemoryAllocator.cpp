@@ -4,7 +4,7 @@
 
 #include "VulkanMemoryAllocator.h"
 
-#include <iostream>
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -19,6 +19,7 @@ namespace YAEngine
     VkResult result = vmaCreateAllocator(&allocatorInfo, &m_Allocator);
     if (result != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create VMA allocator");
       throw std::runtime_error("Failed to create VMA allocator!");
     }
 
@@ -32,8 +33,7 @@ namespace YAEngine
     char* statsStr = nullptr;
     vmaBuildStatsString(m_Allocator, &statsStr, VK_TRUE);
 
-    std::cout << "VMA allocations alive: " << stats.total.statistics.allocationCount << std::endl;
-    // std::cout << statsStr << std::endl;
+    YA_LOG_INFO("VMA", "Allocations alive: %u", stats.total.statistics.allocationCount);
 
     vmaFreeStatsString(m_Allocator, statsStr);
     vmaDestroyAllocator(m_Allocator);

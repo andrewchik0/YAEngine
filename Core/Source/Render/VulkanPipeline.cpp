@@ -3,6 +3,8 @@
 #include <fstream>
 #include <ios>
 
+#include "Log.h"
+
 namespace YAEngine
 {
 
@@ -121,6 +123,7 @@ namespace YAEngine
 
     if (vkCreatePipelineLayout(m_Device, &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create pipeline layout");
       throw std::runtime_error("failed to create pipeline layout!");
     }
 
@@ -151,6 +154,7 @@ namespace YAEngine
 
     if (vkCreateGraphicsPipelines(m_Device, pipelineCache, 1, &pipelineInfo, nullptr, &m_Pipeline) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create graphics pipeline");
       throw std::runtime_error("failed to create graphics pipeline!");
     }
 
@@ -205,6 +209,7 @@ namespace YAEngine
     VkShaderModule shaderModule;
     if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create shader module");
       throw std::runtime_error("failed to create shader module!");
     }
 
@@ -310,6 +315,7 @@ namespace YAEngine
 
     if (!file.is_open())
     {
+      YA_LOG_ERROR("Render", "Failed to open shader file: %s", filepath.c_str());
       throw std::runtime_error("failed to open file!");
     }
 

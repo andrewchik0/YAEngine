@@ -2,6 +2,8 @@
 
 #include <set>
 
+#include "Log.h"
+
 namespace YAEngine
 {
   void VulkanPhysicalDevice::Init(VkInstance instance, VkSurfaceKHR surface)
@@ -14,6 +16,7 @@ namespace YAEngine
 
     if (deviceCount == 0)
     {
+      YA_LOG_ERROR("Render", "No GPUs with Vulkan support found");
       throw std::runtime_error("failed to find GPUs with Vulkan support!");
     }
 
@@ -31,6 +34,7 @@ namespace YAEngine
 
     if (m_PhysicalDevice == VK_NULL_HANDLE)
     {
+      YA_LOG_ERROR("Render", "No suitable GPU found");
       throw std::runtime_error("failed to find a suitable GPU!");
     }
   }

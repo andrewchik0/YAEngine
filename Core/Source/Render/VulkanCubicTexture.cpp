@@ -3,6 +3,7 @@
 #include "RenderContext.h"
 #include "VulkanCommandBuffer.h"
 #include "VulkanDescriptorPool.h"
+#include "Log.h"
 #include "VulkanPipeline.h"
 #include "ImageBarrier.h"
 
@@ -75,6 +76,7 @@ namespace YAEngine
     }
     else
     {
+      YA_LOG_ERROR("Render", "Failed to load BRDFLut.png");
       throw std::runtime_error("Failed to load BRDFLut.png");
     }
   }
@@ -117,6 +119,7 @@ namespace YAEngine
 
     if (vmaCreateBuffer(ctx.allocator, &stagingBufferInfo, &stagingAllocInfo, &stagingBuffer, &stagingAlloc, nullptr) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create vertex staging buffer");
       throw std::runtime_error("Failed to create vertex staging buffer");
     }
 
@@ -135,6 +138,7 @@ namespace YAEngine
 
     if (vmaCreateBuffer(ctx.allocator, &vertexBufferInfo, &vertexAllocInfo, &vertexBuffer, &vertexBufferAllocation, nullptr) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create vertex buffer");
       throw std::runtime_error("Failed to create vertex buffer");
     }
 
@@ -188,6 +192,7 @@ namespace YAEngine
 
     if (vkCreateRenderPass(device, &info, nullptr, &renderPass) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create cubemap render pass");
       throw std::runtime_error("failed to create render pass!");
     }
   }
@@ -207,6 +212,7 @@ namespace YAEngine
 
     if (vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create cubemap descriptor set layout");
       throw std::runtime_error("failed to create descriptor set layout!");
     }
 
@@ -224,6 +230,7 @@ namespace YAEngine
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create cubemap pipeline layout");
       throw std::runtime_error("failed to create pipeline layout!");
     }
 
@@ -314,6 +321,7 @@ namespace YAEngine
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create cubemap graphics pipeline");
       throw std::runtime_error("failed to create graphics pipeline");
     }
 
@@ -361,6 +369,7 @@ namespace YAEngine
 
     if (vkCreateRenderPass(device, &info, nullptr, &irradianceRenderPass) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create irradiance render pass");
       throw std::runtime_error("failed to create render pass!");
     }
   }
@@ -380,6 +389,7 @@ namespace YAEngine
 
     if (vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &irradianceDescriptorSetLayout) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create irradiance descriptor set layout");
       throw std::runtime_error("failed to create descriptor set layout!");
     }
 
@@ -397,6 +407,7 @@ namespace YAEngine
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &irradiancePipelineLayout) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create irradiance pipeline layout");
       throw std::runtime_error("failed to create pipeline layout!");
     }
 
@@ -487,6 +498,7 @@ namespace YAEngine
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &irradiancePipeline) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create irradiance graphics pipeline");
       throw std::runtime_error("failed to create graphics pipeline");
     }
 
@@ -534,6 +546,7 @@ namespace YAEngine
 
     if (vkCreateRenderPass(device, &info, nullptr, &prefilterRenderPass) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create prefilter render pass");
       throw std::runtime_error("failed to create render pass!");
     }
   }
@@ -553,6 +566,7 @@ namespace YAEngine
 
     if (vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &prefilterDescriptorSetLayout) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create prefilter descriptor set layout");
       throw std::runtime_error("failed to create descriptor set layout!");
     }
 
@@ -570,6 +584,7 @@ namespace YAEngine
 
     if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &prefilterPipelineLayout) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create prefilter pipeline layout");
       throw std::runtime_error("failed to create pipeline layout!");
     }
 
@@ -660,6 +675,7 @@ namespace YAEngine
 
     if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &prefilterPipeline) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create prefilter graphics pipeline");
       throw std::runtime_error("failed to create graphics pipeline");
     }
 
@@ -819,6 +835,7 @@ namespace YAEngine
 
     if (vkCreateSampler(ctx.device, &samplerInfo, nullptr, &m_CubeMapSampler) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create cubemap texture sampler");
       throw std::runtime_error("Failed to create texture sampler!");
     }
 
@@ -1015,6 +1032,7 @@ namespace YAEngine
 
     if (vkCreateSampler(ctx.device, &samplerInfo, nullptr, &m_IrradianceSampler) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create irradiance texture sampler");
       throw std::runtime_error("Failed to create texture sampler!");
     }
   }
@@ -1189,6 +1207,7 @@ namespace YAEngine
 
     if (vkCreateSampler(ctx.device, &samplerInfo, nullptr, &m_PrefilterSampler) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create prefilter texture sampler");
       throw std::runtime_error("Failed to create texture sampler!");
     }
 

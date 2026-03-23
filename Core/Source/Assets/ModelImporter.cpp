@@ -10,6 +10,8 @@
 #include <assimp/scene.h>
 #include <assimp/pbrmaterial.h>
 
+#include "Log.h"
+
 namespace YAEngine
 {
   ModelDescription ModelImporter::Import(const std::string& path, bool combinedTextures)
@@ -24,7 +26,7 @@ namespace YAEngine
 
     if (scene == nullptr)
     {
-      fprintf(stderr, "ModelImporter: Failed to load '%s': %s\n", path.c_str(), importer.GetErrorString());
+      YA_LOG_ERROR("Assets", "Failed to load model '%s': %s", path.c_str(), importer.GetErrorString());
       return desc;
     }
 

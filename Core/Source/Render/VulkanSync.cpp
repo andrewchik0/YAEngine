@@ -1,6 +1,7 @@
 #include "VulkanSync.h"
 
 #include "VulkanPhysicalDevice.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -25,6 +26,7 @@ namespace YAEngine
           vkCreateSemaphore(device, &semaphoreInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS ||
           vkCreateFence(device, &fenceInfo, nullptr, &m_InFlightFences[i]) != VK_SUCCESS)
       {
+        YA_LOG_ERROR("Render", "Failed to create synchronization objects for frame %zu", i);
         throw std::runtime_error("failed to create synchronization objects for a frame!");
       }
     }
@@ -62,6 +64,7 @@ namespace YAEngine
     }
     if (result != VK_SUCCESS && result != VK_SUBOPTIMAL_KHR)
     {
+      YA_LOG_ERROR("Render", "Failed to acquire swap chain image, VkResult = %d", result);
       throw std::runtime_error("failed to acquire swap chain image!");
     }
 
@@ -89,6 +92,7 @@ namespace YAEngine
 
     if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[m_FrameIndex]) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to submit draw command buffer");
       throw std::runtime_error("failed to submit draw command buffer!");
     }
 
@@ -112,6 +116,7 @@ namespace YAEngine
     }
     else if (result != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to present swap chain image, VkResult = %d", result);
       throw std::runtime_error("failed to present swap chain image!");
     }
     return true;

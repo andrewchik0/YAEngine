@@ -1,7 +1,5 @@
 #include "FreeCamLayer.h"
 
-#include <iostream>
-
 #include "Application.h"
 
 namespace YAEngine

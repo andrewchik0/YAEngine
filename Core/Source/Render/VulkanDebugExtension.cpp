@@ -1,6 +1,6 @@
 #include "VulkanDebugExtension.h"
 
-#include <iostream>
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -12,21 +12,21 @@ namespace YAEngine
   {
     if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
     {
-      std::cerr << "[VULKAN ERROR] " << pCallbackData->pMessage << std::endl;
+      YA_LOG_ERROR("Vulkan", "%s", pCallbackData->pMessage);
     }
     else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT)
     {
-      std::cerr << "[VULKAN WARNING] " << pCallbackData->pMessage << std::endl;
+      YA_LOG_WARN("Vulkan", "%s", pCallbackData->pMessage);
     }
     else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT)
     {
-      std::cout << "[VULKAN INFO] " << pCallbackData->pMessage << std::endl;
+      YA_LOG_INFO("Vulkan", "%s", pCallbackData->pMessage);
     }
     else if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT)
     {
-      std::cout << "[VULKAN VERBOSE] " << pCallbackData->pMessage << std::endl;
+      YA_LOG_VERBOSE("Vulkan", "%s", pCallbackData->pMessage);
     }
-    return VK_FALSE; // VK_TRUE если хочешь прерывать выполнение на ошибке
+    return VK_FALSE;
   }
 
   VkResult CreateDebugUtilsMessengerEXT(VkInstance instance, const VkDebugUtilsMessengerCreateInfoEXT* pCreateInfo, const VkAllocationCallbacks* pAllocator, VkDebugUtilsMessengerEXT* pDebugMessenger)
@@ -55,6 +55,7 @@ namespace YAEngine
   {
     if (!CheckValidationLayerSupport())
     {
+      YA_LOG_ERROR("Render", "Validation layers requested, but not available");
       throw std::runtime_error("validation layers requested, but not available!");
     }
 
@@ -96,6 +97,7 @@ namespace YAEngine
 
     if (CreateDebugUtilsMessengerEXT(instance, &createInfo, nullptr, &m_DebugMessenger) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to set up debug messenger");
       throw std::runtime_error("failed to set up debug messenger!");
     }
   }

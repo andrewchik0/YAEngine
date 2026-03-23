@@ -2,6 +2,7 @@
 
 #include "VulkanPhysicalDevice.h"
 #include "VulkanInstance.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -42,6 +43,7 @@ namespace YAEngine
 
     if (vkCreateDevice(physicalDevice.Get(), &createInfo, nullptr, &m_Device) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create logical device");
       throw std::runtime_error("failed to create logical device!");
     }
   }

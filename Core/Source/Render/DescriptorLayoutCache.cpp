@@ -2,6 +2,8 @@
 
 #include <algorithm>
 
+#include "Log.h"
+
 namespace YAEngine
 {
   bool DescriptorLayoutCache::LayoutKey::operator==(const LayoutKey& other) const
@@ -63,6 +65,7 @@ namespace YAEngine
     VkDescriptorSetLayout layout;
     if (vkCreateDescriptorSetLayout(device, &info, nullptr, &layout) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create descriptor set layout");
       throw std::runtime_error("failed to create descriptor set layout!");
     }
 

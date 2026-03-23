@@ -1,6 +1,7 @@
 #include "VulkanInstance.h"
 
 #include "Application.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -37,6 +38,7 @@ namespace YAEngine
     int32_t result = 0;
     if ((result = vkCreateInstance(&createInfo, nullptr, &m_Instance)) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create Vulkan instance, VkResult = %d", result);
       throw std::runtime_error("failed to create instance!" + result);
     }
 

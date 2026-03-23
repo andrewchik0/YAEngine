@@ -1,5 +1,7 @@
 #include "RenderBackend.h"
 
+#include "Log.h"
+
 namespace YAEngine
 {
   void RenderBackend::Init(GLFWwindow* window, const RenderSpecs& specs)
@@ -23,6 +25,7 @@ namespace YAEngine
     cacheInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     if (vkCreatePipelineCache(m_Device.Get(), &cacheInfo, nullptr, &m_PipelineCache) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create pipeline cache");
       throw std::runtime_error("Failed to create pipeline cache!");
     }
 

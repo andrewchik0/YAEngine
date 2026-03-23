@@ -2,6 +2,7 @@
 
 #include "RenderContext.h"
 #include "ImageBarrier.h"
+#include "Log.h"
 
 #include <algorithm>
 #include <queue>
@@ -264,6 +265,7 @@ namespace YAEngine
 
       if (vkCreateRenderPass(m_Ctx->device, &rpInfo, nullptr, &pass.renderPass) != VK_SUCCESS)
       {
+        YA_LOG_ERROR("Render", "Failed to create render pass: %s", pass.info.name.c_str());
         throw std::runtime_error("Failed to create render pass: " + pass.info.name);
       }
     }
@@ -321,6 +323,7 @@ namespace YAEngine
 
       if (vkCreateFramebuffer(m_Ctx->device, &fbInfo, nullptr, &pass.framebuffer) != VK_SUCCESS)
       {
+        YA_LOG_ERROR("Render", "Failed to create framebuffer: %s", pass.info.name.c_str());
         throw std::runtime_error("Failed to create framebuffer: " + pass.info.name);
       }
     }
@@ -388,6 +391,7 @@ namespace YAEngine
 
     if (order.size() != n)
     {
+      YA_LOG_ERROR("Render", "Render graph has a cycle");
       throw std::runtime_error("Render graph has a cycle!");
     }
 

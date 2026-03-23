@@ -2,6 +2,7 @@
 
 #include "RenderContext.h"
 #include "VulkanCommandBuffer.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -25,6 +26,7 @@ namespace YAEngine
 
     if (vmaCreateBuffer(ctx.allocator, &stagingInfo, &stagingAllocInfo, &stagingBuffer, &stagingAlloc, nullptr) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create staging buffer");
       throw std::runtime_error("Failed to create staging buffer");
     }
 
@@ -48,6 +50,7 @@ namespace YAEngine
     if (vmaCreateBuffer(ctx.allocator, &bufferInfo, &allocInfo, &result.m_Buffer, &result.m_Allocation, nullptr) != VK_SUCCESS)
     {
       vmaDestroyBuffer(ctx.allocator, stagingBuffer, stagingAlloc);
+      YA_LOG_ERROR("Render", "Failed to create GPU buffer");
       throw std::runtime_error("Failed to create GPU buffer");
     }
 
@@ -86,6 +89,7 @@ namespace YAEngine
 
     if (vmaCreateBuffer(ctx.allocator, &bufferInfo, &allocInfo, &result.m_Buffer, &result.m_Allocation, nullptr) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create mapped buffer");
       throw std::runtime_error("Failed to create mapped buffer");
     }
 

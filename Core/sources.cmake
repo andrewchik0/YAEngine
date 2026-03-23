@@ -71,6 +71,7 @@ set(SOURCE_FILES
   Source/Assets/ModelBuilder.h
   Source/Assets/ModelManager.cpp
   Source/Assets/ModelManager.h
+  Source/Log.h
   Source/EventBus.h
   Source/LayerManager.h
   Source/InputSystem.cpp

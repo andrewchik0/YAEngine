@@ -1,6 +1,7 @@
 #include "VulkanCommandBuffer.h"
 
 #include "VulkanPhysicalDevice.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -17,6 +18,7 @@ namespace YAEngine
 
     if (vkCreateCommandPool(m_Device, &poolInfo, nullptr, &m_CommandPool) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to create command pool");
       throw std::runtime_error("failed to create command pool!");
     }
 
@@ -30,6 +32,7 @@ namespace YAEngine
 
     if (vkAllocateCommandBuffers(m_Device, &allocInfo, m_CommandBuffers.data()) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to allocate command buffers");
       throw std::runtime_error("failed to allocate command buffers!");
     }
   }
@@ -54,6 +57,7 @@ namespace YAEngine
 
     if (vkBeginCommandBuffer(m_CommandBuffers[currentFrameIndex], &beginInfo) != VK_SUCCESS)
     {
+      YA_LOG_ERROR("Render", "Failed to begin recording command buffer");
       throw std::runtime_error("failed to begin recording command buffer!");
     }
   }
@@ -61,7 +65,8 @@ namespace YAEngine
   void VulkanCommandBuffer::End(size_t currentFrameIndex)
   {
     if (vkEndCommandBuffer(m_CommandBuffers[currentFrameIndex]) != VK_SUCCESS)
-      {
+    {
+      YA_LOG_ERROR("Render", "Failed to end recording command buffer");
       throw std::runtime_error("failed to record command buffer!");
     }
   }
