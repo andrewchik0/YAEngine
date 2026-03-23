@@ -34,7 +34,7 @@ layout(set = 1, binding = 2) uniform sampler2D noiseTexture;
 const int KERNEL_SIZE = 16;
 
 layout(set = 1, binding = 3) uniform SSAOKernel {
-  vec4 samples[64];
+  vec4 samples[KERNEL_SIZE];
 } u_Kernel;
 
 const float RADIUS = 0.2;
@@ -95,12 +95,10 @@ void main()
     vec4 clip = u_Data.proj * vec4(samplePos, 1.0);
     vec2 sampleUV = (clip.xy / clip.w) * 0.5 + 0.5;
 
-    // Compare depths using cheap linearization instead of full reconstructViewPos
     float sampledDepth = textureLod(depthTexture, sampleUV, 0.0).r;
 
-    // Skip skybox samples — don't count them at all
-    if (sampledDepth >= 0.9999)
-      continue;
+    // Mask out skybox samples
+    float notSky = step(sampledDepth, 0.9998);
 
     float sampleLinearDepth = linearizeDepth(sampledDepth);
     float expectedLinearDepth = linearizeDepth(clip.z / clip.w);
@@ -112,12 +110,12 @@ void main()
     float isOccluded = step(scaledBias, -depthDiff);
 
     // Range check: smooth, depth-proportional rejection of distant occluders
+    // When sample is farther than center, rangeCheck = 1.0
     float maxRange = max(RADIUS * 2.0, linearDepthCenter * 0.02);
-    float rangeCheck = sampleLinearDepth < linearDepthCenter
-      ? smoothstep(maxRange, maxRange * 0.5, abs(linearDepthCenter - sampleLinearDepth))
-      : 1.0;
+    float rangeSmooth = smoothstep(maxRange, maxRange * 0.5, abs(linearDepthCenter - sampleLinearDepth));
+    float rangeCheck = mix(1.0, rangeSmooth, step(sampleLinearDepth, linearDepthCenter));
 
-    occlusion += isOccluded * rangeCheck;
+    occlusion += isOccluded * rangeCheck * notSky;
   }
 
   float ao = 1.0 - (occlusion / float(KERNEL_SIZE)) * INTENSITY;

@@ -64,8 +64,6 @@ namespace YAEngine
       int lightsCount = MAX_LIGHTS;
     } m_Lights;
 
-    void SetViewportAndScissor();
-
     void DrawMeshes(Application* app);
     void SetUpCamera(Application* app);
     void InitPipelines();

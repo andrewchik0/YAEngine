@@ -85,7 +85,6 @@ namespace YAEngine
         m_ForwardPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
         m_ForwardPipelineDoubleSided.Bind(ctx.cmd);
         m_ForwardPipelineDoubleSided.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
-        SetViewportAndScissor();
 
         DrawMeshes(app);
       }
@@ -96,6 +95,8 @@ namespace YAEngine
       .inputs = {m_MainDepth, m_MainNormals},
       .colorOutputs = {m_SSAOColor},
       .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_SSAOEnabled) return;
+
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
 
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
@@ -118,6 +119,8 @@ namespace YAEngine
       .inputs = {m_SSAOColor, m_MainDepth},
       .colorOutputs = {m_SSAOBlurred},
       .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_SSAOEnabled) return;
+
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
 
         auto& ssaoColor = m_Graph.GetResource(m_SSAOColor);
@@ -203,7 +206,6 @@ namespace YAEngine
       .finalColorLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
       .execute = [this](const RGExecuteContext& ctx) {
         auto* app = static_cast<Application*>(ctx.userData);
-        SetViewportAndScissor();
 
         auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
         auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
@@ -346,7 +348,7 @@ namespace YAEngine
       std::mt19937 rng(42);
       std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
 
-      // 16 pixels, RGBA16F (8 bytes per pixel)
+      // 16 pixels, R32G32B32A32_SFLOAT (16 bytes per pixel)
       std::array<glm::vec4, 16> noiseData;
       for (auto& v : noiseData)
       {
@@ -360,17 +362,19 @@ namespace YAEngine
       m_SSAONoise.Load(ctx, noiseData.data(), 4, 4, 16, VK_FORMAT_R32G32B32A32_SFLOAT);
     }
 
-    // Generate SSAO hemisphere kernel (64 samples)
+    // Generate SSAO hemisphere kernel
     {
+      static constexpr int SSAO_KERNEL_SIZE = 16;
+
       std::mt19937 rng(0);
       std::uniform_real_distribution<float> dist(0.0f, 1.0f);
 
       struct SSAOKernelData
       {
-        glm::vec4 samples[64];
+        glm::vec4 samples[SSAO_KERNEL_SIZE];
       } kernelData;
 
-      for (int i = 0; i < 64; i++)
+      for (int i = 0; i < SSAO_KERNEL_SIZE; i++)
       {
         glm::vec3 sample(
           dist(rng) * 2.0f - 1.0f,
@@ -381,7 +385,7 @@ namespace YAEngine
         sample *= dist(rng);
 
         // Accelerating interpolation — bias samples closer to origin
-        float scale = float(i) / 64.0f;
+        float scale = float(i) / float(SSAO_KERNEL_SIZE);
         scale = 0.1f + scale * scale * 0.9f;
         sample *= scale;
 
@@ -555,26 +559,6 @@ namespace YAEngine
     }
     m_TAAIndex = (m_TAAIndex + 1) % 2;
     m_GlobalFrameIndex++;
-  }
-
-  void Render::SetViewportAndScissor()
-  {
-    auto cmd = m_Backend.GetCurrentCommandBuffer();
-
-    VkViewport viewport{};
-    viewport.x = 0.0f;
-    viewport.y = 0.0f;
-    viewport.width = (float) m_Backend.GetSwapChain().GetExt().width;
-    viewport.height = (float) m_Backend.GetSwapChain().GetExt().height;
-    viewport.minDepth = 0.0f;
-    viewport.maxDepth = 1.0f;
-    vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-    VkRect2D scissor{};
-    scissor.offset = {0, 0};
-    scissor.extent = m_Backend.GetSwapChain().GetExt();
-    vkCmdSetScissor(cmd, 0, 1, &scissor);
-
   }
 
   void Render::DrawMeshes(Application* app)
@@ -827,7 +811,7 @@ namespace YAEngine
       // Write static bindings (noise texture + kernel UBO)
       m_SSAOPassDescriptorSets[i].WriteCombinedImageSampler(2,
         m_SSAONoise.GetView(), m_SSAONoise.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-      m_SSAOPassDescriptorSets[i].WriteUniformBuffer(3, m_SSAOKernelUBO.Get(), 64 * sizeof(glm::vec4));
+      m_SSAOPassDescriptorSets[i].WriteUniformBuffer(3, m_SSAOKernelUBO.Get(), 16 * sizeof(glm::vec4));
     }
     PipelineCreateInfo ssaoInfo = {
       .fragmentShaderFile = "ssao.frag",

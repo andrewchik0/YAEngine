@@ -90,10 +90,8 @@ void main()
   // SSR-only debug: zero out base color to show only reflections
   if (u_Data.currentTexture == 6)
     originalColor = vec3(0.0);
-  else
-    originalColor *= ao;
 
-  // Early exits
+  // Early exits — no AO for skybox or invalid normals
   if (depth >= DEPTH_EPSILON)
   {
     outColor = vec4(originalColor, 1.0);
@@ -107,6 +105,9 @@ void main()
   }
 
   worldNormal = normalize(worldNormal);
+
+  // Apply AO to geometry only
+  originalColor *= ao;
 
   if (u_Data.ssrEnabled == 0 || roughness > MAX_ROUGHNESS)
   {

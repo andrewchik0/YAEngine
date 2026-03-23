@@ -59,7 +59,7 @@ void main()
       float spatialWeight = exp(-dist2 / 8.0);
 
       // Depth weight: reject samples across depth discontinuities
-      float depthDiff = abs(centerDepth - sampleDepth) / centerDepth;
+      float depthDiff = abs(centerDepth - sampleDepth) / max(centerDepth, 0.001);
       float depthWeight = exp(-depthDiff * depthDiff * 2000.0);
 
       float weight = spatialWeight * depthWeight;

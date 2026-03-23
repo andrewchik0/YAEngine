@@ -53,9 +53,8 @@ namespace YAEngine
           const char* debugViews[] = {
             "Off", "Albedo", "Metallic", "Roughness", "Normals", "SSAO", "SSR"
           };
-          const int debugValues[] = { 0, 1, 2, 3, 4, 5, 6 };
           if (ImGui::Combo("Debug View", &debugViewIndex, debugViews, IM_ARRAYSIZE(debugViews)))
-            App().GetRender().SetDebugView(debugValues[debugViewIndex]);
+            App().GetRender().SetDebugView(debugViewIndex);
         }
 
         ImGui::Checkbox("SSAO", &App().GetRender().GetSSAOEnabled());
