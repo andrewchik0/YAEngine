@@ -35,17 +35,9 @@ namespace YAEngine
         {
           static int debugViewIndex = 0;
           const char* debugViews[] = {
-            "Off", "Albedo", "Metallic", "Roughness", "Normals",
-            "SSR: Raw Depth", "SSR: World Normal", "SSR: View Normal",
-            "SSR: Reflect Dir", "SSR: Hit Map", "SSR: Hit UV",
-            "SSR: Hit Distance", "SSR: Raw Hit Map", "SSR: Ray Direction",
-            "SSR: Raw Hit Dist", "SSR: Depth Compare",
-            "SSR: Roundtrip Test", "SSR: UV Shift Test",
-            "SSR: Depth Roundtrip", "SSR: Minimal SSR",
-            "SSR: Analytical Mirror", "SSR: Normal Deviation x2",
-            "SSR: Normal Angle"
+            "Off", "Albedo", "Metallic", "Roughness", "Normals"
           };
-          const int debugValues[] = { 0, 1, 2, 3, 4, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27 };
+          const int debugValues[] = { 0, 1, 2, 3, 4 };
           if (ImGui::Combo("Debug View", &debugViewIndex, debugViews, IM_ARRAYSIZE(debugViews)))
             App().GetRender().m_CurrentTexture = debugValues[debugViewIndex];
         }
