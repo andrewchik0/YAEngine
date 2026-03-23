@@ -29,6 +29,11 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   float fov;
   int screenWidth;
   int screenHeight;
+  int ssaoEnabled;
+  int ssrEnabled;
+  int taaEnabled;
+  float jitterX;
+  float jitterY;
 } u_Data;
 
 layout(push_constant) uniform PushConstants

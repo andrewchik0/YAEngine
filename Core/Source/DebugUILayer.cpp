@@ -28,30 +28,39 @@ namespace YAEngine
         }
 
         ImGui::Text("FPS: %.1f", fps);
-        ImGui::Text("Frame time: %.2fms", App().GetTimer().GetDeltaTime() * 1000.0f);
+
+        float frametime = (float)App().GetTimer().GetDeltaTime() * 1000.0f;
+        ImGui::Text("Frame time: %.2fms", frametime);
+
+        m_FrametimeHistory[m_FrametimeOffset] = frametime;
+        m_FrametimeOffset = (m_FrametimeOffset + 1) % FRAMETIME_HISTORY_SIZE;
+
+        float maxFrametime = 0.0f;
+        for (int i = 0; i < FRAMETIME_HISTORY_SIZE; i++)
+          if (m_FrametimeHistory[i] > maxFrametime)
+            maxFrametime = m_FrametimeHistory[i];
+
+        char overlay[32];
+        snprintf(overlay, sizeof(overlay), "%.2f ms", frametime);
+        ImGui::PlotLines("##frametime", m_FrametimeHistory, FRAMETIME_HISTORY_SIZE,
+          m_FrametimeOffset, overlay, 0.0f, maxFrametime * 1.2f, ImVec2(0, 80));
+
         ImGui::Separator();
         ImGui::DragFloat("Gamma", &App().GetRender().GetGamma(), 0.01f, 0.0f, 10.0f);
         ImGui::DragFloat("Exposure", &App().GetRender().GetExposure(), 0.01f, 0.0f, 10.0f);
         {
           static int debugViewIndex = 0;
           const char* debugViews[] = {
-            "Off", "Albedo", "Metallic", "Roughness", "Normals"
+            "Off", "Albedo", "Metallic", "Roughness", "Normals", "SSAO", "SSR"
           };
-          const int debugValues[] = { 0, 1, 2, 3, 4 };
+          const int debugValues[] = { 0, 1, 2, 3, 4, 5, 6 };
           if (ImGui::Combo("Debug View", &debugViewIndex, debugViews, IM_ARRAYSIZE(debugViews)))
             App().GetRender().SetDebugView(debugValues[debugViewIndex]);
         }
 
-        ImGui::Separator();
-        for (int i = 0; i < App().GetRender().GetLightsCount(); i++)
-        {
-          auto& light = App().GetRender().GetLight(i);
-          ImGui::DragFloat(("Light cutoff " + std::to_string(i)).c_str(), &light.cutOff, 0.01f, 0.0f, 120.0f);
-          ImGui::DragFloat(("Light outer cutoff " + std::to_string(i)).c_str(), &light.outerCutOff, 0.01f, 0.0f, 120.0f);
-          ImGui::DragFloat3(("Light color " + std::to_string(i)).c_str(), &light.color.r, 0.01f, -120.0f, 120.0f);
-          ImGui::DragFloat3(("Light position " + std::to_string(i)).c_str(), &light.position.r, 0.01f, -120.0f, 120.0f);
-          ImGui::Separator();
-        }
+        ImGui::Checkbox("SSAO", &App().GetRender().GetSSAOEnabled());
+        ImGui::Checkbox("SSR", &App().GetRender().GetSSREnabled());
+        ImGui::Checkbox("TAA", &App().GetRender().GetTAAEnabled());
         ImGui::EndTabItem();
       }
 

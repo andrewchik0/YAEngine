@@ -20,6 +20,11 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   float fov;
   int screenWidth;
   int screenHeight;
+  int ssaoEnabled;
+  int ssrEnabled;
+  int taaEnabled;
+  float jitterX;
+  float jitterY;
 } u_Data;
 
 layout(set = 1, binding = 0) uniform sampler2D frame;
@@ -27,6 +32,7 @@ layout(set = 1, binding = 1) uniform sampler2D depthTexture;
 layout(set = 1, binding = 2) uniform sampler2D normalTexture;
 layout(set = 1, binding = 3) uniform sampler2D materialTexture;
 layout(set = 1, binding = 4) uniform sampler2D albedoTexture;
+layout(set = 1, binding = 5) uniform sampler2D ssaoTexture;
 
 // --- Configuration constants ---
 const int MAX_STEPS = 256;
@@ -76,6 +82,16 @@ void main()
   float metallic = material.g;
   vec3 albedo = texture(albedoTexture, uv).rgb;
   vec3 originalColor = texture(frame, uv).rgb;
+  float ao = texture(ssaoTexture, uv).r;
+
+  if (u_Data.ssaoEnabled == 0)
+    ao = 1.0;
+
+  // SSR-only debug: zero out base color to show only reflections
+  if (u_Data.currentTexture == 6)
+    originalColor = vec3(0.0);
+  else
+    originalColor *= ao;
 
   // Early exits
   if (depth >= DEPTH_EPSILON)
@@ -92,7 +108,7 @@ void main()
 
   worldNormal = normalize(worldNormal);
 
-  if (roughness > MAX_ROUGHNESS)
+  if (u_Data.ssrEnabled == 0 || roughness > MAX_ROUGHNESS)
   {
     outColor = vec4(originalColor, 1.0);
     return;

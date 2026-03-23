@@ -22,6 +22,7 @@ namespace YAEngine
     float heightScale = 1.0f;
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     VkImageUsageFlags additionalUsage = 0;
+    VkFilter filter = VK_FILTER_LINEAR;
   };
 
   struct RGExecuteContext
@@ -91,6 +92,7 @@ namespace YAEngine
       VkFramebuffer framebuffer = VK_NULL_HANDLE;
       VulkanImage privateDepth;
       VkFramebuffer overrideFramebuffer = VK_NULL_HANDLE;
+      VkExtent2D extent {};
     };
 
     void DetermineResourceUsage();

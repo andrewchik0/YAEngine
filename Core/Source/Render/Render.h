@@ -8,6 +8,7 @@
 #include "SkyBox.h"
 #include "VulkanPipeline.h"
 #include "VulkanStorageBuffer.h"
+#include "VulkanUniformBuffer.h"
 
 namespace YAEngine
 {
@@ -44,12 +45,18 @@ namespace YAEngine
     Light& GetLight(int index) { return m_Lights.lights[index]; }
     int GetLightsCount() const { return m_Lights.lightsCount; }
     void SetLightsCount(int count) { m_Lights.lightsCount = count; }
+    bool& GetSSAOEnabled() { return b_SSAOEnabled; }
+    bool& GetSSREnabled() { return b_SSREnabled; }
+    bool& GetTAAEnabled() { return b_TAAEnabled; }
 
   private:
 
     float m_Gamma = 2.2f;
     float m_Exposure = 1.0f;
     int m_CurrentTexture = 0;
+    bool b_SSAOEnabled = true;
+    bool b_SSREnabled = true;
+    bool b_TAAEnabled = true;
 
     struct
     {
@@ -78,11 +85,15 @@ namespace YAEngine
     RGHandle m_MainAlbedo {};
     RGHandle m_SSRColor {};
     RGHandle m_MainVelocity {};
+    RGHandle m_SSAOColor {};
+    RGHandle m_SSAOBlurred {};
     RGHandle m_TAAHistory0 {};
     RGHandle m_TAAHistory1 {};
 
     // Pass indices
     uint32_t m_MainPassIndex {};
+    uint32_t m_SSAOPassIndex {};
+    uint32_t m_SSAOBlurPassIndex {};
     uint32_t m_SSRPassIndex {};
     uint32_t m_TAAPassIndex {};
     uint32_t m_SwapchainPassIndex {};
@@ -104,6 +115,8 @@ namespace YAEngine
     std::vector<VulkanDescriptorSet> m_SwapChainDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_TAADescriptorSets;
+    std::vector<VulkanDescriptorSet> m_SSAOPassDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_SSAOBlurPassDescriptorSets;
 
     VulkanDescriptorSet m_InstanceDescriptorSet;
     VulkanStorageBuffer m_InstanceBuffer;
@@ -119,9 +132,13 @@ namespace YAEngine
     VulkanPipeline m_QuadPipeline;
     VulkanPipeline m_TAAPipeline;
     VulkanPipeline m_SSRPipeline;
+    VulkanPipeline m_SSAOPipeline;
+    VulkanPipeline m_SSAOBlurPipeline;
 
     VulkanMaterial m_DefaultMaterial {};
     VulkanTexture m_NoneTexture;
+    VulkanTexture m_SSAONoise;
+    VulkanUniformBuffer m_SSAOKernelUBO;
     CubicTextureResources m_CubicResources;
 
   public:

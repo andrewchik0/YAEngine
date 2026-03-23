@@ -29,6 +29,11 @@ namespace YAEngine
       float fov;
       int screenWidth;
       int screenHeight;
+      int ssaoEnabled;
+      int ssrEnabled;
+      int taaEnabled;
+      float jitterX;
+      float jitterY;
     } ubo;
 
     void Init(const RenderContext& ctx);

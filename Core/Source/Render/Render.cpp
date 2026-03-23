@@ -10,6 +10,8 @@
 
 #include "Utils/Utils.h"
 
+#include <random>
+
 namespace YAEngine
 {
   void Render::SetupRenderGraph(uint32_t width, uint32_t height)
@@ -44,6 +46,14 @@ namespace YAEngine
     m_MainVelocity = m_Graph.CreateResource({
       .name = "mainVelocity",
       .format = VK_FORMAT_R16G16_SFLOAT
+    });
+    m_SSAOColor = m_Graph.CreateResource({
+      .name = "ssaoColor",
+      .format = VK_FORMAT_R8_UNORM
+    });
+    m_SSAOBlurred = m_Graph.CreateResource({
+      .name = "ssaoBlurred",
+      .format = VK_FORMAT_R8_UNORM
     });
     m_SSRColor = m_Graph.CreateResource({
       .name = "ssrColor",
@@ -81,9 +91,53 @@ namespace YAEngine
       }
     });
 
+    m_SSAOPassIndex = m_Graph.AddPass({
+      .name = "SSAOPass",
+      .inputs = {m_MainDepth, m_MainNormals},
+      .colorOutputs = {m_SSAOColor},
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+
+        auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+        auto& mainNormals = m_Graph.GetResource(m_MainNormals);
+
+        m_SSAOPipeline.Bind(ctx.cmd);
+        m_SSAOPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
+          mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SSAOPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        m_SSAOPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_SSAOPipeline.BindDescriptorSets(ctx.cmd, {m_SSAOPassDescriptorSets[currentFrame].Get()}, 1);
+        DrawQuad();
+      }
+    });
+
+    m_SSAOBlurPassIndex = m_Graph.AddPass({
+      .name = "SSAOBlurPass",
+      .inputs = {m_SSAOColor, m_MainDepth},
+      .colorOutputs = {m_SSAOBlurred},
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+
+        auto& ssaoColor = m_Graph.GetResource(m_SSAOColor);
+        auto& depth = m_Graph.GetResource(m_MainDepth);
+
+        m_SSAOBlurPipeline.Bind(ctx.cmd);
+        m_SSAOBlurPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
+          ssaoColor.GetView(), ssaoColor.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SSAOBlurPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          depth.GetView(), depth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        m_SSAOBlurPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_SSAOBlurPipeline.BindDescriptorSets(ctx.cmd, {m_SSAOBlurPassDescriptorSets[currentFrame].Get()}, 1);
+        DrawQuad();
+      }
+    });
+
     m_SSRPassIndex = m_Graph.AddPass({
       .name = "SSRPass",
-      .inputs = {m_MainColor, m_MainDepth, m_MainNormals, m_MainMaterial, m_MainAlbedo},
+      .inputs = {m_MainColor, m_MainDepth, m_MainNormals, m_MainMaterial, m_MainAlbedo, m_SSAOBlurred},
       .colorOutputs = {m_SSRColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
@@ -93,18 +147,21 @@ namespace YAEngine
         auto& mainNormals = m_Graph.GetResource(m_MainNormals);
         auto& mainMaterial = m_Graph.GetResource(m_MainMaterial);
         auto& mainAlbedo = m_Graph.GetResource(m_MainAlbedo);
+        auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
 
         m_SSRPipeline.Bind(ctx.cmd);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
-          mainColor.GetView(), mainColor.GetSampler(), mainColor.GetLayout());
+          mainColor.GetView(), mainColor.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
-          mainDepth.GetView(), mainDepth.GetSampler(), mainDepth.GetLayout());
+          mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
-          mainNormals.GetView(), mainNormals.GetSampler(), mainNormals.GetLayout());
+          mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
-          mainMaterial.GetView(), mainMaterial.GetSampler(), mainMaterial.GetLayout());
+          mainMaterial.GetView(), mainMaterial.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
-          mainAlbedo.GetView(), mainAlbedo.GetSampler(), mainAlbedo.GetLayout());
+          mainAlbedo.GetView(), mainAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(5,
+          ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
         m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_SSRPassDescriptorSets[currentFrame].Get()}, 1);
@@ -126,11 +183,11 @@ namespace YAEngine
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         m_TAAPipeline.Bind(ctx.cmd);
         m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(0,
-          ssrColor.GetView(), ssrColor.GetSampler(), ssrColor.GetLayout());
+          ssrColor.GetView(), ssrColor.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(1,
           historyPrev.GetView(), historyPrev.GetSampler(), historyPrev.GetLayout());
         m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(2,
-          velocity.GetView(), velocity.GetSampler(), velocity.GetLayout());
+          velocity.GetView(), velocity.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_TAAPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
         m_TAAPipeline.BindDescriptorSets(ctx.cmd, {m_TAADescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
@@ -139,7 +196,7 @@ namespace YAEngine
 
     m_SwapchainPassIndex = m_Graph.AddPass({
       .name = "SwapchainPass",
-      .inputs = {m_TAAHistory0},
+      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_MainAlbedo, m_MainNormals, m_MainMaterial},
       .colorOutputs = {},
       .externalFramebuffer = true,
       .externalFormat = swapFormat,
@@ -150,11 +207,23 @@ namespace YAEngine
 
         auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
         auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
+        auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
+        auto& mainAlbedo = m_Graph.GetResource(m_MainAlbedo);
+        auto& mainNormals = m_Graph.GetResource(m_MainNormals);
+        auto& mainMaterial = m_Graph.GetResource(m_MainMaterial);
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         m_QuadPipeline.Bind(ctx.cmd);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
           historyCurrent.GetView(), historyCurrent.GetSampler(), historyCurrent.GetLayout());
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
+          mainAlbedo.GetView(), mainAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
+          mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
+          mainMaterial.GetView(), mainMaterial.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
         m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
@@ -272,6 +341,57 @@ namespace YAEngine
     m_DefaultMaterial.Init(ctx, m_NoneTexture);
     m_PerFrameData.Init(ctx);
 
+    // Generate SSAO noise texture (4x4 random tangent-space rotations)
+    {
+      std::mt19937 rng(42);
+      std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
+
+      // 16 pixels, RGBA16F (8 bytes per pixel)
+      std::array<glm::vec4, 16> noiseData;
+      for (auto& v : noiseData)
+      {
+        v = glm::vec4(dist(rng), dist(rng), 0.0f, 0.0f);
+        v = glm::vec4(glm::normalize(glm::vec2(v.x, v.y)), 0.0f, 0.0f);
+      }
+
+      // Convert to half-float manually via uint16 — use R16G16B16A16_SFLOAT
+      // VulkanTexture::Load expects raw data with pixelSize per pixel
+      // Use R32G32B32A32_SFLOAT for simplicity (16 bytes per pixel)
+      m_SSAONoise.Load(ctx, noiseData.data(), 4, 4, 16, VK_FORMAT_R32G32B32A32_SFLOAT);
+    }
+
+    // Generate SSAO hemisphere kernel (64 samples)
+    {
+      std::mt19937 rng(0);
+      std::uniform_real_distribution<float> dist(0.0f, 1.0f);
+
+      struct SSAOKernelData
+      {
+        glm::vec4 samples[64];
+      } kernelData;
+
+      for (int i = 0; i < 64; i++)
+      {
+        glm::vec3 sample(
+          dist(rng) * 2.0f - 1.0f,
+          dist(rng) * 2.0f - 1.0f,
+          dist(rng)
+        );
+        sample = glm::normalize(sample);
+        sample *= dist(rng);
+
+        // Accelerating interpolation — bias samples closer to origin
+        float scale = float(i) / 64.0f;
+        scale = 0.1f + scale * scale * 0.9f;
+        sample *= scale;
+
+        kernelData.samples[i] = glm::vec4(sample, 0.0f);
+      }
+
+      m_SSAOKernelUBO.Create(ctx, sizeof(SSAOKernelData));
+      m_SSAOKernelUBO.Update(kernelData);
+    }
+
     // Setup and compile render graph
     SetupRenderGraph(width, height);
 
@@ -330,6 +450,18 @@ namespace YAEngine
       set.Destroy();
     }
     m_SSRPipeline.Destroy();
+    for (auto& set : m_SSAOPassDescriptorSets)
+    {
+      set.Destroy();
+    }
+    for (auto& set : m_SSAOBlurPassDescriptorSets)
+    {
+      set.Destroy();
+    }
+    m_SSAOPipeline.Destroy();
+    m_SSAOBlurPipeline.Destroy();
+    m_SSAONoise.Destroy(ctx);
+    m_SSAOKernelUBO.Destroy(ctx);
     m_ForwardPipeline.Destroy();
     m_ForwardPipelineDoubleSided.Destroy();
     m_ForwardPipelineInstanced.Destroy();
@@ -397,6 +529,9 @@ namespace YAEngine
     m_PerFrameData.ubo.currentTexture = m_CurrentTexture;
     m_PerFrameData.ubo.screenWidth = int(app->GetWindow().GetWidth());
     m_PerFrameData.ubo.screenHeight = int(app->GetWindow().GetHeight());
+    m_PerFrameData.ubo.ssaoEnabled = b_SSAOEnabled ? 1 : 0;
+    m_PerFrameData.ubo.ssrEnabled = b_SSREnabled ? 1 : 0;
+    m_PerFrameData.ubo.taaEnabled = b_TAAEnabled ? 1 : 0;
     m_LightsBuffer.Update(0, &m_Lights, sizeof(Light) * MAX_LIGHTS + sizeof(int));
 
     // Configure render graph for this frame (TAA ping-pong + swapchain)
@@ -527,13 +662,24 @@ namespace YAEngine
     m_PrevView = view;
     m_PrevProj = proj;
 
-    glm::vec2 jitter = GetTAAJitter(m_GlobalFrameIndex);
+    if (b_TAAEnabled)
+    {
+      glm::vec2 jitter = GetTAAJitter(m_GlobalFrameIndex);
 
-    jitter.x /= float(app->GetWindow().GetWidth());
-    jitter.y /= float(app->GetWindow().GetHeight());
+      jitter.x /= float(app->GetWindow().GetWidth());
+      jitter.y /= float(app->GetWindow().GetHeight());
 
-    proj[2][0] += jitter.x;
-    proj[2][1] += jitter.y;
+      m_PerFrameData.ubo.jitterX = jitter.x;
+      m_PerFrameData.ubo.jitterY = jitter.y;
+
+      proj[2][0] += jitter.x;
+      proj[2][1] += jitter.y;
+    }
+    else
+    {
+      m_PerFrameData.ubo.jitterX = 0.0f;
+      m_PerFrameData.ubo.jitterY = 0.0f;
+    }
 
     m_PerFrameData.ubo.view = view;
     m_PerFrameData.ubo.proj = proj;
@@ -608,6 +754,10 @@ namespace YAEngine
       .bindings = {
         {
           { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
@@ -656,6 +806,70 @@ namespace YAEngine
     quadInfo.sets = std::vector({ m_PerFrameData.GetLayout(), m_TAADescriptorSets[0].GetLayout() });
     m_TAAPipeline.Init(ctx.device, taaRP, quadInfo, pipelineCache);
 
+    // SSAO descriptor sets and pipeline
+    VkRenderPass ssaoRP = m_Graph.GetPassRenderPass(m_SSAOPassIndex);
+
+    m_SSAOPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      SetDescription ssaoDesc = {
+        .set = 1,
+        .bindings = {
+          {
+            { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          }
+        }
+      };
+      m_SSAOPassDescriptorSets[i].Init(ctx, ssaoDesc);
+      // Write static bindings (noise texture + kernel UBO)
+      m_SSAOPassDescriptorSets[i].WriteCombinedImageSampler(2,
+        m_SSAONoise.GetView(), m_SSAONoise.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      m_SSAOPassDescriptorSets[i].WriteUniformBuffer(3, m_SSAOKernelUBO.Get(), 64 * sizeof(glm::vec4));
+    }
+    PipelineCreateInfo ssaoInfo = {
+      .fragmentShaderFile = "ssao.frag",
+      .vertexShaderFile = "quad.vert",
+      .depthTesting = false,
+      .vertexInputFormat = "",
+      .sets = std::vector({
+        m_PerFrameData.GetLayout(),
+        m_SSAOPassDescriptorSets[0].GetLayout(),
+      })
+    };
+    m_SSAOPipeline.Init(ctx.device, ssaoRP, ssaoInfo, pipelineCache);
+
+    // SSAO Blur descriptor sets and pipeline
+    VkRenderPass ssaoBlurRP = m_Graph.GetPassRenderPass(m_SSAOBlurPassIndex);
+
+    m_SSAOBlurPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      SetDescription ssaoBlurDesc = {
+        .set = 1,
+        .bindings = {
+          {
+            { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          }
+        }
+      };
+      m_SSAOBlurPassDescriptorSets[i].Init(ctx, ssaoBlurDesc);
+    }
+    PipelineCreateInfo ssaoBlurInfo = {
+      .fragmentShaderFile = "ssao_blur.frag",
+      .vertexShaderFile = "quad.vert",
+      .depthTesting = false,
+      .vertexInputFormat = "",
+      .sets = std::vector({
+        m_PerFrameData.GetLayout(),
+        m_SSAOBlurPassDescriptorSets[0].GetLayout(),
+      })
+    };
+    m_SSAOBlurPipeline.Init(ctx.device, ssaoBlurRP, ssaoBlurInfo, pipelineCache);
+
     // SSR descriptor sets and pipeline
     VkRenderPass ssrRP = m_Graph.GetPassRenderPass(m_SSRPassIndex);
 
@@ -671,12 +885,13 @@ namespace YAEngine
             { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
       m_SSRPassDescriptorSets[i].Init(ctx, ssrDesc);
     }
-    PipelineCreateInfo ssrDesc = {
+    PipelineCreateInfo ssrPipelineDesc = {
       .fragmentShaderFile = "ssr.frag",
       .vertexShaderFile = "quad.vert",
       .depthTesting = false,
@@ -686,7 +901,7 @@ namespace YAEngine
         m_SSRPassDescriptorSets[0].GetLayout(),
       })
     };
-    m_SSRPipeline.Init(ctx.device, ssrRP, ssrDesc, pipelineCache);
+    m_SSRPipeline.Init(ctx.device, ssrRP, ssrPipelineDesc, pipelineCache);
   }
 
   void Render::DrawQuad()

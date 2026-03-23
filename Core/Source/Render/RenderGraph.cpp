@@ -140,6 +140,8 @@ namespace YAEngine
       if (needsSampler)
       {
         SamplerDesc samplerDesc;
+        samplerDesc.magFilter = res.desc.filter;
+        samplerDesc.minFilter = res.desc.filter;
         if (res.desc.aspect == VK_IMAGE_ASPECT_DEPTH_BIT)
         {
           samplerDesc.magFilter = VK_FILTER_NEAREST;
@@ -275,15 +277,27 @@ namespace YAEngine
   {
     for (auto& pass : m_Passes)
     {
+      // Compute per-pass extent from first color output (or global extent for external)
+      if (!pass.info.colorOutputs.empty() && !pass.info.externalFramebuffer)
+      {
+        auto& res = m_Resources[pass.info.colorOutputs[0]];
+        pass.extent.width = std::max(1u, static_cast<uint32_t>(m_Extent.width * res.desc.widthScale));
+        pass.extent.height = std::max(1u, static_cast<uint32_t>(m_Extent.height * res.desc.heightScale));
+      }
+      else
+      {
+        pass.extent = m_Extent;
+      }
+
       if (pass.info.externalFramebuffer) continue;
       if (pass.info.colorOutputs.empty()) continue;
 
-      // Create private depth if no managed depth output
+      // Create private depth if no managed depth output (match pass extent)
       if (pass.info.depthOutput == RG_INVALID_HANDLE)
       {
         ImageDesc depthDesc;
-        depthDesc.width = m_Extent.width;
-        depthDesc.height = m_Extent.height;
+        depthDesc.width = pass.extent.width;
+        depthDesc.height = pass.extent.height;
         depthDesc.format = VK_FORMAT_D32_SFLOAT;
         depthDesc.usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
         depthDesc.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -317,8 +331,8 @@ namespace YAEngine
       fbInfo.renderPass = pass.renderPass;
       fbInfo.attachmentCount = static_cast<uint32_t>(views.size());
       fbInfo.pAttachments = views.data();
-      fbInfo.width = m_Extent.width;
-      fbInfo.height = m_Extent.height;
+      fbInfo.width = pass.extent.width;
+      fbInfo.height = pass.extent.height;
       fbInfo.layers = 1;
 
       if (vkCreateFramebuffer(m_Ctx->device, &fbInfo, nullptr, &pass.framebuffer) != VK_SUCCESS)
@@ -431,6 +445,8 @@ namespace YAEngine
     {
       auto& pass = m_Passes[passIndex];
 
+      ctx.extent = pass.extent;
+
       // Insert barriers for inputs
       InsertBarriers(cmd, passIndex);
 
@@ -455,11 +471,23 @@ namespace YAEngine
       rpInfo.renderPass = pass.renderPass;
       rpInfo.framebuffer = fb;
       rpInfo.renderArea.offset = {0, 0};
-      rpInfo.renderArea.extent = m_Extent;
+      rpInfo.renderArea.extent = pass.extent;
       rpInfo.clearValueCount = attachmentCount;
       rpInfo.pClearValues = clearValues.data();
 
       vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+      // Set viewport and scissor to match pass extent
+      VkViewport viewport{};
+      viewport.width = static_cast<float>(pass.extent.width);
+      viewport.height = static_cast<float>(pass.extent.height);
+      viewport.minDepth = 0.0f;
+      viewport.maxDepth = 1.0f;
+      vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+      VkRect2D scissor{};
+      scissor.extent = pass.extent;
+      vkCmdSetScissor(cmd, 0, 1, &scissor);
 
       pass.info.execute(ctx);
 

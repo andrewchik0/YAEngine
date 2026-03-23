@@ -24,6 +24,11 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   float fov;
   int screenWidth;
   int screenHeight;
+  int ssaoEnabled;
+  int ssrEnabled;
+  int taaEnabled;
+  float jitterX;
+  float jitterY;
 } u_Data;
 
 struct Light
@@ -153,23 +158,4 @@ void main() {
   outMaterial = vec2(roughness, metallic);
   outAlbedo = vec4(albedo.rgb, 1.0);
   outVelocity = velocity;
-
-  if (bool(u_Data.currentTexture))
-  {
-    switch (u_Data.currentTexture)
-    {
-    case 1:
-      outColor = vec4(albedo.rgb, 1.0);
-      break;
-    case 2:
-      outColor = vec4(vec3(metallic), 1.0);
-      break;
-    case 3:
-      outColor = vec4(vec3(roughness), 1.0);
-      break;
-    case 4:
-      outColor = vec4(vec3(normal), 1.0);
-      break;
-    }
-  }
 }

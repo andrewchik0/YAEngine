@@ -20,6 +20,11 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   float fov;
   int screenWidth;
   int screenHeight;
+  int ssaoEnabled;
+  int ssrEnabled;
+  int taaEnabled;
+  float jitterX;
+  float jitterY;
 } u_Data;
 
 layout(set = 1, binding = 0) uniform sampler2D frame;
@@ -30,9 +35,17 @@ layout(set = 1, binding = 2) uniform sampler2D velocityTexture;
 
 void main()
 {
-  ivec2 screenSpaceUV = ivec2(uv * vec2(u_Data.screenWidth, u_Data.screenHeight));
+  // Passthrough when TAA is disabled
+  if (u_Data.taaEnabled == 0)
+  {
+    outColor = vec4(texture(frame, uv).rgb, 1.0);
+    return;
+  }
 
-  vec3 currentColor = texture(frame, uv).rgb;
+  vec2 unjitteredUV = uv - vec2(u_Data.jitterX, u_Data.jitterY) * 0.5;
+  ivec2 screenSpaceUV = ivec2(unjitteredUV * vec2(u_Data.screenWidth, u_Data.screenHeight));
+
+  vec3 currentColor = texture(frame, unjitteredUV).rgb;
   vec3 currentYCoCg = RGBToYCoCg(currentColor);
 
   vec3 colorMin = vec3(0);
@@ -55,7 +68,7 @@ void main()
     historyCol = InverseTonemapYCoCg(historyCol);
 
     float speed = length(velocity * vec2(u_Data.screenWidth, u_Data.screenHeight));
-    float blendFactor = mix(EMA_IIR_INVERSE_CUTOFF_FREQUENCY, 0.0, clamp(speed / 16.0, 0.0, 1.0));
+    float blendFactor = mix(EMA_IIR_INVERSE_CUTOFF_FREQUENCY, 0.5, clamp(speed / 16.0, 0.0, 1.0));
 
     result = mix(currentYCoCg, historyCol, blendFactor);
     result = YCoCgToRGB(result);
