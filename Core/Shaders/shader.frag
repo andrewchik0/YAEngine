@@ -84,7 +84,7 @@ void main() {
   vec4 albedo = mix(vec4(u_Material.albedo, 1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
   albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
 
-  float hasMetallicTexture = float((u_Material.textureMask >> 5) & 1);
+  float hasMetallicTexture = float((u_Material.textureMask >> 1) & 1);
   float metallic = mix(u_Material.metallic, texture(metallicTexture, inTexCoord).b, hasMetallicTexture);
 
   float combinedTextures = float((u_Material.textureMask >> 8) & 1);

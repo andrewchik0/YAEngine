@@ -64,9 +64,9 @@ public:
 
     {
       auto albedoHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_albedo.png");
-      auto normalHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_normal.png");
-      auto roughnessHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_roughness.png");
-      auto metallicHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_metallic.png");
+      auto normalHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_normal.png", nullptr, true);
+      auto roughnessHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_roughness.png", nullptr, true);
+      auto metallicHandle = App().GetAssetManager().Textures().Load(APP_WORKING_DIR "/Assets/Materials/tile_metallic.png", nullptr, true);
 
       auto meshHandle = App().GetAssetManager().Meshes().Load(vertices, indices);
       auto materialHandle = App().GetAssetManager().Materials().Create();

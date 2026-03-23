@@ -41,7 +41,11 @@ namespace YAEngine
     );
 
     if (self)
+    {
+      self->m_WindowWidth = width;
+      self->m_WindowHeight = height;
       self->m_WindowEventStack.push_back(std::make_unique<ResizeEvent>(width, height));
+    }
   }
 
   void Window::MouseScrollCallback(GLFWwindow* window, double xOffset, double yOffset)

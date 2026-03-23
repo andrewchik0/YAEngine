@@ -297,22 +297,22 @@ namespace YAEngine
     if (!baseColorTexture.empty())
       mat.baseColorTexture = m_AssetManager->Textures().Load((model.basePath / baseColorTexture).string(), &mat.hasAlpha);
     if (!metallicTexture.empty())
-      mat.metallicTexture = m_AssetManager->Textures().Load((model.basePath / metallicTexture).string());
+      mat.metallicTexture = m_AssetManager->Textures().Load((model.basePath / metallicTexture).string(), nullptr, true);
     if (!roughnessTexture.empty())
-      mat.roughnessTexture = m_AssetManager->Textures().Load((model.basePath / roughnessTexture).string());
+      mat.roughnessTexture = m_AssetManager->Textures().Load((model.basePath / roughnessTexture).string(), nullptr, true);
     else if (hasSG && !specularTexture.empty())
-      mat.roughnessTexture = m_AssetManager->Textures().Load((model.basePath / specularTexture).string());
+      mat.roughnessTexture = m_AssetManager->Textures().Load((model.basePath / specularTexture).string(), nullptr, true);
     if (!specularTexture.empty())
-      mat.specularTexture = m_AssetManager->Textures().Load((model.basePath / specularTexture).string());
+      mat.specularTexture = m_AssetManager->Textures().Load((model.basePath / specularTexture).string(), nullptr, true);
     if (!emissiveTexture.empty())
       mat.emissiveTexture = m_AssetManager->Textures().Load((model.basePath / emissiveTexture).string());
 
     if (!normalTexture.empty())
-      mat.normalTexture = m_AssetManager->Textures().Load((model.basePath / normalTexture).string());
+      mat.normalTexture = m_AssetManager->Textures().Load((model.basePath / normalTexture).string(), nullptr, true);
     else if (!normalPBR.empty())
-      mat.normalTexture = m_AssetManager->Textures().Load((model.basePath / normalPBR).string());
+      mat.normalTexture = m_AssetManager->Textures().Load((model.basePath / normalPBR).string(), nullptr, true);
     else if (!heightTexture.empty())
-      mat.heightTexture = m_AssetManager->Textures().Load((model.basePath / heightTexture).string());
+      mat.heightTexture = m_AssetManager->Textures().Load((model.basePath / heightTexture).string(), nullptr, true);
 
     m_Scene->AddComponent<MaterialComponent>(mesh, materialHandle);
   }

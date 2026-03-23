@@ -25,7 +25,7 @@ namespace YAEngine
     void SetRenderContext(const RenderContext& ctx) { m_Ctx = &ctx; }
 
     [[nodiscard]]
-    TextureHandle Load(const std::string& filePath, bool* hasAlpha = nullptr);
+    TextureHandle Load(const std::string& filePath, bool* hasAlpha = nullptr, bool linear = false);
     void Destroy(TextureHandle handle);
 
     bool CheckAlpha(void* data, uint32_t width, uint32_t height);

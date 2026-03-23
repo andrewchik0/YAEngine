@@ -151,7 +151,7 @@ namespace YAEngine
     }
   }
 
-  void VulkanSwapChain::CreateFrameBuffers(VkRenderPass renderPass, uint32_t width, uint32_t height)
+  void VulkanSwapChain::CreateFrameBuffers(VkRenderPass renderPass)
   {
     m_RenderPass = renderPass;
     m_SwapChainFrameBuffers.resize(m_SwapChainImageViews.size());
@@ -159,8 +159,8 @@ namespace YAEngine
     VkImageCreateInfo depthImageInfo{};
     depthImageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     depthImageInfo.imageType = VK_IMAGE_TYPE_2D;
-    depthImageInfo.extent.width = width;
-    depthImageInfo.extent.height = height;
+    depthImageInfo.extent.width = m_SwapChainExtent.width;
+    depthImageInfo.extent.height = m_SwapChainExtent.height;
     depthImageInfo.extent.depth = 1;
     depthImageInfo.mipLevels = 1;
     depthImageInfo.arrayLayers = 1;
@@ -233,7 +233,7 @@ namespace YAEngine
     vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
   }
 
-  void VulkanSwapChain::Recreate(VkRenderPass renderPass, uint32_t width, uint32_t height)
+  void VulkanSwapChain::Recreate(VkRenderPass renderPass)
   {
     m_RenderPass = renderPass;
 
@@ -241,6 +241,6 @@ namespace YAEngine
 
     Destroy();
     Init(m_Device, m_PhysicalDevice, m_Surface, m_Window, m_Allocator);
-    CreateFrameBuffers(m_RenderPass, width, height);
+    CreateFrameBuffers(m_RenderPass);
   }
 }

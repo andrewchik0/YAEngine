@@ -24,7 +24,7 @@ namespace YAEngine
   public:
     void Init(GLFWwindow* window, const RenderSpecs &specs);
     void Destroy();
-    void Resize(uint32_t width, uint32_t height);
+    void Resize();
 
     void Draw(Application* app);
 
@@ -120,5 +120,6 @@ namespace YAEngine
     const RenderContext& GetContext() const { return m_Backend.GetContext(); }
     const VulkanTexture& GetNoneTexture() const { return m_NoneTexture; }
     CubicTextureResources& GetCubicResources() { return m_CubicResources; }
+    VkExtent2D GetSwapChainExtent() { return m_Backend.GetSwapChain().GetExt(); }
   };
 }

@@ -278,7 +278,7 @@ namespace YAEngine
 
     // Create swapchain framebuffers using graph's render pass
     m_Backend.GetSwapChain().CreateFrameBuffers(
-      m_Graph.GetPassRenderPass(m_SwapchainPassIndex), width, height);
+      m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
 
     // Clear TAA history buffers
     ClearHistoryBuffers();
@@ -346,13 +346,20 @@ namespace YAEngine
     m_Backend.Destroy();
   }
 
-  void Render::Resize(uint32_t width, uint32_t height)
+  void Render::Resize()
   {
     b_Resized = false;
     auto& ctx = m_Backend.GetContext();
 
+    // Recreate swapchain first to get actual surface dimensions
+    m_Backend.GetSwapChain().Recreate(
+      m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
+
+    // Use actual swapchain extent for everything
+    auto actualExtent = m_Backend.GetSwapChain().GetExt();
+
     // Resize graph (recreates managed resources and non-external framebuffers)
-    m_Graph.Resize({width, height});
+    m_Graph.Resize(actualExtent);
 
     // Recreate TAA external framebuffers
     for (auto& fb : m_TAAFramebuffers)
@@ -366,10 +373,6 @@ namespace YAEngine
     m_TAADepth.Destroy(ctx);
     CreateTAAFramebuffers();
 
-    // Recreate swapchain
-    m_Backend.GetSwapChain().Recreate(
-      m_Graph.GetPassRenderPass(m_SwapchainPassIndex), width, height);
-
     // Clear history buffers
     ClearHistoryBuffers();
   }
@@ -379,7 +382,7 @@ namespace YAEngine
     auto imageIndex = m_Backend.BeginFrame();
     if (!imageIndex)
     {
-      Resize(app->GetWindow().GetWidth(), app->GetWindow().GetHeight());
+      Resize();
       return;
     }
 
@@ -411,7 +414,7 @@ namespace YAEngine
 
     if (!m_Backend.EndFrame(*imageIndex, b_Resized))
     {
-      Resize(app->GetWindow().GetWidth(), app->GetWindow().GetHeight());
+      Resize();
     }
     m_TAAIndex = (m_TAAIndex + 1) % 2;
     m_GlobalFrameIndex++;

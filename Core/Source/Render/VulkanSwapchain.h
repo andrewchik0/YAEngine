@@ -7,9 +7,9 @@ namespace YAEngine
   public:
     void Init(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, GLFWwindow* window, VmaAllocator allocator);
     void Destroy();
-    void Recreate(VkRenderPass renderPass, uint32_t width, uint32_t height);
+    void Recreate(VkRenderPass renderPass);
 
-    void CreateFrameBuffers(VkRenderPass renderPass, uint32_t width, uint32_t height);
+    void CreateFrameBuffers(VkRenderPass renderPass);
 
     VkSwapchainKHR& Get()
     {

@@ -7,7 +7,7 @@
 
 namespace YAEngine
 {
-  TextureHandle TextureManager::Load(const std::string& path, bool* hasAlpha)
+  TextureHandle TextureManager::Load(const std::string& path, bool* hasAlpha, bool linear)
   {
     auto texture = std::make_unique<Texture>();
     int32_t width, height, channels;
@@ -20,7 +20,8 @@ namespace YAEngine
       {
         *hasAlpha = CheckAlpha(data, width, height);
       }
-      texture->m_VulkanTexture.Load(*m_Ctx, data, width, height, 4, VK_FORMAT_R8G8B8A8_SRGB);
+      VkFormat format = linear ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_SRGB;
+      texture->m_VulkanTexture.Load(*m_Ctx, data, width, height, 4, format);
       stbi_image_free(data);
 
       return AssetManagerBase::Load(std::move(texture));

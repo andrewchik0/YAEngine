@@ -31,19 +31,26 @@ namespace YAEngine
       layer->OnBeforeInit();
     m_AssetManager.Init();
     m_AssetManager.SetRenderContext(m_Render.GetContext(), m_Render.GetNoneTexture(), m_Render.GetCubicResources());
-    int w, h;
-    glfwGetWindowSize(m_Window.Get(), &w, &h);
-    m_Render.Resize(w, h);
+    m_Render.Resize();
     m_Render.Draw(this);
 
     for (auto& layer : m_LayerStack)
       layer->Init();
 
-    m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize((float)w, (float)h);
+    auto swapExtent = m_Render.GetSwapChainExtent();
+    m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(
+      (float)swapExtent.width, (float)swapExtent.height);
 
     while (m_Window.IsOpen())
     {
       HandleEvents();
+
+      if (m_Window.GetWidth() == 0 || m_Window.GetHeight() == 0)
+      {
+        glfwWaitEvents();
+        continue;
+      }
+
       m_Timer.Step();
       m_Scene.Update();
       for (auto& layer : m_LayerStack)
@@ -89,8 +96,10 @@ namespace YAEngine
           float height = static_cast<float>(dynamic_cast<ResizeEvent*>(windowEvent.get())->height);
           if (width != 0.0f && height != 0.0f)
           {
-            m_Render.Resize(static_cast<uint32_t>(width), static_cast<uint32_t>(height));
-            m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(width, height);
+            m_Render.Resize();
+            auto extent = m_Render.GetSwapChainExtent();
+            m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(
+              (float)extent.width, (float)extent.height);
             m_EventBus.Emit<ResizeEvent>(*dynamic_cast<ResizeEvent*>(windowEvent.get()));
           }
           break;

@@ -32,7 +32,23 @@ namespace YAEngine
         ImGui::Separator();
         ImGui::DragFloat("Gamma", &App().GetRender().m_Gamma, 0.01f, 0.0f, 10.0f);
         ImGui::DragFloat("Exposure", &App().GetRender().m_Exposure, 0.01f, 0.0f, 10.0f);
-        ImGui::InputInt("Current Texture", &App().GetRender().m_CurrentTexture);
+        {
+          static int debugViewIndex = 0;
+          const char* debugViews[] = {
+            "Off", "Albedo", "Metallic", "Roughness", "Normals",
+            "SSR: Raw Depth", "SSR: World Normal", "SSR: View Normal",
+            "SSR: Reflect Dir", "SSR: Hit Map", "SSR: Hit UV",
+            "SSR: Hit Distance", "SSR: Raw Hit Map", "SSR: Ray Direction",
+            "SSR: Raw Hit Dist", "SSR: Depth Compare",
+            "SSR: Roundtrip Test", "SSR: UV Shift Test",
+            "SSR: Depth Roundtrip", "SSR: Minimal SSR",
+            "SSR: Analytical Mirror", "SSR: Normal Deviation x2",
+            "SSR: Normal Angle"
+          };
+          const int debugValues[] = { 0, 1, 2, 3, 4, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27 };
+          if (ImGui::Combo("Debug View", &debugViewIndex, debugViews, IM_ARRAYSIZE(debugViews)))
+            App().GetRender().m_CurrentTexture = debugValues[debugViewIndex];
+        }
 
         ImGui::Separator();
         for (int i = 0; i < App().GetRender().m_Lights.lightsCount; i++)
