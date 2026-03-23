@@ -23,7 +23,10 @@ namespace YAEngine
     ModelDescription desc;
 
     if (scene == nullptr)
+    {
+      fprintf(stderr, "ModelImporter: Failed to load '%s': %s\n", path.c_str(), importer.GetErrorString());
       return desc;
+    }
 
     desc.basePath = std::filesystem::path(path).parent_path();
     desc.root.name = std::filesystem::path(path).filename().string();

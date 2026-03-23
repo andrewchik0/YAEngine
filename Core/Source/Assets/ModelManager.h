@@ -30,9 +30,12 @@ namespace YAEngine
     void SetRenderContext(const AssetManagerInitInfo&) override {}
 
     ModelManager() = default;
-    ModelManager(Scene* scene, AssetManager* assetManager)
-      : m_Scene(scene), m_AssetManager(assetManager), m_Builder(scene, assetManager)
+
+    void SetDependencies(Scene* scene, AssetManager* assetManager)
     {
+      m_Scene = scene;
+      m_AssetManager = assetManager;
+      m_Builder = ModelBuilder(scene, assetManager);
     }
 
     ModelHandle Load(const std::string& path, bool combinedTextures = false);

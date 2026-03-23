@@ -15,7 +15,7 @@ namespace YAEngine
 
   void AssetManager::Init()
   {
-    Models() = ModelManager(&Application::Get().GetScene(), this);
+    Models().SetDependencies(&Application::Get().GetScene(), this);
   }
 
   void AssetManager::SetRenderContext(const RenderContext& ctx, const VulkanTexture& noneTexture, CubicTextureResources& cubicResources)

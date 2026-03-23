@@ -21,11 +21,11 @@ namespace YAEngine
     {
       auto id = ++m_NextId;
       auto& handlers = m_Handlers[typeid(Event)];
-      handlers.push_back({id, priority, [handler](const void* e)
+      HandlerWrapper wrapper {id, priority, [handler](const void* e)
       {
           return handler(*static_cast<const Event*>(e));
-      }});
-      SortHandlers(handlers);
+      }};
+      InsertSorted(handlers, std::move(wrapper));
       return id;
     }
 
@@ -35,12 +35,12 @@ namespace YAEngine
     {
       auto id = ++m_NextId;
       auto& handlers = m_Handlers[typeid(Event)];
-      handlers.push_back({id, priority, [handler](const void* e)
+      HandlerWrapper wrapper {id, priority, [handler](const void* e)
       {
           handler(*static_cast<const Event*>(e));
           return false;
-      }});
-      SortHandlers(handlers);
+      }};
+      InsertSorted(handlers, std::move(wrapper));
       return id;
     }
 
@@ -78,13 +78,14 @@ namespace YAEngine
       std::function<bool(const void*)> callback;
     };
 
-    static void SortHandlers(std::vector<HandlerWrapper>& handlers)
+    static void InsertSorted(std::vector<HandlerWrapper>& handlers, HandlerWrapper&& wrapper)
     {
-      std::stable_sort(handlers.begin(), handlers.end(),
+      auto pos = std::upper_bound(handlers.begin(), handlers.end(), wrapper,
         [](const HandlerWrapper& a, const HandlerWrapper& b)
         {
           return a.priority < b.priority;
         });
+      handlers.insert(pos, std::move(wrapper));
     }
 
     std::unordered_map<std::type_index, std::vector<HandlerWrapper>> m_Handlers;

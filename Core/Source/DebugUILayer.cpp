@@ -8,32 +8,6 @@ namespace YAEngine
 {
   static Entity s_SelectedEntity;
 
-  void DebugUILayer::OnSceneReady()
-  {
-    // Subscribe with high priority to consume events when ImGui wants them
-    m_KeySub = App().Events().Subscribe<KeyEvent>(
-      std::function<bool(const KeyEvent&)>([](const KeyEvent&) -> bool {
-        return ImGui::GetIO().WantCaptureKeyboard;
-      }), -100);
-
-    m_MouseButtonSub = App().Events().Subscribe<MouseButtonEvent>(
-      std::function<bool(const MouseButtonEvent&)>([](const MouseButtonEvent&) -> bool {
-        return ImGui::GetIO().WantCaptureMouse;
-      }), -100);
-
-    m_MouseScrollSub = App().Events().Subscribe<MouseWheelEvent>(
-      std::function<bool(const MouseWheelEvent&)>([](const MouseWheelEvent&) -> bool {
-        return ImGui::GetIO().WantCaptureMouse;
-      }), -100);
-  }
-
-  void DebugUILayer::OnDetach()
-  {
-    App().Events().Unsubscribe<KeyEvent>(m_KeySub);
-    App().Events().Unsubscribe<MouseButtonEvent>(m_MouseButtonSub);
-    App().Events().Unsubscribe<MouseWheelEvent>(m_MouseScrollSub);
-  }
-
   void DebugUILayer::RenderUI()
   {
     ImGui::Begin("Debug UI");

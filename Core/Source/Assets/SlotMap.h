@@ -44,6 +44,8 @@ namespace YAEngine
 
       slot.data.reset();
       slot.generation++;
+      if (slot.generation == 0)
+        slot.generation = 1;
       m_FreeList.push_back(index);
       m_Count--;
       return true;

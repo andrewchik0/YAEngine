@@ -13,8 +13,11 @@ namespace YAEngine
 
     void ProcessEvents();
 
+    void SetImGuiFiltering(bool enabled) { m_ImGuiFiltering = enabled; }
+
   private:
     Window& m_Window;
     EventBus& m_EventBus;
+    bool m_ImGuiFiltering = false;
   };
 }

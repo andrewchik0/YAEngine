@@ -36,6 +36,7 @@ namespace YAEngine
     m_Render.Draw(this);
 
     m_LayerManager.CallOnSceneReady();
+    m_InputSystem.SetImGuiFiltering(true);
 
     auto swapExtent = m_Render.GetSwapChainExtent();
     m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(
