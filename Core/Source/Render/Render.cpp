@@ -82,7 +82,7 @@ namespace YAEngine
 
     m_SSRPassIndex = m_Graph.AddPass({
       .name = "SSRPass",
-      .inputs = {m_MainColor, m_MainDepth, m_MainNormals, m_MainMaterial, m_MainAlbedo, m_MainVelocity},
+      .inputs = {m_MainColor, m_MainDepth, m_MainNormals, m_MainMaterial, m_MainAlbedo},
       .colorOutputs = {m_SSRColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();

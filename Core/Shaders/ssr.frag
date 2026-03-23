@@ -59,7 +59,9 @@ float linearizeDepth(float depth)
 
 vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
 {
-  return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
+  float t = clamp(1.0 - cosTheta, 0.0, 1.0);
+  float t2 = t * t;
+  return F0 + (max(vec3(1.0 - roughness), F0) - F0) * t2 * t2 * t;
 }
 
 // --- Main ---
@@ -68,9 +70,10 @@ void main()
 {
   // Read G-buffer
   float depth = texture(depthTexture, uv).r;
-  vec3 worldNormal = normalize(texture(normalTexture, uv).rgb);
-  float roughness = texture(materialTexture, uv).r;
-  float metallic = texture(materialTexture, uv).g;
+  vec3 worldNormal = texture(normalTexture, uv).rgb;
+  vec2 material = texture(materialTexture, uv).rg;
+  float roughness = material.r;
+  float metallic = material.g;
   vec3 albedo = texture(albedoTexture, uv).rgb;
   vec3 originalColor = texture(frame, uv).rgb;
 
@@ -81,11 +84,13 @@ void main()
     return;
   }
 
-  if (length(worldNormal) < 0.001)
+  if (dot(worldNormal, worldNormal) < 0.000001)
   {
     outColor = vec4(originalColor, 1.0);
     return;
   }
+
+  worldNormal = normalize(worldNormal);
 
   if (roughness > MAX_ROUGHNESS)
   {
@@ -140,13 +145,15 @@ void main()
 
   float originLinearDepth = linearizeDepth(depth);
 
+  float invSteps = 1.0 / float(steps);
+
   for (int i = 1; i <= steps; i++)
   {
-    float t = float(i) / float(steps);
+    float t = float(i) * invSteps;
     vec2 sampleUV = mix(startScreen, endScreen, t);
 
     // Screen bounds check
-    if (sampleUV.x < 0.0 || sampleUV.x > 1.0 || sampleUV.y < 0.0 || sampleUV.y > 1.0)
+    if (any(notEqual(clamp(sampleUV, 0.0, 1.0), sampleUV)))
       break;
 
     // Linearly interpolated ray depth in NDC (perspective-correct in screen space)
@@ -171,7 +178,10 @@ void main()
         continue;
 
       // Reject same-surface hits by normal similarity
-      vec3 sampleNormal = normalize(texture(normalTexture, sampleUV).rgb);
+      vec3 sampleNormalRaw = texture(normalTexture, sampleUV).rgb;
+      if (dot(sampleNormalRaw, sampleNormalRaw) < 0.000001)
+        continue;
+      vec3 sampleNormal = normalize(sampleNormalRaw);
       if (dot(sampleNormal, worldNormal) > SAME_SURFACE_THRESHOLD)
         continue;
 
@@ -190,15 +200,15 @@ void main()
   }
 
   // Binary refinement in screen space
-  float lo = float(hitStep - 1) / float(steps);
-  float hi = float(hitStep) / float(steps);
+  float lo = float(hitStep - 1) * invSteps;
+  float hi = float(hitStep) * invSteps;
 
   for (int j = 0; j < REFINEMENT_STEPS; j++)
   {
     float mid = (lo + hi) * 0.5;
     vec2 midScreen = mix(startScreen, endScreen, mid);
 
-    if (midScreen.x < 0.0 || midScreen.x > 1.0 || midScreen.y < 0.0 || midScreen.y > 1.0)
+    if (any(notEqual(clamp(midScreen, 0.0, 1.0), midScreen)))
       break;
 
     float midRayDepth = mix(startDepthNDC, endDepthNDC, mid);
@@ -233,7 +243,7 @@ void main()
   float distanceFade = 1.0 - smoothstep(0.0, 1.0, hitT);
 
   // Roughness fade
-  float roughnessFade = 1.0 - roughness * roughness;
+  float roughnessFade = 1.0 - smoothstep(0.0, MAX_ROUGHNESS, roughness);
 
   // Final SSR mask
   vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade, vec3(0.0), vec3(1.0));
