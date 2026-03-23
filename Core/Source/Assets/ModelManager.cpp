@@ -49,7 +49,7 @@ namespace YAEngine
 
   void ModelManager::DestroyEntityAssets(Entity entity)
   {
-    auto& tc = m_Scene->GetTransform(entity);
+    auto& hc = m_Scene->GetHierarchy(entity);
 
     if (m_Scene->HasComponent<MeshComponent>(entity))
     {
@@ -64,10 +64,10 @@ namespace YAEngine
         m_AssetManager->Materials().Destroy(mc.asset);
     }
 
-    Entity child = tc.firstChild;
+    Entity child = hc.firstChild;
     while (child != entt::null)
     {
-      Entity next = m_Scene->GetTransform(child).nextSibling;
+      Entity next = m_Scene->GetHierarchy(child).nextSibling;
       DestroyEntityAssets(child);
       child = next;
     }
@@ -75,7 +75,7 @@ namespace YAEngine
 
   void ModelManager::TraverseInstanceData(Entity entity, std::vector<glm::mat4>* instanceData, uint32_t offset)
   {
-    auto& tc = m_Scene->GetTransform(entity);
+    auto& hc = m_Scene->GetHierarchy(entity);
 
     if (m_Scene->HasComponent<MeshComponent>(entity))
     {
@@ -87,14 +87,14 @@ namespace YAEngine
       mesh.offset = offset;
     }
 
-    if (tc.firstChild != entt::null)
+    if (hc.firstChild != entt::null)
     {
-      TraverseInstanceData(tc.firstChild, instanceData, offset);
+      TraverseInstanceData(hc.firstChild, instanceData, offset);
     }
 
-    if (tc.nextSibling != entt::null)
+    if (hc.nextSibling != entt::null)
     {
-      TraverseInstanceData(tc.nextSibling, instanceData, offset);
+      TraverseInstanceData(hc.nextSibling, instanceData, offset);
     }
   }
 }

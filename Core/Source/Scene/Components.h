@@ -5,15 +5,18 @@
 
 namespace YAEngine
 {
+  struct HierarchyComponent
+  {
+    entt::entity parent { entt::null };
+    entt::entity firstChild { entt::null };
+    entt::entity nextSibling { entt::null };
+  };
+
   struct TransformComponent
   {
     glm::vec3 position { 0 };
     glm::quat rotation { 1, 0, 0, 0 };
     glm::vec3 scale { 1 };
-
-    entt::entity parent { entt::null };
-    entt::entity firstChild { entt::null };
-    entt::entity nextSibling { entt::null };
 
     glm::mat4 local { 1.0f };
     glm::mat4 world { 1.0f };

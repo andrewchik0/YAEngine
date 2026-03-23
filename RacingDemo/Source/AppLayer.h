@@ -4,6 +4,7 @@
 #include "ControlsLayer.h"
 #include "FreeCamLayer.h"
 #include "DebugUILayer.h"
+#include "GameComponents.h"
 
 #include "Vertices.h"
 
@@ -14,21 +15,9 @@ class AppLayer : public YAEngine::Layer
 public:
   AppLayer() = default;
 
-
-  YAEngine::Entity car, road, trees;
-
   YAEngine::SubscriptionId key {};
 
-  std::array<YAEngine::Entity, 4> wheels {};
-
-  struct WheelState
-  {
-    glm::dquat baseRot;
-    double spinAngle;
-  };
-  std::array<WheelState, 4> wheelStates {};
-
-  void OnBeforeInit() override
+  void OnAttach() override
   {
     App().GetWindow().Maximize();
 #ifndef TEST
@@ -38,26 +27,40 @@ public:
     App().PushLayer<YAEngine::DebugUILayer>();
   }
 
-  void Init() override
+  void OnSceneReady() override
   {
     App().GetScene().SetSkybox(App().GetAssetManager().CubeMaps().Load(APP_WORKING_DIR "/Assets/Textures/sky.hdr"));
 
     key = App().Events().Subscribe<YAEngine::KeyEvent>([&](auto e) { OnKeyBoard(e); });
 
 #ifndef TEST
-    App().GetRender().m_Gamma = 1.48f;
-    App().GetRender().m_Exposure = 1.24f;
+    App().GetRender().GetGamma() = 1.48f;
+    App().GetRender().GetExposure() = 1.24f;
     {
       auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf", true);
-      car = App().GetAssetManager().Models().Get(carHandle).rootEntity;
-      wheels[0] = App().GetScene().GetChildByName(car, "wheel-left-front");
-      wheels[1] = App().GetScene().GetChildByName(car, "wheel-right-front");
-      wheels[2] = App().GetScene().GetChildByName(car, "wheel-left-back");
-      wheels[3] = App().GetScene().GetChildByName(car, "wheel-right-back");
-      wheelStates[0].baseRot = App().GetScene().GetTransform(wheels[0]).rotation;
-      wheelStates[1].baseRot = App().GetScene().GetTransform(wheels[1]).rotation;
-      wheelStates[2].baseRot = App().GetScene().GetTransform(wheels[2]).rotation;
-      wheelStates[3].baseRot = App().GetScene().GetTransform(wheels[3]).rotation;
+      auto car = App().GetAssetManager().Models().Get(carHandle).rootEntity;
+
+      // Add VehicleComponent to car
+      App().GetScene().AddComponent<VehicleComponent>(car);
+
+      auto wheels = std::array<YAEngine::Entity, 4> {
+        App().GetScene().GetChildByName(car, "wheel-left-front"),
+        App().GetScene().GetChildByName(car, "wheel-right-front"),
+        App().GetScene().GetChildByName(car, "wheel-left-back"),
+        App().GetScene().GetChildByName(car, "wheel-right-back")
+      };
+
+      // Add WheelComponent to each wheel
+      for (int i = 0; i < 4; i++)
+      {
+        auto baseRot = App().GetScene().GetTransform(wheels[i]).rotation;
+        App().GetScene().AddComponent<WheelComponent>(wheels[i],
+          WheelComponent {
+            .baseRot = baseRot,
+            .isFront = (i < 2)
+          });
+      }
+
       App().GetScene().GetTransform(car).position.y = -0.82f;
       App().GetScene().SetDoubleSided(car);
     }
@@ -107,18 +110,18 @@ public:
     }
 #endif
 
-    App().GetRender().m_Lights.lights[0].color = glm::vec3(0.0f, 20.0f, 0.0f);
-    App().GetRender().m_Lights.lights[0].position = glm::vec3(0.0f, 20.0f, 10.0f);
-    App().GetRender().m_Lights.lights[0].cutOff = 60.0f;
-    App().GetRender().m_Lights.lights[0].outerCutOff = 90.0f;
+    App().GetRender().GetLight(0).color = glm::vec3(0.0f, 20.0f, 0.0f);
+    App().GetRender().GetLight(0).position = glm::vec3(0.0f, 20.0f, 10.0f);
+    App().GetRender().GetLight(0).cutOff = 60.0f;
+    App().GetRender().GetLight(0).outerCutOff = 90.0f;
 
-    App().GetRender().m_Lights.lights[1].color = glm::vec3(20.0f, 0.0f, 0.0f);
-    App().GetRender().m_Lights.lights[1].position = glm::vec3(0.0f, 20.0f, -10.0f);
-    App().GetRender().m_Lights.lights[1].cutOff = 60.0f;
-    App().GetRender().m_Lights.lights[1].outerCutOff = 90.0f;
+    App().GetRender().GetLight(1).color = glm::vec3(20.0f, 0.0f, 0.0f);
+    App().GetRender().GetLight(1).position = glm::vec3(0.0f, 20.0f, -10.0f);
+    App().GetRender().GetLight(1).cutOff = 60.0f;
+    App().GetRender().GetLight(1).outerCutOff = 90.0f;
   }
 
-  void Destroy() override
+  void OnDetach() override
   {
     App().Events().Unsubscribe<YAEngine::KeyEvent>(key);
   }
@@ -127,16 +130,35 @@ public:
   {
     if (event.action == GLFW_PRESS && event.key == GLFW_KEY_ESCAPE)
     {
-      auto cam = App().GetLayer<ControlsLayer>()->camera;
-      if (App().GetScene().GetActiveCamera() == cam)
+      // Find follow camera (ControlsLayer camera) and free camera via ECS
+      auto followView = App().GetScene().GetView<FollowCameraComponent, YAEngine::CameraComponent>();
+      auto freeView = App().GetScene().GetView<YAEngine::CameraComponent, YAEngine::TransformComponent>();
+
+      YAEngine::Entity followCam = entt::null;
+      YAEngine::Entity freeCam = entt::null;
+
+      for (auto e : followView)
       {
-        auto debugCamera = App().GetLayer<YAEngine::FreeCamLayer>()->freeCam;
-        App().GetScene().SetActiveCamera(debugCamera);
+        followCam = e;
+        break;
       }
+
+      // FreeCam is a camera entity without FollowCameraComponent
+      for (auto e : freeView)
+      {
+        if (!App().GetScene().HasComponent<FollowCameraComponent>(e))
+        {
+          freeCam = e;
+          break;
+        }
+      }
+
+      if (followCam == entt::null || freeCam == entt::null) return;
+
+      if (App().GetScene().GetActiveCamera() == followCam)
+        App().GetScene().SetActiveCamera(freeCam);
       else
-      {
-        App().GetScene().SetActiveCamera(cam);
-      }
+        App().GetScene().SetActiveCamera(followCam);
     }
   }
 

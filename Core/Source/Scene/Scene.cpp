@@ -1,4 +1,5 @@
 #include "Scene.h"
+#include "TransformSystem.h"
 
 namespace YAEngine
 {
@@ -7,6 +8,7 @@ namespace YAEngine
   {
     Entity e = m_Registry.create();
     m_Registry.emplace<TransformComponent>(e);
+    m_Registry.emplace<HierarchyComponent>(e);
     if (!name.empty())
       m_Registry.emplace<Name>(e, name);
     return e;
@@ -14,28 +16,28 @@ namespace YAEngine
 
   void Scene::DestroyEntity(Entity e)
   {
-    auto& tc = m_Registry.get<TransformComponent>(e);
+    auto& hc = m_Registry.get<HierarchyComponent>(e);
 
-    Entity child = tc.firstChild;
+    Entity child = hc.firstChild;
     while (child != entt::null)
     {
-      Entity next = m_Registry.get<TransformComponent>(child).nextSibling;
+      Entity next = m_Registry.get<HierarchyComponent>(child).nextSibling;
       DestroyEntity(child);
       child = next;
     }
 
-    if (tc.parent != entt::null)
+    if (hc.parent != entt::null)
     {
-      auto& parentTc = m_Registry.get<TransformComponent>(tc.parent);
-      entt::entity* link = &parentTc.firstChild;
+      auto& parentHc = m_Registry.get<HierarchyComponent>(hc.parent);
+      entt::entity* link = &parentHc.firstChild;
       while (*link != entt::null)
       {
         if (*link == e)
         {
-          *link = tc.nextSibling;
+          *link = hc.nextSibling;
           break;
         }
-        link = &m_Registry.get<TransformComponent>(*link).nextSibling;
+        link = &m_Registry.get<HierarchyComponent>(*link).nextSibling;
       }
     }
 
@@ -44,40 +46,58 @@ namespace YAEngine
 
   void Scene::SetParent(Entity child, Entity parent)
   {
-    auto& childT = m_Registry.get<TransformComponent>(child);
+    auto& childH = m_Registry.get<HierarchyComponent>(child);
 
-    if (childT.parent != entt::null)
+    // Cycle detection: walk up from parent to root, reject if child is found
+    if (parent != entt::null)
     {
-      auto& oldParent = m_Registry.get<TransformComponent>(childT.parent);
+      entt::entity ancestor = parent;
+      while (ancestor != entt::null)
+      {
+        if (ancestor == child)
+          return;
+        ancestor = m_Registry.get<HierarchyComponent>(ancestor).parent;
+      }
+    }
+
+    // Unlink from old parent
+    if (childH.parent != entt::null)
+    {
+      auto& oldParent = m_Registry.get<HierarchyComponent>(childH.parent);
 
       entt::entity* link = &oldParent.firstChild;
       while (*link != entt::null)
       {
         if (*link == child)
         {
-          *link = m_Registry.get<TransformComponent>(*link).nextSibling;
+          *link = m_Registry.get<HierarchyComponent>(*link).nextSibling;
           break;
         }
-        link = &m_Registry.get<TransformComponent>(*link).nextSibling;
+        link = &m_Registry.get<HierarchyComponent>(*link).nextSibling;
       }
     }
 
-    childT.parent = parent;
-    childT.nextSibling = entt::null;
+    childH.parent = parent;
+    childH.nextSibling = entt::null;
 
     if (parent != entt::null)
     {
-      auto& parentT = m_Registry.get<TransformComponent>(parent);
-      childT.nextSibling = parentT.firstChild;
-      parentT.firstChild = child;
+      auto& parentH = m_Registry.get<HierarchyComponent>(parent);
+      childH.nextSibling = parentH.firstChild;
+      parentH.firstChild = child;
     }
 
-    childT.dirty = true;
+    m_Registry.get<TransformComponent>(child).dirty = true;
   }
 
   TransformComponent& Scene::GetTransform(Entity e)
   {
     return m_Registry.get<TransformComponent>(e);
+  }
+
+  HierarchyComponent& Scene::GetHierarchy(Entity e)
+  {
+    return m_Registry.get<HierarchyComponent>(e);
   }
 
   Name& Scene::GetName(Entity e)
@@ -91,7 +111,9 @@ namespace YAEngine
     if (currentEntityName == name)
       return entity;
 
-    auto firstChild = GetTransform(entity).firstChild;
+    auto& hc = GetHierarchy(entity);
+
+    auto firstChild = hc.firstChild;
     if (firstChild != entt::null)
     {
       auto child = GetChildByName(firstChild, name);
@@ -99,7 +121,7 @@ namespace YAEngine
         return child;
     }
 
-    auto sibling = GetTransform(entity).nextSibling;
+    auto sibling = hc.nextSibling;
     while (sibling != entt::null)
     {
       auto child = GetChildByName(sibling, name);
@@ -110,7 +132,7 @@ namespace YAEngine
         if (childName == name)
           return child;
       }
-      sibling = GetTransform(sibling).nextSibling;
+      sibling = GetHierarchy(sibling).nextSibling;
     }
 
     return entt::null;
@@ -119,14 +141,15 @@ namespace YAEngine
   void Scene::MarkDirty(Entity e)
   {
     auto& t = m_Registry.get<TransformComponent>(e);
+    auto& hc = m_Registry.get<HierarchyComponent>(e);
 
-    if (t.parent != entt::null)
+    if (hc.parent != entt::null)
     {
-      entt::entity parent = t.parent;
+      entt::entity parent = hc.parent;
       while (parent != entt::null)
       {
         m_Registry.get<TransformComponent>(parent).dirty = true;
-        parent = m_Registry.get<TransformComponent>(parent).parent;
+        parent = m_Registry.get<HierarchyComponent>(parent).parent;
       }
     }
 
@@ -135,104 +158,56 @@ namespace YAEngine
 
     t.dirty = true;
 
-    entt::entity child = t.firstChild;
+    entt::entity child = hc.firstChild;
     while (child != entt::null)
     {
       MarkDirty(child);
-      child = m_Registry.get<TransformComponent>(child).nextSibling;
+      child = m_Registry.get<HierarchyComponent>(child).nextSibling;
     }
   }
 
   void Scene::Update()
   {
-    auto view = m_Registry.view<TransformComponent>();
-
-    for (auto e : view)
-    {
-      auto& t = view.get<TransformComponent>(e);
-      if (t.parent == entt::null)
-      {
-        UpdateWorldTransform(e);
-      }
-    }
-  }
-
-  void Scene::UpdateWorldTransform(Entity e)
-  {
-    auto& t = m_Registry.get<TransformComponent>(e);
-
-    if (!t.dirty)
-      return;
-
-    t.local = ComposeLocal(t);
-
-    if (t.parent != entt::null)
-    {
-      auto& parent = m_Registry.get<TransformComponent>(t.parent);
-      t.world = parent.world * t.local;
-    }
-    else
-    {
-      t.world = t.local;
-    }
-
-    t.dirty = false;
-
-    entt::entity child = t.firstChild;
-    while (child != entt::null)
-    {
-      auto& ct = m_Registry.get<TransformComponent>(child);
-      ct.dirty = true;
-      UpdateWorldTransform(child);
-      child = ct.nextSibling;
-    }
-  }
-
-  glm::mat4 Scene::ComposeLocal(const TransformComponent& t)
-  {
-    glm::mat4 T = glm::translate(glm::mat4(1.0f), t.position);
-    glm::mat4 R = glm::toMat4(t.rotation);
-    glm::mat4 S = glm::scale(glm::mat4(1.0f), t.scale);
-    return T * R * S;
+    TransformSystem::Update(m_Registry);
   }
 
   void Scene::SetDoubleSided(Entity e)
   {
-    auto& tc = GetTransform(e);
+    auto& hc = GetHierarchy(e);
 
     if (HasComponent<MeshComponent>(e))
     {
       GetComponent<MeshComponent>(e).doubleSided = true;
     }
 
-    if (tc.firstChild != entt::null)
+    if (hc.firstChild != entt::null)
     {
-      SetDoubleSided(tc.firstChild);
+      SetDoubleSided(hc.firstChild);
     }
 
-    if (tc.nextSibling != entt::null)
+    if (hc.nextSibling != entt::null)
     {
-      SetDoubleSided(tc.nextSibling);
+      SetDoubleSided(hc.nextSibling);
     }
   }
 
   void Scene::NoShading(Entity e)
   {
-    auto& tc = GetTransform(e);
+    auto& hc = GetHierarchy(e);
 
     if (HasComponent<MeshComponent>(e))
     {
       GetComponent<MeshComponent>(e).noShading = true;
     }
 
-    if (tc.firstChild != entt::null)
+    if (hc.firstChild != entt::null)
     {
-      NoShading(tc.firstChild);
+      NoShading(hc.firstChild);
     }
 
-    if (tc.nextSibling != entt::null)
+    if (hc.nextSibling != entt::null)
     {
-      NoShading(tc.nextSibling);
+      NoShading(hc.nextSibling);
     }
   }
 

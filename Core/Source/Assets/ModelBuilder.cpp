@@ -21,9 +21,9 @@ namespace YAEngine
       rootMaxBB = glm::max(rootMaxBB, childTc.maxBB);
 
       if (prevChild == entt::null)
-        m_Scene->GetTransform(rootEntity).firstChild = child;
+        m_Scene->GetHierarchy(rootEntity).firstChild = child;
       else
-        m_Scene->GetTransform(prevChild).nextSibling = child;
+        m_Scene->GetHierarchy(prevChild).nextSibling = child;
 
       prevChild = child;
     }
@@ -39,8 +39,9 @@ namespace YAEngine
   {
     Entity entity = m_Scene->CreateEntity(node.name);
     auto& tc = m_Scene->GetTransform(entity);
+    auto& hc = m_Scene->GetHierarchy(entity);
 
-    tc.parent = parent;
+    hc.parent = parent;
     tc.position = node.position;
     tc.rotation = node.rotation;
     tc.scale = node.scale;
@@ -104,9 +105,9 @@ namespace YAEngine
       nodeMaxBB = glm::max(nodeMaxBB, childTc.maxBB);
 
       if (prevChild == entt::null)
-        tc.firstChild = child;
+        hc.firstChild = child;
       else
-        m_Scene->GetTransform(prevChild).nextSibling = child;
+        m_Scene->GetHierarchy(prevChild).nextSibling = child;
 
       prevChild = child;
     }

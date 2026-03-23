@@ -28,9 +28,9 @@ namespace YAEngine
 
     float speed = 1.0;
 
-    void Init() override;
+    void OnSceneReady() override;
     void Update(double deltaTime) override;
-    void Destroy() override;
+    void OnDetach() override;
 
     SubscriptionId onKeyboard, onMouseMove, onMouseButton, onMouseScroll;
     void OnKeyboard(const KeyEvent& event);

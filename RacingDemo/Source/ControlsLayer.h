@@ -1,13 +1,10 @@
 #pragma once
 #include "Application.h"
-
-class AppLayer;
+#include "GameComponents.h"
 
 class ControlsLayer : public YAEngine::Layer
 {
 public:
-  YAEngine::Entity camera;
-
   YAEngine::SubscriptionId onKeyboard;
 
   bool arrowLeft = false;
@@ -15,31 +12,20 @@ public:
   bool arrowUp = false;
   bool arrowDown = false;
 
-  double wheelsSteer = 0.0;
-  glm::dvec3 velocity = glm::dvec3(0.0f);
-  double speed = 0.0f;
-  double maxSpeed = 30.0f;
-  double maxSpeedBack = 5.0f;
-  double acceleration = 10.0f;
-  double accelerationBack = 5.0f;
-  double brake = 15.0f;
-  double drag = 5.0f;
-  glm::dvec3 cameraOffset;
-
-  void Init() override
+  void OnSceneReady() override
   {
-    App().Events().Subscribe<YAEngine::KeyEvent>([&](auto event) { OnKeyboard(event); });
+    onKeyboard = App().Events().Subscribe<YAEngine::KeyEvent>([&](auto event) { OnKeyboard(event); });
 
-    camera = App().GetScene().CreateEntity("camera");
+    auto camera = App().GetScene().CreateEntity("camera");
     App().GetScene().AddComponent<YAEngine::CameraComponent>(camera);
-    cameraOffset = glm::vec3(0.0, 1.9, -3.6);
+    App().GetScene().AddComponent<FollowCameraComponent>(camera);
 
     glm::dvec3 eulerDegrees = glm::vec3(160.0, -0.0, -180.0);
     glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
     App().GetScene().GetTransform(camera).rotation = glm::quat(eulerRadians);
   }
 
-  void Destroy() override
+  void OnDetach() override
   {
     App().Events().Unsubscribe<YAEngine::KeyEvent>(onKeyboard);
   }
@@ -61,4 +47,3 @@ public:
     if (e.key == GLFW_KEY_DOWN) arrowDown = value;
   }
 };
-

@@ -8,6 +8,32 @@ namespace YAEngine
 {
   static Entity s_SelectedEntity;
 
+  void DebugUILayer::OnSceneReady()
+  {
+    // Subscribe with high priority to consume events when ImGui wants them
+    m_KeySub = App().Events().Subscribe<KeyEvent>(
+      std::function<bool(const KeyEvent&)>([](const KeyEvent&) -> bool {
+        return ImGui::GetIO().WantCaptureKeyboard;
+      }), -100);
+
+    m_MouseButtonSub = App().Events().Subscribe<MouseButtonEvent>(
+      std::function<bool(const MouseButtonEvent&)>([](const MouseButtonEvent&) -> bool {
+        return ImGui::GetIO().WantCaptureMouse;
+      }), -100);
+
+    m_MouseScrollSub = App().Events().Subscribe<MouseWheelEvent>(
+      std::function<bool(const MouseWheelEvent&)>([](const MouseWheelEvent&) -> bool {
+        return ImGui::GetIO().WantCaptureMouse;
+      }), -100);
+  }
+
+  void DebugUILayer::OnDetach()
+  {
+    App().Events().Unsubscribe<KeyEvent>(m_KeySub);
+    App().Events().Unsubscribe<MouseButtonEvent>(m_MouseButtonSub);
+    App().Events().Unsubscribe<MouseWheelEvent>(m_MouseScrollSub);
+  }
+
   void DebugUILayer::RenderUI()
   {
     ImGui::Begin("Debug UI");
@@ -30,8 +56,8 @@ namespace YAEngine
         ImGui::Text("FPS: %.1f", fps);
         ImGui::Text("Frame time: %.2fms", App().GetTimer().GetDeltaTime() * 1000.0f);
         ImGui::Separator();
-        ImGui::DragFloat("Gamma", &App().GetRender().m_Gamma, 0.01f, 0.0f, 10.0f);
-        ImGui::DragFloat("Exposure", &App().GetRender().m_Exposure, 0.01f, 0.0f, 10.0f);
+        ImGui::DragFloat("Gamma", &App().GetRender().GetGamma(), 0.01f, 0.0f, 10.0f);
+        ImGui::DragFloat("Exposure", &App().GetRender().GetExposure(), 0.01f, 0.0f, 10.0f);
         {
           static int debugViewIndex = 0;
           const char* debugViews[] = {
@@ -39,16 +65,17 @@ namespace YAEngine
           };
           const int debugValues[] = { 0, 1, 2, 3, 4 };
           if (ImGui::Combo("Debug View", &debugViewIndex, debugViews, IM_ARRAYSIZE(debugViews)))
-            App().GetRender().m_CurrentTexture = debugValues[debugViewIndex];
+            App().GetRender().SetDebugView(debugValues[debugViewIndex]);
         }
 
         ImGui::Separator();
-        for (int i = 0; i < App().GetRender().m_Lights.lightsCount; i++)
+        for (int i = 0; i < App().GetRender().GetLightsCount(); i++)
         {
-          ImGui::DragFloat(("Light cutoff " + std::to_string(i)).c_str(), &App().GetRender().m_Lights.lights[i].cutOff, 0.01f, 0.0f, 120.0f);
-          ImGui::DragFloat(("Light outer cutoff " + std::to_string(i)).c_str(), &App().GetRender().m_Lights.lights[i].outerCutOff, 0.01f, 0.0f, 120.0f);
-          ImGui::DragFloat3(("Light color " + std::to_string(i)).c_str(), &App().GetRender().m_Lights.lights[i].color.r, 0.01f, -120.0f, 120.0f);
-          ImGui::DragFloat3(("Light position " + std::to_string(i)).c_str(), &App().GetRender().m_Lights.lights[i].position.r, 0.01f, -120.0f, 120.0f);
+          auto& light = App().GetRender().GetLight(i);
+          ImGui::DragFloat(("Light cutoff " + std::to_string(i)).c_str(), &light.cutOff, 0.01f, 0.0f, 120.0f);
+          ImGui::DragFloat(("Light outer cutoff " + std::to_string(i)).c_str(), &light.outerCutOff, 0.01f, 0.0f, 120.0f);
+          ImGui::DragFloat3(("Light color " + std::to_string(i)).c_str(), &light.color.r, 0.01f, -120.0f, 120.0f);
+          ImGui::DragFloat3(("Light position " + std::to_string(i)).c_str(), &light.position.r, 0.01f, -120.0f, 120.0f);
           ImGui::Separator();
         }
         ImGui::EndTabItem();
@@ -56,8 +83,6 @@ namespace YAEngine
 
       if (ImGui::BeginTabItem("Scene"))
       {
-        auto view = App().GetScene().GetView<TransformComponent>();
-
         ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.12f, 0.12f, 0.12f, 1.0f));
         ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(8, 6));
         ImGui::PushStyleVar(ImGuiStyleVar_ChildRounding, 4.0f);
@@ -77,9 +102,10 @@ namespace YAEngine
           "Scene Tree"
         );
 
-        view.each([&](auto entity, TransformComponent& tc)
+        auto hierarchyView = App().GetScene().GetView<TransformComponent, HierarchyComponent>();
+        hierarchyView.each([&](auto entity, TransformComponent& tc, HierarchyComponent& hc)
         {
-          if (tc.parent == entt::null)
+          if (hc.parent == entt::null)
           {
             DrawEntity(entity);
           }
@@ -97,7 +123,7 @@ namespace YAEngine
   {
     auto& scene = App().GetScene();
 
-    auto& tc   = scene.GetComponent<TransformComponent>(entity);
+    auto& hc = scene.GetComponent<HierarchyComponent>(entity);
     Name name = std::to_string(int(entity));
     if (scene.HasComponent<Name>(entity))
       name = scene.GetName(entity);
@@ -106,7 +132,7 @@ namespace YAEngine
         ImGuiTreeNodeFlags_OpenOnArrow |
         ImGuiTreeNodeFlags_SpanFullWidth;
 
-    if (tc.firstChild == entt::null)
+    if (hc.firstChild == entt::null)
       flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
 
     if (entity == s_SelectedEntity)
@@ -123,13 +149,13 @@ namespace YAEngine
     if (ImGui::IsItemClicked())
       s_SelectedEntity = entity;
 
-    if (opened && tc.firstChild != entt::null)
+    if (opened && hc.firstChild != entt::null)
     {
-      Entity child = tc.firstChild;
+      Entity child = hc.firstChild;
       while (child != entt::null)
       {
         DrawEntity(child);
-        child = scene.GetComponent<TransformComponent>(child).nextSibling;
+        child = scene.GetComponent<HierarchyComponent>(child).nextSibling;
       }
 
       ImGui::TreePop();

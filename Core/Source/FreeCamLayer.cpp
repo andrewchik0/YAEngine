@@ -6,7 +6,7 @@
 
 namespace YAEngine
 {
-  void FreeCamLayer::Init()
+  void FreeCamLayer::OnSceneReady()
   {
     freeCam = App().GetScene().CreateEntity("FreeCam");
     App().GetScene().AddComponent<CameraComponent>(freeCam);
@@ -25,7 +25,7 @@ namespace YAEngine
     onMouseScroll = App().Events().Subscribe<MouseWheelEvent>([&](const MouseWheelEvent& e) { OnMouseScroll(e); });
   }
 
-  void FreeCamLayer::Destroy()
+  void FreeCamLayer::OnDetach()
   {
     App().Events().Unsubscribe<MouseButtonEvent>(onMouseButton);
     App().Events().Unsubscribe<MouseMovedEvent>(onMouseMove);

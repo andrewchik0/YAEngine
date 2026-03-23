@@ -1,115 +1,132 @@
 #include "ControlsLayer.h"
-#include "AppLayer.h"
 
 void ControlsLayer::Update(double dt)
 {
-  auto car = App().GetLayer<AppLayer>()->car;
+  // Find vehicle via ECS
+  auto vehicleView = App().GetScene().GetView<VehicleComponent, YAEngine::TransformComponent>();
+
+  YAEngine::Entity car = entt::null;
+  VehicleComponent* vehicle = nullptr;
+
+  for (auto e : vehicleView)
+  {
+    car = e;
+    vehicle = &App().GetScene().GetComponent<VehicleComponent>(e);
+    break;
+  }
+
+  if (car == entt::null) return;
 
   glm::dvec3 position = App().GetScene().GetTransform(car).position;
   glm::dquat rotation = App().GetScene().GetTransform(car).rotation;
 
   if (arrowLeft)
   {
-    wheelsSteer = glm::clamp(wheelsSteer + 0.1 * dt, 0.0, 0.03);
+    vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer + 0.1 * dt, 0.0, 0.03);
   }
   if (arrowRight)
   {
-    wheelsSteer = glm::clamp(wheelsSteer - 0.1 * dt, -0.03, 0.0);
+    vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer - 0.1 * dt, -0.03, 0.0);
   }
   if (!arrowLeft && !arrowRight)
   {
-    if (wheelsSteer > 0.0) wheelsSteer = glm::clamp(wheelsSteer - 0.2 * dt, 0.0, 0.03);
-    if (wheelsSteer < 0.0) wheelsSteer = glm::clamp(wheelsSteer + 0.2 * dt, -0.03, 0.0);
+    if (vehicle->wheelsSteer > 0.0) vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer - 0.2 * dt, 0.0, 0.03);
+    if (vehicle->wheelsSteer < 0.0) vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer + 0.2 * dt, -0.03, 0.0);
   }
 
   if (arrowUp)
-    speed += acceleration * dt;
+    vehicle->speed += vehicle->acceleration * dt;
   else if (arrowDown)
   {
-    if (speed > 0)
-      speed -= brake * dt;
+    if (vehicle->speed > 0)
+      vehicle->speed -= vehicle->brake * dt;
     else
-      speed -= accelerationBack * dt;
+      vehicle->speed -= vehicle->accelerationBack * dt;
   }
   else
-    speed -= drag * dt * (speed > 0 ? 1 : speed < 0 ? -1 : 0);
+    vehicle->speed -= vehicle->drag * dt * (vehicle->speed > 0 ? 1 : vehicle->speed < 0 ? -1 : 0);
 
-  if (speed < 0.001 && speed > -0.001) speed = 0;
+  if (vehicle->speed < 0.001 && vehicle->speed > -0.001) vehicle->speed = 0;
 
-  speed = glm::clamp(speed, -maxSpeedBack, maxSpeed);
+  vehicle->speed = glm::clamp(vehicle->speed, -vehicle->maxSpeedBack, vehicle->maxSpeed);
 
-  double turnSpeed = glm::radians(260.0 - speed / maxSpeed * 160.0);
-  double turn = wheelsSteer * (1.0 / 0.03) * turnSpeed * dt * (speed / maxSpeed);
+  double turnSpeed = glm::radians(260.0 - vehicle->speed / vehicle->maxSpeed * 160.0);
+  double turn = vehicle->wheelsSteer * (1.0 / 0.03) * turnSpeed * dt * (vehicle->speed / vehicle->maxSpeed);
 
   glm::dquat rotDelta = glm::angleAxis(turn, glm::dvec3(0,1,0));
   rotation = rotDelta * rotation;
 
   glm::dvec3 forward = rotation * glm::dvec3(0, 0, 1);
-  position += forward * speed * dt;
+  position += forward * vehicle->speed * dt;
 
   App().GetScene().GetTransform(car).position = position;
   App().GetScene().GetTransform(car).rotation = rotation;
   App().GetScene().MarkDirty(car);
 
-  glm::dvec3 eulerDegrees = glm::dvec3(160.0, -0.0, -180.0);
-  glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
-  glm::dquat extraRot = glm::dquat(eulerRadians);
+  // Update follow camera via ECS
+  auto camView = App().GetScene().GetView<FollowCameraComponent, YAEngine::CameraComponent, YAEngine::TransformComponent>();
 
-  glm::dquat camRot = App().GetScene().GetTransform(camera).rotation;
-  glm::dquat targetRot = rotation * extraRot;
-
-  double camSmooth = 8.0;
-  double t = 1.0 - std::exp(-camSmooth * dt);
-
-  camRot = glm::slerp(camRot, targetRot, t);
-  App().GetScene().GetTransform(camera).rotation = camRot;
-
-  double normSpeed = glm::clamp(speed / maxSpeed, 0.0, 1.0);
-  double backFactor = glm::smoothstep(0.5, 1.0, normSpeed);
-
-  glm::dvec3 dynamicOffset = cameraOffset;
-  dynamicOffset.z *= glm::mix(1.0, 0.6, backFactor);
-
-  glm::dvec3 targetPos = position + rotation * dynamicOffset;
-
-  glm::dvec3 camPos = App().GetScene().GetTransform(camera).position;
-  camPos = glm::mix(camPos, targetPos, t);
-  App().GetScene().GetTransform(camera).position = camPos;
-
-  if (speed > .01)
+  for (auto camEntity : camView)
   {
-    auto& cam = App().GetScene().GetComponent<YAEngine::CameraComponent>(camera);
-    double minFov = glm::radians(58.31);
-    double maxFov = glm::radians(75.0);
-    double normSpeed = glm::clamp(speed / maxSpeed, 0.0, 1.0);
-    double factor = glm::smoothstep(0.0, 1.0, normSpeed);
-    double targetFov = glm::mix(minFov, maxFov, factor);
+    auto& follow = App().GetScene().GetComponent<FollowCameraComponent>(camEntity);
+    auto& cam = App().GetScene().GetComponent<YAEngine::CameraComponent>(camEntity);
+    auto& camTc = App().GetScene().GetTransform(camEntity);
 
-    double lerpSpeed = 5.0;
-    cam.fov = float(glm::mix(double(cam.fov), targetFov, 1.0 - std::exp(-lerpSpeed * dt)));
-  }
+    glm::dvec3 eulerDegrees = glm::dvec3(160.0, -0.0, -180.0);
+    glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
+    glm::dquat extraRot = glm::dquat(eulerRadians);
 
-  auto& wheels = App().GetLayer<AppLayer>()->wheels;
+    glm::dquat camRot = camTc.rotation;
+    glm::dquat targetRot = rotation * extraRot;
 
-  float wheelRadius = 0.29f;
+    double t = 1.0 - std::exp(-follow.smoothSpeed * dt);
 
-  for (int i = 0; i < wheels.size(); i++)
-  {
-    auto& wheel = wheels[i];
-    auto& tc = App().GetScene().GetTransform(wheel);
+    camRot = glm::slerp(camRot, targetRot, t);
+    camTc.rotation = camRot;
 
-    glm::quat baseRot = App().GetLayer<AppLayer>()->wheelStates[i].baseRot;
+    double normSpeed = glm::clamp(vehicle->speed / vehicle->maxSpeed, 0.0, 1.0);
+    double backFactor = glm::smoothstep(0.5, 1.0, normSpeed);
 
-    App().GetLayer<AppLayer>()->wheelStates[i].spinAngle += (speed / wheelRadius) * dt;
+    glm::dvec3 dynamicOffset = follow.offset;
+    dynamicOffset.z *= glm::mix(1.0, 0.6, backFactor);
 
-    glm::quat steerRot = glm::identity<glm::quat>();
-    if (i == 0 || i == 1)
+    glm::dvec3 targetPos = position + rotation * dynamicOffset;
+
+    glm::dvec3 camPos = camTc.position;
+    camPos = glm::mix(camPos, targetPos, t);
+    camTc.position = camPos;
+
+    if (vehicle->speed > .01)
     {
-      steerRot = glm::angleAxis(wheelsSteer * 10.0f, glm::dvec3(0,1,0));
+      double speedNorm = glm::clamp(vehicle->speed / vehicle->maxSpeed, 0.0, 1.0);
+      double factor = glm::smoothstep(0.0, 1.0, speedNorm);
+      double targetFov = glm::mix(follow.baseFov, follow.maxFov, factor);
+
+      double lerpSpeed = 5.0;
+      cam.fov = float(glm::mix(double(cam.fov), targetFov, 1.0 - std::exp(-lerpSpeed * dt)));
     }
 
-    glm::quat spinRot = glm::angleAxis(App().GetLayer<AppLayer>()->wheelStates[i].spinAngle, glm::dvec3(1,0,0));
+    break;
+  }
 
-    tc.rotation = steerRot * baseRot * spinRot;
+  // Update wheels via ECS
+  auto wheelView = App().GetScene().GetView<WheelComponent, YAEngine::TransformComponent>();
+
+  for (auto wheelEntity : wheelView)
+  {
+    auto& wc = App().GetScene().GetComponent<WheelComponent>(wheelEntity);
+    auto& tc = App().GetScene().GetTransform(wheelEntity);
+
+    wc.spinAngle += (vehicle->speed / wc.radius) * dt;
+
+    glm::quat steerRot = glm::identity<glm::quat>();
+    if (wc.isFront)
+    {
+      steerRot = glm::angleAxis(vehicle->wheelsSteer * 10.0f, glm::dvec3(0,1,0));
+    }
+
+    glm::quat spinRot = glm::angleAxis(wc.spinAngle, glm::dvec3(1,0,0));
+
+    tc.rotation = steerRot * glm::quat(wc.baseRot) * spinRot;
   }
 }

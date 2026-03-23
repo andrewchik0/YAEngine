@@ -35,19 +35,27 @@ namespace YAEngine
       return m_InstanceBuffer.Allocate(size);
     }
 
+    static constexpr size_t MAX_LIGHTS = 2;
+
+    float& GetGamma() { return m_Gamma; }
+    float& GetExposure() { return m_Exposure; }
+    int GetDebugView() const { return m_CurrentTexture; }
+    void SetDebugView(int view) { m_CurrentTexture = view; }
+    Light& GetLight(int index) { return m_Lights.lights[index]; }
+    int GetLightsCount() const { return m_Lights.lightsCount; }
+    void SetLightsCount(int count) { m_Lights.lightsCount = count; }
+
+  private:
+
     float m_Gamma = 2.2f;
     float m_Exposure = 1.0f;
-
     int m_CurrentTexture = 0;
 
-    static constexpr size_t MAX_LIGHTS = 2;
     struct
     {
       Light lights[MAX_LIGHTS];
       int lightsCount = MAX_LIGHTS;
     } m_Lights;
-
-  private:
 
     void SetViewportAndScissor();
 

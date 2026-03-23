@@ -5,6 +5,8 @@
 #include "EventBus.h"
 #include "Window.h"
 #include "Layer.h"
+#include "LayerManager.h"
+#include "InputSystem.h"
 #include "Assets/AssetManager.h"
 #include "Render/Render.h"
 #include "Scene/Scene.h"
@@ -70,27 +72,19 @@ namespace YAEngine
     requires std::is_base_of<Layer, T>::value
     void PushLayer()
     {
-      m_LayerStack.push_back(std::make_unique<T>());
+      m_LayerManager.PushLayer<T>();
     }
 
     template<typename T>
     requires std::is_base_of<Layer, T>::value
     T* GetLayer()
     {
-      for (const auto& layer : m_LayerStack)
-      {
-        if (auto casted = dynamic_cast<T*>(layer.get()))
-          return casted;
-      }
-      return nullptr;
+      return m_LayerManager.GetLayer<T>();
     }
 
     void RenderUI()
     {
-      for (auto& layer : m_LayerStack)
-      {
-        layer->RenderUI();
-      }
+      m_LayerManager.CallRenderUI();
     }
 
     Timer& GetTimer()
@@ -110,18 +104,17 @@ namespace YAEngine
     static std::unique_ptr<Application> instance;
     static std::mutex mtx;
 
-    std::vector<std::unique_ptr<Layer>> m_LayerStack;
-
     Render m_Render {};
     Scene m_Scene;
     Window m_Window;
     AssetManager m_AssetManager;
     Timer m_Timer;
     EventBus m_EventBus;
+    InputSystem m_InputSystem;
+    LayerManager m_LayerManager;
+
+    SubscriptionId m_ResizeSubscription {};
 
     friend class Scene;
-
-    void HandleEvents();
-    void InitLayers();
   };
 }

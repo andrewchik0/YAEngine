@@ -45,6 +45,8 @@ set(SOURCE_FILES
   Source/Render/VulkanMaterial.h
   Source/Scene/Scene.cpp
   Source/Scene/Scene.h
+  Source/Scene/TransformSystem.cpp
+  Source/Scene/TransformSystem.h
   Source/Assets/AssetManager.cpp
   Source/Assets/AssetManager.h
   Source/Assets/MeshManager.cpp
@@ -70,6 +72,9 @@ set(SOURCE_FILES
   Source/Assets/ModelManager.cpp
   Source/Assets/ModelManager.h
   Source/EventBus.h
+  Source/LayerManager.h
+  Source/InputSystem.cpp
+  Source/InputSystem.h
   Source/DebugUILayer.cpp
   Source/DebugUILayer.h
   Source/Render/VulkanImGui.cpp

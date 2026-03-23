@@ -19,6 +19,7 @@ namespace YAEngine
     void SetParent(Entity child, Entity parent);
 
     TransformComponent& GetTransform(Entity e);
+    HierarchyComponent& GetHierarchy(Entity e);
     Name& GetName(Entity e);
 
     template<typename T, typename... Args>
@@ -73,7 +74,6 @@ namespace YAEngine
 
     void MarkDirty(Entity e);
     void Update();
-    void UpdateWorldTransform(entt::entity e);
     void SetDoubleSided(Entity e);
     void NoShading(Entity e);
 
@@ -92,8 +92,6 @@ namespace YAEngine
 
     entt::entity m_ActiveCamera = entt::null;
     CubeMapHandle m_Skybox {};
-
-    glm::mat4 ComposeLocal(const TransformComponent& t);
 
   };
 
