@@ -71,7 +71,7 @@ void main()
       prefilteredColor += texture(uCubemap, vec3(L.x, -L.y, L.z)).rgb * NdotL;
       totalWeight += NdotL;
     }
-}
+  }
 
   prefilteredColor /= max(totalWeight, 0.001);
   outColor = vec4(prefilteredColor, 1.0);

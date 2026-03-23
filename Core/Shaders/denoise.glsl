@@ -15,13 +15,6 @@
 
 // ------------------------------------------------------------------------- //
 
-// https://www.shadertoy.com/view/4djSRW
-vec3 hash33(vec3 p3) {
-	p3 = fract(p3 * vec3(0.1031, 0.1030, 0.0973));
-    p3 += dot(p3, p3.yxz + 33.33);
-    return fract((p3.xxy + p3.yxx) * p3.zyx);
-}
-
 // ------------------------------------------------------------------------- //
 
 // https://www.shadertoy.com/view/4dSBDt
@@ -136,8 +129,8 @@ void getVarianceClippingBounds(vec3 color, sampler2D colorSampler, ivec2 screenS
         }
     }
 
-    colorAvg *= 0.111111111;
-    colorVar *= 0.111111111;
+    colorAvg *= (1.0 / 9.0);
+    colorVar *= (1.0 / 9.0);
 
     vec3 sigma = sqrt(max(vec3(0.0), colorVar - colorAvg * colorAvg));
 	colorMin = colorAvg - colorBoxSigma * sigma;

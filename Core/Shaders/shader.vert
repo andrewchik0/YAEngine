@@ -44,7 +44,6 @@ void main() {
   outPrevClipPos = u_Data.prevProj * u_Data.prevView * worldPos;
   outTexCoord = inTexCoord;
   outPosition = vec3(worldPos);
-  outNormal = normalize(mat3(pc.world) * inNormal);
 
   mat3 normalMatrix = transpose(inverse(mat3(pc.world)));
 
@@ -54,5 +53,6 @@ void main() {
   T = normalize(T - N * dot(T, N));
   vec3 B = cross(N, T) * inTangent.w;
 
+  outNormal = N;
   outTBN = mat3(T, B, N);
 }

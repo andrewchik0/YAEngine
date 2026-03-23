@@ -42,7 +42,6 @@ layout(set = 1, binding = 4) uniform sampler2D specularTexture;
 layout(set = 1, binding = 5) uniform sampler2D emissiveTexture;
 layout(set = 1, binding = 6) uniform sampler2D normalTexture;
 layout(set = 1, binding = 7) uniform sampler2D heightTexture;
-layout(set = 1, binding = 8) uniform samplerCube cubemapTexture;
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outNormal;
@@ -50,15 +49,9 @@ layout(location = 2) out vec2 outMaterial;
 layout(location = 3) out vec4 outAlbedo;
 layout(location = 4) out vec2 outVelocity;
 
-float Hash(vec2 p)
-{
-  return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453);
-}
-
-
 void main() {
   float base = float(u_Material.textureMask & 1);
-  vec4 albedo = texture(baseColorTexture, inTexCoord) * base + vec4(u_Material.albedo, 1.0) * (1 - base);
+  vec4 albedo = texture(baseColorTexture, inTexCoord) * base + vec4(u_Material.albedo, 1.0) * (1.0 - base);
 
   vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;
   vec2 prevNDC = inPrevClipPos.xy / inPrevClipPos.w;

@@ -43,15 +43,15 @@ layout(push_constant) uniform PushConstants
 } pc;
 
 void main() {
-  vec4 worldPos = pc.world * instances.data[gl_InstanceIndex + pc.offset] * vec4(inPosition, 1.0);
+  mat4 worldMatrix = pc.world * instances.data[gl_InstanceIndex + pc.offset];
+  vec4 worldPos = worldMatrix * vec4(inPosition, 1.0);
   gl_Position = u_Data.proj * u_Data.view * worldPos;
   outCurClipPos = gl_Position;
   outPrevClipPos = u_Data.prevProj * u_Data.prevView * worldPos;
   outTexCoord = inTexCoord;
   outPosition = vec3(worldPos);
-  outNormal = normalize(mat3(pc.world * instances.data[gl_InstanceIndex + pc.offset]) * inNormal);
 
-  mat3 normalMatrix = transpose(inverse(mat3(pc.world * instances.data[gl_InstanceIndex + pc.offset])));
+  mat3 normalMatrix = transpose(inverse(mat3(worldMatrix)));
 
   vec3 N = normalize(normalMatrix * inNormal);
   vec3 T = normalize(normalMatrix * inTangent.xyz);
@@ -59,5 +59,6 @@ void main() {
   T = normalize(T - N * dot(T, N));
   vec3 B = cross(N, T) * inTangent.w;
 
+  outNormal = N;
   outTBN = mat3(T, B, N);
 }

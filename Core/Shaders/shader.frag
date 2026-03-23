@@ -76,13 +76,19 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
 void main() {
   float gamma = u_Data.gamma;
 
+  float hasAlbedoTexture = float(u_Material.textureMask & 1);
+  vec4 albedo = mix(vec4(u_Material.albedo, 1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
+
+  if (albedo.a < 0.5)
+  {
+    discard;
+  }
+
+  albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
+
   float hasNormalMap = float((u_Material.textureMask >> 5) & 1);
   vec3 n_ts = texture(normalTexture, inTexCoord).rgb * 2.0 - 1.0;
   vec3 normal = mix(inNormal, normalize(inTBN * n_ts), hasNormalMap);
-
-  float hasAlbedoTexture = float(u_Material.textureMask & 1);
-  vec4 albedo = mix(vec4(u_Material.albedo, 1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
-  albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
 
   float hasMetallicTexture = float((u_Material.textureMask >> 1) & 1);
   float metallic = mix(u_Material.metallic, texture(metallicTexture, inTexCoord).b, hasMetallicTexture);
@@ -98,7 +104,7 @@ void main() {
 
   vec3 viewVec = normalize(u_Data.cameraPosition - inPosition);
 
-  float NdotV = clamp(max(dot(normal, viewVec), -dot(normal, viewVec)), 0.01, 0.99);
+  float NdotV = clamp(abs(dot(normal, viewVec)), 0.01, 0.99);
   vec3 f0 = mix(vec3(0.04), albedo.rgb, metallic);
 
   vec3 resultColor = vec3(0);
@@ -124,7 +130,7 @@ void main() {
   vec3 F = fresnelSchlickRoughness(NdotV, f0, roughness);
 
   vec3 kD = 1.0 - F;
-  kD *= (1 - metallic);
+  kD *= (1.0 - metallic);
 
   vec3 irradiance = texture(irradianceCubemap, normal).rgb;
   vec3 diffuse = irradiance * albedo.rgb;
@@ -132,28 +138,21 @@ void main() {
   vec3 R = reflect(-viewVec, normal);
   const float MAX_REFLECTION_LOD = 9.0;
   vec3 prefilteredColor = textureLod(prefilterTexture, R, roughness * MAX_REFLECTION_LOD).rgb;
-  vec2 brdf = texture(brdfTexture, vec2(NdotV, clamp(roughness, 0.01, .99))).rg;
+  vec2 brdf = texture(brdfTexture, vec2(NdotV, clamp(roughness, 0.01, 0.99))).rg;
   vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
-  vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0, 0.8));
-  resultColor += max(ambient, vec3(0));
+  vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
+  resultColor += max(ambient, vec3(0.0));
 
   vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;
   vec2 prevNDC = inPrevClipPos.xy / inPrevClipPos.w;
   vec2 velocity = (curNDC - prevNDC) * 0.5;
 
-  if (albedo.a < 0.5)
-  {
-    discard;
-  }
-  else
-  {
-    outColor = vec4(resultColor, 1.0);
-    outNormal = vec4(normal, 1.0);
-    outMaterial = vec2(roughness, metallic);
-    outAlbedo = vec4(albedo.rgb, 1.0);
-    outVelocity = velocity;
-  }
+  outColor = vec4(resultColor, 1.0);
+  outNormal = vec4(normal, 1.0);
+  outMaterial = vec2(roughness, metallic);
+  outAlbedo = vec4(albedo.rgb, 1.0);
+  outVelocity = velocity;
 
   if (bool(u_Data.currentTexture))
   {

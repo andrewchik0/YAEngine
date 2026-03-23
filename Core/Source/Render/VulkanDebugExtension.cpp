@@ -10,6 +10,9 @@ namespace YAEngine
     const VkDebugUtilsMessengerCallbackDataEXT* pCallbackData,
     void* pUserData)
   {
+    if (strstr(pCallbackData->pMessage, "loader_get_json"))
+      return VK_FALSE;
+
     if (messageSeverity & VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
     {
       YA_LOG_ERROR("Vulkan", "%s", pCallbackData->pMessage);

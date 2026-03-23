@@ -34,8 +34,8 @@ public:
     key = App().Events().Subscribe<YAEngine::KeyEvent>([&](auto e) { OnKeyBoard(e); });
 
 #ifndef TEST
-    App().GetRender().GetGamma() = 1.48f;
-    App().GetRender().GetExposure() = 1.24f;
+    App().GetRender().GetGamma() = 1.9f;
+    App().GetRender().GetExposure() = 1.2f;
     {
       auto carHandle = App().GetAssetManager().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf", true);
       auto car = App().GetAssetManager().Models().Get(carHandle).rootEntity;

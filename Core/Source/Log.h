@@ -24,12 +24,15 @@ namespace YAEngine
       if (level < s_Level) return;
 
       const char* levelStr = "";
+      const char* colorBegin = "";
+      const char* colorEnd   = "\033[0m";
+      FILE* out = stdout;
       switch (level)
       {
         case LogLevel::Verbose: levelStr = "VERBOSE"; break;
         case LogLevel::Info:    levelStr = "INFO";    break;
-        case LogLevel::Warning: levelStr = "WARNING"; break;
-        case LogLevel::Error:   levelStr = "ERROR";   break;
+        case LogLevel::Warning: levelStr = "WARNING"; colorBegin = "\033[33m"; break;
+        case LogLevel::Error:   levelStr = "ERROR";   colorBegin = "\033[31m"; out = stderr; break;
       }
 
       const char* filename = file;
@@ -38,14 +41,14 @@ namespace YAEngine
       else if (const char* bslash = strrchr(file, '\\'))
         filename = bslash + 1;
 
-      fprintf(stderr, "[%s] [%s] %s:%d: ", levelStr, tag, filename, line);
+      fprintf(out, "%s[%s] [%s] %s:%d: ", colorBegin, levelStr, tag, filename, line);
 
       va_list args;
       va_start(args, fmt);
-      vfprintf(stderr, fmt, args);
+      vfprintf(out, fmt, args);
       va_end(args);
 
-      fprintf(stderr, "\n");
+      fprintf(out, "%s\n", colorEnd);
     }
 
   private:

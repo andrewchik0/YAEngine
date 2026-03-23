@@ -18,22 +18,24 @@ vec2 hammersley(uint i, uint N)
 
 vec3 fresnel_schlick_roughness(float cosTheta, vec3 f0, float roughness)
 {
-  return f0 + (max(vec3(1.0), f0) - f0) * pow(1.0 - cosTheta, 5.0);
+  return f0 + (max(vec3(1.0 - roughness), f0) - f0) * pow(1.0 - cosTheta, 5.0);
 }
-vec3 fresnel_schlik(float cosTheta, vec3 fO)
+vec3 fresnel_schlick(float cosTheta, vec3 f0)
 {
-  return fO + (vec3(1.0) - fO) * pow(1 - max(cosTheta, 0.0), 5.0);
+  float t = 1.0 - max(cosTheta, 0.0);
+  float t2 = t * t;
+  return f0 + (vec3(1.0) - f0) * (t2 * t2 * t);
 }
 
-float normal_disribution_GGX(float alpha, float NdotH)
+float normal_distribution_GGX(float alpha, float NdotH)
 {
-  float numerator = pow(alpha, 2.0);
+  float alpha2 = alpha * alpha;
 
-  float denominator = NdotH * NdotH * (pow(alpha, 2.0) - 1.0) + 1.0;
+  float denominator = NdotH * NdotH * (alpha2 - 1.0) + 1.0;
   denominator *= denominator * PI;
   denominator = max(denominator, 1e-5);
 
-  return numerator / denominator;
+  return alpha2 / denominator;
 }
 vec3 importance_sample_GGX(vec2 Xi, vec3 N, float roughness)
 {
@@ -80,12 +82,12 @@ vec3 PBR(
   float LdotN = max(dot(lightDir, normal), 0.0);
   float HdotN = max(dot(halfWayVec, normal), 0.0);
 
-  vec3 kSpecular = fresnel_schlik(VdotH, f0);
-  vec3 kDiffuse = (vec3(1.0) - kSpecular) * (1 - metallic);
+  vec3 kSpecular = fresnel_schlick(VdotH, f0);
+  vec3 kDiffuse = (vec3(1.0) - kSpecular) * (1.0 - metallic);
 
   vec3 lambert = albedo / PI;
 
-  vec3 cookTorranceNumerator = normal_disribution_GGX(alpha, HdotN) * geometry_smith(alpha, VdotN, LdotN) * fresnel_schlik(VdotH, f0);
+  vec3 cookTorranceNumerator = normal_distribution_GGX(alpha, HdotN) * geometry_smith(alpha, VdotN, LdotN) * kSpecular;
   float cookTorranceDenominator = 4.0 * max(VdotN, 0.0) * max(LdotN, 0.0);
   cookTorranceDenominator = max(cookTorranceDenominator, 1e-5);
   vec3 cookTorrance = cookTorranceNumerator / cookTorranceDenominator;
@@ -94,5 +96,5 @@ vec3 PBR(
 
   vec3 outgoingLight = emissivity + BRDF * lightColor * max(LdotN, 0.0);
 
-  return vec3(outgoingLight);
+  return outgoingLight;
 }
