@@ -40,7 +40,7 @@ layout(set = 1, binding = 6) uniform sampler2D hiZTexture;
 const int MAX_ITERATIONS = 128;
 const int REFINEMENT_STEPS = 8;
 const float MAX_RAY_DISTANCE = 30.0;
-const float SELF_INTERSECT_DIST = 0.1;
+const float SELF_INTERSECT_DIST = 0.02;
 const float NORMAL_BIAS = 0.02;
 const float MAX_ROUGHNESS = 0.6;
 const float EDGE_FADE_START = 0.8;
@@ -72,24 +72,6 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
   return F0 + (max(vec3(1.0 - roughness), F0) - F0) * t2 * t2 * t;
 }
 
-// Get the cell boundary intersection along the ray direction at a given mip level
-vec2 getCellBoundary(vec2 pos, vec2 dir, float cellSize)
-{
-  // Position within current cell (0..cellSize)
-  vec2 cellPos = mod(pos, vec2(cellSize));
-
-  // Distance to the next boundary in each axis
-  vec2 toCellEdge;
-  toCellEdge.x = (dir.x > 0.0) ? (cellSize - cellPos.x) : cellPos.x;
-  toCellEdge.y = (dir.y > 0.0) ? (cellSize - cellPos.y) : cellPos.y;
-
-  // Avoid division by zero
-  vec2 absDir = abs(dir) + 1e-10;
-  vec2 tVals = toCellEdge / absDir;
-
-  return tVals;
-}
-
 // --- Main ---
 
 void main()
@@ -107,7 +89,7 @@ void main()
   if (u_Data.ssaoEnabled == 0)
     ao = 1.0;
 
-  // SSR-only debug: zero out base color to show only reflections
+  // SSR debug mode: zero out base color to show only reflections
   if (u_Data.currentTexture == 6)
     originalColor = vec3(0.0);
 
@@ -180,19 +162,28 @@ void main()
     return;
   }
 
-  vec2 rayDir = rayDelta / rayScreenLen; // normalized in pixel space
-
   float originLinearDepth = linearizeDepth(depth);
+
+  // How steeply the reflection leaves the surface (1.0 = perpendicular, 0.0 = grazing)
+  float reflNormalDot = abs(dot(reflectDir, viewNormal));
   int maxMip = u_Data.hizMipCount - 1;
 
   // --- Hi-Z Ray March ---
   bool hit = false;
   vec2 hitUV = vec2(0.0);
   float hitT = 0.0;
+  // Stochastic jitter: sub-pixel offset that varies per pixel per frame.
+  // This randomizes the hit/miss boundary position so TAA can smooth it.
+  // Interleaved gradient noise (Jimenez, SIGGRAPH 2014)
+  float ign = fract(52.9829189 * fract(dot(
+      gl_FragCoord.xy + fract(u_Data.time * 7.23) * vec2(131.0, 257.0),
+      vec2(0.06711056, 0.00583715))));
+  float jitterOffset = ign / rayScreenLen;
 
-  // Start at mip 0 and work up when skipping empty space
+  // Cap mip level to limit staircase size at silhouettes
+  int effectiveMaxMip = min(maxMip, 4);
   int mipLevel = 0;
-  float t = 0.0;
+  float t = jitterOffset;
 
   for (int i = 0; i < MAX_ITERATIONS; i++)
   {
@@ -206,14 +197,12 @@ void main()
       break;
 
     float rayDepth = mix(startDepthNDC, endDepthNDC, t);
-
-    // Sample Hi-Z at current mip level
     float cellMinDepth = textureLod(hiZTexture, sampleUV, float(mipLevel)).r;
 
     if (cellMinDepth >= DEPTH_EPSILON)
     {
       // Sky — go coarser to skip faster
-      mipLevel = min(mipLevel + 1, maxMip);
+      mipLevel = min(mipLevel + 1, effectiveMaxMip);
       continue;
     }
 
@@ -234,17 +223,23 @@ void main()
         if (rayLinearDepth - sampleLinearDepth > MAX_THICKNESS)
         {
           // Ray passed through — go coarser
-          mipLevel = min(mipLevel + 1, maxMip);
+          mipLevel = min(mipLevel + 1, effectiveMaxMip);
           continue;
         }
 
-        // Reject same-surface hits
-        vec3 sampleNormalRaw = texture(normalTexture, sampleUV).rgb;
-        if (dot(sampleNormalRaw, sampleNormalRaw) > 0.000001)
+        // Reject same-surface hits (only for grazing-angle reflections
+        // where the ray slides along the surface, e.g. wall reflecting itself).
+        // Skip for steep reflections (e.g. floor reflecting car above) to avoid
+        // rejecting valid hits on different objects with similar normals.
+        if (reflNormalDot < 0.5)
         {
-          vec3 sampleNormal = normalize(sampleNormalRaw);
-          if (dot(sampleNormal, worldNormal) > SAME_SURFACE_THRESHOLD)
-            continue;
+          vec3 sampleNormalRaw = texture(normalTexture, sampleUV).rgb;
+          if (dot(sampleNormalRaw, sampleNormalRaw) > 0.000001)
+          {
+            vec3 sampleNormal = normalize(sampleNormalRaw);
+            if (dot(sampleNormal, worldNormal) > SAME_SURFACE_THRESHOLD)
+              continue;
+          }
         }
 
         hit = true;
@@ -256,7 +251,7 @@ void main()
       {
         // Go finer for more precision
         mipLevel--;
-        // Step back to re-test at finer level
+        // Undo current step to re-test at finer level
         t -= max(1.0, float(1 << (mipLevel + 1))) / rayScreenLen;
         t = max(t, 0.0);
       }
@@ -264,7 +259,7 @@ void main()
     else
     {
       // Ray is in front of everything — advance and try coarser
-      mipLevel = min(mipLevel + 1, maxMip);
+      mipLevel = min(mipLevel + 1, effectiveMaxMip);
     }
   }
 
@@ -310,7 +305,14 @@ void main()
   float dR = abs(hitLinearDepth - linearizeDepth(textureLod(hiZTexture, hitUV + vec2(0.0, texelSize.y), 0.0).r));
   float dL = abs(hitLinearDepth - linearizeDepth(textureLod(hiZTexture, hitUV - vec2(0.0, texelSize.y), 0.0).r));
   float maxDepthDiff = max(max(dU, dD), max(dR, dL));
-  float silhouetteFade = 1.0 - smoothstep(0.5, 2.0, maxDepthDiff);
+  float silhouetteFade = 1.0 - smoothstep(0.01, 0.3, maxDepthDiff);
+
+  // Contact fade — near the contact line between an object and its reflection,
+  // SSR catches thin edge geometry (splitters, lips) that's only 1-2 pixels wide.
+  // This creates stretched vertical streaks. Fade out hits that are too close
+  // to the origin in screen space — these are unreliable edge reflections.
+  float hitScreenDist = hitT * rayScreenLen; // pixels the ray traveled
+  float contactFade = smoothstep(0.0, 32.0, hitScreenDist);
 
   // Contribution calculation
   vec3 reflectedColor = texture(frame, hitUV).rgb;
@@ -332,7 +334,7 @@ void main()
   float roughnessFade = 1.0 - smoothstep(0.0, MAX_ROUGHNESS, roughness);
 
   // Final SSR mask
-  vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade * silhouetteFade, vec3(0.0), vec3(1.0));
+  vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade * silhouetteFade * contactFade, vec3(0.0), vec3(1.0));
 
   outColor = vec4(originalColor * (1.0 - ssrMask) + reflectedColor * ssrMask, 1.0);
 }

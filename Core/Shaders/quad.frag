@@ -59,7 +59,7 @@ void main()
       outColor = vec4(ao, ao, ao, 1.0);
     }
     return;
-  case 6: // SSR only (base zeroed in ssr.frag)
+  case 6: // SSR only (base zeroed in ssr.frag, HDR needs tone mapping)
     {
       vec3 color = texture(frame, uv).rgb;
       color = color * u_Data.exposure;
