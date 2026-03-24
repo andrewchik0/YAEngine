@@ -70,12 +70,38 @@ namespace YAEngine
       .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
     });
 
+    uint32_t hizMipCount = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+    m_HiZResource = m_Graph.CreateResource({
+      .name = "hiZ",
+      .format = VK_FORMAT_R32_SFLOAT,
+      .filter = VK_FILTER_NEAREST,
+      .mipLevels = hizMipCount
+    });
+
     // --- Passes ---
+
+    // 1. Depth prepass — fills depth buffer first (wins on overdraw)
+    m_DepthPrepassIndex = m_Graph.AddPass({
+      .name = "DepthPrepass",
+      .depthOutput = m_MainDepth,
+      .clearDepth = true,
+      .depthOnly = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto* app = static_cast<Application*>(ctx.userData);
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        m_PerFrameData.SetUp(currentFrame);
+        DrawMeshesDepthOnly(app);
+      }
+    });
+
+    // 2. Main pass — forward PBR, reuses depth from prepass (EQUAL test, no depth write)
     m_MainPassIndex = m_Graph.AddPass({
       .name = "MainPass",
       .inputs = {},
       .colorOutputs = {m_MainColor, m_MainNormals, m_MainMaterial, m_MainAlbedo, m_MainVelocity},
       .depthOutput = m_MainDepth,
+      .clearColor = true,
+      .clearDepth = false,
       .execute = [this](const RGExecuteContext& ctx) {
         auto* app = static_cast<Application*>(ctx.userData);
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
@@ -138,9 +164,52 @@ namespace YAEngine
       }
     });
 
+    // 5. Hi-Z mip chain generation (compute)
+    m_HiZPassIndex = m_Graph.AddPass({
+      .name = "HiZPass",
+      .inputs = {m_MainDepth},
+      .storageOutputs = {m_HiZResource},
+      .isCompute = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        uint32_t mipCount = m_Graph.GetResourceDesc(m_HiZResource).mipLevels;
+        uint32_t w = m_Graph.GetExtent().width;
+        uint32_t h = m_Graph.GetExtent().height;
+
+        m_HiZPipeline.Bind(ctx.cmd);
+
+        for (uint32_t mip = 0; mip < mipCount; mip++)
+        {
+          uint32_t dstW = std::max(1u, w >> mip);
+          uint32_t dstH = std::max(1u, h >> mip);
+
+          struct { int srcMip; int dstWidth; int dstHeight; } pc;
+          pc.srcMip = (mip == 0) ? -1 : static_cast<int>(mip - 1);
+          pc.dstWidth = static_cast<int>(dstW);
+          pc.dstHeight = static_cast<int>(dstH);
+
+          m_HiZPipeline.BindDescriptorSets(ctx.cmd, {m_HiZDescriptorSets[mip].Get()}, 0);
+          m_HiZPipeline.PushConstants(ctx.cmd, &pc);
+          m_HiZPipeline.Dispatch(ctx.cmd, (dstW + 15) / 16, (dstH + 15) / 16, 1);
+
+          if (mip < mipCount - 1)
+          {
+            VkMemoryBarrier memBarrier{};
+            memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+            memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            vkCmdPipelineBarrier(ctx.cmd,
+              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+              VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+              0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+          }
+        }
+      }
+    });
+
+    // 6. SSR — Hi-Z accelerated screen-space reflections
     m_SSRPassIndex = m_Graph.AddPass({
       .name = "SSRPass",
-      .inputs = {m_MainColor, m_MainDepth, m_MainNormals, m_MainMaterial, m_MainAlbedo, m_SSAOBlurred},
+      .inputs = {m_MainColor, m_MainDepth, m_MainNormals, m_MainMaterial, m_MainAlbedo, m_SSAOBlurred, m_HiZResource},
       .colorOutputs = {m_SSRColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
@@ -151,6 +220,7 @@ namespace YAEngine
         auto& mainMaterial = m_Graph.GetResource(m_MainMaterial);
         auto& mainAlbedo = m_Graph.GetResource(m_MainAlbedo);
         auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
+        auto& hiZ = m_Graph.GetResource(m_HiZResource);
 
         m_SSRPipeline.Bind(ctx.cmd);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
@@ -165,6 +235,8 @@ namespace YAEngine
           mainAlbedo.GetView(), mainAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(5,
           ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(6,
+          hiZ.GetView(), hiZ.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
         m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_SSRPassDescriptorSets[currentFrame].Get()}, 1);
@@ -412,6 +484,9 @@ namespace YAEngine
     // Init pipelines using graph's render passes
     InitPipelines();
 
+    // Create Hi-Z per-mip views and descriptor sets
+    CreateHiZResources();
+
     m_Backend.InitImGui(window, m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
 
     m_CubicResources.Init(ctx);
@@ -429,6 +504,10 @@ namespace YAEngine
     m_SkyBox.Destroy();
     m_CubicResources.Destroy(ctx);
     m_NoneTexture.Destroy(ctx);
+
+    // Destroy Hi-Z resources
+    DestroyHiZResources();
+    m_HiZPipeline.Destroy();
 
     // Destroy TAA external framebuffers
     for (auto& fb : m_TAAFramebuffers)
@@ -466,6 +545,10 @@ namespace YAEngine
     m_SSAOBlurPipeline.Destroy();
     m_SSAONoise.Destroy(ctx);
     m_SSAOKernelUBO.Destroy(ctx);
+    m_DepthPrepassPipeline.Destroy();
+    m_DepthPrepassPipelineDoubleSided.Destroy();
+    m_DepthPrepassPipelineInstanced.Destroy();
+    m_DepthPrepassPipelineDoubleSidedInstanced.Destroy();
     m_ForwardPipeline.Destroy();
     m_ForwardPipelineDoubleSided.Destroy();
     m_ForwardPipelineInstanced.Destroy();
@@ -496,8 +579,14 @@ namespace YAEngine
     // Use actual swapchain extent for everything
     auto actualExtent = m_Backend.GetSwapChain().GetExt();
 
+    // Destroy Hi-Z per-mip views before graph resize destroys the image
+    DestroyHiZResources();
+
     // Resize graph (recreates managed resources and non-external framebuffers)
     m_Graph.Resize(actualExtent);
+
+    // Recreate Hi-Z per-mip views and descriptor sets
+    CreateHiZResources();
 
     // Recreate TAA external framebuffers
     for (auto& fb : m_TAAFramebuffers)
@@ -536,6 +625,7 @@ namespace YAEngine
     m_PerFrameData.ubo.ssaoEnabled = b_SSAOEnabled ? 1 : 0;
     m_PerFrameData.ubo.ssrEnabled = b_SSREnabled ? 1 : 0;
     m_PerFrameData.ubo.taaEnabled = b_TAAEnabled ? 1 : 0;
+    m_PerFrameData.ubo.hizMipCount = static_cast<int>(m_Graph.GetResourceDesc(m_HiZResource).mipLevels);
     m_LightsBuffer.Update(0, &m_Lights, sizeof(Light) * MAX_LIGHTS + sizeof(int));
 
     // Configure render graph for this frame (TAA ping-pong + swapchain)
@@ -701,14 +791,43 @@ namespace YAEngine
     m_LightsBuffer.Create(ctx, MAX_LIGHTS * sizeof(Light) + sizeof(int));
     m_LightsDescriptorSet.WriteStorageBuffer(0, m_LightsBuffer.Get(), MAX_LIGHTS * sizeof(Light) + sizeof(int));
 
+    // Depth prepass pipelines — vertex-only, no fragment shader
+    VkRenderPass depthRP = m_Graph.GetPassRenderPass(m_DepthPrepassIndex);
+
+    PipelineCreateInfo depthPrepassInfo = {
+      .vertexShaderFile = "depth_prepass.vert",
+      .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+      .colorAttachmentCount = 0,
+      .vertexInputFormat = "f3f2f3f4",
+      .sets = std::vector({
+        m_PerFrameData.GetLayout(),
+      })
+    };
+    m_DepthPrepassPipeline.Init(ctx.device, depthRP, depthPrepassInfo, pipelineCache);
+    depthPrepassInfo.doubleSided = true;
+    m_DepthPrepassPipelineDoubleSided.Init(ctx.device, depthRP, depthPrepassInfo, pipelineCache);
+
+    depthPrepassInfo.doubleSided = false;
+    depthPrepassInfo.vertexShaderFile = "depth_prepass_instanced.vert";
+    depthPrepassInfo.sets = std::vector({
+      m_PerFrameData.GetLayout(),
+      m_InstanceDescriptorSet.GetLayout(),
+    });
+    m_DepthPrepassPipelineInstanced.Init(ctx.device, depthRP, depthPrepassInfo, pipelineCache);
+    depthPrepassInfo.doubleSided = true;
+    m_DepthPrepassPipelineDoubleSidedInstanced.Init(ctx.device, depthRP, depthPrepassInfo, pipelineCache);
+
     // Forward pipelines — use graph's main pass render pass
+    // depthWrite=false, compareOp=EQUAL (depth already written by prepass)
     VkRenderPass mainRP = m_Graph.GetPassRenderPass(m_MainPassIndex);
 
     PipelineCreateInfo forwardInfo = {
       .fragmentShaderFile = "shader.frag",
       .vertexShaderFile = "shader.vert",
       .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+      .depthWrite = false,
       .colorAttachmentCount = 5,
+      .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
       .vertexInputFormat = "f3f2f3f4",
       .sets = std::vector({
         m_PerFrameData.GetLayout(),
@@ -854,7 +973,7 @@ namespace YAEngine
     };
     m_SSAOBlurPipeline.Init(ctx.device, ssaoBlurRP, ssaoBlurInfo, pipelineCache);
 
-    // SSR descriptor sets and pipeline
+    // SSR descriptor sets and pipeline (7 bindings: frame, depth, normals, material, albedo, ssao, hiZ)
     VkRenderPass ssrRP = m_Graph.GetPassRenderPass(m_SSRPassIndex);
 
     m_SSRPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
@@ -870,6 +989,7 @@ namespace YAEngine
             { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
@@ -886,6 +1006,152 @@ namespace YAEngine
       })
     };
     m_SSRPipeline.Init(ctx.device, ssrRP, ssrPipelineDesc, pipelineCache);
+
+    // Hi-Z compute pipeline
+    SetDescription hizSetDesc = {
+      .set = 0,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT }
+      }
+    };
+    VulkanDescriptorSet hizLayoutHelper;
+    hizLayoutHelper.Init(ctx, hizSetDesc);
+    m_HiZPipeline.Init(ctx.device, "hiz.comp",
+      { hizLayoutHelper.GetLayout() },
+      sizeof(int) * 3,
+      pipelineCache);
+    hizLayoutHelper.Destroy();
+  }
+
+  void Render::DrawMeshesDepthOnly(Application* app)
+  {
+    auto currentFrame = m_Backend.GetCurrentFrameIndex();
+    auto cmd = m_Backend.GetCurrentCommandBuffer();
+    auto& meshManager = app->GetAssetManager().Meshes();
+
+    auto view = app->GetScene().GetView<MeshComponent, TransformComponent, MaterialComponent>();
+
+    view.each([&](MeshComponent mesh, TransformComponent transform, MaterialComponent material)
+    {
+      if (!mesh.shouldRender) return;
+      if (mesh.noShading) return;
+
+      auto* instanceData = meshManager.GetInstanceData(mesh.asset);
+
+      auto& pipeline = instanceData == nullptr
+        ? (mesh.doubleSided ? m_DepthPrepassPipelineDoubleSided : m_DepthPrepassPipeline)
+        : (mesh.doubleSided ? m_DepthPrepassPipelineDoubleSidedInstanced : m_DepthPrepassPipelineInstanced);
+
+      pipeline.Bind(cmd);
+      pipeline.BindDescriptorSets(cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+
+      struct _
+      {
+        glm::mat4 model;
+        int offset = 0;
+      } data;
+      data.model = transform.world;
+      data.offset = meshManager.GetInstanceOffset(mesh.asset) / sizeof(glm::mat4);
+      pipeline.PushConstants(cmd, &data);
+
+      uint32_t instanceCount = 1;
+      if (instanceData != nullptr)
+      {
+        instanceCount = uint32_t(instanceData->size());
+        pipeline.BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 1);
+        m_InstanceBuffer.Update(meshManager.GetInstanceOffset(mesh.asset), instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
+      }
+
+      meshManager.GetVertexBuffer(mesh.asset).Draw(cmd, instanceCount);
+    });
+  }
+
+  void Render::CreateHiZResources()
+  {
+    auto& ctx = m_Backend.GetContext();
+    auto hizImage = m_Graph.GetResourceImage(m_HiZResource);
+    auto& hizDesc = m_Graph.GetResourceDesc(m_HiZResource);
+    uint32_t mipCount = hizDesc.mipLevels;
+
+    // Create per-mip image views for storage writes
+    m_HiZMipViews.resize(mipCount);
+    for (uint32_t mip = 0; mip < mipCount; mip++)
+    {
+      VkImageViewCreateInfo viewInfo{};
+      viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+      viewInfo.image = hizImage;
+      viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+      viewInfo.format = VK_FORMAT_R32_SFLOAT;
+      viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+      viewInfo.subresourceRange.baseMipLevel = mip;
+      viewInfo.subresourceRange.levelCount = 1;
+      viewInfo.subresourceRange.baseArrayLayer = 0;
+      viewInfo.subresourceRange.layerCount = 1;
+
+      if (vkCreateImageView(ctx.device, &viewInfo, nullptr, &m_HiZMipViews[mip]) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Render", "Failed to create Hi-Z mip view %d", mip);
+        throw std::runtime_error("Failed to create Hi-Z mip view!");
+      }
+    }
+
+    // Create per-mip descriptor sets for Hi-Z compute
+    SetDescription hizSetDesc = {
+      .set = 0,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT }
+      }
+    };
+
+    m_HiZDescriptorSets.resize(mipCount);
+    for (uint32_t mip = 0; mip < mipCount; mip++)
+    {
+      if (mip == 0)
+        m_HiZDescriptorSets[mip].Init(ctx, hizSetDesc);
+      else
+        m_HiZDescriptorSets[mip].Init(ctx, m_HiZDescriptorSets[0].GetLayout());
+    }
+
+    // Write descriptors
+    auto& depth = m_Graph.GetResource(m_MainDepth);
+    auto& hiZ = m_Graph.GetResource(m_HiZResource);
+
+    for (uint32_t mip = 0; mip < mipCount; mip++)
+    {
+      if (mip == 0)
+      {
+        // Mip 0: read from depth buffer
+        m_HiZDescriptorSets[mip].WriteCombinedImageSampler(0,
+          depth.GetView(), depth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      }
+      else
+      {
+        // Mip N: read from full Hi-Z texture (in GENERAL layout during compute)
+        m_HiZDescriptorSets[mip].WriteCombinedImageSampler(0,
+          hiZ.GetView(), hiZ.GetSampler(), VK_IMAGE_LAYOUT_GENERAL);
+      }
+
+      // Storage image write for this mip level
+      m_HiZDescriptorSets[mip].WriteStorageImage(1, m_HiZMipViews[mip], VK_IMAGE_LAYOUT_GENERAL);
+    }
+  }
+
+  void Render::DestroyHiZResources()
+  {
+    auto& ctx = m_Backend.GetContext();
+
+    for (auto& set : m_HiZDescriptorSets)
+      set.Destroy();
+    m_HiZDescriptorSets.clear();
+
+    for (auto view : m_HiZMipViews)
+    {
+      if (view != VK_NULL_HANDLE)
+        vkDestroyImageView(ctx.device, view, nullptr);
+    }
+    m_HiZMipViews.clear();
   }
 
   void Render::DrawQuad()

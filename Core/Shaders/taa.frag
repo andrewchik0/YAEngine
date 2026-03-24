@@ -25,6 +25,7 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   int taaEnabled;
   float jitterX;
   float jitterY;
+  int hizMipCount;
 } u_Data;
 
 layout(set = 1, binding = 0) uniform sampler2D frame;

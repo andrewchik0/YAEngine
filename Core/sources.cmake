@@ -103,4 +103,6 @@ set(SOURCE_FILES
   Source/Render/DescriptorLayoutCache.h
   Source/Render/RenderGraph.cpp
   Source/Render/RenderGraph.h
+  Source/Render/VulkanComputePipeline.cpp
+  Source/Render/VulkanComputePipeline.h
 )

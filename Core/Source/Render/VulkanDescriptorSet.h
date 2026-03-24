@@ -35,6 +35,11 @@ namespace YAEngine
       VkSampler sampler,
       VkImageLayout layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL
     );
+    void WriteStorageImage(
+      uint32_t binding,
+      VkImageView imageView,
+      VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL
+    );
 
     VkDescriptorSet Get()
     {

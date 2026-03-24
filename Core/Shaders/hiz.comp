@@ -1,0 +1,41 @@
+#version 450
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(push_constant) uniform PushConstants {
+  int srcMip;
+  int dstWidth;
+  int dstHeight;
+} pc;
+
+layout(set = 0, binding = 0) uniform sampler2D inputMip;
+layout(set = 0, binding = 1, r32f) uniform writeonly image2D outputMip;
+
+void main()
+{
+  ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+  if (pos.x >= pc.dstWidth || pos.y >= pc.dstHeight) return;
+
+  // srcMip < 0: 1:1 copy from depth buffer to Hi-Z mip 0
+  if (pc.srcMip < 0)
+  {
+    vec2 uv = (vec2(pos) + 0.5) / vec2(pc.dstWidth, pc.dstHeight);
+    float d = textureLod(inputMip, uv, 0.0).r;
+    imageStore(outputMip, pos, vec4(d));
+    return;
+  }
+
+  // Each output texel covers a 2x2 block in the source
+  vec2 srcSize = vec2(textureSize(inputMip, pc.srcMip));
+  vec2 texelSize = 1.0 / srcSize;
+  vec2 uv = (vec2(pos) * 2.0 + 1.0) * texelSize;
+
+  // Sample 4 texels from source mip and take minimum (closest depth to camera)
+  float d0 = textureLod(inputMip, uv + vec2(-0.5, -0.5) * texelSize, float(pc.srcMip)).r;
+  float d1 = textureLod(inputMip, uv + vec2( 0.5, -0.5) * texelSize, float(pc.srcMip)).r;
+  float d2 = textureLod(inputMip, uv + vec2(-0.5,  0.5) * texelSize, float(pc.srcMip)).r;
+  float d3 = textureLod(inputMip, uv + vec2( 0.5,  0.5) * texelSize, float(pc.srcMip)).r;
+
+  float minDepth = min(min(d0, d1), min(d2, d3));
+  imageStore(outputMip, pos, vec4(minDepth));
+}

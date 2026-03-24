@@ -5,13 +5,6 @@ layout(location = 1) in vec2 inTexCoord;
 layout(location = 2) in vec3 inNormal;
 layout(location = 3) in vec4 inTangent;
 
-layout(location = 0) out vec2 outTexCoord;
-layout(location = 1) out vec3 outNormal;
-layout(location = 2) out vec3 outPosition;
-layout(location = 3) out mat3 outTBN;
-layout(location = 6) out vec4 outCurClipPos;
-layout(location = 7) out vec4 outPrevClipPos;
-
 invariant gl_Position;
 
 layout(set = 0, binding = 0) uniform PerFrameUBO {
@@ -48,19 +41,4 @@ layout(push_constant) uniform PushConstants
 void main() {
   vec4 worldPos = pc.world * vec4(inPosition, 1.0);
   gl_Position = u_Data.proj * u_Data.view * worldPos;
-  outCurClipPos = gl_Position;
-  outPrevClipPos = u_Data.prevProj * u_Data.prevView * worldPos;
-  outTexCoord = inTexCoord;
-  outPosition = vec3(worldPos);
-
-  mat3 normalMatrix = transpose(inverse(mat3(pc.world)));
-
-  vec3 N = normalize(normalMatrix * inNormal);
-  vec3 T = normalize(normalMatrix * inTangent.xyz);
-
-  T = normalize(T - N * dot(T, N));
-  vec3 B = cross(N, T) * inTangent.w;
-
-  outNormal = N;
-  outTBN = mat3(T, B, N);
 }

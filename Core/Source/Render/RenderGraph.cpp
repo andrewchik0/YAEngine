@@ -112,6 +112,10 @@ namespace YAEngine
       {
         m_Resources[handle].usage |= VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
       }
+      for (auto handle : pass.info.storageOutputs)
+      {
+        m_Resources[handle].usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+      }
       if (pass.info.depthOutput != RG_INVALID_HANDLE)
       {
         m_Resources[pass.info.depthOutput].usage |= VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT;
@@ -134,6 +138,7 @@ namespace YAEngine
       imageDesc.format = res.desc.format;
       imageDesc.usage = res.usage;
       imageDesc.aspectMask = res.desc.aspect;
+      imageDesc.mipLevels = res.desc.mipLevels;
 
       bool needsSampler = (res.usage & VK_IMAGE_USAGE_SAMPLED_BIT) != 0;
 
@@ -142,6 +147,7 @@ namespace YAEngine
         SamplerDesc samplerDesc;
         samplerDesc.magFilter = res.desc.filter;
         samplerDesc.minFilter = res.desc.filter;
+        samplerDesc.maxLod = static_cast<float>(res.desc.mipLevels - 1);
         if (res.desc.aspect == VK_IMAGE_ASPECT_DEPTH_BIT)
         {
           samplerDesc.magFilter = VK_FILTER_NEAREST;
@@ -160,6 +166,62 @@ namespace YAEngine
   {
     for (auto& pass : m_Passes)
     {
+      // Compute passes don't need render passes
+      if (pass.info.isCompute) continue;
+
+      // Depth-only pass: single depth attachment, no color
+      if (pass.info.depthOnly)
+      {
+        VkAttachmentDescription att{};
+        att.format = VK_FORMAT_D32_SFLOAT;
+        att.samples = VK_SAMPLE_COUNT_1_BIT;
+        att.loadOp = pass.info.clearDepth ? VK_ATTACHMENT_LOAD_OP_CLEAR : VK_ATTACHMENT_LOAD_OP_LOAD;
+        att.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+        att.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+        att.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+        att.initialLayout = pass.info.clearDepth
+          ? VK_IMAGE_LAYOUT_UNDEFINED
+          : VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        att.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkAttachmentReference depthRef{};
+        depthRef.attachment = 0;
+        depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+
+        VkSubpassDescription subpass{};
+        subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+        subpass.colorAttachmentCount = 0;
+        subpass.pColorAttachments = nullptr;
+        subpass.pDepthStencilAttachment = &depthRef;
+
+        VkSubpassDependency dep{};
+        dep.srcSubpass = VK_SUBPASS_EXTERNAL;
+        dep.dstSubpass = 0;
+        dep.srcStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+          | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        dep.srcAccessMask = 0;
+        dep.dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+          | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+        dep.dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT
+          | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+
+        VkRenderPassCreateInfo rpInfo{};
+        rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+        rpInfo.attachmentCount = 1;
+        rpInfo.pAttachments = &att;
+        rpInfo.subpassCount = 1;
+        rpInfo.pSubpasses = &subpass;
+        rpInfo.dependencyCount = 1;
+        rpInfo.pDependencies = &dep;
+
+        if (vkCreateRenderPass(m_Ctx->device, &rpInfo, nullptr, &pass.renderPass) != VK_SUCCESS)
+        {
+          YA_LOG_ERROR("Render", "Failed to create depth-only render pass: %s", pass.info.name.c_str());
+          throw std::runtime_error("Failed to create depth-only render pass: " + pass.info.name);
+        }
+        continue;
+      }
+
       std::vector<VkAttachmentDescription> attachments;
       std::vector<VkAttachmentReference> colorRefs;
 
@@ -277,6 +339,44 @@ namespace YAEngine
   {
     for (auto& pass : m_Passes)
     {
+      // Compute passes don't need framebuffers
+      if (pass.info.isCompute) continue;
+
+      // Depth-only pass
+      if (pass.info.depthOnly)
+      {
+        if (pass.info.depthOutput != RG_INVALID_HANDLE)
+        {
+          auto& res = m_Resources[pass.info.depthOutput];
+          pass.extent.width = std::max(1u, static_cast<uint32_t>(m_Extent.width * res.desc.widthScale));
+          pass.extent.height = std::max(1u, static_cast<uint32_t>(m_Extent.height * res.desc.heightScale));
+        }
+        else
+        {
+          pass.extent = m_Extent;
+        }
+
+        VkImageView views[1] = {
+          ResolveResource(pass.info.depthOutput).GetView()
+        };
+
+        VkFramebufferCreateInfo fbInfo{};
+        fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fbInfo.renderPass = pass.renderPass;
+        fbInfo.attachmentCount = 1;
+        fbInfo.pAttachments = views;
+        fbInfo.width = pass.extent.width;
+        fbInfo.height = pass.extent.height;
+        fbInfo.layers = 1;
+
+        if (vkCreateFramebuffer(m_Ctx->device, &fbInfo, nullptr, &pass.framebuffer) != VK_SUCCESS)
+        {
+          YA_LOG_ERROR("Render", "Failed to create depth-only framebuffer: %s", pass.info.name.c_str());
+          throw std::runtime_error("Failed to create depth-only framebuffer: " + pass.info.name);
+        }
+        continue;
+      }
+
       // Compute per-pass extent from first color output (or global extent for external)
       if (!pass.info.colorOutputs.empty() && !pass.info.externalFramebuffer)
       {
@@ -355,6 +455,10 @@ namespace YAEngine
       {
         writers[handle] = i;
       }
+      for (auto handle : m_Passes[i].info.storageOutputs)
+      {
+        writers[handle] = i;
+      }
       if (m_Passes[i].info.depthOutput != RG_INVALID_HANDLE)
       {
         writers[m_Passes[i].info.depthOutput] = i;
@@ -427,10 +531,30 @@ namespace YAEngine
 
       TransitionImageLayout(cmd, image.GetImage(),
         layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        res.desc.aspect);
+        res.desc.aspect, 0, res.desc.mipLevels);
 
       layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
       image.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
+
+    // For compute passes: transition storage outputs to GENERAL
+    if (pass.info.isCompute)
+    {
+      for (auto handle : pass.info.storageOutputs)
+      {
+        auto& layout = m_CurrentLayouts[handle];
+        if (layout == VK_IMAGE_LAYOUT_GENERAL) continue;
+
+        auto& res = m_Resources[handle];
+        auto& image = ResolveResource(handle);
+
+        TransitionImageLayout(cmd, image.GetImage(),
+          layout, VK_IMAGE_LAYOUT_GENERAL,
+          res.desc.aspect, 0, res.desc.mipLevels);
+
+        layout = VK_IMAGE_LAYOUT_GENERAL;
+        image.SetLayout(VK_IMAGE_LAYOUT_GENERAL);
+      }
     }
   }
 
@@ -447,10 +571,67 @@ namespace YAEngine
 
       ctx.extent = pass.extent;
 
-      // Insert barriers for inputs
+      // Insert barriers for inputs (and storage outputs for compute)
       InsertBarriers(cmd, passIndex);
 
-      // Determine framebuffer
+      // Compute pass: no render pass, just execute
+      if (pass.info.isCompute)
+      {
+        pass.info.execute(ctx);
+
+        // Update tracked layouts for storage outputs
+        for (auto handle : pass.info.storageOutputs)
+        {
+          m_CurrentLayouts[handle] = VK_IMAGE_LAYOUT_GENERAL;
+          ResolveResource(handle).SetLayout(VK_IMAGE_LAYOUT_GENERAL);
+        }
+        continue;
+      }
+
+      // Depth-only pass
+      if (pass.info.depthOnly)
+      {
+        VkFramebuffer fb = pass.overrideFramebuffer != VK_NULL_HANDLE
+          ? pass.overrideFramebuffer : pass.framebuffer;
+
+        VkClearValue clearValue{};
+        clearValue.depthStencil = {1.0f, 0};
+
+        VkRenderPassBeginInfo rpInfo{};
+        rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rpInfo.renderPass = pass.renderPass;
+        rpInfo.framebuffer = fb;
+        rpInfo.renderArea.offset = {0, 0};
+        rpInfo.renderArea.extent = pass.extent;
+        rpInfo.clearValueCount = 1;
+        rpInfo.pClearValues = &clearValue;
+
+        vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        VkViewport viewport{};
+        viewport.width = static_cast<float>(pass.extent.width);
+        viewport.height = static_cast<float>(pass.extent.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+        VkRect2D scissor{};
+        scissor.extent = pass.extent;
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+        pass.info.execute(ctx);
+
+        vkCmdEndRenderPass(cmd);
+
+        if (pass.info.depthOutput != RG_INVALID_HANDLE)
+        {
+          m_CurrentLayouts[pass.info.depthOutput] = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+          ResolveResource(pass.info.depthOutput).SetLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+        }
+        continue;
+      }
+
+      // Regular graphics pass
       VkFramebuffer fb = pass.overrideFramebuffer != VK_NULL_HANDLE
         ? pass.overrideFramebuffer : pass.framebuffer;
 
@@ -547,6 +728,16 @@ namespace YAEngine
     ResolveResource(handle).SetLayout(layout);
   }
 
+  VkImage RenderGraph::GetResourceImage(RGHandle handle)
+  {
+    return ResolveResource(handle).GetImage();
+  }
+
+  const RGResourceDesc& RenderGraph::GetResourceDesc(RGHandle handle) const
+  {
+    return m_Resources[handle].desc;
+  }
+
   VulkanImage& RenderGraph::ResolveResource(RGHandle handle)
   {
     auto& res = m_Resources[handle];
@@ -570,7 +761,7 @@ namespace YAEngine
     // Destroy non-external framebuffers and private depths
     for (auto& pass : m_Passes)
     {
-      if (!pass.info.externalFramebuffer && pass.framebuffer != VK_NULL_HANDLE)
+      if (!pass.info.externalFramebuffer && !pass.info.isCompute && pass.framebuffer != VK_NULL_HANDLE)
       {
         vkDestroyFramebuffer(m_Ctx->device, pass.framebuffer, nullptr);
         pass.framebuffer = VK_NULL_HANDLE;

@@ -34,6 +34,7 @@ namespace YAEngine
       int taaEnabled;
       float jitterX;
       float jitterY;
+      int hizMipCount;
     } ubo;
 
     void Init(const RenderContext& ctx);

@@ -139,4 +139,25 @@ namespace YAEngine
     vkUpdateDescriptorSets(m_Device, 1, &write, 0, nullptr);
   }
 
+  void VulkanDescriptorSet::WriteStorageImage(
+    uint32_t binding,
+    VkImageView imageView,
+    VkImageLayout layout)
+  {
+    VkDescriptorImageInfo imageInfo{};
+    imageInfo.imageView = imageView;
+    imageInfo.sampler   = VK_NULL_HANDLE;
+    imageInfo.imageLayout = layout;
+
+    VkWriteDescriptorSet write{};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_DescriptorSet;
+    write.dstBinding = binding;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    write.descriptorCount = 1;
+    write.pImageInfo = &imageInfo;
+
+    vkUpdateDescriptorSets(m_Device, 1, &write, 0, nullptr);
+  }
+
 }

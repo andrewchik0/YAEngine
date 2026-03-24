@@ -23,6 +23,7 @@ namespace YAEngine
     VkImageAspectFlags aspect = VK_IMAGE_ASPECT_COLOR_BIT;
     VkImageUsageFlags additionalUsage = 0;
     VkFilter filter = VK_FILTER_LINEAR;
+    uint32_t mipLevels = 1;
   };
 
   struct RGExecuteContext
@@ -39,9 +40,12 @@ namespace YAEngine
     std::string name;
     std::vector<RGHandle> inputs;
     std::vector<RGHandle> colorOutputs;
+    std::vector<RGHandle> storageOutputs;
     RGHandle depthOutput = RG_INVALID_HANDLE;
     bool clearColor = true;
     bool clearDepth = true;
+    bool depthOnly = false;
+    bool isCompute = false;
     bool externalFramebuffer = false;
     VkFormat externalFormat = VK_FORMAT_UNDEFINED;
     VkImageLayout finalColorLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -73,6 +77,9 @@ namespace YAEngine
     VkRenderPass GetPassRenderPass(uint32_t pass) const;
     VkExtent2D GetExtent() const { return m_Extent; }
     void SetResourceLayout(RGHandle handle, VkImageLayout layout);
+
+    VkImage GetResourceImage(RGHandle handle);
+    const RGResourceDesc& GetResourceDesc(RGHandle handle) const;
 
   private:
 

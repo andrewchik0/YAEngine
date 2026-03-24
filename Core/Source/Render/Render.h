@@ -6,6 +6,7 @@
 #include "VulkanCubicTexture.h"
 #include "VulkanMaterial.h"
 #include "SkyBox.h"
+#include "VulkanComputePipeline.h"
 #include "VulkanPipeline.h"
 #include "VulkanStorageBuffer.h"
 #include "VulkanUniformBuffer.h"
@@ -65,12 +66,15 @@ namespace YAEngine
     } m_Lights;
 
     void DrawMeshes(Application* app);
+    void DrawMeshesDepthOnly(Application* app);
     void SetUpCamera(Application* app);
     void InitPipelines();
 
     void SetupRenderGraph(uint32_t width, uint32_t height);
     void CreateTAAFramebuffers();
     void ClearHistoryBuffers();
+    void CreateHiZResources();
+    void DestroyHiZResources();
 
     RenderBackend m_Backend;
     RenderGraph m_Graph;
@@ -83,14 +87,17 @@ namespace YAEngine
     RGHandle m_MainAlbedo {};
     RGHandle m_SSRColor {};
     RGHandle m_MainVelocity {};
+    RGHandle m_HiZResource {};
     RGHandle m_SSAOColor {};
     RGHandle m_SSAOBlurred {};
     RGHandle m_TAAHistory0 {};
     RGHandle m_TAAHistory1 {};
 
     // Pass indices
+    uint32_t m_DepthPrepassIndex {};
     uint32_t m_MainPassIndex {};
     uint32_t m_SSAOPassIndex {};
+    uint32_t m_HiZPassIndex {};
     uint32_t m_SSAOBlurPassIndex {};
     uint32_t m_SSRPassIndex {};
     uint32_t m_TAAPassIndex {};
@@ -130,14 +137,22 @@ namespace YAEngine
     VulkanPipeline m_QuadPipeline;
     VulkanPipeline m_TAAPipeline;
     VulkanPipeline m_SSRPipeline;
+    VulkanPipeline m_DepthPrepassPipeline;
+    VulkanPipeline m_DepthPrepassPipelineDoubleSided;
+    VulkanPipeline m_DepthPrepassPipelineInstanced;
+    VulkanPipeline m_DepthPrepassPipelineDoubleSidedInstanced;
     VulkanPipeline m_SSAOPipeline;
     VulkanPipeline m_SSAOBlurPipeline;
+    VulkanComputePipeline m_HiZPipeline;
 
     VulkanMaterial m_DefaultMaterial {};
     VulkanTexture m_NoneTexture;
     VulkanTexture m_SSAONoise;
     VulkanUniformBuffer m_SSAOKernelUBO;
     CubicTextureResources m_CubicResources;
+
+    std::vector<VkImageView> m_HiZMipViews;
+    std::vector<VulkanDescriptorSet> m_HiZDescriptorSets;
 
   public:
     const RenderContext& GetContext() const { return m_Backend.GetContext(); }

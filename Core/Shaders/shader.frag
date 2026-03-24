@@ -29,6 +29,7 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   int taaEnabled;
   float jitterX;
   float jitterY;
+  int hizMipCount;
 } u_Data;
 
 struct Light

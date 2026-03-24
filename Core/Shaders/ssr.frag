@@ -25,6 +25,7 @@ layout(set = 0, binding = 0) uniform PerFrameUBO {
   int taaEnabled;
   float jitterX;
   float jitterY;
+  int hizMipCount;
 } u_Data;
 
 layout(set = 1, binding = 0) uniform sampler2D frame;
@@ -33,9 +34,10 @@ layout(set = 1, binding = 2) uniform sampler2D normalTexture;
 layout(set = 1, binding = 3) uniform sampler2D materialTexture;
 layout(set = 1, binding = 4) uniform sampler2D albedoTexture;
 layout(set = 1, binding = 5) uniform sampler2D ssaoTexture;
+layout(set = 1, binding = 6) uniform sampler2D hiZTexture;
 
 // --- Configuration constants ---
-const int MAX_STEPS = 256;
+const int MAX_ITERATIONS = 128;
 const int REFINEMENT_STEPS = 8;
 const float MAX_RAY_DISTANCE = 30.0;
 const float SELF_INTERSECT_DIST = 0.1;
@@ -70,6 +72,24 @@ vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
   return F0 + (max(vec3(1.0 - roughness), F0) - F0) * t2 * t2 * t;
 }
 
+// Get the cell boundary intersection along the ray direction at a given mip level
+vec2 getCellBoundary(vec2 pos, vec2 dir, float cellSize)
+{
+  // Position within current cell (0..cellSize)
+  vec2 cellPos = mod(pos, vec2(cellSize));
+
+  // Distance to the next boundary in each axis
+  vec2 toCellEdge;
+  toCellEdge.x = (dir.x > 0.0) ? (cellSize - cellPos.x) : cellPos.x;
+  toCellEdge.y = (dir.y > 0.0) ? (cellSize - cellPos.y) : cellPos.y;
+
+  // Avoid division by zero
+  vec2 absDir = abs(dir) + 1e-10;
+  vec2 tVals = toCellEdge / absDir;
+
+  return tVals;
+}
+
 // --- Main ---
 
 void main()
@@ -91,7 +111,7 @@ void main()
   if (u_Data.currentTexture == 6)
     originalColor = vec3(0.0);
 
-  // Early exits — no AO for skybox or invalid normals
+  // Early exits
   if (depth >= DEPTH_EPSILON)
   {
     outColor = vec4(originalColor, 1.0);
@@ -128,7 +148,7 @@ void main()
   // Backward fade for reflections pointing towards camera
   float backwardFade = 1.0 - clamp(reflectDir.z, 0.0, 1.0);
 
-  // --- Screen-space ray march ---
+  // --- Screen-space ray march setup ---
   vec3 rayOrigin = viewPos + viewNormal * NORMAL_BIAS;
   vec3 rayEnd = rayOrigin + reflectDir * MAX_RAY_DISTANCE;
 
@@ -150,63 +170,101 @@ void main()
   float startDepthNDC = startClip.z / startClip.w;
   float endDepthNDC = endClip.z / endClip.w;
 
-  // Determine step count from screen-space pixel distance
-  vec2 screenDelta = (endScreen - startScreen) * vec2(float(u_Data.screenWidth), float(u_Data.screenHeight));
-  int steps = clamp(int(max(abs(screenDelta.x), abs(screenDelta.y))), 1, MAX_STEPS);
+  vec2 screenSize = vec2(float(u_Data.screenWidth), float(u_Data.screenHeight));
+  vec2 rayDelta = endScreen - startScreen;
+  float rayScreenLen = length(rayDelta * screenSize);
 
-  // March in screen space
+  if (rayScreenLen < 1.0)
+  {
+    outColor = vec4(originalColor, 1.0);
+    return;
+  }
+
+  vec2 rayDir = rayDelta / rayScreenLen; // normalized in pixel space
+
+  float originLinearDepth = linearizeDepth(depth);
+  int maxMip = u_Data.hizMipCount - 1;
+
+  // --- Hi-Z Ray March ---
   bool hit = false;
   vec2 hitUV = vec2(0.0);
   float hitT = 0.0;
-  int hitStep = 0;
 
-  float originLinearDepth = linearizeDepth(depth);
+  // Start at mip 0 and work up when skipping empty space
+  int mipLevel = 0;
+  float t = 0.0;
 
-  float invSteps = 1.0 / float(steps);
-
-  for (int i = 1; i <= steps; i++)
+  for (int i = 0; i < MAX_ITERATIONS; i++)
   {
-    float t = float(i) * invSteps;
+    t += max(1.0, float(1 << mipLevel)) / rayScreenLen;
+    if (t >= 1.0) break;
+
     vec2 sampleUV = mix(startScreen, endScreen, t);
 
     // Screen bounds check
-    if (any(notEqual(clamp(sampleUV, 0.0, 1.0), sampleUV)))
+    if (any(lessThan(sampleUV, vec2(0.0))) || any(greaterThan(sampleUV, vec2(1.0))))
       break;
 
-    // Linearly interpolated ray depth in NDC (perspective-correct in screen space)
     float rayDepth = mix(startDepthNDC, endDepthNDC, t);
 
-    float sampleDepth = texture(depthTexture, sampleUV).r;
-    if (sampleDepth >= DEPTH_EPSILON)
-      continue;
+    // Sample Hi-Z at current mip level
+    float cellMinDepth = textureLod(hiZTexture, sampleUV, float(mipLevel)).r;
 
-    float diff = rayDepth - sampleDepth;
-    if (diff > 0.0)
+    if (cellMinDepth >= DEPTH_EPSILON)
     {
-      float sampleLinearDepth = linearizeDepth(sampleDepth);
+      // Sky — go coarser to skip faster
+      mipLevel = min(mipLevel + 1, maxMip);
+      continue;
+    }
 
-      // Reject close self-intersections by depth
-      if (abs(sampleLinearDepth - originLinearDepth) < SELF_INTERSECT_DIST)
-        continue;
+    if (rayDepth > cellMinDepth)
+    {
+      // Ray is behind the closest surface in this cell
+      if (mipLevel == 0)
+      {
+        // Finest level — potential hit, validate it
+        float sampleLinearDepth = linearizeDepth(cellMinDepth);
 
-      // Reject hits where ray is too far behind the surface (edge artifacts)
-      float rayLinearDepth = linearizeDepth(rayDepth);
-      if (rayLinearDepth - sampleLinearDepth > MAX_THICKNESS)
-        continue;
+        // Reject self-intersection
+        if (abs(sampleLinearDepth - originLinearDepth) < SELF_INTERSECT_DIST)
+          continue;
 
-      // Reject same-surface hits by normal similarity
-      vec3 sampleNormalRaw = texture(normalTexture, sampleUV).rgb;
-      if (dot(sampleNormalRaw, sampleNormalRaw) < 0.000001)
-        continue;
-      vec3 sampleNormal = normalize(sampleNormalRaw);
-      if (dot(sampleNormal, worldNormal) > SAME_SURFACE_THRESHOLD)
-        continue;
+        // Reject too-thick hits
+        float rayLinearDepth = linearizeDepth(rayDepth);
+        if (rayLinearDepth - sampleLinearDepth > MAX_THICKNESS)
+        {
+          // Ray passed through — go coarser
+          mipLevel = min(mipLevel + 1, maxMip);
+          continue;
+        }
 
-      hit = true;
-      hitUV = sampleUV;
-      hitT = t;
-      hitStep = i;
-      break;
+        // Reject same-surface hits
+        vec3 sampleNormalRaw = texture(normalTexture, sampleUV).rgb;
+        if (dot(sampleNormalRaw, sampleNormalRaw) > 0.000001)
+        {
+          vec3 sampleNormal = normalize(sampleNormalRaw);
+          if (dot(sampleNormal, worldNormal) > SAME_SURFACE_THRESHOLD)
+            continue;
+        }
+
+        hit = true;
+        hitUV = sampleUV;
+        hitT = t;
+        break;
+      }
+      else
+      {
+        // Go finer for more precision
+        mipLevel--;
+        // Step back to re-test at finer level
+        t -= max(1.0, float(1 << (mipLevel + 1))) / rayScreenLen;
+        t = max(t, 0.0);
+      }
+    }
+    else
+    {
+      // Ray is in front of everything — advance and try coarser
+      mipLevel = min(mipLevel + 1, maxMip);
     }
   }
 
@@ -217,19 +275,19 @@ void main()
   }
 
   // Binary refinement in screen space
-  float lo = float(hitStep - 1) * invSteps;
-  float hi = float(hitStep) * invSteps;
+  float lo = max(hitT - 2.0 / rayScreenLen, 0.0);
+  float hi = hitT;
 
   for (int j = 0; j < REFINEMENT_STEPS; j++)
   {
     float mid = (lo + hi) * 0.5;
     vec2 midScreen = mix(startScreen, endScreen, mid);
 
-    if (any(notEqual(clamp(midScreen, 0.0, 1.0), midScreen)))
+    if (any(lessThan(midScreen, vec2(0.0))) || any(greaterThan(midScreen, vec2(1.0))))
       break;
 
     float midRayDepth = mix(startDepthNDC, endDepthNDC, mid);
-    float midSampleDepth = texture(depthTexture, midScreen).r;
+    float midSampleDepth = textureLod(hiZTexture, midScreen, 0.0).r;
 
     if (midSampleDepth >= DEPTH_EPSILON)
       lo = mid;
@@ -242,6 +300,17 @@ void main()
   // Final hit position
   float finalT = (lo + hi) * 0.5;
   hitUV = mix(startScreen, endScreen, finalT);
+  hitT = finalT;
+
+  // Silhouette edge detection — fade out hits at depth discontinuities
+  vec2 texelSize = 1.0 / screenSize;
+  float hitLinearDepth = linearizeDepth(textureLod(hiZTexture, hitUV, 0.0).r);
+  float dU = abs(hitLinearDepth - linearizeDepth(textureLod(hiZTexture, hitUV + vec2(texelSize.x, 0.0), 0.0).r));
+  float dD = abs(hitLinearDepth - linearizeDepth(textureLod(hiZTexture, hitUV - vec2(texelSize.x, 0.0), 0.0).r));
+  float dR = abs(hitLinearDepth - linearizeDepth(textureLod(hiZTexture, hitUV + vec2(0.0, texelSize.y), 0.0).r));
+  float dL = abs(hitLinearDepth - linearizeDepth(textureLod(hiZTexture, hitUV - vec2(0.0, texelSize.y), 0.0).r));
+  float maxDepthDiff = max(max(dU, dD), max(dR, dL));
+  float silhouetteFade = 1.0 - smoothstep(0.5, 2.0, maxDepthDiff);
 
   // Contribution calculation
   vec3 reflectedColor = texture(frame, hitUV).rgb;
@@ -263,7 +332,7 @@ void main()
   float roughnessFade = 1.0 - smoothstep(0.0, MAX_ROUGHNESS, roughness);
 
   // Final SSR mask
-  vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade, vec3(0.0), vec3(1.0));
+  vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade * silhouetteFade, vec3(0.0), vec3(1.0));
 
   outColor = vec4(originalColor * (1.0 - ssrMask) + reflectedColor * ssrMask, 1.0);
 }

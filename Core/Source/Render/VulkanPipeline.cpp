@@ -14,24 +14,30 @@ namespace YAEngine
     m_PushConstantSize = info.pushConstantSize;
 
     auto vertShaderCode = ReadFile(info.vertexShaderFile);
-    auto fragShaderCode = ReadFile(info.fragmentShaderFile);
-
     VkShaderModule vertShaderModule = CreateShaderModule(m_Device, vertShaderCode);
-    VkShaderModule fragShaderModule = CreateShaderModule(m_Device, fragShaderCode);
+
+    std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
 
     VkPipelineShaderStageCreateInfo vertShaderStageInfo{};
     vertShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vertShaderStageInfo.stage = VK_SHADER_STAGE_VERTEX_BIT;
     vertShaderStageInfo.module = vertShaderModule;
     vertShaderStageInfo.pName = "main";
+    shaderStages.push_back(vertShaderStageInfo);
 
-    VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
-    fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragShaderStageInfo.module = fragShaderModule;
-    fragShaderStageInfo.pName = "main";
+    VkShaderModule fragShaderModule = VK_NULL_HANDLE;
+    if (!info.fragmentShaderFile.empty())
+    {
+      auto fragShaderCode = ReadFile(info.fragmentShaderFile);
+      fragShaderModule = CreateShaderModule(m_Device, fragShaderCode);
 
-    VkPipelineShaderStageCreateInfo shaderStages[] = {vertShaderStageInfo, fragShaderStageInfo};
+      VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
+      fragShaderStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+      fragShaderStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+      fragShaderStageInfo.module = fragShaderModule;
+      fragShaderStageInfo.pName = "main";
+      shaderStages.push_back(fragShaderStageInfo);
+    }
 
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
@@ -137,8 +143,8 @@ namespace YAEngine
 
     VkGraphicsPipelineCreateInfo pipelineInfo{};
     pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = shaderStages;
+    pipelineInfo.stageCount = static_cast<uint32_t>(shaderStages.size());
+    pipelineInfo.pStages = shaderStages.data();
     pipelineInfo.pVertexInputState = &vertexInputInfo;
     pipelineInfo.pInputAssemblyState = &inputAssembly;
     pipelineInfo.pViewportState = &viewportState;
@@ -158,7 +164,8 @@ namespace YAEngine
       throw std::runtime_error("failed to create graphics pipeline!");
     }
 
-    vkDestroyShaderModule(m_Device, fragShaderModule, nullptr);
+    if (fragShaderModule != VK_NULL_HANDLE)
+      vkDestroyShaderModule(m_Device, fragShaderModule, nullptr);
     vkDestroyShaderModule(m_Device, vertShaderModule, nullptr);
   }
 
