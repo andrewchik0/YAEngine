@@ -7,30 +7,7 @@ layout(location = 3) in mat3 inTBN;
 layout(location = 6) in vec4 inCurClipPos;
 layout(location = 7) in vec4 inPrevClipPos;
 
-layout(set = 0, binding = 0) uniform PerFrameUBO {
-  mat4 view;
-  mat4 proj;
-  mat4 invProj;
-  mat4 prevView;
-  mat4 prevProj;
-  vec3 cameraPosition;
-  float time;
-  vec3 cameraDirection;
-  float gamma;
-  float exposure;
-  int currentTexture;
-  float near;
-  float far;
-  float fov;
-  int screenWidth;
-  int screenHeight;
-  int ssaoEnabled;
-  int ssrEnabled;
-  int taaEnabled;
-  float jitterX;
-  float jitterY;
-  int hizMipCount;
-} u_Data;
+#include "common.glsl"
 
 layout(set = 1, binding = 0) uniform PerMaterialUBO {
   vec3 albedo;

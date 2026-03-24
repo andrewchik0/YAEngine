@@ -14,34 +14,12 @@ layout(location = 7) out vec4 outPrevClipPos;
 
 invariant gl_Position;
 
-layout(set = 0, binding = 0) uniform PerFrameUBO {
-  mat4 view;
-  mat4 proj;
-  mat4 invProj;
-  mat4 prevView;
-  mat4 prevProj;
-  vec3 cameraPosition;
-  float time;
-  vec3 cameraDirection;
-  float gamma;
-  float exposure;
-  int currentTexture;
-  float near;
-  float far;
-  float fov;
-  int screenWidth;
-  int screenHeight;
-  int ssaoEnabled;
-  int ssrEnabled;
-  int taaEnabled;
-  float jitterX;
-  float jitterY;
-  int hizMipCount;
-} u_Data;
+#include "common.glsl"
 
 layout(push_constant) uniform PushConstants
 {
   mat4 world;
+  mat3 normalMatrix;
   int offset;
 } pc;
 
@@ -53,10 +31,8 @@ void main() {
   outTexCoord = inTexCoord;
   outPosition = vec3(worldPos);
 
-  mat3 normalMatrix = transpose(inverse(mat3(pc.world)));
-
-  vec3 N = normalize(normalMatrix * inNormal);
-  vec3 T = normalize(normalMatrix * inTangent.xyz);
+  vec3 N = normalize(pc.normalMatrix * inNormal);
+  vec3 T = normalize(pc.normalMatrix * inTangent.xyz);
 
   T = normalize(T - N * dot(T, N));
   vec3 B = cross(N, T) * inTangent.w;

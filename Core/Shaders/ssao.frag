@@ -3,30 +3,8 @@
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 outColor;
 
-layout(set = 0, binding = 0) uniform PerFrameUBO {
-  mat4 view;
-  mat4 proj;
-  mat4 invProj;
-  mat4 prevView;
-  mat4 prevProj;
-  vec3 cameraPosition;
-  float time;
-  vec3 cameraDirection;
-  float gamma;
-  float exposure;
-  int currentTexture;
-  float near;
-  float far;
-  float fov;
-  int screenWidth;
-  int screenHeight;
-  int ssaoEnabled;
-  int ssrEnabled;
-  int taaEnabled;
-  float jitterX;
-  float jitterY;
-  int hizMipCount;
-} u_Data;
+#include "common.glsl"
+#include "utils.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D depthTexture;
 layout(set = 1, binding = 1) uniform sampler2D normalTexture;
@@ -41,19 +19,6 @@ layout(set = 1, binding = 3) uniform SSAOKernel {
 const float RADIUS = 0.2;
 const float BIAS = 0.025;
 const float INTENSITY = 1.5;
-
-float linearizeDepth(float d)
-{
-  return u_Data.near * u_Data.far / (u_Data.far - d * (u_Data.far - u_Data.near));
-}
-
-vec3 reconstructViewPos(vec2 screenUV, float depth)
-{
-  vec2 ndc = screenUV * 2.0 - 1.0;
-  vec4 clipPos = vec4(ndc, depth, 1.0);
-  vec4 viewPos = u_Data.invProj * clipPos;
-  return viewPos.xyz / viewPos.w;
-}
 
 void main()
 {

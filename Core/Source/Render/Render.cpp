@@ -555,8 +555,6 @@ namespace YAEngine
     m_ForwardPipelineDoubleSidedInstanced.Destroy();
     m_ForwardPipelineNoShading.Destroy();
     m_InstanceDescriptorSet.Destroy();
-    m_LightsDescriptorSet.Destroy();
-    m_LightsBuffer.Destroy(ctx);
     m_InstanceBuffer.Destroy(ctx);
     m_QuadPipeline.Destroy();
     m_TAAPipeline.Destroy();
@@ -626,7 +624,6 @@ namespace YAEngine
     m_PerFrameData.ubo.ssrEnabled = b_SSREnabled ? 1 : 0;
     m_PerFrameData.ubo.taaEnabled = b_TAAEnabled ? 1 : 0;
     m_PerFrameData.ubo.hizMipCount = static_cast<int>(m_Graph.GetResourceDesc(m_HiZResource).mipLevels);
-    m_LightsBuffer.Update(0, &m_Lights, sizeof(Light) * MAX_LIGHTS + sizeof(int));
 
     // Configure render graph for this frame (TAA ping-pong + swapchain)
     auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
@@ -674,22 +671,43 @@ namespace YAEngine
 
       currentPipeline.Bind(cmd);
 
-      struct _
+      bool isInstanced = (instanceData != nullptr) && !mesh.noShading;
+
+      if (!isInstanced)
       {
-        glm::mat4 model;
-        int offset = 0;
-      } data;
-      data.model = transform.world;
-      data.offset = meshManager.GetInstanceOffset(mesh.asset) / sizeof(glm::mat4);
-      currentPipeline.PushConstants(cmd, &data);
+        struct
+        {
+          glm::mat4 model;
+          glm::vec4 normalCol0;
+          glm::vec4 normalCol1;
+          glm::vec4 normalCol2;
+          int offset = 0;
+        } data;
+        data.model = transform.world;
+        glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(transform.world)));
+        data.normalCol0 = glm::vec4(normalMat[0], 0.0f);
+        data.normalCol1 = glm::vec4(normalMat[1], 0.0f);
+        data.normalCol2 = glm::vec4(normalMat[2], 0.0f);
+        currentPipeline.PushConstants(cmd, &data);
+      }
+      else
+      {
+        struct
+        {
+          glm::mat4 model;
+          int offset = 0;
+        } data;
+        data.model = transform.world;
+        data.offset = meshManager.GetInstanceOffset(mesh.asset) / sizeof(glm::mat4);
+        currentPipeline.PushConstants(cmd, &data);
+      }
 
       currentPipeline.BindDescriptorSets(cmd, {materialManager.GetVulkanMaterial(material.asset).GetDescriptorSet(currentFrame)}, 1);
-      currentPipeline.BindDescriptorSets(cmd, { m_LightsDescriptorSet.Get() }, 2);
       uint32_t instanceCount = 1;
-      if (instanceData != nullptr)
+      if (isInstanced)
       {
         instanceCount = uint32_t(instanceData->size());
-        currentPipeline.BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 3);
+        currentPipeline.BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 2);
         m_InstanceBuffer.Update(meshManager.GetInstanceOffset(mesh.asset), instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
       }
 
@@ -781,16 +799,6 @@ namespace YAEngine
     m_InstanceBuffer.Create(ctx, MAX_INSTANCES * sizeof(glm::mat4));
     m_InstanceDescriptorSet.WriteStorageBuffer(0, m_InstanceBuffer.Get(), MAX_INSTANCES * sizeof(glm::mat4));
 
-    SetDescription lightsDesc = {
-      .set = 2,
-      .bindings = {
-        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT }
-      }
-    };
-    m_LightsDescriptorSet.Init(ctx, lightsDesc);
-    m_LightsBuffer.Create(ctx, MAX_LIGHTS * sizeof(Light) + sizeof(int));
-    m_LightsDescriptorSet.WriteStorageBuffer(0, m_LightsBuffer.Get(), MAX_LIGHTS * sizeof(Light) + sizeof(int));
-
     // Depth prepass pipelines — vertex-only, no fragment shader
     VkRenderPass depthRP = m_Graph.GetPassRenderPass(m_DepthPrepassIndex);
 
@@ -824,7 +832,7 @@ namespace YAEngine
     PipelineCreateInfo forwardInfo = {
       .fragmentShaderFile = "shader.frag",
       .vertexShaderFile = "shader.vert",
-      .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+      .pushConstantSize = sizeof(glm::mat4) + 3 * sizeof(glm::vec4) + sizeof(int),
       .depthWrite = false,
       .colorAttachmentCount = 5,
       .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
@@ -832,19 +840,20 @@ namespace YAEngine
       .sets = std::vector({
         m_PerFrameData.GetLayout(),
         m_DefaultMaterial.GetLayout(),
-        m_LightsDescriptorSet.GetLayout(),
       })
     };
     m_ForwardPipeline.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
     forwardInfo.doubleSided = true;
     m_ForwardPipelineDoubleSided.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
+    forwardInfo.pushConstantSize = sizeof(glm::mat4) + sizeof(int);
     forwardInfo.sets.push_back(m_InstanceDescriptorSet.GetLayout());
     forwardInfo.vertexShaderFile = "instanced.vert",
     m_ForwardPipelineDoubleSidedInstanced.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
     forwardInfo.doubleSided = false;
     m_ForwardPipelineInstanced.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
+    forwardInfo.pushConstantSize = sizeof(glm::mat4) + 3 * sizeof(glm::vec4) + sizeof(int);
     forwardInfo.sets.pop_back();
     forwardInfo.doubleSided = true;
     forwardInfo.fragmentShaderFile = "no_shading.frag";

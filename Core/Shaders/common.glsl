@@ -1,0 +1,24 @@
+layout(set = 0, binding = 0) uniform PerFrameUBO {
+  mat4 view;
+  mat4 proj;
+  mat4 invProj;
+  mat4 prevView;
+  mat4 prevProj;
+  vec3 cameraPosition;
+  float time;
+  vec3 cameraDirection;
+  float gamma;
+  float exposure;
+  int currentTexture;
+  float near;
+  float far;
+  float fov;
+  int screenWidth;
+  int screenHeight;
+  int ssaoEnabled;
+  int ssrEnabled;
+  int taaEnabled;
+  float jitterX;
+  float jitterY;
+  int hizMipCount;
+} u_Data;

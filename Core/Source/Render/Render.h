@@ -13,14 +13,6 @@
 
 namespace YAEngine
 {
-  struct Light
-  {
-    glm::vec3 position;
-    float cutOff;
-    glm::vec3 color;
-    float outerCutOff;
-  };
-
   class Render
   {
   public:
@@ -37,15 +29,10 @@ namespace YAEngine
       return m_InstanceBuffer.Allocate(size);
     }
 
-    static constexpr size_t MAX_LIGHTS = 2;
-
     float& GetGamma() { return m_Gamma; }
     float& GetExposure() { return m_Exposure; }
     int GetDebugView() const { return m_CurrentTexture; }
     void SetDebugView(int view) { m_CurrentTexture = view; }
-    Light& GetLight(int index) { return m_Lights.lights[index]; }
-    int GetLightsCount() const { return m_Lights.lightsCount; }
-    void SetLightsCount(int count) { m_Lights.lightsCount = count; }
     bool& GetSSAOEnabled() { return b_SSAOEnabled; }
     bool& GetSSREnabled() { return b_SSREnabled; }
     bool& GetTAAEnabled() { return b_TAAEnabled; }
@@ -58,12 +45,6 @@ namespace YAEngine
     bool b_SSAOEnabled = true;
     bool b_SSREnabled = true;
     bool b_TAAEnabled = true;
-
-    struct
-    {
-      Light lights[MAX_LIGHTS];
-      int lightsCount = MAX_LIGHTS;
-    } m_Lights;
 
     void DrawMeshes(Application* app);
     void DrawMeshesDepthOnly(Application* app);
@@ -125,9 +106,6 @@ namespace YAEngine
 
     VulkanDescriptorSet m_InstanceDescriptorSet;
     VulkanStorageBuffer m_InstanceBuffer;
-
-    VulkanDescriptorSet m_LightsDescriptorSet;
-    VulkanStorageBuffer m_LightsBuffer;
 
     VulkanPipeline m_ForwardPipeline;
     VulkanPipeline m_ForwardPipelineNoShading;

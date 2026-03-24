@@ -1,4 +1,4 @@
-vec3 ACESFilm(vec3 x)
+vec3 acesFilm(vec3 x)
 {
   const float a = 2.51;
   const float b = 0.03;

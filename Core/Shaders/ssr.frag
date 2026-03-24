@@ -3,30 +3,9 @@
 layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 outColor;
 
-layout(set = 0, binding = 0) uniform PerFrameUBO {
-  mat4 view;
-  mat4 proj;
-  mat4 invProj;
-  mat4 prevView;
-  mat4 prevProj;
-  vec3 cameraPosition;
-  float time;
-  vec3 cameraDirection;
-  float gamma;
-  float exposure;
-  int currentTexture;
-  float near;
-  float far;
-  float fov;
-  int screenWidth;
-  int screenHeight;
-  int ssaoEnabled;
-  int ssrEnabled;
-  int taaEnabled;
-  float jitterX;
-  float jitterY;
-  int hizMipCount;
-} u_Data;
+#include "common.glsl"
+#include "utils.glsl"
+#include "pbr.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D frame;
 layout(set = 1, binding = 1) uniform sampler2D depthTexture;
@@ -47,30 +26,6 @@ const float EDGE_FADE_START = 0.8;
 const float DEPTH_EPSILON = 0.9999;
 const float SAME_SURFACE_THRESHOLD = 0.99;
 const float MAX_THICKNESS = 2.0;
-
-// --- Helper functions ---
-
-vec3 reconstructViewPos(vec2 screenUV, float depth)
-{
-  vec2 ndc = screenUV * 2.0 - 1.0;
-  vec4 clipPos = vec4(ndc, depth, 1.0);
-  vec4 viewPos = u_Data.invProj * clipPos;
-  return viewPos.xyz / viewPos.w;
-}
-
-float linearizeDepth(float depth)
-{
-  float num = u_Data.invProj[2][2] * depth + u_Data.invProj[3][2];
-  float den = u_Data.invProj[2][3] * depth + u_Data.invProj[3][3];
-  return -num / den;
-}
-
-vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
-{
-  float t = clamp(1.0 - cosTheta, 0.0, 1.0);
-  float t2 = t * t;
-  return F0 + (max(vec3(1.0 - roughness), F0) - F0) * t2 * t2 * t;
-}
 
 // --- Main ---
 

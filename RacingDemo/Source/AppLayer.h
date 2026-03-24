@@ -114,15 +114,6 @@ public:
     }
 #endif
 
-    App().GetRender().GetLight(0).color = glm::vec3(0.0f, 20.0f, 0.0f);
-    App().GetRender().GetLight(0).position = glm::vec3(0.0f, 20.0f, 10.0f);
-    App().GetRender().GetLight(0).cutOff = 60.0f;
-    App().GetRender().GetLight(0).outerCutOff = 90.0f;
-
-    App().GetRender().GetLight(1).color = glm::vec3(20.0f, 0.0f, 0.0f);
-    App().GetRender().GetLight(1).position = glm::vec3(0.0f, 20.0f, -10.0f);
-    App().GetRender().GetLight(1).cutOff = 60.0f;
-    App().GetRender().GetLight(1).outerCutOff = 90.0f;
   }
 
   void OnDetach() override

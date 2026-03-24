@@ -7,44 +7,7 @@ layout(location = 3) in mat3 inTBN;
 layout(location = 6) in vec4 inCurClipPos;
 layout(location = 7) in vec4 inPrevClipPos;
 
-layout(set = 0, binding = 0) uniform PerFrameUBO {
-  mat4 view;
-  mat4 proj;
-  mat4 invProj;
-  mat4 prevView;
-  mat4 prevProj;
-  vec3 cameraPosition;
-  float time;
-  vec3 cameraDirection;
-  float gamma;
-  float exposure;
-  int currentTexture;
-  float near;
-  float far;
-  float fov;
-  int screenWidth;
-  int screenHeight;
-  int ssaoEnabled;
-  int ssrEnabled;
-  int taaEnabled;
-  float jitterX;
-  float jitterY;
-  int hizMipCount;
-} u_Data;
-
-struct Light
-{
-  vec3 position;
-  float cutOff;
-  vec3 color;
-  float outerCutOff;
-};
-
-layout(set = 2, binding = 0) readonly buffer Lights
-{
-  Light lights[2];
-  int lightsCount;
-} u_Lights;
+#include "common.glsl"
 
 layout(set = 1, binding = 0) uniform PerMaterialUBO {
   vec3 albedo;
@@ -73,11 +36,6 @@ layout(location = 3) out vec4 outAlbedo;
 layout(location = 4) out vec2 outVelocity;
 
 #include "pbr.glsl"
-
-vec3 fresnelSchlickRoughness(float cosTheta, vec3 F0, float roughness)
-{
-  return F0 + (max(vec3(1.0 - roughness), F0) - F0) * pow(clamp(1.0 - cosTheta, 0.0, 1.0), 5.0);
-}
 
 void main() {
   float gamma = u_Data.gamma;
@@ -113,26 +71,7 @@ void main() {
   float NdotV = clamp(abs(dot(normal, viewVec)), 0.01, 0.99);
   vec3 f0 = mix(vec3(0.04), albedo.rgb, metallic);
 
-  vec3 resultColor = vec3(0);
-
-  const int lightCount = 0;
-  for (int i = 0; i < lightCount; ++i)
-  {
-    vec3 lightDir = normalize(u_Lights.lights[i].position - inPosition);
-    vec3 lightColor = u_Lights.lights[i].color / (length(lightDir) * length(lightDir));
-    vec3 halfWayVec = normalize(viewVec + lightDir);
-
-    vec3 spotDir = normalize(vec3(0, 1, 0));
-    float cutOff = cos(radians(u_Lights.lights[i].cutOff));
-    float outerCutOff = cos(radians(u_Lights.lights[i].outerCutOff));
-
-    float theta = dot(lightDir, normalize(spotDir));
-    float epsilon = (cutOff - outerCutOff);
-    float intensity = clamp((theta - outerCutOff) / epsilon, 0.0, 1.0);
-
-    resultColor += PBR(lightDir, lightColor, halfWayVec, viewVec, normal, f0, dot(normal, viewVec), metallic, albedo.rgb, roughness * roughness, vec3(0.0)) * intensity;
-  }
-
+  // IBL ambient
   vec3 F = fresnelSchlickRoughness(NdotV, f0, roughness);
 
   vec3 kD = 1.0 - F;
@@ -148,7 +87,7 @@ void main() {
   vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
   vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
-  resultColor += max(ambient, vec3(0.0));
+  vec3 resultColor = max(ambient, vec3(0.0));
 
   vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;
   vec2 prevNDC = inPrevClipPos.xy / inPrevClipPos.w;
