@@ -1,4 +1,5 @@
 cmake-build-debug
+cmake-build-debugeditor
 cmake-build-release
 bin
 out

@@ -87,6 +87,7 @@ namespace YAEngine
 
     m_LayerManager.CallOnDetach();
 
+    m_Render.WaitIdle();
     m_AssetManager.DestroyAll();
   }
 }

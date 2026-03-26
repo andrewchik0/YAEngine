@@ -602,6 +602,11 @@ namespace YAEngine
     vkDeviceWaitIdle(ctx.device);
   }
 
+  void Render::WaitIdle()
+  {
+    vkDeviceWaitIdle(m_Backend.GetContext().device);
+  }
+
   void Render::Destroy()
   {
     vkDeviceWaitIdle(m_Backend.GetContext().device);

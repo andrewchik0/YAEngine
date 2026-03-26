@@ -26,6 +26,7 @@ public:
     glm::dvec3 eulerDegrees = glm::vec3(160.0, -0.0, -180.0);
     glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
     App().GetScene().GetTransform(m_Camera).rotation = glm::quat(eulerRadians);
+    App().GetScene().SetActiveCamera(m_Camera);
   }
 
   void SetTarget(YAEngine::Entity car)

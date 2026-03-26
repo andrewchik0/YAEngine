@@ -26,6 +26,7 @@ namespace YAEngine
     void Init(GLFWwindow* window, const RenderSpecs &specs);
     void Destroy();
     void Resize();
+    void WaitIdle();
 
     void Draw(Application* app);
 

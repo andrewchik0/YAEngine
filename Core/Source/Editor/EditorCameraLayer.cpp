@@ -117,7 +117,7 @@ namespace YAEngine
 
   void EditorCameraLayer::OnMouseButton(const MouseButtonEvent& event)
   {
-    if (event.button != GLFW_MOUSE_BUTTON_RIGHT) return;
+    if (event.button != GLFW_MOUSE_BUTTON_LEFT) return;
     b_MousePressed = event.action == GLFW_PRESS;
   }
 

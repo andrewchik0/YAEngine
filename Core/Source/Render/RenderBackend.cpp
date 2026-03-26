@@ -16,7 +16,7 @@ namespace YAEngine
     m_SwapChain.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), window, m_Allocator.Get());
 
     m_CommandBuffer.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), m_MaxFramesInFlight);
-    m_Sync.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), m_SwapChain.GetImageCount());
+    m_Sync.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), m_MaxFramesInFlight, m_SwapChain.GetImageCount());
     m_CommandBuffer.SetGraphicsQueue(m_Sync.GetQueue());
 
     m_DescriptorPool.Init(m_Device.Get());
@@ -57,7 +57,7 @@ namespace YAEngine
   std::optional<uint32_t> RenderBackend::BeginFrame()
   {
     uint32_t imageIndex;
-    auto result = m_Sync.WaitIdle(m_SwapChain.Get(), &imageIndex);
+    auto result = m_Sync.WaitIdle(m_SwapChain.Get(), m_CurrentFrameIndex, &imageIndex);
     if (!result)
       return std::nullopt;
 
@@ -68,7 +68,7 @@ namespace YAEngine
   bool RenderBackend::EndFrame(uint32_t imageIndex, bool resized)
   {
     m_CommandBuffer.End(m_CurrentFrameIndex);
-    auto result = m_Sync.Submit(m_CommandBuffer.GetCurrentBuffer(), m_SwapChain.Get(), imageIndex, resized);
+    auto result = m_Sync.Submit(m_CommandBuffer.GetCurrentBuffer(), m_SwapChain.Get(), m_CurrentFrameIndex, imageIndex, resized);
     m_CurrentFrameIndex = (m_CurrentFrameIndex + 1) % m_MaxFramesInFlight;
     return result;
   }

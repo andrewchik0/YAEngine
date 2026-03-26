@@ -5,28 +5,40 @@
 
 namespace YAEngine
 {
-  void VulkanSync::Init(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface, uint32_t swapChainsCount)
+  void VulkanSync::Init(VkDevice device, VkPhysicalDevice physicalDevice, VkSurfaceKHR surface,
+                        uint32_t framesInFlight, uint32_t swapchainImageCount)
   {
     m_Device = device;
-    m_SwapchainsCount = swapChainsCount;
-    m_ImageAvailableSemaphores.resize(m_SwapchainsCount);
-    m_RenderFinishedSemaphores.resize(m_SwapchainsCount);
-    m_InFlightFences.resize(m_SwapchainsCount);
+    m_FrameCount = framesInFlight;
+    m_SemaphoreCount = swapchainImageCount;
+    m_SemaphoreIndex = 0;
+
+    m_ImageAvailableSemaphores.resize(m_SemaphoreCount);
+    m_RenderFinishedSemaphores.resize(m_SemaphoreCount);
+    m_InFlightFences.resize(m_FrameCount);
 
     VkSemaphoreCreateInfo semaphoreInfo{};
     semaphoreInfo.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    for (size_t i = 0; i < m_SemaphoreCount; i++)
+    {
+      if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &m_ImageAvailableSemaphores[i]) != VK_SUCCESS ||
+          vkCreateSemaphore(device, &semaphoreInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Render", "Failed to create semaphores for index %zu", i);
+        throw std::runtime_error("failed to create synchronization objects for a frame!");
+      }
+    }
 
     VkFenceCreateInfo fenceInfo{};
     fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
     fenceInfo.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
-    for (size_t i = 0; i < m_SwapchainsCount; i++)
+    for (size_t i = 0; i < m_FrameCount; i++)
     {
-      if (vkCreateSemaphore(device, &semaphoreInfo, nullptr, &m_ImageAvailableSemaphores[i]) != VK_SUCCESS ||
-          vkCreateSemaphore(device, &semaphoreInfo, nullptr, &m_RenderFinishedSemaphores[i]) != VK_SUCCESS ||
-          vkCreateFence(device, &fenceInfo, nullptr, &m_InFlightFences[i]) != VK_SUCCESS)
+      if (vkCreateFence(device, &fenceInfo, nullptr, &m_InFlightFences[i]) != VK_SUCCESS)
       {
-        YA_LOG_ERROR("Render", "Failed to create synchronization objects for frame %zu", i);
+        YA_LOG_ERROR("Render", "Failed to create fence for frame %zu", i);
         throw std::runtime_error("failed to create synchronization objects for a frame!");
       }
     }
@@ -39,26 +51,26 @@ namespace YAEngine
   void VulkanSync::Destroy()
   {
     vkDeviceWaitIdle(m_Device);
-    for (size_t i = 0; i < m_SwapchainsCount; i++)
+    for (size_t i = 0; i < m_FrameCount; i++)
     {
       vkWaitForFences(m_Device, 1, &m_InFlightFences[i], VK_TRUE, UINT64_MAX);
+      vkDestroyFence(m_Device, m_InFlightFences[i], nullptr);
     }
 
-    for (size_t i = 0; i < m_SwapchainsCount; i++)
+    for (size_t i = 0; i < m_SemaphoreCount; i++)
     {
       vkDestroySemaphore(m_Device, m_RenderFinishedSemaphores[i], nullptr);
       vkDestroySemaphore(m_Device, m_ImageAvailableSemaphores[i], nullptr);
-      vkDestroyFence(m_Device, m_InFlightFences[i], nullptr);
     }
   }
 
-  bool VulkanSync::WaitIdle(VkSwapchainKHR swapChain, uint32_t* imageIndex)
+  bool VulkanSync::WaitIdle(VkSwapchainKHR swapChain, uint32_t frameIndex, uint32_t* imageIndex)
   {
-    m_FrameIndex = (m_FrameIndex + 1) % m_SwapchainsCount;
+    vkWaitForFences(m_Device, 1, &m_InFlightFences[frameIndex], VK_TRUE, UINT64_MAX);
 
-    vkWaitForFences(m_Device, 1, &m_InFlightFences[m_FrameIndex], VK_TRUE, UINT64_MAX);
+    m_SemaphoreIndex = (m_SemaphoreIndex + 1) % m_SemaphoreCount;
 
-    VkResult result = vkAcquireNextImageKHR(m_Device, swapChain, UINT64_MAX, m_ImageAvailableSemaphores[m_FrameIndex], VK_NULL_HANDLE, imageIndex);
+    VkResult result = vkAcquireNextImageKHR(m_Device, swapChain, UINT64_MAX, m_ImageAvailableSemaphores[m_SemaphoreIndex], VK_NULL_HANDLE, imageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR)
     {
       return false;
@@ -69,16 +81,16 @@ namespace YAEngine
       throw std::runtime_error("failed to acquire swap chain image!");
     }
 
-    vkResetFences(m_Device, 1, &m_InFlightFences[m_FrameIndex]);
+    vkResetFences(m_Device, 1, &m_InFlightFences[frameIndex]);
     return true;
   }
 
-  bool VulkanSync::Submit(VkCommandBuffer commandBuffer, VkSwapchainKHR swapChain, uint32_t imageIndex, bool resized)
+  bool VulkanSync::Submit(VkCommandBuffer commandBuffer, VkSwapchainKHR swapChain, uint32_t frameIndex, uint32_t imageIndex, bool resized)
   {
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
 
-    VkSemaphore waitSemaphores[] = {m_ImageAvailableSemaphores[m_FrameIndex]};
+    VkSemaphore waitSemaphores[] = {m_ImageAvailableSemaphores[m_SemaphoreIndex]};
     VkPipelineStageFlags waitStages[] = {VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT};
     submitInfo.waitSemaphoreCount = 1;
     submitInfo.pWaitSemaphores = waitSemaphores;
@@ -87,11 +99,11 @@ namespace YAEngine
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    VkSemaphore signalSemaphores[] = {m_RenderFinishedSemaphores[m_FrameIndex]};
+    VkSemaphore signalSemaphores[] = {m_RenderFinishedSemaphores[m_SemaphoreIndex]};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 
-    if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[m_FrameIndex]) != VK_SUCCESS)
+    if (vkQueueSubmit(m_GraphicsQueue, 1, &submitInfo, m_InFlightFences[frameIndex]) != VK_SUCCESS)
     {
       YA_LOG_ERROR("Render", "Failed to submit draw command buffer");
       throw std::runtime_error("failed to submit draw command buffer!");
