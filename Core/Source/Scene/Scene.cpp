@@ -9,8 +9,7 @@ namespace YAEngine
     Entity e = m_Registry.create();
     m_Registry.emplace<TransformComponent>(e);
     m_Registry.emplace<HierarchyComponent>(e);
-    if (!name.empty())
-      m_Registry.emplace<Name>(e, name);
+    m_Registry.emplace<Name>(e, name);
     return e;
   }
 
@@ -95,7 +94,17 @@ namespace YAEngine
     return m_Registry.get<TransformComponent>(e);
   }
 
+  const TransformComponent& Scene::GetTransform(Entity e) const
+  {
+    return m_Registry.get<TransformComponent>(e);
+  }
+
   HierarchyComponent& Scene::GetHierarchy(Entity e)
+  {
+    return m_Registry.get<HierarchyComponent>(e);
+  }
+
+  const HierarchyComponent& Scene::GetHierarchy(Entity e) const
   {
     return m_Registry.get<HierarchyComponent>(e);
   }
@@ -105,13 +114,18 @@ namespace YAEngine
     return m_Registry.get<Name>(e);
   }
 
-  Entity Scene::GetChildByName(Entity entity, Name name)
+  const Name& Scene::GetName(Entity e) const
   {
-    auto currentEntityName = GetName(entity);
+    return m_Registry.get<Name>(e);
+  }
+
+  Entity Scene::GetChildByName(Entity entity, const Name& name) const
+  {
+    const auto& currentEntityName = GetName(entity);
     if (currentEntityName == name)
       return entity;
 
-    auto& hc = GetHierarchy(entity);
+    const auto& hc = GetHierarchy(entity);
 
     auto firstChild = hc.firstChild;
     if (firstChild != entt::null)
@@ -128,7 +142,7 @@ namespace YAEngine
 
       if (child != entt::null)
       {
-        auto childName = GetName(child);
+        const auto& childName = GetName(child);
         if (childName == name)
           return child;
       }
@@ -173,41 +187,33 @@ namespace YAEngine
 
   void Scene::SetDoubleSided(Entity e)
   {
-    auto& hc = GetHierarchy(e);
-
     if (HasComponent<MeshComponent>(e))
     {
       GetComponent<MeshComponent>(e).doubleSided = true;
     }
 
-    if (hc.firstChild != entt::null)
+    auto& hc = GetHierarchy(e);
+    Entity child = hc.firstChild;
+    while (child != entt::null)
     {
-      SetDoubleSided(hc.firstChild);
-    }
-
-    if (hc.nextSibling != entt::null)
-    {
-      SetDoubleSided(hc.nextSibling);
+      SetDoubleSided(child);
+      child = GetHierarchy(child).nextSibling;
     }
   }
 
   void Scene::NoShading(Entity e)
   {
-    auto& hc = GetHierarchy(e);
-
     if (HasComponent<MeshComponent>(e))
     {
       GetComponent<MeshComponent>(e).noShading = true;
     }
 
-    if (hc.firstChild != entt::null)
+    auto& hc = GetHierarchy(e);
+    Entity child = hc.firstChild;
+    while (child != entt::null)
     {
-      NoShading(hc.firstChild);
-    }
-
-    if (hc.nextSibling != entt::null)
-    {
-      NoShading(hc.nextSibling);
+      NoShading(child);
+      child = GetHierarchy(child).nextSibling;
     }
   }
 

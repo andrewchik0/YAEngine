@@ -16,7 +16,6 @@ namespace YAEngine
 
   void VulkanVertexBuffer::Destroy(const RenderContext& ctx)
   {
-    vkDeviceWaitIdle(ctx.device);
     m_VerticesBuffer.Destroy(ctx);
     m_IndicesBuffer.Destroy(ctx);
   }

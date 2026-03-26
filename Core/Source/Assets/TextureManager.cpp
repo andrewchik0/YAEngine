@@ -68,7 +68,7 @@ namespace YAEngine
   {
     uint8_t* pixels = (uint8_t *)data;
 
-    for (uint32_t i = 3; i < width * height; i += 4)
+    for (size_t i = 3; i < static_cast<size_t>(width) * height * 4; i += 4)
     {
       if (pixels[i] < 250)
         return true;

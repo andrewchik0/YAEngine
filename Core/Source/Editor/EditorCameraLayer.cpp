@@ -100,6 +100,14 @@ namespace YAEngine
 
   void EditorCameraLayer::OnMouseMoved(const MouseMovedEvent& event)
   {
+    if (b_FirstMouseMove)
+    {
+      m_PrevX = event.x;
+      m_PrevY = event.y;
+      b_FirstMouseMove = false;
+      return;
+    }
+
     m_DeltaX = event.x - m_PrevX;
     m_DeltaY = event.y - m_PrevY;
 
@@ -109,6 +117,7 @@ namespace YAEngine
 
   void EditorCameraLayer::OnMouseButton(const MouseButtonEvent& event)
   {
+    if (event.button != GLFW_MOUSE_BUTTON_RIGHT) return;
     b_MousePressed = event.action == GLFW_PRESS;
   }
 

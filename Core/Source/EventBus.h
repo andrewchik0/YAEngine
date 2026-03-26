@@ -1,11 +1,6 @@
 #pragma once
 
-#include <functional>
-#include <unordered_map>
-#include <vector>
-#include <typeindex>
-#include <cstdint>
-#include <algorithm>
+#include "Pch.h"
 
 namespace YAEngine
 {
@@ -63,7 +58,8 @@ namespace YAEngine
       auto it = m_Handlers.find(typeid(Event));
       if (it == m_Handlers.end()) return;
 
-      for (auto& h : it->second)
+      auto handlersCopy = it->second;
+      for (auto& h : handlersCopy)
       {
         if (h.callback(&event))
           break;

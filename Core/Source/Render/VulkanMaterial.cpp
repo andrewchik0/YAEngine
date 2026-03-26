@@ -41,9 +41,9 @@ namespace YAEngine
       {
         m_DescriptorSets[i].Init(ctx, layout);
       }
-      m_UniformBuffers[i].Create(ctx, sizeof(__PerMaterialData));
-      m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(__PerMaterialData));
-      for (size_t j = 1; j < 8; j++)
+      m_UniformBuffers[i].Create(ctx, sizeof(PerMaterialData));
+      m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(PerMaterialData));
+      for (size_t j = 1; j < 11; j++)
         m_DescriptorSets[i].WriteCombinedImageSampler((uint32_t)j, noneTexture.GetView(), noneTexture.GetSampler());
     }
   }
@@ -128,6 +128,6 @@ namespace YAEngine
     data.sg = material.sg;
 
     m_UniformBuffers[currentFrame].Update(data);
-    m_DescriptorSets[currentFrame].WriteUniformBuffer(0, m_UniformBuffers[currentFrame].Get(), sizeof(__PerMaterialData));
+    m_DescriptorSets[currentFrame].WriteUniformBuffer(0, m_UniformBuffers[currentFrame].Get(), sizeof(PerMaterialData));
   }
 }

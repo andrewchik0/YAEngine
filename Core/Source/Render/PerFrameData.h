@@ -11,7 +11,7 @@ namespace YAEngine
   {
   public:
 
-    struct __PerFrameUBO
+    struct PerFrameUBO
     {
       glm::mat4 view;
       glm::mat4 proj;

@@ -80,13 +80,23 @@ namespace YAEngine
     allocInfo.commandBufferCount = 1;
 
     VkCommandBuffer commandBuffer;
-    vkAllocateCommandBuffers(m_Device, &allocInfo, &commandBuffer);
+    VkResult result = vkAllocateCommandBuffers(m_Device, &allocInfo, &commandBuffer);
+    if (result != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to allocate single-time command buffer: %d", result);
+      throw std::runtime_error("Failed to allocate single-time command buffer");
+    }
 
     VkCommandBufferBeginInfo beginInfo{};
     beginInfo.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     beginInfo.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    result = vkBeginCommandBuffer(commandBuffer, &beginInfo);
+    if (result != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to begin single-time command buffer: %d", result);
+      throw std::runtime_error("Failed to begin single-time command buffer");
+    }
 
     return commandBuffer;
   }
@@ -100,7 +110,12 @@ namespace YAEngine
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    vkQueueSubmit(m_Queue, 1, &submitInfo, VK_NULL_HANDLE);
+    VkResult result = vkQueueSubmit(m_Queue, 1, &submitInfo, VK_NULL_HANDLE);
+    if (result != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to submit single-time command buffer: %d", result);
+      throw std::runtime_error("Failed to submit single-time command buffer");
+    }
     vkQueueWaitIdle(m_Queue);
 
     vkFreeCommandBuffers(m_Device, m_CommandPool, 1, &commandBuffer);

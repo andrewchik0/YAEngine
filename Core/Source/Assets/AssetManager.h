@@ -1,6 +1,6 @@
 #pragma once
-#include <typeindex>
 
+#include "Pch.h"
 #include "IAssetManager.h"
 #include "CubeMapManager.h"
 #include "MaterialManager.h"

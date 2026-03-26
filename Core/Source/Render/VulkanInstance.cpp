@@ -39,15 +39,15 @@ namespace YAEngine
     if ((result = vkCreateInstance(&createInfo, nullptr, &m_Instance)) != VK_SUCCESS)
     {
       YA_LOG_ERROR("Render", "Failed to create Vulkan instance, VkResult = %d", result);
-      throw std::runtime_error("failed to create instance!" + result);
+      throw std::runtime_error("Failed to create instance");
     }
 
-    m_DebugExtension.SetUpMessanger(m_Instance);
+    m_DebugExtension.SetUpMessenger(m_Instance);
   }
 
   void VulkanInstance::Destroy()
   {
-    m_DebugExtension.DestroyMessanger(m_Instance);
+    m_DebugExtension.DestroyMessenger(m_Instance);
     vkDestroyInstance(m_Instance, nullptr);
   }
 

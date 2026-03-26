@@ -6,6 +6,20 @@ namespace YAEngine
 {
   struct RenderContext;
 
+  static constexpr uint32_t CUBEMAP_SIZE = 1024;
+
+  namespace Detail
+  {
+    constexpr uint32_t MipLevels(uint32_t size)
+    {
+      uint32_t levels = 1;
+      while (size >>= 1) ++levels;
+      return levels;
+    }
+  }
+
+  static constexpr uint32_t CUBEMAP_MAX_MIP_LEVELS = Detail::MipLevels(CUBEMAP_SIZE);
+
   struct CubicTextureResources
   {
     void Init(const RenderContext& ctx);
@@ -34,12 +48,11 @@ namespace YAEngine
     VulkanTexture brdfLut;
 
   private:
-    void InitRenderPass(VkDevice device);
-    void InitPipeline(VkDevice device);
-    void InitIrradianceRenderPass(VkDevice device);
-    void InitIrradiancePipeline(VkDevice device);
-    void InitPrefilterRenderPass(VkDevice device);
-    void InitPrefilterPipeline(VkDevice device);
+    void InitRenderPass(VkDevice device, VkRenderPass& outRenderPass, const char* debugName);
+    void InitPipeline(VkDevice device, VkRenderPass rp, const char* fragShader,
+                      uint32_t pushConstantSize, VkShaderStageFlags pushStages,
+                      VkDescriptorSetLayout& outSetLayout, VkPipelineLayout& outPipelineLayout,
+                      VkPipeline& outPipeline, const char* debugName);
     void CreateVertexBuffer(const RenderContext& ctx);
   };
 
@@ -86,8 +99,8 @@ namespace YAEngine
     VkImageView m_PrefilterImageView {};
     VmaAllocation m_PrefilterImageAllocation {};
     VkSampler m_PrefilterSampler {};
-    VkImageView m_PrefilterFaceViews[6 * 10] {};
-    VkFramebuffer m_PrefilterFrameBuffers[6 * 10] {};
+    VkImageView m_PrefilterFaceViews[6 * CUBEMAP_MAX_MIP_LEVELS] {};
+    VkFramebuffer m_PrefilterFrameBuffers[6 * CUBEMAP_MAX_MIP_LEVELS] {};
 
     void ComputeIrradiance(const RenderContext& ctx, CubicTextureResources& res);
     void ComputePrefilter(const RenderContext& ctx, CubicTextureResources& res);

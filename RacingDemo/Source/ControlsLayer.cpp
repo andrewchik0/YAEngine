@@ -11,23 +11,23 @@ void ControlsLayer::Update(double dt)
   glm::dvec3 position = App().GetScene().GetTransform(car).position;
   glm::dquat rotation = App().GetScene().GetTransform(car).rotation;
 
-  if (arrowLeft)
+  if (b_ArrowLeft)
   {
     vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer + 0.1 * dt, 0.0, 0.03);
   }
-  if (arrowRight)
+  if (b_ArrowRight)
   {
     vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer - 0.1 * dt, -0.03, 0.0);
   }
-  if (!arrowLeft && !arrowRight)
+  if (!b_ArrowLeft && !b_ArrowRight)
   {
     if (vehicle->wheelsSteer > 0.0) vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer - 0.2 * dt, 0.0, 0.03);
     if (vehicle->wheelsSteer < 0.0) vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer + 0.2 * dt, -0.03, 0.0);
   }
 
-  if (arrowUp)
+  if (b_ArrowUp)
     vehicle->speed += vehicle->acceleration * dt;
-  else if (arrowDown)
+  else if (b_ArrowDown)
   {
     if (vehicle->speed > 0)
       vehicle->speed -= vehicle->brake * dt;

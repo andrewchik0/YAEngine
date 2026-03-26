@@ -9,6 +9,11 @@ layout(location = 0) out vec4 outColor;
 layout(set = 1, binding = 0) uniform sampler2D ssaoTexture;
 layout(set = 1, binding = 1) uniform sampler2D depthTexture;
 
+layout(push_constant) uniform PushConstants
+{
+  int direction; // 0 = horizontal, 1 = vertical
+} pc;
+
 void main()
 {
   vec2 texelSize = 1.0 / vec2(float(u_Data.screenWidth), float(u_Data.screenHeight));
@@ -17,29 +22,29 @@ void main()
   float result = 0.0;
   float totalWeight = 0.0;
 
-  // 5x5 bilateral blur
-  for (int x = -2; x <= 2; x++)
+  // Separable bilateral blur: 5 samples along one axis
+  vec2 step = (pc.direction == 0)
+    ? vec2(texelSize.x, 0.0)
+    : vec2(0.0, texelSize.y);
+
+  for (int i = -2; i <= 2; i++)
   {
-    for (int y = -2; y <= 2; y++)
-    {
-      vec2 offset = vec2(float(x), float(y)) * texelSize;
-      vec2 sampleUV = uv + offset;
+    vec2 sampleUV = uv + step * float(i);
 
-      float ao = textureLod(ssaoTexture, sampleUV, 0.0).r;
-      float sampleDepth = linearizeDepth(textureLod(depthTexture, sampleUV, 0.0).r);
+    float ao = textureLod(ssaoTexture, sampleUV, 0.0).r;
+    float sampleDepth = linearizeDepth(textureLod(depthTexture, sampleUV, 0.0).r);
 
-      // Spatial weight: gaussian
-      float dist2 = float(x * x + y * y);
-      float spatialWeight = exp(-dist2 / 8.0);
+    // Spatial weight: gaussian
+    float dist2 = float(i * i);
+    float spatialWeight = exp(-dist2 / 4.5);
 
-      // Depth weight: reject samples across depth discontinuities
-      float depthDiff = abs(centerDepth - sampleDepth) / max(centerDepth, 0.001);
-      float depthWeight = exp(-depthDiff * depthDiff * 2000.0);
+    // Depth weight: reject samples across depth discontinuities
+    float depthDiff = abs(centerDepth - sampleDepth) / max(centerDepth, 0.001);
+    float depthWeight = exp(-depthDiff * depthDiff * 2000.0);
 
-      float weight = spatialWeight * depthWeight;
-      result += ao * weight;
-      totalWeight += weight;
-    }
+    float weight = spatialWeight * depthWeight;
+    result += ao * weight;
+    totalWeight += weight;
   }
 
   result /= totalWeight;

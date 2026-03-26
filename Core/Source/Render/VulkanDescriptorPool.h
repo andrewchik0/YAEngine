@@ -11,7 +11,7 @@ namespace YAEngine
 
     VkDescriptorSet Allocate(VkDescriptorSetLayout layout);
 
-    VkDescriptorPool Get()
+    VkDescriptorPool Get() const
     {
       return m_Pools.empty() ? VK_NULL_HANDLE : m_Pools[0];
     }

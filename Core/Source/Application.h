@@ -1,7 +1,6 @@
 #pragma once
 
-#include <mutex>
-
+#include "Pch.h"
 #include "EventBus.h"
 #include "Window.h"
 #include "Layer.h"
@@ -11,6 +10,7 @@
 #include "Render/Render.h"
 #include "Scene/Scene.h"
 #include "Utils/Timer.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -26,7 +26,7 @@ namespace YAEngine
     Application(const Application&) = delete;
     Application& operator=(const Application&) = delete;
 
-    static void Init(ApplicationSpecs specs)
+    static void Init(const ApplicationSpecs& specs)
     {
       std::lock_guard<std::mutex> lock(mtx);
       if (!instance)
@@ -34,13 +34,18 @@ namespace YAEngine
         instance.reset(new Application(specs));
       } else
       {
+        YA_LOG_ERROR("App", "Singleton already initialized!");
         throw std::runtime_error("Singleton already initialized!");
       }
     }
 
     static Application& Get()
     {
-      if (!instance) throw std::runtime_error("Singleton not initialized!");
+      if (!instance)
+      {
+        YA_LOG_ERROR("App", "Singleton not initialized!");
+        throw std::runtime_error("Singleton not initialized!");
+      }
       return *instance;
     }
 

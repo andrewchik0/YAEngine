@@ -22,6 +22,8 @@ namespace YAEngine
   ModelHandle ModelManager::LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances, bool combinedTextures)
   {
     auto handle = Load(path, combinedTextures);
+    if (!handle)
+      return handle;
 
     auto& model = Get(handle);
 
@@ -33,16 +35,22 @@ namespace YAEngine
     return handle;
   }
 
-  void ModelManager::Destroy(Model& model)
+  void ModelManager::Destroy(ModelHandle handle)
   {
+    if (!Has(handle))
+      return;
+
+    auto& model = Get(handle);
     DestroyEntityAssets(model.rootEntity);
     m_Scene->DestroyEntity(model.rootEntity);
+    Remove(handle);
   }
 
   void ModelManager::DestroyAll()
   {
     ForEach([this](Model& model) {
-      Destroy(model);
+      DestroyEntityAssets(model.rootEntity);
+      m_Scene->DestroyEntity(model.rootEntity);
     });
     Clear();
   }

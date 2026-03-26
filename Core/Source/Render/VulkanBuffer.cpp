@@ -45,7 +45,6 @@ namespace YAEngine
 
     VulkanBuffer result;
     result.m_Size = size;
-    result.m_Allocator = ctx.allocator;
 
     if (vmaCreateBuffer(ctx.allocator, &bufferInfo, &allocInfo, &result.m_Buffer, &result.m_Allocation, nullptr) != VK_SUCCESS)
     {
@@ -82,10 +81,10 @@ namespace YAEngine
     allocInfo.flags =
       VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT |
       VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
 
     VulkanBuffer result;
     result.m_Size = size;
-    result.m_Allocator = ctx.allocator;
 
     if (vmaCreateBuffer(ctx.allocator, &bufferInfo, &allocInfo, &result.m_Buffer, &result.m_Allocation, nullptr) != VK_SUCCESS)
     {

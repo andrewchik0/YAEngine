@@ -4,7 +4,7 @@
 #include "VulkanCommandBuffer.h"
 #include "VulkanDescriptorPool.h"
 #include "Log.h"
-#include "VulkanPipeline.h"
+#include "ShaderUtils.h"
 #include "ImageBarrier.h"
 
 #include "StbImage/stb_image.h"
@@ -46,12 +46,20 @@ namespace YAEngine
     projection = glm::perspective(glm::radians(90.0f), 1.0f, 0.1f, 9.0f);
     projection[1][1] *= -1;
 
-    InitRenderPass(ctx.device);
-    InitPipeline(ctx.device);
-    InitIrradianceRenderPass(ctx.device);
-    InitIrradiancePipeline(ctx.device);
-    InitPrefilterRenderPass(ctx.device);
-    InitPrefilterPipeline(ctx.device);
+    InitRenderPass(ctx.device, renderPass, "cubemap");
+    InitPipeline(ctx.device, renderPass, "cubemap.frag",
+                 sizeof(glm::mat4), VK_SHADER_STAGE_VERTEX_BIT,
+                 descriptorSetLayout, pipelineLayout, pipeline, "cubemap");
+
+    InitRenderPass(ctx.device, irradianceRenderPass, "irradiance");
+    InitPipeline(ctx.device, irradianceRenderPass, "irradiance.frag",
+                 sizeof(glm::mat4), VK_SHADER_STAGE_VERTEX_BIT,
+                 irradianceDescriptorSetLayout, irradiancePipelineLayout, irradiancePipeline, "irradiance");
+
+    InitRenderPass(ctx.device, prefilterRenderPass, "prefilter");
+    InitPipeline(ctx.device, prefilterRenderPass, "prefilter.frag",
+                 sizeof(glm::mat4) + sizeof(float), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                 prefilterDescriptorSetLayout, prefilterPipelineLayout, prefilterPipeline, "prefilter");
     CreateVertexBuffer(ctx);
 
     int w, h, channels;
@@ -152,7 +160,7 @@ namespace YAEngine
     vmaDestroyBuffer(ctx.allocator, stagingBuffer, stagingAlloc);
   }
 
-  void CubicTextureResources::InitRenderPass(VkDevice device)
+  void CubicTextureResources::InitRenderPass(VkDevice device, VkRenderPass& outRenderPass, const char* debugName)
   {
     VkAttachmentDescription color{};
     color.format = VK_FORMAT_R16G16B16A16_SFLOAT;
@@ -190,14 +198,17 @@ namespace YAEngine
     info.dependencyCount = 1;
     info.pDependencies = &dependency;
 
-    if (vkCreateRenderPass(device, &info, nullptr, &renderPass) != VK_SUCCESS)
+    if (vkCreateRenderPass(device, &info, nullptr, &outRenderPass) != VK_SUCCESS)
     {
-      YA_LOG_ERROR("Render", "Failed to create cubemap render pass");
+      YA_LOG_ERROR("Render", "Failed to create %s render pass", debugName);
       throw std::runtime_error("failed to create render pass!");
     }
   }
 
-  void CubicTextureResources::InitPipeline(VkDevice device)
+  void CubicTextureResources::InitPipeline(VkDevice device, VkRenderPass rp, const char* fragShader,
+                                            uint32_t pushConstantSize, VkShaderStageFlags pushStages,
+                                            VkDescriptorSetLayout& outSetLayout, VkPipelineLayout& outPipelineLayout,
+                                            VkPipeline& outPipeline, const char* debugName)
   {
     VkDescriptorSetLayoutBinding samplerBinding{};
     samplerBinding.binding = 0;
@@ -210,43 +221,43 @@ namespace YAEngine
     setInfo.bindingCount = 1;
     setInfo.pBindings = &samplerBinding;
 
-    if (vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &descriptorSetLayout) != VK_SUCCESS)
+    if (vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &outSetLayout) != VK_SUCCESS)
     {
-      YA_LOG_ERROR("Render", "Failed to create cubemap descriptor set layout");
+      YA_LOG_ERROR("Render", "Failed to create %s descriptor set layout", debugName);
       throw std::runtime_error("failed to create descriptor set layout!");
     }
 
     VkPushConstantRange push{};
-    push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+    push.stageFlags = pushStages;
     push.offset = 0;
-    push.size = sizeof(glm::mat4);
+    push.size = pushConstantSize;
 
     VkPipelineLayoutCreateInfo layoutInfo{};
     layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
     layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &descriptorSetLayout;
+    layoutInfo.pSetLayouts = &outSetLayout;
     layoutInfo.pushConstantRangeCount = 1;
     layoutInfo.pPushConstantRanges = &push;
 
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &pipelineLayout) != VK_SUCCESS)
+    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &outPipelineLayout) != VK_SUCCESS)
     {
-      YA_LOG_ERROR("Render", "Failed to create cubemap pipeline layout");
+      YA_LOG_ERROR("Render", "Failed to create %s pipeline layout", debugName);
       throw std::runtime_error("failed to create pipeline layout!");
     }
 
     VkPipelineShaderStageCreateInfo vertStage{};
     vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
     vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertStage.module = VulkanPipeline::CreateShaderModule(device, VulkanPipeline::ReadFile("cubemap.vert"));
+    vertStage.module = CreateShaderModule(device, ReadShaderFile("cubemap.vert"));
     vertStage.pName = "main";
 
-    VkPipelineShaderStageCreateInfo fragStage{};
-    fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragStage.module = VulkanPipeline::CreateShaderModule(device, VulkanPipeline::ReadFile("cubemap.frag"));
-    fragStage.pName = "main";
+    VkPipelineShaderStageCreateInfo fragStageInfo{};
+    fragStageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    fragStageInfo.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+    fragStageInfo.module = CreateShaderModule(device, ReadShaderFile(fragShader));
+    fragStageInfo.pName = "main";
 
-    VkPipelineShaderStageCreateInfo stages[] = { vertStage, fragStage };
+    VkPipelineShaderStageCreateInfo stages[] = { vertStage, fragStageInfo };
 
     VkVertexInputBindingDescription binding{};
     binding.binding = 0;
@@ -315,372 +326,18 @@ namespace YAEngine
     pipelineInfo.pMultisampleState = &msaa;
     pipelineInfo.pColorBlendState = &blending;
     pipelineInfo.pDynamicState = &dynamic;
-    pipelineInfo.layout = pipelineLayout;
-    pipelineInfo.renderPass = renderPass;
+    pipelineInfo.layout = outPipelineLayout;
+    pipelineInfo.renderPass = rp;
     pipelineInfo.subpass = 0;
 
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &pipeline) != VK_SUCCESS)
+    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &outPipeline) != VK_SUCCESS)
     {
-      YA_LOG_ERROR("Render", "Failed to create cubemap graphics pipeline");
+      YA_LOG_ERROR("Render", "Failed to create %s graphics pipeline", debugName);
       throw std::runtime_error("failed to create graphics pipeline");
     }
 
     vkDestroyShaderModule(device, vertStage.module, nullptr);
-    vkDestroyShaderModule(device, fragStage.module, nullptr);
-  }
-
-  void CubicTextureResources::InitIrradianceRenderPass(VkDevice device)
-  {
-    VkAttachmentDescription color{};
-    color.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    color.samples = VK_SAMPLE_COUNT_1_BIT;
-    color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    color.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    color.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    color.finalLayout   = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference colorRef{};
-    colorRef.attachment = 0;
-    colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorRef;
-
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-    VkRenderPassCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    info.attachmentCount = 1;
-    info.pAttachments = &color;
-    info.subpassCount = 1;
-    info.pSubpasses = &subpass;
-    info.dependencyCount = 1;
-    info.pDependencies = &dependency;
-
-    if (vkCreateRenderPass(device, &info, nullptr, &irradianceRenderPass) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create irradiance render pass");
-      throw std::runtime_error("failed to create render pass!");
-    }
-  }
-
-  void CubicTextureResources::InitIrradiancePipeline(VkDevice device)
-  {
-    VkDescriptorSetLayoutBinding samplerBinding{};
-    samplerBinding.binding = 0;
-    samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerBinding.descriptorCount = 1;
-    samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    VkDescriptorSetLayoutCreateInfo setInfo{};
-    setInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    setInfo.bindingCount = 1;
-    setInfo.pBindings = &samplerBinding;
-
-    if (vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &irradianceDescriptorSetLayout) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create irradiance descriptor set layout");
-      throw std::runtime_error("failed to create descriptor set layout!");
-    }
-
-    VkPushConstantRange push{};
-    push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
-    push.offset = 0;
-    push.size = sizeof(glm::mat4);
-
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &irradianceDescriptorSetLayout;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &push;
-
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &irradiancePipelineLayout) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create irradiance pipeline layout");
-      throw std::runtime_error("failed to create pipeline layout!");
-    }
-
-    VkPipelineShaderStageCreateInfo vertStage{};
-    vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertStage.module = VulkanPipeline::CreateShaderModule(device, VulkanPipeline::ReadFile("cubemap.vert"));
-    vertStage.pName = "main";
-
-    VkPipelineShaderStageCreateInfo fragStage{};
-    fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragStage.module = VulkanPipeline::CreateShaderModule(device, VulkanPipeline::ReadFile("irradiance.frag"));
-    fragStage.pName = "main";
-
-    VkPipelineShaderStageCreateInfo stages[] = { vertStage, fragStage };
-
-    VkVertexInputBindingDescription binding{};
-    binding.binding = 0;
-    binding.stride = sizeof(glm::vec3);
-    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-    VkVertexInputAttributeDescription attr{};
-    attr.binding = 0;
-    attr.location = 0;
-    attr.format = VK_FORMAT_R32G32B32_SFLOAT;
-    attr.offset = 0;
-
-    VkPipelineVertexInputStateCreateInfo vertexInput{};
-    vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInput.vertexBindingDescriptionCount = 1;
-    vertexInput.pVertexBindingDescriptions = &binding;
-    vertexInput.vertexAttributeDescriptionCount = 1;
-    vertexInput.pVertexAttributeDescriptions = &attr;
-
-    VkPipelineInputAssemblyStateCreateInfo assembly{};
-    assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    assembly.primitiveRestartEnable = VK_FALSE;
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
-
-    VkDynamicState dynamics[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-
-    VkPipelineDynamicStateCreateInfo dynamic{};
-    dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamic.dynamicStateCount = 2;
-    dynamic.pDynamicStates = dynamics;
-
-    VkPipelineRasterizationStateCreateInfo raster{};
-    raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    raster.polygonMode = VK_POLYGON_MODE_FILL;
-    raster.cullMode = VK_CULL_MODE_NONE;
-    raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    raster.lineWidth = 1.0f;
-
-    VkPipelineMultisampleStateCreateInfo msaa{};
-    msaa.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    msaa.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineColorBlendAttachmentState blend{};
-    blend.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-    VkPipelineColorBlendStateCreateInfo blending{};
-    blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    blending.attachmentCount = 1;
-    blending.pAttachments = &blend;
-
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = stages;
-    pipelineInfo.pVertexInputState = &vertexInput;
-    pipelineInfo.pInputAssemblyState = &assembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &raster;
-    pipelineInfo.pMultisampleState = &msaa;
-    pipelineInfo.pColorBlendState = &blending;
-    pipelineInfo.pDynamicState = &dynamic;
-    pipelineInfo.layout = irradiancePipelineLayout;
-    pipelineInfo.renderPass = irradianceRenderPass;
-    pipelineInfo.subpass = 0;
-
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &irradiancePipeline) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create irradiance graphics pipeline");
-      throw std::runtime_error("failed to create graphics pipeline");
-    }
-
-    vkDestroyShaderModule(device, vertStage.module, nullptr);
-    vkDestroyShaderModule(device, fragStage.module, nullptr);
-  }
-
-  void CubicTextureResources::InitPrefilterRenderPass(VkDevice device)
-  {
-    VkAttachmentDescription color{};
-    color.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-    color.samples = VK_SAMPLE_COUNT_1_BIT;
-    color.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    color.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    color.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    color.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    color.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    color.finalLayout   = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkAttachmentReference colorRef{};
-    colorRef.attachment = 0;
-    colorRef.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-
-    VkSubpassDescription subpass{};
-    subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-    subpass.colorAttachmentCount = 1;
-    subpass.pColorAttachments = &colorRef;
-
-    VkSubpassDependency dependency{};
-    dependency.srcSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.dstSubpass = 0;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    dependency.srcAccessMask = 0;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
-    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
-
-    VkRenderPassCreateInfo info{};
-    info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    info.attachmentCount = 1;
-    info.pAttachments = &color;
-    info.subpassCount = 1;
-    info.pSubpasses = &subpass;
-    info.dependencyCount = 1;
-    info.pDependencies = &dependency;
-
-    if (vkCreateRenderPass(device, &info, nullptr, &prefilterRenderPass) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create prefilter render pass");
-      throw std::runtime_error("failed to create render pass!");
-    }
-  }
-
-  void CubicTextureResources::InitPrefilterPipeline(VkDevice device)
-  {
-    VkDescriptorSetLayoutBinding samplerBinding{};
-    samplerBinding.binding = 0;
-    samplerBinding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
-    samplerBinding.descriptorCount = 1;
-    samplerBinding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
-
-    VkDescriptorSetLayoutCreateInfo setInfo{};
-    setInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-    setInfo.bindingCount = 1;
-    setInfo.pBindings = &samplerBinding;
-
-    if (vkCreateDescriptorSetLayout(device, &setInfo, nullptr, &prefilterDescriptorSetLayout) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create prefilter descriptor set layout");
-      throw std::runtime_error("failed to create descriptor set layout!");
-    }
-
-    VkPushConstantRange push{};
-    push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
-    push.offset = 0;
-    push.size = sizeof(glm::mat4) + sizeof(float);
-
-    VkPipelineLayoutCreateInfo layoutInfo{};
-    layoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    layoutInfo.setLayoutCount = 1;
-    layoutInfo.pSetLayouts = &prefilterDescriptorSetLayout;
-    layoutInfo.pushConstantRangeCount = 1;
-    layoutInfo.pPushConstantRanges = &push;
-
-    if (vkCreatePipelineLayout(device, &layoutInfo, nullptr, &prefilterPipelineLayout) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create prefilter pipeline layout");
-      throw std::runtime_error("failed to create pipeline layout!");
-    }
-
-    VkPipelineShaderStageCreateInfo vertStage{};
-    vertStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    vertStage.stage = VK_SHADER_STAGE_VERTEX_BIT;
-    vertStage.module = VulkanPipeline::CreateShaderModule(device, VulkanPipeline::ReadFile("cubemap.vert"));
-    vertStage.pName = "main";
-
-    VkPipelineShaderStageCreateInfo fragStage{};
-    fragStage.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
-    fragStage.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-    fragStage.module = VulkanPipeline::CreateShaderModule(device, VulkanPipeline::ReadFile("prefilter.frag"));
-    fragStage.pName = "main";
-
-    VkPipelineShaderStageCreateInfo stages[] = { vertStage, fragStage };
-
-    VkVertexInputBindingDescription binding{};
-    binding.binding = 0;
-    binding.stride = sizeof(glm::vec3);
-    binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-    VkVertexInputAttributeDescription attr{};
-    attr.binding = 0;
-    attr.location = 0;
-    attr.format = VK_FORMAT_R32G32B32_SFLOAT;
-    attr.offset = 0;
-
-    VkPipelineVertexInputStateCreateInfo vertexInput{};
-    vertexInput.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
-    vertexInput.vertexBindingDescriptionCount = 1;
-    vertexInput.pVertexBindingDescriptions = &binding;
-    vertexInput.vertexAttributeDescriptionCount = 1;
-    vertexInput.pVertexAttributeDescriptions = &attr;
-
-    VkPipelineInputAssemblyStateCreateInfo assembly{};
-    assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
-    assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
-    assembly.primitiveRestartEnable = VK_FALSE;
-
-    VkPipelineViewportStateCreateInfo viewportState{};
-    viewportState.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
-    viewportState.viewportCount = 1;
-    viewportState.scissorCount = 1;
-
-    VkDynamicState dynamics[] = { VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR };
-
-    VkPipelineDynamicStateCreateInfo dynamic{};
-    dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
-    dynamic.dynamicStateCount = 2;
-    dynamic.pDynamicStates = dynamics;
-
-    VkPipelineRasterizationStateCreateInfo raster{};
-    raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
-    raster.polygonMode = VK_POLYGON_MODE_FILL;
-    raster.cullMode = VK_CULL_MODE_NONE;
-    raster.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    raster.lineWidth = 1.0f;
-
-    VkPipelineMultisampleStateCreateInfo msaa{};
-    msaa.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
-    msaa.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
-
-    VkPipelineColorBlendAttachmentState blend{};
-    blend.colorWriteMask =
-        VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
-        VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
-
-    VkPipelineColorBlendStateCreateInfo blending{};
-    blending.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
-    blending.attachmentCount = 1;
-    blending.pAttachments = &blend;
-
-    VkGraphicsPipelineCreateInfo pipelineInfo{};
-    pipelineInfo.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
-    pipelineInfo.stageCount = 2;
-    pipelineInfo.pStages = stages;
-    pipelineInfo.pVertexInputState = &vertexInput;
-    pipelineInfo.pInputAssemblyState = &assembly;
-    pipelineInfo.pViewportState = &viewportState;
-    pipelineInfo.pRasterizationState = &raster;
-    pipelineInfo.pMultisampleState = &msaa;
-    pipelineInfo.pColorBlendState = &blending;
-    pipelineInfo.pDynamicState = &dynamic;
-    pipelineInfo.layout = prefilterPipelineLayout;
-    pipelineInfo.renderPass = prefilterRenderPass;
-    pipelineInfo.subpass = 0;
-
-    if (vkCreateGraphicsPipelines(device, VK_NULL_HANDLE, 1, &pipelineInfo, nullptr, &prefilterPipeline) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create prefilter graphics pipeline");
-      throw std::runtime_error("failed to create graphics pipeline");
-    }
-
-    vkDestroyShaderModule(device, vertStage.module, nullptr);
-    vkDestroyShaderModule(device, fragStage.module, nullptr);
+    vkDestroyShaderModule(device, fragStageInfo.module, nullptr);
   }
 
   // ─── VulkanCubicTexture ────────────────────────────────────────────
@@ -693,7 +350,7 @@ namespace YAEngine
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent = { 1024, 1024, 1 };
+    imageInfo.extent = { CUBEMAP_SIZE, CUBEMAP_SIZE, 1 };
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
     imageInfo.mipLevels = 1;
     imageInfo.arrayLayers = 6;
@@ -745,8 +402,8 @@ namespace YAEngine
       fb.renderPass = res.renderPass;
       fb.attachmentCount = 1;
       fb.pAttachments = &m_FaceViews[face];
-      fb.width  = 1024;
-      fb.height = 1024;
+      fb.width  = CUBEMAP_SIZE;
+      fb.height = CUBEMAP_SIZE;
       fb.layers = 1;
 
       vkCreateFramebuffer(ctx.device, &fb, nullptr, &m_FrameBuffers[face]);
@@ -781,7 +438,7 @@ namespace YAEngine
       rp.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
       rp.renderPass = res.renderPass;
       rp.framebuffer = m_FrameBuffers[face];
-      rp.renderArea.extent = { 1024, 1024 };
+      rp.renderArea.extent = { CUBEMAP_SIZE, CUBEMAP_SIZE };
 
       VkClearValue clear{};
       clear.color = { 0, 0, 0, 1 };
@@ -795,8 +452,8 @@ namespace YAEngine
       vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
                               res.pipelineLayout, 0, 1, &descriptorSet, 0, nullptr);
 
-      VkViewport vp{ 0, 0, 1024.0f, 1024.0f, 0, 1 };
-      VkRect2D scissor{ {0,0}, {1024, 1024} };
+      VkViewport vp{ 0, 0, (float)CUBEMAP_SIZE, (float)CUBEMAP_SIZE, 0, 1 };
+      VkRect2D scissor{ {0,0}, {CUBEMAP_SIZE, CUBEMAP_SIZE} };
       vkCmdSetViewport(cmd, 0, 1, &vp);
       vkCmdSetScissor(cmd, 0, 1, &scissor);
 
@@ -868,7 +525,7 @@ namespace YAEngine
       vkDestroyFramebuffer(ctx.device, m_IrradianceFrameBuffers[face], nullptr);
       vkDestroyImageView(ctx.device, m_IrradianceFaceViews[face], nullptr);
 
-      for (uint32_t mip = 0; mip < 10; mip++)
+      for (uint32_t mip = 0; mip < CUBEMAP_MAX_MIP_LEVELS; mip++)
       {
         vkDestroyFramebuffer(ctx.device, m_PrefilterFrameBuffers[mip * 6 + face], nullptr);
         vkDestroyImageView(ctx.device, m_PrefilterFaceViews[mip * 6 + face], nullptr);
@@ -1043,9 +700,9 @@ namespace YAEngine
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
-    imageInfo.extent = { 1024, 1024, 1 };
+    imageInfo.extent = { CUBEMAP_SIZE, CUBEMAP_SIZE, 1 };
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.mipLevels = 10;
+    imageInfo.mipLevels = CUBEMAP_MAX_MIP_LEVELS;
     imageInfo.arrayLayers = 6;
     imageInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     imageInfo.usage =
@@ -1066,13 +723,13 @@ namespace YAEngine
     viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 10;
+    viewInfo.subresourceRange.levelCount = CUBEMAP_MAX_MIP_LEVELS;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 6;
 
     vkCreateImageView(ctx.device, &viewInfo, nullptr, &m_PrefilterImageView);
 
-    for (uint32_t mip = 0; mip < 10; mip++)
+    for (uint32_t mip = 0; mip < CUBEMAP_MAX_MIP_LEVELS; mip++)
     {
       for (uint32_t face = 0; face < 6; face++)
       {
@@ -1091,9 +748,9 @@ namespace YAEngine
       }
     }
 
-    for (uint32_t mip = 0; mip < 10; mip++)
+    for (uint32_t mip = 0; mip < CUBEMAP_MAX_MIP_LEVELS; mip++)
     {
-      uint32_t size = 1024 >> mip;
+      uint32_t size = CUBEMAP_SIZE >> mip;
       for (uint32_t face = 0; face < 6; face++)
       {
         VkFramebufferCreateInfo fb{};
@@ -1112,7 +769,7 @@ namespace YAEngine
     auto cmd = ctx.commandBuffer->BeginSingleTimeCommands();
     TransitionImageLayout(cmd, m_PrefilterImage,
       VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-      VK_IMAGE_ASPECT_COLOR_BIT, 0, 10, 0, 6);
+      VK_IMAGE_ASPECT_COLOR_BIT, 0, CUBEMAP_MAX_MIP_LEVELS, 0, 6);
     ctx.commandBuffer->EndSingleTimeCommands(cmd);
 
     VkDescriptorImageInfo descriptorImageInfo{};
@@ -1132,10 +789,10 @@ namespace YAEngine
 
     vkUpdateDescriptorSets(ctx.device, 1, &write, 0, nullptr);
 
-    for (uint32_t mip = 0; mip < 10; mip++)
+    for (uint32_t mip = 0; mip < CUBEMAP_MAX_MIP_LEVELS; mip++)
     {
-      auto roughness = float(mip) / 9.0f;
-      uint32_t size = 1024 >> mip;
+      auto roughness = float(mip) / float(CUBEMAP_MAX_MIP_LEVELS - 1);
+      uint32_t size = CUBEMAP_SIZE >> mip;
 
       for (uint32_t face = 0; face < 6; face++)
       {
@@ -1185,7 +842,7 @@ namespace YAEngine
     cmd = ctx.commandBuffer->BeginSingleTimeCommands();
     TransitionImageLayout(cmd, m_PrefilterImage,
       VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-      VK_IMAGE_ASPECT_COLOR_BIT, 0, 10, 0, 6);
+      VK_IMAGE_ASPECT_COLOR_BIT, 0, CUBEMAP_MAX_MIP_LEVELS, 0, 6);
 
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -1203,7 +860,7 @@ namespace YAEngine
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     samplerInfo.mipLodBias = 0.0f;
     samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 10.0f;
+    samplerInfo.maxLod = static_cast<float>(CUBEMAP_MAX_MIP_LEVELS);
 
     if (vkCreateSampler(ctx.device, &samplerInfo, nullptr, &m_PrefilterSampler) != VK_SUCCESS)
     {

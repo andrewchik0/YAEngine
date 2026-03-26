@@ -8,7 +8,7 @@
 
 namespace YAEngine
 {
-  static void CkeckVkResult(VkResult err)
+  static void CheckVkResult(VkResult err)
   {
     if (err == VK_SUCCESS) return;
     YA_LOG_ERROR("Vulkan", "VkResult = %d", err);
@@ -52,14 +52,24 @@ namespace YAEngine
     poolInfo.poolSizeCount = (uint32_t)IM_ARRAYSIZE(poolSizes);
     poolInfo.pPoolSizes = poolSizes;
 
-    vkCreateDescriptorPool(device, &poolInfo, nullptr, &m_ImGuiDescriptorPool);
+    VkResult result = vkCreateDescriptorPool(device, &poolInfo, nullptr, &m_ImGuiDescriptorPool);
+    if (result != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to create ImGui descriptor pool: %d", result);
+      throw std::runtime_error("Failed to create ImGui descriptor pool");
+    }
 
     VkPipelineCacheCreateInfo pipelineCacheInfo{};
     pipelineCacheInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
     pipelineCacheInfo.initialDataSize = 0;
     pipelineCacheInfo.pInitialData = nullptr;
 
-    vkCreatePipelineCache(device, &pipelineCacheInfo, nullptr, &m_PipelineCache);
+    result = vkCreatePipelineCache(device, &pipelineCacheInfo, nullptr, &m_PipelineCache);
+    if (result != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to create ImGui pipeline cache: %d", result);
+      throw std::runtime_error("Failed to create ImGui pipeline cache");
+    }
 
     ImGui_ImplVulkan_InitInfo init_info = {};
     init_info.Instance = instance;
@@ -72,7 +82,7 @@ namespace YAEngine
     init_info.MinImageCount = swapchainImageCount;
     init_info.ImageCount = swapchainImageCount;
     init_info.Allocator = nullptr;
-    init_info.CheckVkResultFn = CkeckVkResult;
+    init_info.CheckVkResultFn = CheckVkResult;
     init_info.PipelineInfoMain.RenderPass = renderPass;
 
     ImGui_ImplVulkan_Init(&init_info);

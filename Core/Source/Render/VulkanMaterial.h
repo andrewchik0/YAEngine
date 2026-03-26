@@ -13,7 +13,7 @@ namespace YAEngine
   {
   public:
 
-    struct __PerMaterialData
+    struct PerMaterialData
     {
       glm::vec3 albedo;
       float roughness;

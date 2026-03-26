@@ -24,7 +24,7 @@ namespace YAEngine
 
     std::vector<std::unique_ptr<Event>>& PollEvents();
 
-    [[nodiscard]] const char** GetRequiredInstanceExtensions(uint32_t extensionsCount) const;
+    [[nodiscard]] const char** GetRequiredInstanceExtensions(uint32_t& extensionsCount) const;
 
     GLFWwindow* Get()
     {

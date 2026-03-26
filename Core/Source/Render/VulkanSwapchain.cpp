@@ -1,8 +1,5 @@
 #include "VulkanSwapchain.h"
 
-#include <algorithm>
-#include <limits>
-
 #include "VulkanPhysicalDevice.h"
 #include "Log.h"
 

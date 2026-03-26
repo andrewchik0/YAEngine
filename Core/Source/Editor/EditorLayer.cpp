@@ -39,14 +39,14 @@ namespace YAEngine
   {
     ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
-    if (!m_LayoutBuilt)
+    if (!b_LayoutBuilt)
     {
       if (ImGui::DockBuilderGetNode(dockspaceId) == nullptr ||
           ImGui::DockBuilderGetNode(dockspaceId)->IsSplitNode() == false)
       {
         BuildDefaultLayout(dockspaceId);
       }
-      m_LayoutBuilt = true;
+      b_LayoutBuilt = true;
     }
 
     if (ImGui::BeginMainMenuBar())
@@ -65,7 +65,7 @@ namespace YAEngine
 
         if (ImGui::MenuItem("Reset Layout"))
         {
-          m_LayoutBuilt = false;
+          b_LayoutBuilt = false;
         }
 
         ImGui::EndMenu();

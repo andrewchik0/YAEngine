@@ -14,14 +14,14 @@ namespace YAEngine
 
   struct Material
   {
-    glm::vec3 albedo;
-    glm::vec3 emissivity;
-    float roughness;
-    float metallic;
-    float specular;
-    bool sg;
-    bool hasAlpha;
-    bool combinedTextures;
+    glm::vec3 albedo{1.0f, 1.0f, 1.0f};
+    glm::vec3 emissivity{0.0f, 0.0f, 0.0f};
+    float roughness{0.5f};
+    float metallic{0.0f};
+    float specular{0.5f};
+    bool sg{false};
+    bool hasAlpha{false};
+    bool combinedTextures{false};
 
     TextureHandle baseColorTexture;
     TextureHandle metallicTexture;

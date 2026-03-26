@@ -41,7 +41,7 @@ namespace YAEngine
       VkImageLayout layout = VK_IMAGE_LAYOUT_GENERAL
     );
 
-    VkDescriptorSet Get()
+    VkDescriptorSet Get() const
     {
       return m_DescriptorSet;
     }

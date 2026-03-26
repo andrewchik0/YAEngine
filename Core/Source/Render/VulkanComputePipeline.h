@@ -28,7 +28,5 @@ namespace YAEngine
     VkPipeline m_Pipeline {};
     VkPipelineLayout m_PipelineLayout {};
     uint32_t m_PushConstantSize = 0;
-
-    static std::vector<char> ReadFile(std::string_view filename);
   };
 }

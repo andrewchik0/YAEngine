@@ -81,6 +81,7 @@ namespace YAEngine
     RGHandle m_MainVelocity {};
     RGHandle m_HiZResource {};
     RGHandle m_SSAOColor {};
+    RGHandle m_SSAOBlurIntermediate {};
     RGHandle m_SSAOBlurred {};
     RGHandle m_TAAHistory0 {};
     RGHandle m_TAAHistory1 {};
@@ -101,7 +102,8 @@ namespace YAEngine
     uint32_t m_MainPassIndex {};
     uint32_t m_SSAOPassIndex {};
     uint32_t m_HiZPassIndex {};
-    uint32_t m_SSAOBlurPassIndex {};
+    uint32_t m_SSAOBlurHPassIndex {};
+    uint32_t m_SSAOBlurVPassIndex {};
     uint32_t m_SSRPassIndex {};
     uint32_t m_TAAPassIndex {};
     uint32_t m_SwapchainPassIndex {};
@@ -124,7 +126,8 @@ namespace YAEngine
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_TAADescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSAOPassDescriptorSets;
-    std::vector<VulkanDescriptorSet> m_SSAOBlurPassDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_SSAOBlurHPassDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_SSAOBlurVPassDescriptorSets;
 
     VulkanDescriptorSet m_InstanceDescriptorSet;
     VulkanStorageBuffer m_InstanceBuffer;
@@ -142,7 +145,8 @@ namespace YAEngine
     VulkanPipeline m_DepthPrepassPipelineInstanced;
     VulkanPipeline m_DepthPrepassPipelineDoubleSidedInstanced;
     VulkanPipeline m_SSAOPipeline;
-    VulkanPipeline m_SSAOBlurPipeline;
+    VulkanPipeline m_SSAOBlurHPipeline;
+    VulkanPipeline m_SSAOBlurVPipeline;
     VulkanComputePipeline m_HiZPipeline;
 
     VulkanMaterial m_DefaultMaterial {};

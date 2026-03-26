@@ -1,7 +1,5 @@
 #include "VulkanPhysicalDevice.h"
 
-#include <set>
-
 #include "Log.h"
 
 namespace YAEngine

@@ -29,6 +29,7 @@ namespace YAEngine
     bool b_KeyS = false;
 
     bool b_MousePressed = false;
+    bool b_FirstMouseMove = true;
 
     double m_PrevX = 0.0, m_PrevY = 0.0, m_DeltaX = 0.0, m_DeltaY = 0.0;
 

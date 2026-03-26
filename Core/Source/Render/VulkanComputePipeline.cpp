@@ -1,9 +1,6 @@
 #include "VulkanComputePipeline.h"
 
-#include <fstream>
-#include <ios>
-
-#include "Log.h"
+#include "ShaderUtils.h"
 
 namespace YAEngine
 {
@@ -16,19 +13,8 @@ namespace YAEngine
     m_Device = device;
     m_PushConstantSize = pushConstantSize;
 
-    auto code = ReadFile(shaderFile);
-
-    VkShaderModuleCreateInfo moduleInfo{};
-    moduleInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    moduleInfo.codeSize = code.size();
-    moduleInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-    VkShaderModule shaderModule;
-    if (vkCreateShaderModule(m_Device, &moduleInfo, nullptr, &shaderModule) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create compute shader module: %s", shaderFile.c_str());
-      throw std::runtime_error("Failed to create compute shader module!");
-    }
+    auto code = ReadShaderFile(shaderFile);
+    VkShaderModule shaderModule = CreateShaderModule(m_Device, code);
 
     VkPipelineShaderStageCreateInfo stageInfo{};
     stageInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
@@ -99,30 +85,5 @@ namespace YAEngine
   void VulkanComputePipeline::Dispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ)
   {
     vkCmdDispatch(cmd, groupCountX, groupCountY, groupCountZ);
-  }
-
-  std::vector<char> VulkanComputePipeline::ReadFile(std::string_view filename)
-  {
-    std::string filepath = SHADER_BIN_DIR;
-    filepath += '/';
-    filepath += filename;
-    filepath += ".spv";
-
-    std::ifstream file(filepath, std::ios::ate | std::ios::binary);
-
-    if (!file.is_open())
-    {
-      YA_LOG_ERROR("Render", "Failed to open shader file: %s", filepath.c_str());
-      throw std::runtime_error("Failed to open shader file!");
-    }
-
-    size_t fileSize = (size_t)file.tellg();
-    std::vector<char> buffer(fileSize);
-
-    file.seekg(0);
-    file.read(buffer.data(), fileSize);
-    file.close();
-
-    return buffer;
   }
 }

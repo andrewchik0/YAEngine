@@ -1,4 +1,5 @@
 #include "Window.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -62,15 +63,14 @@ namespace YAEngine
     m_WindowWidth = specs.width;
 
     glfwInit();
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MAJOR, 4);
-    glfwWindowHint(GLFW_CONTEXT_VERSION_MINOR, 6);
     glfwWindowHint(GLFW_CLIENT_API, GLFW_NO_API);
     m_WindowHandle = glfwCreateWindow(m_WindowWidth, m_WindowHeight, specs.title.c_str(), nullptr, nullptr);
     if (!m_WindowHandle)
     {
       glfwTerminate();
+      YA_LOG_ERROR("Window", "Failed to create GLFW window");
+      throw std::runtime_error("Failed to create GLFW window");
     }
-    glfwMakeContextCurrent(m_WindowHandle);
     glfwSetWindowUserPointer(m_WindowHandle, this);
     glfwSetKeyCallback(m_WindowHandle, KeyCallback);
     glfwSetCursorPosCallback(m_WindowHandle, CursorPositionCallback);
@@ -97,7 +97,7 @@ namespace YAEngine
     return m_WindowEventStack;
   }
 
-  const char** Window::GetRequiredInstanceExtensions(uint32_t extensionsCount) const
+  const char** Window::GetRequiredInstanceExtensions(uint32_t& extensionsCount) const
   {
     return glfwGetRequiredInstanceExtensions(&extensionsCount);
   }

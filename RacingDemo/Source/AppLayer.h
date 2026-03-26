@@ -101,7 +101,7 @@ public:
           App().GetAssetManager().Materials().Get(materialHandle).roughness = i / 9.0f;
           App().GetAssetManager().Materials().Get(materialHandle).metallic = j / 9.0f;
 
-          auto entity = App().GetScene().CreateEntity("Sphere" + i * 10 + j);
+          auto entity = App().GetScene().CreateEntity(std::string("Sphere") + std::to_string(i * 10 + j));
           App().GetScene().AddComponent<YAEngine::MeshComponent>(entity, meshHandle);
           App().GetScene().AddComponent<YAEngine::MaterialComponent>(entity, materialHandle);
           App().GetScene().GetTransform(entity).position = glm::vec3(i * 3.0f, j * 3.0f, 0.0f);

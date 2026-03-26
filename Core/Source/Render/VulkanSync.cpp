@@ -41,7 +41,7 @@ namespace YAEngine
     vkDeviceWaitIdle(m_Device);
     for (size_t i = 0; i < m_SwapchainsCount; i++)
     {
-      vkWaitForFences(m_Device, 1, &m_InFlightFences[m_FrameIndex], VK_TRUE, UINT64_MAX);
+      vkWaitForFences(m_Device, 1, &m_InFlightFences[i], VK_TRUE, UINT64_MAX);
     }
 
     for (size_t i = 0; i < m_SwapchainsCount; i++)
@@ -54,9 +54,10 @@ namespace YAEngine
 
   bool VulkanSync::WaitIdle(VkSwapchainKHR swapChain, uint32_t* imageIndex)
   {
+    m_FrameIndex = (m_FrameIndex + 1) % m_SwapchainsCount;
+
     vkWaitForFences(m_Device, 1, &m_InFlightFences[m_FrameIndex], VK_TRUE, UINT64_MAX);
 
-    m_FrameIndex = (m_FrameIndex + 1) % m_SwapchainsCount;
     VkResult result = vkAcquireNextImageKHR(m_Device, swapChain, UINT64_MAX, m_ImageAvailableSemaphores[m_FrameIndex], VK_NULL_HANDLE, imageIndex);
     if (result == VK_ERROR_OUT_OF_DATE_KHR)
     {

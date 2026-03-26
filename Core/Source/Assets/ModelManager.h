@@ -41,7 +41,7 @@ namespace YAEngine
     ModelHandle Load(const std::string& path, bool combinedTextures = false);
     ModelHandle LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances, bool combinedTextures = false);
 
-    void Destroy(Model& model);
+    void Destroy(ModelHandle handle);
     void DestroyAll() override;
 
   private:

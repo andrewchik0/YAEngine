@@ -7,7 +7,7 @@ namespace YAEngine
   {
     const auto& windowEventStack = m_Window.PollEvents();
 
-    ImGuiIO* io = m_ImGuiFiltering ? &ImGui::GetIO() : nullptr;
+    ImGuiIO* io = b_ImGuiFiltering ? &ImGui::GetIO() : nullptr;
     bool passThrough = b_ViewportHovered;
 
     for (auto& windowEvent : windowEventStack)

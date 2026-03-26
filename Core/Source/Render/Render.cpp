@@ -51,6 +51,10 @@ namespace YAEngine
       .name = "ssaoColor",
       .format = VK_FORMAT_R8_UNORM
     });
+    m_SSAOBlurIntermediate = m_Graph.CreateResource({
+      .name = "ssaoBlurIntermediate",
+      .format = VK_FORMAT_R8_UNORM
+    });
     m_SSAOBlurred = m_Graph.CreateResource({
       .name = "ssaoBlurred",
       .format = VK_FORMAT_R8_UNORM
@@ -88,8 +92,6 @@ namespace YAEngine
       .depthOnly = true,
       .execute = [this](const RGExecuteContext& ctx) {
         auto* app = static_cast<Application*>(ctx.userData);
-        auto currentFrame = m_Backend.GetCurrentFrameIndex();
-        m_PerFrameData.SetUp(currentFrame);
         DrawMeshesDepthOnly(app);
       }
     });
@@ -105,7 +107,6 @@ namespace YAEngine
       .execute = [this](const RGExecuteContext& ctx) {
         auto* app = static_cast<Application*>(ctx.userData);
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
-        m_PerFrameData.SetUp(currentFrame);
 
         m_ForwardPipeline.Bind(ctx.cmd);
         m_ForwardPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
@@ -140,10 +141,10 @@ namespace YAEngine
       }
     });
 
-    m_SSAOBlurPassIndex = m_Graph.AddPass({
-      .name = "SSAOBlurPass",
+    m_SSAOBlurHPassIndex = m_Graph.AddPass({
+      .name = "SSAOBlurHPass",
       .inputs = {m_SSAOColor, m_MainDepth},
-      .colorOutputs = {m_SSAOBlurred},
+      .colorOutputs = {m_SSAOBlurIntermediate},
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_SSAOEnabled) return;
 
@@ -152,14 +153,42 @@ namespace YAEngine
         auto& ssaoColor = m_Graph.GetResource(m_SSAOColor);
         auto& depth = m_Graph.GetResource(m_MainDepth);
 
-        m_SSAOBlurPipeline.Bind(ctx.cmd);
-        m_SSAOBlurPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
+        m_SSAOBlurHPipeline.Bind(ctx.cmd);
+        m_SSAOBlurHPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
           ssaoColor.GetView(), ssaoColor.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_SSAOBlurPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+        m_SSAOBlurHPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
           depth.GetView(), depth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-        m_SSAOBlurPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
-        m_SSAOBlurPipeline.BindDescriptorSets(ctx.cmd, {m_SSAOBlurPassDescriptorSets[currentFrame].Get()}, 1);
+        m_SSAOBlurHPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_SSAOBlurHPipeline.BindDescriptorSets(ctx.cmd, {m_SSAOBlurHPassDescriptorSets[currentFrame].Get()}, 1);
+        int direction = 0;
+        m_SSAOBlurHPipeline.PushConstants(ctx.cmd, &direction);
+        DrawQuad();
+      }
+    });
+
+    m_SSAOBlurVPassIndex = m_Graph.AddPass({
+      .name = "SSAOBlurVPass",
+      .inputs = {m_SSAOBlurIntermediate, m_MainDepth},
+      .colorOutputs = {m_SSAOBlurred},
+      .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_SSAOEnabled) return;
+
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+
+        auto& intermediate = m_Graph.GetResource(m_SSAOBlurIntermediate);
+        auto& depth = m_Graph.GetResource(m_MainDepth);
+
+        m_SSAOBlurVPipeline.Bind(ctx.cmd);
+        m_SSAOBlurVPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
+          intermediate.GetView(), intermediate.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SSAOBlurVPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          depth.GetView(), depth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        m_SSAOBlurVPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_SSAOBlurVPipeline.BindDescriptorSets(ctx.cmd, {m_SSAOBlurVPassDescriptorSets[currentFrame].Get()}, 1);
+        int direction = 1;
+        m_SSAOBlurVPipeline.PushConstants(ctx.cmd, &direction);
         DrawQuad();
       }
     });
@@ -193,14 +222,24 @@ namespace YAEngine
 
           if (mip < mipCount - 1)
           {
-            VkMemoryBarrier memBarrier{};
-            memBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-            memBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-            memBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            VkImageMemoryBarrier imgBarrier{};
+            imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+            imgBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+            imgBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+            imgBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+            imgBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+            imgBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            imgBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            imgBarrier.image = m_Graph.GetResource(m_HiZResource).GetImage();
+            imgBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+            imgBarrier.subresourceRange.baseMipLevel = mip;
+            imgBarrier.subresourceRange.levelCount = 1;
+            imgBarrier.subresourceRange.baseArrayLayer = 0;
+            imgBarrier.subresourceRange.layerCount = 1;
             vkCmdPipelineBarrier(ctx.cmd,
               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
               VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-              0, 1, &memBarrier, 0, nullptr, 0, nullptr);
+              0, 0, nullptr, 0, nullptr, 1, &imgBarrier);
           }
         }
       }
@@ -609,12 +648,17 @@ namespace YAEngine
     {
       set.Destroy();
     }
-    for (auto& set : m_SSAOBlurPassDescriptorSets)
+    for (auto& set : m_SSAOBlurHPassDescriptorSets)
+    {
+      set.Destroy();
+    }
+    for (auto& set : m_SSAOBlurVPassDescriptorSets)
     {
       set.Destroy();
     }
     m_SSAOPipeline.Destroy();
-    m_SSAOBlurPipeline.Destroy();
+    m_SSAOBlurHPipeline.Destroy();
+    m_SSAOBlurVPipeline.Destroy();
     m_SSAONoise.Destroy(ctx);
     m_SSAOKernelUBO.Destroy(ctx);
     m_DepthPrepassPipeline.Destroy();
@@ -651,6 +695,9 @@ namespace YAEngine
 #else
     auto& ctx = m_Backend.GetContext();
     auto actualExtent = m_Backend.GetSwapChain().GetExt();
+
+    // Wait for all GPU work to complete before destroying resources
+    vkDeviceWaitIdle(ctx.device);
 
     // Destroy Hi-Z per-mip views before graph resize destroys the image
     DestroyHiZResources();
@@ -707,6 +754,9 @@ namespace YAEngine
   {
     auto& ctx = m_Backend.GetContext();
 
+    // Wait for all GPU work to complete before destroying resources
+    vkDeviceWaitIdle(ctx.device);
+
     uint32_t w = m_PendingViewportWidth;
     uint32_t h = m_PendingViewportHeight;
 
@@ -742,15 +792,9 @@ namespace YAEngine
 
   void Render::Draw(Application *app)
   {
-    auto imageIndex = m_Backend.BeginFrame();
-    if (!imageIndex)
-    {
-      Resize();
-      return;
-    }
-
 #ifdef YA_EDITOR
-    // Handle deferred viewport resize (requested by ViewportPanel on previous frame)
+    // Handle deferred viewport resize BEFORE acquiring the frame —
+    // no command buffer is recording at this point, safe to wait for GPU and recreate resources
     if (m_PendingViewportWidth != m_ViewportWidth || m_PendingViewportHeight != m_ViewportHeight)
     {
       if (m_PendingViewportWidth > 0 && m_PendingViewportHeight > 0)
@@ -767,6 +811,13 @@ namespace YAEngine
       }
     }
 #endif
+
+    auto imageIndex = m_Backend.BeginFrame();
+    if (!imageIndex)
+    {
+      Resize();
+      return;
+    }
 
     m_Stats = {};
 
@@ -808,6 +859,10 @@ namespace YAEngine
 #endif
     m_Graph.SetPassFramebuffer(m_SwapchainPassIndex,
       m_Backend.GetSwapChain().GetFramebuffer(*imageIndex));
+
+    // Upload per-frame UBO before executing passes
+    auto currentFrame = m_Backend.GetCurrentFrameIndex();
+    m_PerFrameData.SetUp(currentFrame);
 
     // Execute all passes
     m_Graph.Execute(cmd, app);
@@ -934,8 +989,13 @@ namespace YAEngine
     {
       glm::vec2 jitter = GetTAAJitter(m_GlobalFrameIndex);
 
+#ifdef YA_EDITOR
+      jitter.x /= float(m_ViewportWidth);
+      jitter.y /= float(m_ViewportHeight);
+#else
       jitter.x /= float(app->GetWindow().GetWidth());
       jitter.y /= float(app->GetWindow().GetHeight());
+#endif
 
       m_PerFrameData.ubo.jitterX = jitter.x;
       m_PerFrameData.ubo.jitterY = jitter.y;
@@ -1133,34 +1193,46 @@ namespace YAEngine
     };
     m_SSAOPipeline.Init(ctx.device, ssaoRP, ssaoInfo, pipelineCache);
 
-    // SSAO Blur descriptor sets and pipeline
-    VkRenderPass ssaoBlurRP = m_Graph.GetPassRenderPass(m_SSAOBlurPassIndex);
+    // SSAO Blur descriptor sets and pipelines (horizontal + vertical)
+    SetDescription ssaoBlurDesc = {
+      .set = 1,
+      .bindings = {
+        {
+          { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        }
+      }
+    };
 
-    m_SSAOBlurPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    m_SSAOBlurHPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
     for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
     {
-      SetDescription ssaoBlurDesc = {
-        .set = 1,
-        .bindings = {
-          {
-            { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-          }
-        }
-      };
-      m_SSAOBlurPassDescriptorSets[i].Init(ctx, ssaoBlurDesc);
+      m_SSAOBlurHPassDescriptorSets[i].Init(ctx, ssaoBlurDesc);
     }
+
+    m_SSAOBlurVPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      m_SSAOBlurVPassDescriptorSets[i].Init(ctx, ssaoBlurDesc);
+    }
+
     PipelineCreateInfo ssaoBlurInfo = {
       .fragmentShaderFile = "ssao_blur.frag",
       .vertexShaderFile = "quad.vert",
+      .pushConstantSize = sizeof(int),
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({
         m_PerFrameData.GetLayout(),
-        m_SSAOBlurPassDescriptorSets[0].GetLayout(),
+        m_SSAOBlurHPassDescriptorSets[0].GetLayout(),
       })
     };
-    m_SSAOBlurPipeline.Init(ctx.device, ssaoBlurRP, ssaoBlurInfo, pipelineCache);
+
+    VkRenderPass ssaoBlurHRP = m_Graph.GetPassRenderPass(m_SSAOBlurHPassIndex);
+    m_SSAOBlurHPipeline.Init(ctx.device, ssaoBlurHRP, ssaoBlurInfo, pipelineCache);
+
+    VkRenderPass ssaoBlurVRP = m_Graph.GetPassRenderPass(m_SSAOBlurVPassIndex);
+    m_SSAOBlurVPipeline.Init(ctx.device, ssaoBlurVRP, ssaoBlurInfo, pipelineCache);
 
     // SSR descriptor sets and pipeline (7 bindings: frame, depth, normals, material, albedo, ssao, hiZ)
     VkRenderPass ssrRP = m_Graph.GetPassRenderPass(m_SSRPassIndex);
@@ -1253,9 +1325,6 @@ namespace YAEngine
       }
 
       auto& vb = meshManager.GetVertexBuffer(mesh.asset);
-      m_Stats.drawCalls++;
-      m_Stats.triangles += uint32_t(vb.GetIndexCount() / 3) * instanceCount;
-      m_Stats.vertices += uint32_t(vb.GetIndexCount()) * instanceCount;
       vb.Draw(cmd, instanceCount);
     });
   }

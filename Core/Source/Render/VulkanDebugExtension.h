@@ -19,9 +19,9 @@ namespace YAEngine
     void AddLayer(VkInstanceCreateInfo& info);
     void AddExtension(std::vector<const char*>& extensions) const;
 
-    void SetUpMessanger(VkInstance& instance);
+    void SetUpMessenger(VkInstance& instance);
 
-    void DestroyMessanger(VkInstance& instance);
+    void DestroyMessenger(VkInstance& instance);
 
   private:
     VkDebugUtilsMessengerEXT m_DebugMessenger {};

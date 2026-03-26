@@ -29,8 +29,8 @@ namespace YAEngine
       {
         m_DescriptorSets[i].Init(ctx, layout);
       }
-      m_UniformBuffers[i].Create(ctx, sizeof(__PerFrameUBO));
-      m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(__PerFrameUBO));
+      m_UniformBuffers[i].Create(ctx, sizeof(PerFrameUBO));
+      m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(PerFrameUBO));
     }
   }
 

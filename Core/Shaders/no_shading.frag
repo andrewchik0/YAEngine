@@ -9,22 +9,7 @@ layout(location = 7) in vec4 inPrevClipPos;
 
 #include "common.glsl"
 
-layout(set = 1, binding = 0) uniform PerMaterialUBO {
-  vec3 albedo;
-  float roughness;
-  vec3 emissivity;
-  float specular;
-  float metallic;
-  int textureMask;
-  int sg;
-} u_Material;
-layout(set = 1, binding = 1) uniform sampler2D baseColorTexture;
-layout(set = 1, binding = 2) uniform sampler2D metallicTexture;
-layout(set = 1, binding = 3) uniform sampler2D roughnessTexture;
-layout(set = 1, binding = 4) uniform sampler2D specularTexture;
-layout(set = 1, binding = 5) uniform sampler2D emissiveTexture;
-layout(set = 1, binding = 6) uniform sampler2D normalTexture;
-layout(set = 1, binding = 7) uniform sampler2D heightTexture;
+#include "material.glsl"
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outNormal;

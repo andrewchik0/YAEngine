@@ -9,25 +9,7 @@ layout(location = 7) in vec4 inPrevClipPos;
 
 #include "common.glsl"
 
-layout(set = 1, binding = 0) uniform PerMaterialUBO {
-  vec3 albedo;
-  float roughness;
-  vec3 emissivity;
-  float specular;
-  float metallic;
-  int textureMask;
-  int sg;
-} u_Material;
-layout(set = 1, binding = 1) uniform sampler2D baseColorTexture;
-layout(set = 1, binding = 2) uniform sampler2D metallicTexture;
-layout(set = 1, binding = 3) uniform sampler2D roughnessTexture;
-layout(set = 1, binding = 4) uniform sampler2D specularTexture;
-layout(set = 1, binding = 5) uniform sampler2D emissiveTexture;
-layout(set = 1, binding = 6) uniform sampler2D normalTexture;
-layout(set = 1, binding = 7) uniform sampler2D heightTexture;
-layout(set = 1, binding = 8) uniform samplerCube prefilterTexture;
-layout(set = 1, binding = 9) uniform sampler2D brdfTexture;
-layout(set = 1, binding = 10) uniform samplerCube irradianceCubemap;
+#include "material.glsl"
 
 layout(location = 0) out vec4 outColor;
 layout(location = 1) out vec4 outNormal;
@@ -43,11 +25,6 @@ void main() {
   float hasAlbedoTexture = float(u_Material.textureMask & 1);
   vec4 albedo = mix(vec4(u_Material.albedo, 1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
 
-  if (albedo.a < 0.5)
-  {
-    discard;
-  }
-
   albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
 
   float hasNormalMap = float((u_Material.textureMask >> 5) & 1);
@@ -55,14 +32,15 @@ void main() {
   vec3 normal = mix(inNormal, normalize(inTBN * n_ts), hasNormalMap);
 
   float hasMetallicTexture = float((u_Material.textureMask >> 1) & 1);
-  float metallic = mix(u_Material.metallic, texture(metallicTexture, inTexCoord).b, hasMetallicTexture);
+  vec4 metallicSample = texture(metallicTexture, inTexCoord);
+  float metallic = mix(u_Material.metallic, metallicSample.b, hasMetallicTexture);
 
   float combinedTextures = float((u_Material.textureMask >> 8) & 1);
 
   float hasRoughnessTexture = float((u_Material.textureMask >> 2) & 1);
   float roughness = mix(
     mix(u_Material.roughness, texture(roughnessTexture, inTexCoord).r, hasRoughnessTexture),
-    texture(metallicTexture, inTexCoord).g,
+    metallicSample.g,
     combinedTextures
   );
 
@@ -86,7 +64,7 @@ void main() {
   vec2 brdf = texture(brdfTexture, vec2(NdotV, clamp(roughness, 0.01, 0.99))).rg;
   vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
-  vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
+  vec3 ambient = kD * diffuse + specular;
   vec3 resultColor = max(ambient, vec3(0.0));
 
   vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;

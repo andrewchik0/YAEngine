@@ -52,13 +52,7 @@ namespace YAEngine
     VkPipelineLayout m_PipelineLayout {};
     uint32_t m_PushConstantSize = 0;
 
-    static std::vector<char> ReadFile(std::string_view filename);
-    static VkShaderModule CreateShaderModule(VkDevice device, const std::vector<char>& code);
-
     std::vector<VkVertexInputAttributeDescription> GetVertexInputAttributeDescriptions(std::string_view vertexInput, uint32_t* vertexSize);
-
-    friend class VulkanCubicTexture;
-    friend struct CubicTextureResources;
 
     VkDevice m_Device {};
   };

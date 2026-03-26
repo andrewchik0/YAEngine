@@ -56,18 +56,18 @@ namespace YAEngine
 
   void VulkanDebugExtension::AddLayer(VkInstanceCreateInfo& info)
   {
-    if (!CheckValidationLayerSupport())
-    {
-      YA_LOG_ERROR("Render", "Validation layers requested, but not available");
-      throw std::runtime_error("validation layers requested, but not available!");
-    }
-
     if (!b_Enabled)
     {
       info.enabledLayerCount = 0;
       info.pNext = nullptr;
       return;
     };
+
+    if (!CheckValidationLayerSupport())
+    {
+      YA_LOG_ERROR("Render", "Validation layers requested, but not available");
+      throw std::runtime_error("validation layers requested, but not available!");
+    }
 
     info.enabledLayerCount = 1;
     info.ppEnabledLayerNames = &m_LayerName;
@@ -87,11 +87,11 @@ namespace YAEngine
       extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   }
 
-  void VulkanDebugExtension::SetUpMessanger(VkInstance& instance)
+  void VulkanDebugExtension::SetUpMessenger(VkInstance& instance)
   {
     if (!b_Enabled) return;
 
-    VkDebugUtilsMessengerCreateInfoEXT createInfo;
+    VkDebugUtilsMessengerCreateInfoEXT createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     createInfo.flags = 0;
     createInfo.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_VERBOSE_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT | VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -105,7 +105,7 @@ namespace YAEngine
     }
   }
 
-  void VulkanDebugExtension::DestroyMessanger(VkInstance& instance)
+  void VulkanDebugExtension::DestroyMessenger(VkInstance& instance)
   {
     if (b_Enabled)
     {

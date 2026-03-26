@@ -37,7 +37,6 @@ namespace YAEngine
     void Update(uint32_t offset, const void* data, uint32_t size)
     {
       std::memcpy(static_cast<uint8_t*>(m_MappedData) + offset, data, size);
-      vmaFlushAllocation(m_Allocator, m_Allocation, offset, size);
     }
 
     uint32_t Allocate(uint32_t size)
@@ -53,7 +52,6 @@ namespace YAEngine
     VkBuffer m_Buffer {};
     VmaAllocation m_Allocation {};
     VkDeviceSize m_Size {};
-    VmaAllocator m_Allocator {};
     void* m_MappedData {};
     uint32_t m_FilledData = 0;
   };

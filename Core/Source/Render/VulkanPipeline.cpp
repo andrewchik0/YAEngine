@@ -1,8 +1,6 @@
 #include "VulkanPipeline.h"
 
-#include <fstream>
-#include <ios>
-
+#include "ShaderUtils.h"
 #include "Log.h"
 
 namespace YAEngine
@@ -13,7 +11,7 @@ namespace YAEngine
     m_Device = device;
     m_PushConstantSize = info.pushConstantSize;
 
-    auto vertShaderCode = ReadFile(info.vertexShaderFile);
+    auto vertShaderCode = ReadShaderFile(info.vertexShaderFile);
     VkShaderModule vertShaderModule = CreateShaderModule(m_Device, vertShaderCode);
 
     std::vector<VkPipelineShaderStageCreateInfo> shaderStages;
@@ -28,7 +26,7 @@ namespace YAEngine
     VkShaderModule fragShaderModule = VK_NULL_HANDLE;
     if (!info.fragmentShaderFile.empty())
     {
-      auto fragShaderCode = ReadFile(info.fragmentShaderFile);
+      auto fragShaderCode = ReadShaderFile(info.fragmentShaderFile);
       fragShaderModule = CreateShaderModule(m_Device, fragShaderCode);
 
       VkPipelineShaderStageCreateInfo fragShaderStageInfo{};
@@ -205,24 +203,6 @@ namespace YAEngine
     );
   }
 
-
-  VkShaderModule VulkanPipeline::CreateShaderModule(VkDevice device, const std::vector<char>& code)
-  {
-    VkShaderModuleCreateInfo createInfo{};
-    createInfo.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    createInfo.codeSize = code.size();
-    createInfo.pCode = reinterpret_cast<const uint32_t*>(code.data());
-
-    VkShaderModule shaderModule;
-    if (vkCreateShaderModule(device, &createInfo, nullptr, &shaderModule) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create shader module");
-      throw std::runtime_error("failed to create shader module!");
-    }
-
-    return shaderModule;
-  }
-
   std::vector<VkVertexInputAttributeDescription> VulkanPipeline::GetVertexInputAttributeDescriptions(
     std::string_view vertexInput, uint32_t* vertexSize)
   {
@@ -242,6 +222,7 @@ namespace YAEngine
         case '3': return VK_FORMAT_R32G32B32_SFLOAT;
         case '4': return VK_FORMAT_R32G32B32A32_SFLOAT;
         default:
+          YA_LOG_ERROR("Render", "Failed to parse vertex input: invalid float component count '%c'", count);
           throw std::runtime_error("failed to parse vertex input!");
         }
         break;
@@ -253,6 +234,7 @@ namespace YAEngine
         case '3': return VK_FORMAT_R32G32B32_UINT;
         case '4': return VK_FORMAT_R32G32B32A32_UINT;
         default:
+          YA_LOG_ERROR("Render", "Failed to parse vertex input: invalid uint component count '%c'", count);
           throw std::runtime_error("failed to parse vertex input!");
         }
           break;
@@ -264,10 +246,12 @@ namespace YAEngine
         case '3': return VK_FORMAT_R32G32B32_SINT;
         case '4': return VK_FORMAT_R32G32B32A32_SINT;
         default:
+          YA_LOG_ERROR("Render", "Failed to parse vertex input: invalid int component count '%c'", count);
           throw std::runtime_error("failed to parse vertex input!");
         }
         break;
       }
+      YA_LOG_ERROR("Render", "Invalid vertex input type '%c'", type);
       throw std::runtime_error("invalid vertex input type");
     };
 
@@ -302,6 +286,7 @@ namespace YAEngine
       case VK_FORMAT_R32G32B32A32_SINT:
           offset += 16; break;
       default:
+          YA_LOG_ERROR("Render", "Unsupported vertex attribute format");
           throw std::runtime_error("unsupported format");
       }
 
@@ -309,31 +294,5 @@ namespace YAEngine
     }
 
     return attributeDescriptions;
-  }
-
-  std::vector<char> VulkanPipeline::ReadFile(std::string_view filename)
-  {
-    std::string filepath = SHADER_BIN_DIR;
-    filepath += '/';
-    filepath += filename;
-    filepath += ".spv";
-
-    std::ifstream file(filepath, std::ios::ate | std::ios::binary);
-
-    if (!file.is_open())
-    {
-      YA_LOG_ERROR("Render", "Failed to open shader file: %s", filepath.c_str());
-      throw std::runtime_error("failed to open file!");
-    }
-
-    size_t fileSize = (size_t) file.tellg();
-    std::vector<char> buffer(fileSize);
-
-    file.seekg(0);
-    file.read(buffer.data(), fileSize);
-
-    file.close();
-
-    return buffer;
   }
 }

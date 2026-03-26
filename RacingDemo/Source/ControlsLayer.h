@@ -5,19 +5,19 @@
 class ControlsLayer : public YAEngine::Layer
 {
 public:
-  YAEngine::SubscriptionId onKeyboard;
+  YAEngine::SubscriptionId m_OnKeyboard;
 
-  bool arrowLeft = false;
-  bool arrowRight = false;
-  bool arrowUp = false;
-  bool arrowDown = false;
+  bool b_ArrowLeft = false;
+  bool b_ArrowRight = false;
+  bool b_ArrowUp = false;
+  bool b_ArrowDown = false;
 
   YAEngine::Entity m_Car = entt::null;
   YAEngine::Entity m_Camera = entt::null;
 
   void OnSceneReady() override
   {
-    onKeyboard = App().Events().Subscribe<YAEngine::KeyEvent>([&](auto event) { OnKeyboard(event); });
+    m_OnKeyboard = App().Events().Subscribe<YAEngine::KeyEvent>([&](auto event) { OnKeyboard(event); });
 
     m_Camera = App().GetScene().CreateEntity("camera");
     App().GetScene().AddComponent<YAEngine::CameraComponent>(m_Camera);
@@ -37,7 +37,7 @@ public:
 
   void OnDetach() override
   {
-    App().Events().Unsubscribe<YAEngine::KeyEvent>(onKeyboard);
+    App().Events().Unsubscribe<YAEngine::KeyEvent>(m_OnKeyboard);
   }
 
   void Update(double deltaTime) override;
@@ -51,9 +51,9 @@ public:
       value = false;
     else return;
 
-    if (e.key == GLFW_KEY_LEFT) arrowLeft = value;
-    if (e.key == GLFW_KEY_RIGHT) arrowRight = value;
-    if (e.key == GLFW_KEY_UP) arrowUp = value;
-    if (e.key == GLFW_KEY_DOWN) arrowDown = value;
+    if (e.key == GLFW_KEY_LEFT) b_ArrowLeft = value;
+    if (e.key == GLFW_KEY_RIGHT) b_ArrowRight = value;
+    if (e.key == GLFW_KEY_UP) b_ArrowUp = value;
+    if (e.key == GLFW_KEY_DOWN) b_ArrowDown = value;
   }
 };

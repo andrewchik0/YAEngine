@@ -4,6 +4,7 @@
 
 #include "Components.h"
 #include "Assets/CubeMapManager.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -19,8 +20,11 @@ namespace YAEngine
     void SetParent(Entity child, Entity parent);
 
     TransformComponent& GetTransform(Entity e);
+    const TransformComponent& GetTransform(Entity e) const;
     HierarchyComponent& GetHierarchy(Entity e);
+    const HierarchyComponent& GetHierarchy(Entity e) const;
     Name& GetName(Entity e);
+    const Name& GetName(Entity e) const;
 
     // For empty tag types (e.g. EditorOnlyTag) returns void; for data components returns T&
     template<typename T, typename... Args>
@@ -47,7 +51,7 @@ namespace YAEngine
     }
 
     template<typename T>
-    bool HasComponent(Entity e)
+    bool HasComponent(Entity e) const
     {
       return m_Registry.all_of<T>(e);
     }
@@ -58,10 +62,21 @@ namespace YAEngine
       if (m_Registry.all_of<T>(e))
         return m_Registry.get<T>(e);
 
+      YA_LOG_ERROR("Scene", "Entity does not have requested component");
       throw std::runtime_error("Entity does not have requested component");
     }
 
-    Entity GetChildByName(Entity entity, Name name);
+    template<typename T>
+    const T& GetComponent(Entity e) const
+    {
+      if (m_Registry.all_of<T>(e))
+        return m_Registry.get<T>(e);
+
+      YA_LOG_ERROR("Scene", "Entity does not have requested component");
+      throw std::runtime_error("Entity does not have requested component");
+    }
+
+    Entity GetChildByName(Entity entity, const Name& name) const;
 
     template<typename... Ts>
     auto GetView()

@@ -21,6 +21,6 @@ namespace YAEngine
 
     EditorContext m_Context;
     std::vector<std::unique_ptr<IEditorPanel>> m_Panels;
-    bool m_LayoutBuilt = false;
+    bool b_LayoutBuilt = false;
   };
 }
