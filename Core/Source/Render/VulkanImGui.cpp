@@ -77,7 +77,7 @@ namespace YAEngine
 
     ImGui_ImplVulkan_Init(&init_info);
 
-    io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/Roboto-Regular.ttf", 13.0f);
+    io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/Roboto-Regular.ttf", 15.0f);
     io.Fonts->Build();
     ImGui::PushFont(io.Fonts->Fonts[0]);
   }
