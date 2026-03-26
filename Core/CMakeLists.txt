@@ -34,6 +34,10 @@ target_compile_definitions(Core PRIVATE
   WORKING_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )
 
+if(YA_EDITOR)
+  target_compile_definitions(Core PUBLIC YA_EDITOR)
+endif()
+
 # Match VS filters to folder tree
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${SOURCE_FILES})
 # Set working directory for VS debugger

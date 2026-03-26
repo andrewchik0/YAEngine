@@ -269,6 +269,65 @@ namespace YAEngine
       }
     });
 
+#ifdef YA_EDITOR
+    // Scene compose pass — tone mapping to offscreen texture for editor viewport
+    m_SceneColor = m_Graph.CreateResource({
+      .name = "sceneColor",
+      .format = VK_FORMAT_R8G8B8A8_UNORM,
+      .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT
+    });
+
+    m_SceneComposePassIndex = m_Graph.AddPass({
+      .name = "SceneComposePass",
+      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_MainAlbedo, m_MainNormals, m_MainMaterial},
+      .colorOutputs = {m_SceneColor},
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
+        auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
+        auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
+        auto& mainAlbedo = m_Graph.GetResource(m_MainAlbedo);
+        auto& mainNormals = m_Graph.GetResource(m_MainNormals);
+        auto& mainMaterial = m_Graph.GetResource(m_MainMaterial);
+
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        m_QuadPipeline.Bind(ctx.cmd);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
+          historyCurrent.GetView(), historyCurrent.GetSampler(), historyCurrent.GetLayout());
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
+          mainAlbedo.GetView(), mainAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
+          mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
+          mainMaterial.GetView(), mainMaterial.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
+        DrawQuad();
+      }
+    });
+
+    // Swapchain pass — editor mode: ImGui only (scene displayed via viewport panel)
+    m_SwapchainPassIndex = m_Graph.AddPass({
+      .name = "SwapchainPass",
+      .inputs = {m_SceneColor},
+      .colorOutputs = {},
+      .externalFramebuffer = true,
+      .externalFormat = swapFormat,
+      .finalColorLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto* app = static_cast<Application*>(ctx.userData);
+
+        ImGui_ImplVulkan_NewFrame();
+        ImGui_ImplGlfw_NewFrame();
+        ImGui::NewFrame();
+        app->RenderUI();
+        ImGui::Render();
+        ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), ctx.cmd);
+      }
+    });
+#else
+    // Swapchain pass — production mode: tone mapping + ImGui overlay
     m_SwapchainPassIndex = m_Graph.AddPass({
       .name = "SwapchainPass",
       .inputs = {m_TAAHistory0, m_SSAOBlurred, m_MainAlbedo, m_MainNormals, m_MainMaterial},
@@ -310,6 +369,7 @@ namespace YAEngine
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), ctx.cmd);
       }
     });
+#endif
 
     m_Graph.Compile();
   }
@@ -358,7 +418,7 @@ namespace YAEngine
   void Render::ClearHistoryBuffers()
   {
     VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
-    auto extent = m_Backend.GetSwapChain().GetExt();
+    auto extent = m_Graph.GetExtent();
 
     auto cmd = m_Backend.GetCommandBuffer().BeginSingleTimeCommands();
 
@@ -489,6 +549,14 @@ namespace YAEngine
 
     m_Backend.InitImGui(window, m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
 
+#ifdef YA_EDITOR
+    CreateSceneImGuiDescriptor();
+    m_ViewportWidth = width;
+    m_ViewportHeight = height;
+    m_PendingViewportWidth = width;
+    m_PendingViewportHeight = height;
+#endif
+
     m_CubicResources.Init(ctx);
     m_SkyBox.Init(ctx, m_Graph.GetPassRenderPass(m_MainPassIndex));
 
@@ -500,6 +568,10 @@ namespace YAEngine
     vkDeviceWaitIdle(m_Backend.GetContext().device);
 
     auto& ctx = m_Backend.GetContext();
+
+#ifdef YA_EDITOR
+    DestroySceneImGuiDescriptor();
+#endif
 
     m_SkyBox.Destroy();
     m_CubicResources.Destroy(ctx);
@@ -568,13 +640,16 @@ namespace YAEngine
   void Render::Resize()
   {
     b_Resized = false;
-    auto& ctx = m_Backend.GetContext();
 
     // Recreate swapchain first to get actual surface dimensions
     m_Backend.GetSwapChain().Recreate(
       m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
 
-    // Use actual swapchain extent for everything
+#ifdef YA_EDITOR
+    // In editor mode, graph extent = viewport size (independent of window size).
+    // Only swapchain is recreated here; viewport resize handled by ResizeViewport().
+#else
+    auto& ctx = m_Backend.GetContext();
     auto actualExtent = m_Backend.GetSwapChain().GetExt();
 
     // Destroy Hi-Z per-mip views before graph resize destroys the image
@@ -600,7 +675,70 @@ namespace YAEngine
 
     // Clear history buffers
     ClearHistoryBuffers();
+#endif
   }
+
+#ifdef YA_EDITOR
+  void Render::CreateSceneImGuiDescriptor()
+  {
+    auto& sceneImage = m_Graph.GetResource(m_SceneColor);
+    m_SceneImGuiDescriptor = ImGui_ImplVulkan_AddTexture(
+      sceneImage.GetSampler(),
+      sceneImage.GetView(),
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+  }
+
+  void Render::DestroySceneImGuiDescriptor()
+  {
+    if (m_SceneImGuiDescriptor != VK_NULL_HANDLE)
+    {
+      ImGui_ImplVulkan_RemoveTexture(m_SceneImGuiDescriptor);
+      m_SceneImGuiDescriptor = VK_NULL_HANDLE;
+    }
+  }
+
+  void Render::RequestViewportResize(uint32_t w, uint32_t h)
+  {
+    m_PendingViewportWidth = w;
+    m_PendingViewportHeight = h;
+  }
+
+  void Render::ResizeViewport()
+  {
+    auto& ctx = m_Backend.GetContext();
+
+    uint32_t w = m_PendingViewportWidth;
+    uint32_t h = m_PendingViewportHeight;
+
+    // Update HiZ mip count for new dimensions
+    uint32_t hizMipCount = static_cast<uint32_t>(std::floor(std::log2(std::max(w, h)))) + 1;
+    m_Graph.SetResourceMipLevels(m_HiZResource, hizMipCount);
+
+    DestroyHiZResources();
+    DestroySceneImGuiDescriptor();
+
+    m_Graph.Resize({w, h});
+
+    CreateSceneImGuiDescriptor();
+    CreateHiZResources();
+
+    // Recreate TAA external framebuffers
+    for (auto& fb : m_TAAFramebuffers)
+    {
+      if (fb != VK_NULL_HANDLE)
+      {
+        vkDestroyFramebuffer(ctx.device, fb, nullptr);
+        fb = VK_NULL_HANDLE;
+      }
+    }
+    m_TAADepth.Destroy(ctx);
+    CreateTAAFramebuffers();
+    ClearHistoryBuffers();
+
+    m_ViewportWidth = w;
+    m_ViewportHeight = h;
+  }
+#endif
 
   void Render::Draw(Application *app)
   {
@@ -611,6 +749,27 @@ namespace YAEngine
       return;
     }
 
+#ifdef YA_EDITOR
+    // Handle deferred viewport resize (requested by ViewportPanel on previous frame)
+    if (m_PendingViewportWidth != m_ViewportWidth || m_PendingViewportHeight != m_ViewportHeight)
+    {
+      if (m_PendingViewportWidth > 0 && m_PendingViewportHeight > 0)
+      {
+        ResizeViewport();
+
+        // Update camera aspect ratio to match new viewport dimensions
+        auto activeCamera = app->GetScene().GetActiveCamera();
+        if (activeCamera != entt::null && app->GetScene().HasComponent<CameraComponent>(activeCamera))
+        {
+          app->GetScene().GetComponent<CameraComponent>(activeCamera).Resize(
+            float(m_ViewportWidth), float(m_ViewportHeight));
+        }
+      }
+    }
+#endif
+
+    m_Stats = {};
+
     auto cmd = m_Backend.GetCurrentCommandBuffer();
 
     SetUpCamera(app);
@@ -618,8 +777,13 @@ namespace YAEngine
     m_PerFrameData.ubo.gamma = m_Gamma;
     m_PerFrameData.ubo.exposure = m_Exposure;
     m_PerFrameData.ubo.currentTexture = m_CurrentTexture;
+#ifdef YA_EDITOR
+    m_PerFrameData.ubo.screenWidth = int(m_ViewportWidth);
+    m_PerFrameData.ubo.screenHeight = int(m_ViewportHeight);
+#else
     m_PerFrameData.ubo.screenWidth = int(app->GetWindow().GetWidth());
     m_PerFrameData.ubo.screenHeight = int(app->GetWindow().GetHeight());
+#endif
     m_PerFrameData.ubo.ssaoEnabled = b_SSAOEnabled ? 1 : 0;
     m_PerFrameData.ubo.ssrEnabled = b_SSREnabled ? 1 : 0;
     m_PerFrameData.ubo.taaEnabled = b_TAAEnabled ? 1 : 0;
@@ -633,7 +797,15 @@ namespace YAEngine
     m_Graph.SetPassColorOutput(m_TAAPassIndex, 0, historyWrite);
     m_Graph.SetPassFramebuffer(m_TAAPassIndex, m_TAAFramebuffers[m_TAAIndex]);
 
+#ifdef YA_EDITOR
+    m_Graph.SetPassInput(m_SceneComposePassIndex, 0, historyWrite);
+
+    // SwapchainPass renders ImGui at full window size, override extent
+    auto swapExtent = m_Backend.GetSwapChain().GetExt();
+    m_Graph.SetPassExtent(m_SwapchainPassIndex, swapExtent);
+#else
     m_Graph.SetPassInput(m_SwapchainPassIndex, 0, historyWrite);
+#endif
     m_Graph.SetPassFramebuffer(m_SwapchainPassIndex,
       m_Backend.GetSwapChain().GetFramebuffer(*imageIndex));
 
@@ -715,7 +887,11 @@ namespace YAEngine
       mat.cubemap = app->GetScene().GetSkybox();
       materialManager.GetVulkanMaterial(material.asset).Bind(app, mat, currentFrame, m_NoneTexture);
 
-      meshManager.GetVertexBuffer(mesh.asset).Draw(cmd, instanceCount);
+      auto& vb = meshManager.GetVertexBuffer(mesh.asset);
+      m_Stats.drawCalls++;
+      m_Stats.triangles += uint32_t(vb.GetIndexCount() / 3) * instanceCount;
+      m_Stats.vertices += uint32_t(vb.GetIndexCount()) * instanceCount;
+      vb.Draw(cmd, instanceCount);
     });
 
     if (!app->GetScene().HasComponent<CameraComponent>(app->GetScene().GetActiveCamera())) return;
@@ -896,8 +1072,12 @@ namespace YAEngine
       m_TAADescriptorSets[i].Init(ctx, taaDesc);
     }
 
-    // Quad pipeline — use swapchain render pass
-    VkRenderPass swapRP = m_Graph.GetPassRenderPass(m_SwapchainPassIndex);
+    // Quad pipeline — tone mapping pass
+#ifdef YA_EDITOR
+    VkRenderPass quadRP = m_Graph.GetPassRenderPass(m_SceneComposePassIndex);
+#else
+    VkRenderPass quadRP = m_Graph.GetPassRenderPass(m_SwapchainPassIndex);
+#endif
 
     PipelineCreateInfo quadInfo = {
       .fragmentShaderFile = "quad.frag",
@@ -910,7 +1090,7 @@ namespace YAEngine
       })
     };
 
-    m_QuadPipeline.Init(ctx.device, swapRP, quadInfo, pipelineCache);
+    m_QuadPipeline.Init(ctx.device, quadRP, quadInfo, pipelineCache);
 
     // TAA pipeline — use TAA render pass (compatible format)
     VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
@@ -1072,7 +1252,11 @@ namespace YAEngine
         m_InstanceBuffer.Update(meshManager.GetInstanceOffset(mesh.asset), instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
       }
 
-      meshManager.GetVertexBuffer(mesh.asset).Draw(cmd, instanceCount);
+      auto& vb = meshManager.GetVertexBuffer(mesh.asset);
+      m_Stats.drawCalls++;
+      m_Stats.triangles += uint32_t(vb.GetIndexCount() / 3) * instanceCount;
+      m_Stats.vertices += uint32_t(vb.GetIndexCount()) * instanceCount;
+      vb.Draw(cmd, instanceCount);
     });
   }
 

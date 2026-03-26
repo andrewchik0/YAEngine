@@ -25,6 +25,7 @@ namespace YAEngine
     void Draw(VkCommandBuffer cmd, uint32_t instanceCount = 1);
 
     VkBuffer Get() const { return m_VerticesBuffer.Get(); }
+    size_t GetIndexCount() const { return m_IndicesCount; }
 
   private:
 

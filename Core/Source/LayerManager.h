@@ -30,14 +30,14 @@ namespace YAEngine
 
     void CallOnAttach()
     {
-      for (auto& layer : m_LayerStack)
-        layer->OnAttach();
+      for (size_t i = 0; i < m_LayerStack.size(); i++)
+        m_LayerStack[i]->OnAttach();
     }
 
     void CallOnSceneReady()
     {
-      for (auto& layer : m_LayerStack)
-        layer->OnSceneReady();
+      for (size_t i = 0; i < m_LayerStack.size(); i++)
+        m_LayerStack[i]->OnSceneReady();
     }
 
     void CallUpdate(double dt)

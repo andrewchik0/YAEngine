@@ -2,6 +2,10 @@
 
 #include "../../cmake-build-release/_deps/imgui-src/imgui.h"
 
+#ifdef YA_EDITOR
+#include "Editor/EditorLayer.h"
+#endif
+
 namespace YAEngine
 {
   std::unique_ptr<Application> Application::instance;
@@ -29,6 +33,9 @@ namespace YAEngine
 
   void Application::Run()
   {
+#ifdef YA_EDITOR
+    m_LayerManager.PushLayer<EditorLayer>();
+#endif
     m_LayerManager.CallOnAttach();
     m_AssetManager.Init();
     m_AssetManager.SetRenderContext(m_Render.GetContext(), m_Render.GetNoneTexture(), m_Render.GetCubicResources());
@@ -51,9 +58,13 @@ namespace YAEngine
         if (width != 0.0f && height != 0.0f)
         {
           m_Render.Resize();
+#ifndef YA_EDITOR
+          // In non-editor mode, camera aspect matches window.
+          // In editor mode, camera aspect is driven by viewport panel size.
           auto extent = m_Render.GetSwapChainExtent();
           m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(
             (float)extent.width, (float)extent.height);
+#endif
         }
       }), -1000); // High priority: handle resize before layers
 

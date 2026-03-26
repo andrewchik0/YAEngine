@@ -97,6 +97,11 @@ namespace YAEngine
       return m_Render;
     }
 
+    InputSystem& GetInputSystem()
+    {
+      return m_InputSystem;
+    }
+
   private:
 
     explicit Application(const ApplicationSpecs& specs);

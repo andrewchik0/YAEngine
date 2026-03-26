@@ -61,8 +61,6 @@ set(SOURCE_FILES
   Source/Assets/MaterialManager.cpp
   Source/Assets/MaterialManager.h
   Source/Scene/Components.h
-  Source/FreeCamLayer.h
-  Source/FreeCamLayer.cpp
   Source/Utils/Timer.h
   Source/Assets/ModelDescription.h
   Source/Assets/ModelImporter.cpp
@@ -76,8 +74,6 @@ set(SOURCE_FILES
   Source/LayerManager.h
   Source/InputSystem.cpp
   Source/InputSystem.h
-  Source/DebugUILayer.cpp
-  Source/DebugUILayer.h
   Source/Render/VulkanImGui.cpp
   Source/Render/VulkanImGui.h
   Vendor/ImGui/imgui_impl_glfw.cpp
@@ -106,3 +102,25 @@ set(SOURCE_FILES
   Source/Render/VulkanComputePipeline.cpp
   Source/Render/VulkanComputePipeline.h
 )
+
+if(YA_EDITOR)
+  list(APPEND SOURCE_FILES
+    Source/Editor/EditorLayer.cpp
+    Source/Editor/EditorLayer.h
+    Source/Editor/IEditorPanel.h
+    Source/Editor/EditorContext.h
+    Source/Editor/Utils/EditorStyle.cpp
+    Source/Editor/Utils/EditorStyle.h
+    Source/Editor/Panels/ViewportPanel.h
+    Source/Editor/Panels/PerformancePanel.h
+    Source/Editor/Panels/PerformancePanel.cpp
+    Source/Editor/Panels/RenderSettingsPanel.h
+    Source/Editor/Panels/RenderSettingsPanel.cpp
+    Source/Editor/Panels/OutlinerPanel.h
+    Source/Editor/Panels/OutlinerPanel.cpp
+    Source/Editor/Panels/DetailsPanel.h
+    Source/Editor/Panels/DetailsPanel.cpp
+    Source/Editor/EditorCameraLayer.h
+    Source/Editor/EditorCameraLayer.cpp
+  )
+endif()

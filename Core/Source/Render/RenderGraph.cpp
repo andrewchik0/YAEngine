@@ -569,7 +569,10 @@ namespace YAEngine
     {
       auto& pass = m_Passes[passIndex];
 
-      ctx.extent = pass.extent;
+      // Use overrideExtent if set, otherwise use pass extent from compilation
+      VkExtent2D passExtent = (pass.overrideExtent.width > 0 && pass.overrideExtent.height > 0)
+        ? pass.overrideExtent : pass.extent;
+      ctx.extent = passExtent;
 
       // Insert barriers for inputs (and storage outputs for compute)
       InsertBarriers(cmd, passIndex);
@@ -602,21 +605,21 @@ namespace YAEngine
         rpInfo.renderPass = pass.renderPass;
         rpInfo.framebuffer = fb;
         rpInfo.renderArea.offset = {0, 0};
-        rpInfo.renderArea.extent = pass.extent;
+        rpInfo.renderArea.extent = passExtent;
         rpInfo.clearValueCount = 1;
         rpInfo.pClearValues = &clearValue;
 
         vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
         VkViewport viewport{};
-        viewport.width = static_cast<float>(pass.extent.width);
-        viewport.height = static_cast<float>(pass.extent.height);
+        viewport.width = static_cast<float>(passExtent.width);
+        viewport.height = static_cast<float>(passExtent.height);
         viewport.minDepth = 0.0f;
         viewport.maxDepth = 1.0f;
         vkCmdSetViewport(cmd, 0, 1, &viewport);
 
         VkRect2D scissor{};
-        scissor.extent = pass.extent;
+        scissor.extent = passExtent;
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
         pass.info.execute(ctx);
@@ -652,7 +655,7 @@ namespace YAEngine
       rpInfo.renderPass = pass.renderPass;
       rpInfo.framebuffer = fb;
       rpInfo.renderArea.offset = {0, 0};
-      rpInfo.renderArea.extent = pass.extent;
+      rpInfo.renderArea.extent = passExtent;
       rpInfo.clearValueCount = attachmentCount;
       rpInfo.pClearValues = clearValues.data();
 
@@ -660,14 +663,14 @@ namespace YAEngine
 
       // Set viewport and scissor to match pass extent
       VkViewport viewport{};
-      viewport.width = static_cast<float>(pass.extent.width);
-      viewport.height = static_cast<float>(pass.extent.height);
+      viewport.width = static_cast<float>(passExtent.width);
+      viewport.height = static_cast<float>(passExtent.height);
       viewport.minDepth = 0.0f;
       viewport.maxDepth = 1.0f;
       vkCmdSetViewport(cmd, 0, 1, &viewport);
 
       VkRect2D scissor{};
-      scissor.extent = pass.extent;
+      scissor.extent = passExtent;
       vkCmdSetScissor(cmd, 0, 1, &scissor);
 
       pass.info.execute(ctx);
@@ -696,6 +699,11 @@ namespace YAEngine
   void RenderGraph::SetPassFramebuffer(uint32_t pass, VkFramebuffer fb)
   {
     m_Passes[pass].overrideFramebuffer = fb;
+  }
+
+  void RenderGraph::SetPassExtent(uint32_t pass, VkExtent2D extent)
+  {
+    m_Passes[pass].overrideExtent = extent;
   }
 
   void RenderGraph::SetPassInput(uint32_t pass, uint32_t slot, RGHandle resource)
@@ -736,6 +744,11 @@ namespace YAEngine
   const RGResourceDesc& RenderGraph::GetResourceDesc(RGHandle handle) const
   {
     return m_Resources[handle].desc;
+  }
+
+  void RenderGraph::SetResourceMipLevels(RGHandle handle, uint32_t mipLevels)
+  {
+    m_Resources[handle].desc.mipLevels = mipLevels;
   }
 
   VulkanImage& RenderGraph::ResolveResource(RGHandle handle)

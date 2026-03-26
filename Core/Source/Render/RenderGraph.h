@@ -67,6 +67,7 @@ namespace YAEngine
     void Compile();
 
     void SetPassFramebuffer(uint32_t pass, VkFramebuffer fb);
+    void SetPassExtent(uint32_t pass, VkExtent2D extent);
     void SetPassInput(uint32_t pass, uint32_t slot, RGHandle resource);
     void SetPassColorOutput(uint32_t pass, uint32_t slot, RGHandle resource);
 
@@ -80,6 +81,7 @@ namespace YAEngine
 
     VkImage GetResourceImage(RGHandle handle);
     const RGResourceDesc& GetResourceDesc(RGHandle handle) const;
+    void SetResourceMipLevels(RGHandle handle, uint32_t mipLevels);
 
   private:
 
@@ -99,6 +101,7 @@ namespace YAEngine
       VkFramebuffer framebuffer = VK_NULL_HANDLE;
       VulkanImage privateDepth;
       VkFramebuffer overrideFramebuffer = VK_NULL_HANDLE;
+      VkExtent2D overrideExtent {};
       VkExtent2D extent {};
     };
 

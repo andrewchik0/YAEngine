@@ -2,9 +2,8 @@
 
 #include "Application.h"
 #include "ControlsLayer.h"
-#include "FreeCamLayer.h"
-#include "DebugUILayer.h"
 #include "GameComponents.h"
+#include "Scene/Components.h"
 
 #include "Vertices.h"
 
@@ -23,8 +22,6 @@ public:
 #ifndef TEST
     App().PushLayer<ControlsLayer>();
 #endif
-    App().PushLayer<YAEngine::FreeCamLayer>();
-    App().PushLayer<YAEngine::DebugUILayer>();
   }
 
   void OnSceneReady() override
@@ -123,14 +120,15 @@ public:
 
   void OnKeyBoard(const YAEngine::KeyEvent event)
   {
+#ifdef YA_EDITOR
     if (event.action == GLFW_PRESS && event.key == GLFW_KEY_ESCAPE)
     {
-      // Find follow camera (ControlsLayer camera) and free camera via ECS
+      // Find follow camera and editor camera via ECS
       auto followView = App().GetScene().GetView<FollowCameraComponent, YAEngine::CameraComponent>();
-      auto freeView = App().GetScene().GetView<YAEngine::CameraComponent, YAEngine::TransformComponent>();
+      auto editorView = App().GetScene().GetView<YAEngine::EditorOnlyTag, YAEngine::CameraComponent>();
 
       YAEngine::Entity followCam = entt::null;
-      YAEngine::Entity freeCam = entt::null;
+      YAEngine::Entity editorCam = entt::null;
 
       for (auto e : followView)
       {
@@ -138,23 +136,20 @@ public:
         break;
       }
 
-      // FreeCam is a camera entity without FollowCameraComponent
-      for (auto e : freeView)
+      for (auto e : editorView)
       {
-        if (!App().GetScene().HasComponent<FollowCameraComponent>(e))
-        {
-          freeCam = e;
-          break;
-        }
+        editorCam = e;
+        break;
       }
 
-      if (followCam == entt::null || freeCam == entt::null) return;
+      if (followCam == entt::null || editorCam == entt::null) return;
 
       if (App().GetScene().GetActiveCamera() == followCam)
-        App().GetScene().SetActiveCamera(freeCam);
+        App().GetScene().SetActiveCamera(editorCam);
       else
         App().GetScene().SetActiveCamera(followCam);
     }
+#endif
   }
 
 };

@@ -15,7 +15,8 @@ namespace YAEngine
     std::vector<VkDescriptorPoolSize> poolSizes = {
       { VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 500 },
       { VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 200 },
-      { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 50 }
+      { VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 50 },
+      { VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, 50 }
     };
 
     VkDescriptorPoolCreateInfo poolInfo{};

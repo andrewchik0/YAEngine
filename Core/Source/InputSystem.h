@@ -14,10 +14,13 @@ namespace YAEngine
     void ProcessEvents();
 
     void SetImGuiFiltering(bool enabled) { m_ImGuiFiltering = enabled; }
+    void SetViewportHovered(bool hovered) { b_ViewportHovered = hovered; }
+    bool IsViewportHovered() const { return b_ViewportHovered; }
 
   private:
     Window& m_Window;
     EventBus& m_EventBus;
     bool m_ImGuiFiltering = false;
+    bool b_ViewportHovered = false;
   };
 }

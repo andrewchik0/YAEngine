@@ -13,6 +13,13 @@
 
 namespace YAEngine
 {
+  struct RenderStats
+  {
+    uint32_t drawCalls = 0;
+    uint32_t triangles = 0;
+    uint32_t vertices = 0;
+  };
+
   class Render
   {
   public:
@@ -37,6 +44,8 @@ namespace YAEngine
     bool& GetSSREnabled() { return b_SSREnabled; }
     bool& GetTAAEnabled() { return b_TAAEnabled; }
 
+    const RenderStats& GetStats() const { return m_Stats; }
+
   private:
 
     float m_Gamma = 2.2f;
@@ -45,6 +54,8 @@ namespace YAEngine
     bool b_SSAOEnabled = true;
     bool b_SSREnabled = true;
     bool b_TAAEnabled = true;
+
+    RenderStats m_Stats {};
 
     void DrawMeshes(Application* app);
     void DrawMeshesDepthOnly(Application* app);
@@ -73,6 +84,17 @@ namespace YAEngine
     RGHandle m_SSAOBlurred {};
     RGHandle m_TAAHistory0 {};
     RGHandle m_TAAHistory1 {};
+
+#ifdef YA_EDITOR
+    RGHandle m_SceneColor {};
+    uint32_t m_SceneComposePassIndex {};
+    VkDescriptorSet m_SceneImGuiDescriptor {};
+    uint32_t m_ViewportWidth = 0;
+    uint32_t m_ViewportHeight = 0;
+    uint32_t m_PendingViewportWidth = 0;
+    uint32_t m_PendingViewportHeight = 0;
+    void ResizeViewport();
+#endif
 
     // Pass indices
     uint32_t m_DepthPrepassIndex {};
@@ -137,5 +159,14 @@ namespace YAEngine
     const VulkanTexture& GetNoneTexture() const { return m_NoneTexture; }
     CubicTextureResources& GetCubicResources() { return m_CubicResources; }
     VkExtent2D GetSwapChainExtent() { return m_Backend.GetSwapChain().GetExt(); }
+
+#ifdef YA_EDITOR
+    void* GetSceneTextureID() const { return (void*)m_SceneImGuiDescriptor; }
+    void CreateSceneImGuiDescriptor();
+    void DestroySceneImGuiDescriptor();
+    void RequestViewportResize(uint32_t w, uint32_t h);
+    uint32_t GetViewportWidth() const { return m_ViewportWidth; }
+    uint32_t GetViewportHeight() const { return m_ViewportHeight; }
+#endif
   };
 }

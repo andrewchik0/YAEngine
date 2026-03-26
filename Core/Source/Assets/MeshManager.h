@@ -17,7 +17,6 @@ namespace YAEngine
 
     friend class MeshManager;
     friend class ModelManager;
-    friend class DebugUILayer;
   };
 
   class MeshManager : public AssetManagerBase<Mesh, MeshTag>, public IAssetManager

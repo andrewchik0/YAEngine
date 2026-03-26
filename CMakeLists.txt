@@ -3,6 +3,8 @@ project(YAEngine)
 
 set(CMAKE_CXX_STANDARD 23)
 
+option(YA_EDITOR "Build with editor support" ON)
+
 find_program(GLSLC_EXECUTABLE
   NAMES glslc glslc.exe
   HINTS

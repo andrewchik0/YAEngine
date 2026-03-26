@@ -22,14 +22,21 @@ namespace YAEngine
     HierarchyComponent& GetHierarchy(Entity e);
     Name& GetName(Entity e);
 
+    // For empty tag types (e.g. EditorOnlyTag) returns void; for data components returns T&
     template<typename T, typename... Args>
-    T& AddComponent(Entity e, Args&&... args)
+    decltype(auto) AddComponent(Entity e, Args&&... args)
     {
-      if (!m_Registry.all_of<T>(e))
+      if constexpr (std::is_empty_v<T>)
       {
-        return m_Registry.emplace<T>(e, std::forward<Args>(args)...);
+        if (!m_Registry.all_of<T>(e))
+          m_Registry.emplace<T>(e, std::forward<Args>(args)...);
       }
-      return m_Registry.get<T>(e);
+      else
+      {
+        if (!m_Registry.all_of<T>(e))
+          return m_Registry.emplace<T>(e, std::forward<Args>(args)...);
+        return m_Registry.get<T>(e);
+      }
     }
 
     template<typename T>
