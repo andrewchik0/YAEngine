@@ -1,6 +1,6 @@
 #pragma once
 
-#include "PerFrameData.h"
+#include "FrameUniformBuffer.h"
 #include "RenderBackend.h"
 #include "RenderGraph.h"
 #include "VulkanCubicTexture.h"
@@ -120,7 +120,7 @@ namespace YAEngine
     glm::mat4 m_PrevView = glm::mat4(1.0f);
     glm::mat4 m_PrevProj = glm::mat4(1.0f);
 
-    PerFrameData m_PerFrameData {};
+    FrameUniformBuffer m_FrameUniformBuffer {};
     SkyBox m_SkyBox;
 
     std::vector<VulkanDescriptorSet> m_SwapChainDescriptorSets;

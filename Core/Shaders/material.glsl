@@ -1,12 +1,5 @@
-layout(set = 1, binding = 0) uniform PerMaterialUBO {
-  vec3 albedo;
-  float roughness;
-  vec3 emissivity;
-  float specular;
-  float metallic;
-  int textureMask;
-  int sg;
-} u_Material;
+#include "../Shared/MaterialUniforms.h"
+layout(set = 1, binding = 0) uniform MaterialUniformsBlock { MaterialUniforms u_Material; };
 layout(set = 1, binding = 1) uniform sampler2D baseColorTexture;
 layout(set = 1, binding = 2) uniform sampler2D metallicTexture;
 layout(set = 1, binding = 3) uniform sampler2D roughnessTexture;

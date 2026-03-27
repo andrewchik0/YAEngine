@@ -41,11 +41,11 @@ void main()
   vec3 originalColor = texture(frame, uv).rgb;
   float ao = texture(ssaoTexture, uv).r;
 
-  if (u_Data.ssaoEnabled == 0)
+  if (u_Frame.ssaoEnabled == 0)
     ao = 1.0;
 
   // SSR debug mode: zero out base color to show only reflections
-  if (u_Data.currentTexture == 6)
+  if (u_Frame.currentTexture == 6)
     originalColor = vec3(0.0);
 
   // Early exits
@@ -66,7 +66,7 @@ void main()
   // Apply AO to geometry only
   originalColor *= ao;
 
-  if (u_Data.ssrEnabled == 0 || roughness > MAX_ROUGHNESS)
+  if (u_Frame.ssrEnabled == 0 || roughness > MAX_ROUGHNESS)
   {
     outColor = vec4(originalColor, 1.0);
     return;
@@ -76,7 +76,7 @@ void main()
   vec3 viewPos = reconstructViewPos(uv, depth);
 
   // Transform normal to view space
-  vec3 viewNormal = normalize(mat3(u_Data.view) * worldNormal);
+  vec3 viewNormal = normalize(mat3(u_Frame.view) * worldNormal);
 
   // Reflection direction
   vec3 viewDir = normalize(viewPos);
@@ -90,15 +90,15 @@ void main()
   vec3 rayEnd = rayOrigin + reflectDir * MAX_RAY_DISTANCE;
 
   // Project start and end to clip space
-  vec4 startClip = u_Data.proj * vec4(rayOrigin, 1.0);
-  vec4 endClip = u_Data.proj * vec4(rayEnd, 1.0);
+  vec4 startClip = u_Frame.proj * vec4(rayOrigin, 1.0);
+  vec4 endClip = u_Frame.proj * vec4(rayEnd, 1.0);
 
   // If end is behind camera, clip the ray to stay in front
   if (endClip.w <= 0.0)
   {
     float tClip = (startClip.w - 0.01) / (startClip.w - endClip.w);
     rayEnd = rayOrigin + reflectDir * MAX_RAY_DISTANCE * tClip;
-    endClip = u_Data.proj * vec4(rayEnd, 1.0);
+    endClip = u_Frame.proj * vec4(rayEnd, 1.0);
   }
 
   // Screen-space coordinates
@@ -107,7 +107,7 @@ void main()
   float startDepthNDC = startClip.z / startClip.w;
   float endDepthNDC = endClip.z / endClip.w;
 
-  vec2 screenSize = vec2(float(u_Data.screenWidth), float(u_Data.screenHeight));
+  vec2 screenSize = vec2(float(u_Frame.screenWidth), float(u_Frame.screenHeight));
   vec2 rayDelta = endScreen - startScreen;
   float rayScreenLen = length(rayDelta * screenSize);
 
@@ -121,7 +121,7 @@ void main()
 
   // How steeply the reflection leaves the surface (1.0 = perpendicular, 0.0 = grazing)
   float reflNormalDot = abs(dot(reflectDir, viewNormal));
-  int maxMip = u_Data.hizMipCount - 1;
+  int maxMip = u_Frame.hizMipCount - 1;
 
   // --- Hi-Z Ray March ---
   bool hit = false;
@@ -131,7 +131,7 @@ void main()
   // This randomizes the hit/miss boundary position so TAA can smooth it.
   // Interleaved gradient noise (Jimenez, SIGGRAPH 2014)
   float ign = fract(52.9829189 * fract(dot(
-      gl_FragCoord.xy + fract(u_Data.time * 7.23) * vec2(131.0, 257.0),
+      gl_FragCoord.xy + fract(u_Frame.time * 7.23) * vec2(131.0, 257.0),
       vec2(0.06711056, 0.00583715))));
   float jitterOffset = ign / rayScreenLen;
 

@@ -41,8 +41,8 @@ namespace YAEngine
       {
         m_DescriptorSets[i].Init(ctx, layout);
       }
-      m_UniformBuffers[i].Create(ctx, sizeof(PerMaterialData));
-      m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(PerMaterialData));
+      m_UniformBuffers[i].Create(ctx, sizeof(MaterialUniforms));
+      m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(MaterialUniforms));
       for (size_t j = 1; j < 11; j++)
         m_DescriptorSets[i].WriteCombinedImageSampler((uint32_t)j, noneTexture.GetView(), noneTexture.GetSampler());
     }
@@ -119,15 +119,15 @@ namespace YAEngine
     }
     textureMask |= (material.combinedTextures << 8);
 
-    data.albedo = material.albedo;
-    data.specular = material.specular;
-    data.metallic = material.metallic;
-    data.roughness = material.roughness;
-    data.emissivity = material.emissivity;
-    data.textureMask = textureMask;
-    data.sg = material.sg;
+    uniforms.albedo = material.albedo;
+    uniforms.specular = material.specular;
+    uniforms.metallic = material.metallic;
+    uniforms.roughness = material.roughness;
+    uniforms.emissivity = material.emissivity;
+    uniforms.textureMask = textureMask;
+    uniforms.sg = material.sg;
 
-    m_UniformBuffers[currentFrame].Update(data);
-    m_DescriptorSets[currentFrame].WriteUniformBuffer(0, m_UniformBuffers[currentFrame].Get(), sizeof(PerMaterialData));
+    m_UniformBuffers[currentFrame].Update(uniforms);
+    m_DescriptorSets[currentFrame].WriteUniformBuffer(0, m_UniformBuffers[currentFrame].Get(), sizeof(MaterialUniforms));
   }
 }

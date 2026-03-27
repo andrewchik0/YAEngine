@@ -30,9 +30,9 @@ layout(push_constant) uniform PushConstants
 void main() {
   mat4 worldMatrix = pc.world * instances.data[gl_InstanceIndex + pc.offset];
   vec4 worldPos = worldMatrix * vec4(inPosition, 1.0);
-  gl_Position = u_Data.proj * u_Data.view * worldPos;
+  gl_Position = u_Frame.proj * u_Frame.view * worldPos;
   outCurClipPos = gl_Position;
-  outPrevClipPos = u_Data.prevProj * u_Data.prevView * worldPos;
+  outPrevClipPos = u_Frame.prevProj * u_Frame.prevView * worldPos;
   outTexCoord = inTexCoord;
   outPosition = vec3(worldPos);
 

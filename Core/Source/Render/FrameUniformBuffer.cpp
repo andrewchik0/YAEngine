@@ -1,10 +1,10 @@
-#include "PerFrameData.h"
+#include "FrameUniformBuffer.h"
 
 #include "RenderContext.h"
 
 namespace YAEngine
 {
-  void PerFrameData::Init(const RenderContext& ctx)
+  void FrameUniformBuffer::Init(const RenderContext& ctx)
   {
     m_DescriptorSets.resize(ctx.maxFramesInFlight);
     m_UniformBuffers.resize(ctx.maxFramesInFlight);
@@ -29,12 +29,12 @@ namespace YAEngine
       {
         m_DescriptorSets[i].Init(ctx, layout);
       }
-      m_UniformBuffers[i].Create(ctx, sizeof(PerFrameUBO));
-      m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(PerFrameUBO));
+      m_UniformBuffers[i].Create(ctx, sizeof(FrameUniforms));
+      m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(FrameUniforms));
     }
   }
 
-  void PerFrameData::Destroy(const RenderContext& ctx)
+  void FrameUniformBuffer::Destroy(const RenderContext& ctx)
   {
     for (auto& set : m_DescriptorSets)
     {
@@ -46,8 +46,8 @@ namespace YAEngine
     }
   }
 
-  void PerFrameData::SetUp(uint32_t frameIndex)
+  void FrameUniformBuffer::SetUp(uint32_t frameIndex)
   {
-    m_UniformBuffers[frameIndex].Update(ubo);
+    m_UniformBuffers[frameIndex].Update(uniforms);
   }
 }

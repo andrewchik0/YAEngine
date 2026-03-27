@@ -3,6 +3,7 @@
 #include "VulkanDescriptorSet.h"
 #include "VulkanTexture.h"
 #include "VulkanUniformBuffer.h"
+#include "MaterialUniforms.h"
 
 namespace YAEngine
 {
@@ -13,16 +14,7 @@ namespace YAEngine
   {
   public:
 
-    struct PerMaterialData
-    {
-      glm::vec3 albedo;
-      float roughness;
-      glm::vec3 emissivity;
-      float specular;
-      float metallic;
-      int textureMask;
-      int sg;
-    } data;
+    MaterialUniforms uniforms;
 
     void Init(const RenderContext& ctx, const VulkanTexture& noneTexture);
     void Destroy(const RenderContext& ctx);

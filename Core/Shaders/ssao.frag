@@ -10,11 +10,8 @@ layout(set = 1, binding = 0) uniform sampler2D depthTexture;
 layout(set = 1, binding = 1) uniform sampler2D normalTexture;
 layout(set = 1, binding = 2) uniform sampler2D noiseTexture;
 
-const int KERNEL_SIZE = 16;
-
-layout(set = 1, binding = 3) uniform SSAOKernel {
-  vec4 samples[KERNEL_SIZE];
-} u_Kernel;
+#include "../Shared/SSAOKernel.h"
+layout(set = 1, binding = 3) uniform SSAOKernelBlock { SSAOKernel u_Kernel; };
 
 const float RADIUS = 0.2;
 const float BIAS = 0.025;
@@ -41,10 +38,10 @@ void main()
   }
 
   worldNormal = normalize(worldNormal);
-  vec3 viewNormal = normalize(mat3(u_Data.view) * worldNormal);
+  vec3 viewNormal = normalize(mat3(u_Frame.view) * worldNormal);
 
   // Full-res noise tiling: noise is 4x4, screen is full-res
-  vec2 noiseScale = vec2(float(u_Data.screenWidth) / 4.0, float(u_Data.screenHeight) / 4.0);
+  vec2 noiseScale = vec2(float(u_Frame.screenWidth) / 4.0, float(u_Frame.screenHeight) / 4.0);
   vec3 randomVec = textureLod(noiseTexture, uv * noiseScale, 0.0).rgb;
 
   vec3 tangent = normalize(randomVec - viewNormal * dot(randomVec, viewNormal));
@@ -53,12 +50,12 @@ void main()
 
   float occlusion = 0.0;
 
-  for (int i = 0; i < KERNEL_SIZE; i++)
+  for (int i = 0; i < SSAO_KERNEL_SIZE; i++)
   {
     vec3 samplePos = viewPos + (TBN * u_Kernel.samples[i].xyz) * RADIUS;
 
     // Project to clip space
-    vec4 clip = u_Data.proj * vec4(samplePos, 1.0);
+    vec4 clip = u_Frame.proj * vec4(samplePos, 1.0);
     vec2 sampleUV = (clip.xy / clip.w) * 0.5 + 0.5;
 
     float sampledDepth = textureLod(depthTexture, sampleUV, 0.0).r;
@@ -84,6 +81,6 @@ void main()
     occlusion += isOccluded * rangeCheck * notSky;
   }
 
-  float ao = 1.0 - (occlusion / float(KERNEL_SIZE)) * INTENSITY;
+  float ao = 1.0 - (occlusion / float(SSAO_KERNEL_SIZE)) * INTENSITY;
   outColor = vec4(clamp(ao, 0.0, 1.0));
 }

@@ -12,6 +12,7 @@ target_include_directories(Core PUBLIC
   ${Vulkan_INCLUDE_DIRS}
   Vendor
   Source
+  Shared
 )
 target_link_libraries(Core PUBLIC
   imgui

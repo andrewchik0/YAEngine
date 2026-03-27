@@ -16,7 +16,7 @@ layout(set = 1, binding = 4) uniform sampler2D materialTexture;
 void main()
 {
   // Debug views — raw G-buffer, no tone mapping
-  switch (u_Data.currentTexture)
+  switch (u_Frame.currentTexture)
   {
   case 1: // Albedo
     outColor = vec4(texture(albedoTexture, uv).rgb, 1.0);
@@ -39,9 +39,9 @@ void main()
   case 6: // SSR only (base zeroed in ssr.frag, HDR needs tone mapping)
     {
       vec3 color = texture(frame, uv).rgb;
-      color = color * u_Data.exposure;
+      color = color * u_Frame.exposure;
       color = acesFilm(color);
-      color = pow(color, vec3(1.0 / u_Data.gamma));
+      color = pow(color, vec3(1.0 / u_Frame.gamma));
       outColor = vec4(color, 1.0);
     }
     return;
@@ -50,9 +50,9 @@ void main()
   // Default: tone-mapped final image
   vec3 color = texture(frame, uv).rgb;
 
-  color = color * u_Data.exposure;
+  color = color * u_Frame.exposure;
   color = acesFilm(color);
-  color = pow(color, vec3(1.0 / u_Data.gamma));
+  color = pow(color, vec3(1.0 / u_Frame.gamma));
 
   outColor = vec4(color, 1.0);
 }

@@ -20,7 +20,7 @@ layout(location = 4) out vec2 outVelocity;
 #include "pbr.glsl"
 
 void main() {
-  float gamma = u_Data.gamma;
+  float gamma = u_Frame.gamma;
 
   float hasAlbedoTexture = float(u_Material.textureMask & 1);
   vec4 albedo = mix(vec4(u_Material.albedo, 1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
@@ -44,7 +44,7 @@ void main() {
     combinedTextures
   );
 
-  vec3 viewVec = normalize(u_Data.cameraPosition - inPosition);
+  vec3 viewVec = normalize(u_Frame.cameraPosition - inPosition);
 
   float NdotV = clamp(abs(dot(normal, viewVec)), 0.01, 0.99);
   vec3 f0 = mix(vec3(0.04), albedo.rgb, metallic);

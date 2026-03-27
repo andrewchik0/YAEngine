@@ -16,7 +16,7 @@ layout(push_constant) uniform PushConstants
 
 void main()
 {
-  vec2 texelSize = 1.0 / vec2(float(u_Data.screenWidth), float(u_Data.screenHeight));
+  vec2 texelSize = 1.0 / vec2(float(u_Frame.screenWidth), float(u_Frame.screenHeight));
   float centerDepth = linearizeDepth(textureLod(depthTexture, uv, 0.0).r);
 
   float result = 0.0;

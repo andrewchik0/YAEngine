@@ -7,6 +7,7 @@
 #include "ImageBarrier.h"
 #include "VulkanVertexBuffer.h"
 #include "Log.h"
+#include "SSAOKernel.h"
 
 #include "Utils/Utils.h"
 
@@ -109,9 +110,9 @@ namespace YAEngine
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
 
         m_ForwardPipeline.Bind(ctx.cmd);
-        m_ForwardPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_ForwardPipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         m_ForwardPipelineDoubleSided.Bind(ctx.cmd);
-        m_ForwardPipelineDoubleSided.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_ForwardPipelineDoubleSided.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
 
         DrawMeshes(app);
       }
@@ -135,7 +136,7 @@ namespace YAEngine
         m_SSAOPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
           mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-        m_SSAOPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_SSAOPipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         m_SSAOPipeline.BindDescriptorSets(ctx.cmd, {m_SSAOPassDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
       }
@@ -159,7 +160,7 @@ namespace YAEngine
         m_SSAOBlurHPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
           depth.GetView(), depth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-        m_SSAOBlurHPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_SSAOBlurHPipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         m_SSAOBlurHPipeline.BindDescriptorSets(ctx.cmd, {m_SSAOBlurHPassDescriptorSets[currentFrame].Get()}, 1);
         int direction = 0;
         m_SSAOBlurHPipeline.PushConstants(ctx.cmd, &direction);
@@ -185,7 +186,7 @@ namespace YAEngine
         m_SSAOBlurVPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
           depth.GetView(), depth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-        m_SSAOBlurVPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_SSAOBlurVPipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         m_SSAOBlurVPipeline.BindDescriptorSets(ctx.cmd, {m_SSAOBlurVPassDescriptorSets[currentFrame].Get()}, 1);
         int direction = 1;
         m_SSAOBlurVPipeline.PushConstants(ctx.cmd, &direction);
@@ -277,7 +278,7 @@ namespace YAEngine
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(6,
           hiZ.GetView(), hiZ.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-        m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         m_SSRPipeline.BindDescriptorSets(ctx.cmd, {m_SSRPassDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
       }
@@ -302,7 +303,7 @@ namespace YAEngine
           historyPrev.GetView(), historyPrev.GetSampler(), historyPrev.GetLayout());
         m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(2,
           velocity.GetView(), velocity.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_TAAPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_TAAPipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         m_TAAPipeline.BindDescriptorSets(ctx.cmd, {m_TAADescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
       }
@@ -340,7 +341,7 @@ namespace YAEngine
           mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
           mainMaterial.GetView(), mainMaterial.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
       }
@@ -396,7 +397,7 @@ namespace YAEngine
           mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
           mainMaterial.GetView(), mainMaterial.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         m_QuadPipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
 
@@ -512,7 +513,7 @@ namespace YAEngine
     m_NoneTexture.Load(ctx, &whitePixel, 1, 1, 4, VK_FORMAT_R8G8B8A8_SRGB);
 
     m_DefaultMaterial.Init(ctx, m_NoneTexture);
-    m_PerFrameData.Init(ctx);
+    m_FrameUniformBuffer.Init(ctx);
 
     // Generate SSAO noise texture (4x4 random tangent-space rotations)
     {
@@ -535,15 +536,10 @@ namespace YAEngine
 
     // Generate SSAO hemisphere kernel
     {
-      static constexpr int SSAO_KERNEL_SIZE = 16;
-
       std::mt19937 rng(0);
       std::uniform_real_distribution<float> dist(0.0f, 1.0f);
 
-      struct SSAOKernelData
-      {
-        glm::vec4 samples[SSAO_KERNEL_SIZE];
-      } kernelData;
+      SSAOKernel kernelData;
 
       for (int i = 0; i < SSAO_KERNEL_SIZE; i++)
       {
@@ -563,7 +559,7 @@ namespace YAEngine
         kernelData.samples[i] = glm::vec4(sample, 0.0f);
       }
 
-      m_SSAOKernelUBO.Create(ctx, sizeof(SSAOKernelData));
+      m_SSAOKernelUBO.Create(ctx, sizeof(SSAOKernel));
       m_SSAOKernelUBO.Update(kernelData);
     }
 
@@ -680,7 +676,7 @@ namespace YAEngine
     m_QuadPipeline.Destroy();
     m_TAAPipeline.Destroy();
     m_DefaultMaterial.Destroy(ctx);
-    m_PerFrameData.Destroy(ctx);
+    m_FrameUniformBuffer.Destroy(ctx);
 
     m_Graph.Destroy();
     m_Backend.Destroy();
@@ -825,21 +821,21 @@ namespace YAEngine
     auto cmd = m_Backend.GetCurrentCommandBuffer();
 
     SetUpCamera(app);
-    m_PerFrameData.ubo.time = (float)app->GetTimer().GetTime();
-    m_PerFrameData.ubo.gamma = m_Gamma;
-    m_PerFrameData.ubo.exposure = m_Exposure;
-    m_PerFrameData.ubo.currentTexture = m_CurrentTexture;
+    m_FrameUniformBuffer.uniforms.time = (float)app->GetTimer().GetTime();
+    m_FrameUniformBuffer.uniforms.gamma = m_Gamma;
+    m_FrameUniformBuffer.uniforms.exposure = m_Exposure;
+    m_FrameUniformBuffer.uniforms.currentTexture = m_CurrentTexture;
 #ifdef YA_EDITOR
-    m_PerFrameData.ubo.screenWidth = int(m_ViewportWidth);
-    m_PerFrameData.ubo.screenHeight = int(m_ViewportHeight);
+    m_FrameUniformBuffer.uniforms.screenWidth = int(m_ViewportWidth);
+    m_FrameUniformBuffer.uniforms.screenHeight = int(m_ViewportHeight);
 #else
-    m_PerFrameData.ubo.screenWidth = int(app->GetWindow().GetWidth());
-    m_PerFrameData.ubo.screenHeight = int(app->GetWindow().GetHeight());
+    m_FrameUniformBuffer.uniforms.screenWidth = int(app->GetWindow().GetWidth());
+    m_FrameUniformBuffer.uniforms.screenHeight = int(app->GetWindow().GetHeight());
 #endif
-    m_PerFrameData.ubo.ssaoEnabled = b_SSAOEnabled ? 1 : 0;
-    m_PerFrameData.ubo.ssrEnabled = b_SSREnabled ? 1 : 0;
-    m_PerFrameData.ubo.taaEnabled = b_TAAEnabled ? 1 : 0;
-    m_PerFrameData.ubo.hizMipCount = static_cast<int>(m_Graph.GetResourceDesc(m_HiZResource).mipLevels);
+    m_FrameUniformBuffer.uniforms.ssaoEnabled = b_SSAOEnabled ? 1 : 0;
+    m_FrameUniformBuffer.uniforms.ssrEnabled = b_SSREnabled ? 1 : 0;
+    m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;
+    m_FrameUniformBuffer.uniforms.hizMipCount = static_cast<int>(m_Graph.GetResourceDesc(m_HiZResource).mipLevels);
 
     // Configure render graph for this frame (TAA ping-pong + swapchain)
     auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
@@ -863,7 +859,7 @@ namespace YAEngine
 
     // Upload per-frame UBO before executing passes
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
-    m_PerFrameData.SetUp(currentFrame);
+    m_FrameUniformBuffer.SetUp(currentFrame);
 
     // Execute all passes
     m_Graph.Execute(cmd, app);
@@ -981,7 +977,7 @@ namespace YAEngine
       {
         currentPipeline = &GetForwardPipeline(dc.pipelineKey);
         currentPipeline->Bind(cmd);
-        currentPipeline->BindDescriptorSets(cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        currentPipeline->BindDescriptorSets(cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         lastPipelineKey = dc.pipelineKey;
         lastMaterialIndex = UINT32_MAX;
         lastMaterialGen = UINT32_MAX;
@@ -1042,7 +1038,7 @@ namespace YAEngine
     auto& camTransform = app->GetScene().GetComponent<TransformComponent>(app->GetScene().GetActiveCamera());
     glm::mat4 camDir = glm::mat4_cast(camTransform.rotation);
     if (skybox)
-      m_SkyBox.Draw(currentFrame, &cubeMapManager.GetVulkanCubicTexture(skybox), cmd, camDir, m_PerFrameData.ubo.proj, m_CubicResources);
+      m_SkyBox.Draw(currentFrame, &cubeMapManager.GetVulkanCubicTexture(skybox), cmd, camDir, m_FrameUniformBuffer.uniforms.proj, m_CubicResources);
   }
 
   void Render::SetUpCamera(Application* app)
@@ -1069,8 +1065,8 @@ namespace YAEngine
     proj[1][1] *= -1.0f;
 
     // Store previous frame matrices (unjittered) for reprojection
-    m_PerFrameData.ubo.prevView = m_PrevView;
-    m_PerFrameData.ubo.prevProj = m_PrevProj;
+    m_FrameUniformBuffer.uniforms.prevView = m_PrevView;
+    m_FrameUniformBuffer.uniforms.prevProj = m_PrevProj;
     m_PrevView = view;
     m_PrevProj = proj;
 
@@ -1086,26 +1082,26 @@ namespace YAEngine
       jitter.y /= float(app->GetWindow().GetHeight());
 #endif
 
-      m_PerFrameData.ubo.jitterX = jitter.x;
-      m_PerFrameData.ubo.jitterY = jitter.y;
+      m_FrameUniformBuffer.uniforms.jitterX = jitter.x;
+      m_FrameUniformBuffer.uniforms.jitterY = jitter.y;
 
       proj[2][0] += jitter.x;
       proj[2][1] += jitter.y;
     }
     else
     {
-      m_PerFrameData.ubo.jitterX = 0.0f;
-      m_PerFrameData.ubo.jitterY = 0.0f;
+      m_FrameUniformBuffer.uniforms.jitterX = 0.0f;
+      m_FrameUniformBuffer.uniforms.jitterY = 0.0f;
     }
 
-    m_PerFrameData.ubo.view = view;
-    m_PerFrameData.ubo.proj = proj;
-    m_PerFrameData.ubo.invProj = glm::inverse(proj);
-    m_PerFrameData.ubo.nearPlane = camera.nearPlane;
-    m_PerFrameData.ubo.farPlane = camera.farPlane;
-    m_PerFrameData.ubo.cameraPosition = transform.position;
-    m_PerFrameData.ubo.cameraDirection = glm::normalize(-glm::vec3(world[2]));
-    m_PerFrameData.ubo.fov = camera.fov;
+    m_FrameUniformBuffer.uniforms.view = view;
+    m_FrameUniformBuffer.uniforms.proj = proj;
+    m_FrameUniformBuffer.uniforms.invProj = glm::inverse(proj);
+    m_FrameUniformBuffer.uniforms.nearPlane = camera.nearPlane;
+    m_FrameUniformBuffer.uniforms.farPlane = camera.farPlane;
+    m_FrameUniformBuffer.uniforms.cameraPosition = transform.position;
+    m_FrameUniformBuffer.uniforms.cameraDirection = glm::normalize(-glm::vec3(world[2]));
+    m_FrameUniformBuffer.uniforms.fov = camera.fov;
   }
 
   void Render::InitPipelines()
@@ -1133,7 +1129,7 @@ namespace YAEngine
       .colorAttachmentCount = 0,
       .vertexInputFormat = "f3f2f3f4",
       .sets = std::vector({
-        m_PerFrameData.GetLayout(),
+        m_FrameUniformBuffer.GetLayout(),
       })
     };
     m_DepthPrepassPipeline.Init(ctx.device, depthRP, depthPrepassInfo, pipelineCache);
@@ -1143,7 +1139,7 @@ namespace YAEngine
     depthPrepassInfo.doubleSided = false;
     depthPrepassInfo.vertexShaderFile = "depth_prepass_instanced.vert";
     depthPrepassInfo.sets = std::vector({
-      m_PerFrameData.GetLayout(),
+      m_FrameUniformBuffer.GetLayout(),
       m_InstanceDescriptorSet.GetLayout(),
     });
     m_DepthPrepassPipelineInstanced.Init(ctx.device, depthRP, depthPrepassInfo, pipelineCache);
@@ -1163,7 +1159,7 @@ namespace YAEngine
       .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
       .vertexInputFormat = "f3f2f3f4",
       .sets = std::vector({
-        m_PerFrameData.GetLayout(),
+        m_FrameUniformBuffer.GetLayout(),
         m_DefaultMaterial.GetLayout(),
       })
     };
@@ -1185,7 +1181,7 @@ namespace YAEngine
     forwardInfo.vertexShaderFile = "shader.vert";
     m_ForwardPipelineNoShading.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
-    // Swapchain descriptor sets (set 1 — set 0 is PerFrameData)
+    // Swapchain descriptor sets (set 1 — set 0 is FrameUniformBuffer)
     SetDescription desc = {
       .set = 1,
       .bindings = {
@@ -1204,7 +1200,7 @@ namespace YAEngine
       m_SwapChainDescriptorSets[i].Init(ctx, desc);
     }
 
-    // TAA descriptor sets (set 1 — set 0 is PerFrameData)
+    // TAA descriptor sets (set 1 — set 0 is FrameUniformBuffer)
     SetDescription taaDesc = {
       .set = 1,
       .bindings = {
@@ -1234,7 +1230,7 @@ namespace YAEngine
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({
-        m_PerFrameData.GetLayout(),
+        m_FrameUniformBuffer.GetLayout(),
         m_SwapChainDescriptorSets[0].GetLayout(),
       })
     };
@@ -1244,7 +1240,7 @@ namespace YAEngine
     // TAA pipeline — use TAA render pass (compatible format)
     VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
     quadInfo.fragmentShaderFile = "taa.frag";
-    quadInfo.sets = std::vector({ m_PerFrameData.GetLayout(), m_TAADescriptorSets[0].GetLayout() });
+    quadInfo.sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_TAADescriptorSets[0].GetLayout() });
     m_TAAPipeline.Init(ctx.device, taaRP, quadInfo, pipelineCache);
 
     // SSAO descriptor sets and pipeline
@@ -1276,7 +1272,7 @@ namespace YAEngine
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({
-        m_PerFrameData.GetLayout(),
+        m_FrameUniformBuffer.GetLayout(),
         m_SSAOPassDescriptorSets[0].GetLayout(),
       })
     };
@@ -1312,7 +1308,7 @@ namespace YAEngine
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({
-        m_PerFrameData.GetLayout(),
+        m_FrameUniformBuffer.GetLayout(),
         m_SSAOBlurHPassDescriptorSets[0].GetLayout(),
       })
     };
@@ -1351,7 +1347,7 @@ namespace YAEngine
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({
-        m_PerFrameData.GetLayout(),
+        m_FrameUniformBuffer.GetLayout(),
         m_SSRPassDescriptorSets[0].GetLayout(),
       })
     };
@@ -1431,7 +1427,7 @@ namespace YAEngine
       {
         currentPipeline = &GetDepthPipeline(dc.pipelineKey);
         currentPipeline->Bind(cmd);
-        currentPipeline->BindDescriptorSets(cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        currentPipeline->BindDescriptorSets(cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         lastPipelineKey = dc.pipelineKey;
       }
 

@@ -2,40 +2,17 @@
 
 #include "VulkanDescriptorSet.h"
 #include "VulkanUniformBuffer.h"
+#include "FrameUniforms.h"
 
 namespace YAEngine
 {
   struct RenderContext;
 
-  class PerFrameData
+  class FrameUniformBuffer
   {
   public:
 
-    struct PerFrameUBO
-    {
-      glm::mat4 view;
-      glm::mat4 proj;
-      glm::mat4 invProj;
-      glm::mat4 prevView;
-      glm::mat4 prevProj;
-      glm::vec3 cameraPosition;
-      float time;
-      glm::vec3 cameraDirection;
-      float gamma;
-      float exposure;
-      int currentTexture;
-      float nearPlane;
-      float farPlane;
-      float fov;
-      int screenWidth;
-      int screenHeight;
-      int ssaoEnabled;
-      int ssrEnabled;
-      int taaEnabled;
-      float jitterX;
-      float jitterY;
-      int hizMipCount;
-    } ubo;
+    FrameUniforms uniforms;
 
     void Init(const RenderContext& ctx);
     void Destroy(const RenderContext& ctx);

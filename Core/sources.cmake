@@ -33,8 +33,8 @@ set(SOURCE_FILES
   Source/Render/VulkanMemoryAllocator.h
   Source/Render/VulkanDescriptorPool.cpp
   Source/Render/VulkanDescriptorPool.h
-  Source/Render/PerFrameData.h
-  Source/Render/PerFrameData.cpp
+  Source/Render/FrameUniformBuffer.h
+  Source/Render/FrameUniformBuffer.cpp
   Source/Render/VulkanDescriptorSet.cpp
   Source/Render/VulkanDescriptorSet.h
   Source/Render/VulkanUniformBuffer.cpp
