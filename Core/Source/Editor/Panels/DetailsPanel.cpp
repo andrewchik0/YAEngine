@@ -144,12 +144,14 @@ namespace YAEngine
       {
         materials.ForEachWithHandle([&](MaterialHandle handle, Material& mat)
         {
+          ImGui::PushID(static_cast<int>(handle.index));
           bool isSelected = (mc.asset == handle);
           if (ImGui::Selectable(mat.name.c_str(), isSelected))
             mc.asset = handle;
 
           if (isSelected)
             ImGui::SetItemDefaultFocus();
+          ImGui::PopID();
         });
 
         ImGui::EndCombo();
