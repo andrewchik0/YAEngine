@@ -806,13 +806,9 @@ namespace YAEngine
       {
         ResizeViewport();
 
-        // Update camera aspect ratio to match new viewport dimensions
-        auto activeCamera = app->GetScene().GetActiveCamera();
-        if (activeCamera != entt::null && app->GetScene().HasComponent<CameraComponent>(activeCamera))
-        {
-          app->GetScene().GetComponent<CameraComponent>(activeCamera).Resize(
-            float(m_ViewportWidth), float(m_ViewportHeight));
-        }
+        // Update aspect ratio for all cameras so switching doesn't produce distortion
+        for (auto [entity, cam] : app->GetScene().GetView<CameraComponent>().each())
+          cam.Resize(float(m_ViewportWidth), float(m_ViewportHeight));
       }
     }
 #endif
