@@ -159,7 +159,7 @@ namespace YAEngine
 
       if (materials.Has(mc.asset))
       {
-        if (ImGui::Button("Select in Browser"))
+        if (ImGui::Button("Select in Material Inspector"))
           context.SelectMaterial(mc.asset);
       }
     }
