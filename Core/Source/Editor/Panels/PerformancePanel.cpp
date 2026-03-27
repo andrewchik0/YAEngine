@@ -49,48 +49,15 @@ namespace YAEngine
     m_AvgFrametime = count > 0 ? sum / (float)count : 0.0f;
     if (m_MinFrametime == FLT_MAX) m_MinFrametime = 0.0f;
 
-    // FPS / ms toggle
-    ImGui::Checkbox("Show FPS", &b_ShowFPS);
-    ImGui::SameLine();
-
-    if (b_ShowFPS)
-    {
-      ImGui::Text("FPS: %.1f", m_DisplayFPS);
-      ImGui::Text("Min: %.1f  Max: %.1f  Avg: %.1f",
-        m_MaxFrametime > 0.0f ? 1000.0f / m_MaxFrametime : 0.0f,
-        m_MinFrametime > 0.0f ? 1000.0f / m_MinFrametime : 0.0f,
-        m_AvgFrametime > 0.0f ? 1000.0f / m_AvgFrametime : 0.0f);
-    }
-    else
-    {
-      ImGui::Text("Frame: %.2f ms", frametime);
-      ImGui::Text("Min: %.2f ms  Max: %.2f ms  Avg: %.2f ms",
-        m_MinFrametime, m_MaxFrametime, m_AvgFrametime);
-    }
+    ImGui::Text("FPS: %.1f  |  Frame: %.2f ms", m_DisplayFPS, frametime);
+    ImGui::Text("Min: %.2f ms  Max: %.2f ms  Avg: %.2f ms",
+      m_MinFrametime, m_MaxFrametime, m_AvgFrametime);
 
     // Graph
     char overlay[32];
-    if (b_ShowFPS)
-      snprintf(overlay, sizeof(overlay), "%.1f FPS", m_DisplayFPS);
-    else
-      snprintf(overlay, sizeof(overlay), "%.2f ms", frametime);
-
-    if (b_ShowFPS)
-    {
-      float maxVal = 0.0f;
-      for (int i = 0; i < FRAMETIME_HISTORY_SIZE; i++)
-      {
-        m_FPSHistory[i] = m_FrametimeHistory[i] > 0.0f ? 1000.0f / m_FrametimeHistory[i] : 0.0f;
-        if (m_FPSHistory[i] > maxVal) maxVal = m_FPSHistory[i];
-      }
-      ImGui::PlotLines("##frametime", m_FPSHistory, FRAMETIME_HISTORY_SIZE,
-        m_FrametimeOffset, overlay, 0.0f, maxVal * 1.2f, ImVec2(0, 80));
-    }
-    else
-    {
-      ImGui::PlotLines("##frametime", m_FrametimeHistory, FRAMETIME_HISTORY_SIZE,
-        m_FrametimeOffset, overlay, 0.0f, m_MaxFrametime * 1.2f, ImVec2(0, 80));
-    }
+    snprintf(overlay, sizeof(overlay), "%.2f ms", frametime);
+    ImGui::PlotLines("##frametime", m_FrametimeHistory, FRAMETIME_HISTORY_SIZE,
+      m_FrametimeOffset, overlay, 0.0f, m_MaxFrametime * 1.2f, ImVec2(0, 80));
 
     // Render Stats section
     ImGui::Separator();

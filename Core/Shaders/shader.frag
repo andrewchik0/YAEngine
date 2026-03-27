@@ -64,7 +64,7 @@ void main() {
   vec2 brdf = texture(brdfTexture, vec2(NdotV, clamp(roughness, 0.01, 0.99))).rg;
   vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
-  vec3 ambient = kD * diffuse + specular;
+  vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
   vec3 resultColor = max(ambient, vec3(0.0));
 
   vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;

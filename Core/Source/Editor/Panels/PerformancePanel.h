@@ -23,7 +23,5 @@ namespace YAEngine
     float m_MaxFrametime = 0.0f;
     float m_AvgFrametime = 0.0f;
 
-    bool b_ShowFPS = false; // false = ms, true = FPS
-    float m_FPSHistory[FRAMETIME_HISTORY_SIZE] = {};
   };
 }
