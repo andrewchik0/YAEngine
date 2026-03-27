@@ -33,6 +33,10 @@ namespace YAEngine
     TextureHandle normalTexture;
     TextureHandle heightTexture;
     CubeMapHandle cubemap;
+
+    uint32_t generation = 0;
+    void MarkChanged() { ++generation; }
+
   private:
 
     VulkanMaterial m_VulkanMaterial;

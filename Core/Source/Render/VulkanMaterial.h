@@ -35,5 +35,6 @@ namespace YAEngine
 
     std::vector<VulkanDescriptorSet> m_DescriptorSets;
     std::vector<VulkanUniformBuffer> m_UniformBuffers;
+    std::vector<uint32_t> m_BoundGenerations;
   };
 }

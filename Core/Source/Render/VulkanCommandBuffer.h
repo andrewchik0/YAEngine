@@ -30,5 +30,6 @@ namespace YAEngine
 
     VkDevice m_Device {};
     VkQueue m_Queue {};
+    VkFence m_SingleTimeFence {};
   };
 }

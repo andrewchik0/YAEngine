@@ -54,6 +54,8 @@ namespace YAEngine
     MaterialHandle asset;
   };
 
+  struct RootTag {};
+
 #ifdef YA_EDITOR
   struct EditorOnlyTag {};
 #endif

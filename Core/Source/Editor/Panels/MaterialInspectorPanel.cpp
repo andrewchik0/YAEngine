@@ -13,9 +13,11 @@ namespace YAEngine
     { "Image Files", "png,jpg,jpeg,tga,bmp,hdr" }
   };
 
-  static void DrawTextureSlot(const char* label, TextureHandle& handle, bool linear,
+  static bool DrawTextureSlot(const char* label, TextureHandle& handle, bool linear,
                               EditorContext& context)
   {
+    bool changed = false;
+
     ImGui::PushID(label);
     ImGui::Text("%s", label);
 
@@ -42,6 +44,7 @@ namespace YAEngine
       {
         bool* alphaPtr = nullptr;
         handle = context.assetManager->Textures().Load(path, alphaPtr, linear);
+        changed = true;
       }
     }
 
@@ -49,11 +52,15 @@ namespace YAEngine
     {
       ImGui::SameLine();
       if (ImGui::Button("x"))
+      {
         handle = TextureHandle::Invalid();
+        changed = true;
+      }
     }
 
     ImGui::EndGroup();
     ImGui::PopID();
+    return changed;
   }
 
   void MaterialInspectorPanel::OnRender(EditorContext& context)
@@ -74,6 +81,8 @@ namespace YAEngine
 
     Material& mat = context.assetManager->Materials().Get(context.selectedMaterial);
 
+    bool changed = false;
+
     if (ImGui::CollapsingHeader("Properties", ImGuiTreeNodeFlags_DefaultOpen))
     {
       char nameBuf[256] = {};
@@ -81,25 +90,28 @@ namespace YAEngine
       if (ImGui::InputText("Name", nameBuf, sizeof(nameBuf)))
         mat.name = nameBuf;
 
-      ImGui::ColorEdit3("Albedo", &mat.albedo.x);
-      ImGui::SliderFloat("Roughness", &mat.roughness, 0.0f, 1.0f);
-      ImGui::SliderFloat("Metallic", &mat.metallic, 0.0f, 1.0f);
-      ImGui::SliderFloat("Specular", &mat.specular, 0.0f, 1.0f);
-      ImGui::ColorEdit3("Emissivity", &mat.emissivity.x);
-      ImGui::Checkbox("Has Alpha", &mat.hasAlpha);
-      ImGui::Checkbox("Combined Textures", &mat.combinedTextures);
+      changed |= ImGui::ColorEdit3("Albedo", &mat.albedo.x);
+      changed |= ImGui::SliderFloat("Roughness", &mat.roughness, 0.0f, 1.0f);
+      changed |= ImGui::SliderFloat("Metallic", &mat.metallic, 0.0f, 1.0f);
+      changed |= ImGui::SliderFloat("Specular", &mat.specular, 0.0f, 1.0f);
+      changed |= ImGui::ColorEdit3("Emissivity", &mat.emissivity.x);
+      changed |= ImGui::Checkbox("Has Alpha", &mat.hasAlpha);
+      changed |= ImGui::Checkbox("Combined Textures", &mat.combinedTextures);
     }
 
     if (ImGui::CollapsingHeader("Textures", ImGuiTreeNodeFlags_DefaultOpen))
     {
-      DrawTextureSlot("Base Color",  mat.baseColorTexture,  false, context);
-      DrawTextureSlot("Metallic",    mat.metallicTexture,   true,  context);
-      DrawTextureSlot("Roughness",   mat.roughnessTexture,  true,  context);
-      DrawTextureSlot("Specular",    mat.specularTexture,   true,  context);
-      DrawTextureSlot("Emissive",    mat.emissiveTexture,   false, context);
-      DrawTextureSlot("Normal",      mat.normalTexture,     true,  context);
-      DrawTextureSlot("Height",      mat.heightTexture,     true,  context);
+      changed |= DrawTextureSlot("Base Color",  mat.baseColorTexture,  false, context);
+      changed |= DrawTextureSlot("Metallic",    mat.metallicTexture,   true,  context);
+      changed |= DrawTextureSlot("Roughness",   mat.roughnessTexture,  true,  context);
+      changed |= DrawTextureSlot("Specular",    mat.specularTexture,   true,  context);
+      changed |= DrawTextureSlot("Emissive",    mat.emissiveTexture,   false, context);
+      changed |= DrawTextureSlot("Normal",      mat.normalTexture,     true,  context);
+      changed |= DrawTextureSlot("Height",      mat.heightTexture,     true,  context);
     }
+
+    if (changed)
+      mat.MarkChanged();
 
     ImGui::End();
   }

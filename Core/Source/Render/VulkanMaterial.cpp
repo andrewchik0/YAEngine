@@ -10,6 +10,7 @@ namespace YAEngine
   {
     m_DescriptorSets.resize(ctx.maxFramesInFlight);
     m_UniformBuffers.resize(ctx.maxFramesInFlight);
+    m_BoundGenerations.resize(ctx.maxFramesInFlight, UINT32_MAX);
 
     VkDescriptorSetLayout layout = nullptr;
     for (size_t i = 0; i < ctx.maxFramesInFlight; i++)
@@ -42,9 +43,12 @@ namespace YAEngine
         m_DescriptorSets[i].Init(ctx, layout);
       }
       m_UniformBuffers[i].Create(ctx, sizeof(MaterialUniforms));
-      m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(MaterialUniforms));
-      for (size_t j = 1; j < 11; j++)
-        m_DescriptorSets[i].WriteCombinedImageSampler((uint32_t)j, noneTexture.GetView(), noneTexture.GetSampler());
+
+      auto writer = m_DescriptorSets[i].Writer();
+      writer.WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(MaterialUniforms));
+      for (uint32_t j = 1; j < 11; j++)
+        writer.WriteCombinedImageSampler(j, noneTexture.GetView(), noneTexture.GetSampler());
+      writer.Flush();
     }
   }
 
@@ -62,59 +66,64 @@ namespace YAEngine
 
   void VulkanMaterial::Bind(Application* app, Material& material, uint32_t currentFrame, const VulkanTexture& noneTexture)
   {
+    if (m_BoundGenerations[currentFrame] == material.generation)
+      return;
+
     int textureMask = 0;
     auto& textures = app->GetAssetManager().Textures();
     auto& cubeMaps = app->GetAssetManager().CubeMaps();
 
+    auto writer = m_DescriptorSets[currentFrame].Writer();
+
     if (textures.Has(material.baseColorTexture))
     {
       auto& base = textures.GetVulkanTexture(material.baseColorTexture);
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(1, base.GetView(), base.GetSampler());
+      writer.WriteCombinedImageSampler(1, base.GetView(), base.GetSampler());
       textureMask |= (1 << 0);
     }
     if (textures.Has(material.metallicTexture))
     {
       auto& metallic = textures.GetVulkanTexture(material.metallicTexture);
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(2, metallic.GetView(), metallic.GetSampler());
+      writer.WriteCombinedImageSampler(2, metallic.GetView(), metallic.GetSampler());
       textureMask |= (1 << 1);
     }
     if (textures.Has(material.roughnessTexture))
     {
       auto& roughness = textures.GetVulkanTexture(material.roughnessTexture);
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(3, roughness.GetView(), roughness.GetSampler());
+      writer.WriteCombinedImageSampler(3, roughness.GetView(), roughness.GetSampler());
       textureMask |= (1 << 2);
     }
     if (textures.Has(material.specularTexture))
     {
       auto& specular = textures.GetVulkanTexture(material.specularTexture);
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(4, specular.GetView(), specular.GetSampler());
+      writer.WriteCombinedImageSampler(4, specular.GetView(), specular.GetSampler());
       textureMask |= (1 << 3);
     }
     if (textures.Has(material.emissiveTexture))
     {
       auto& emissive = textures.GetVulkanTexture(material.emissiveTexture);
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(5, emissive.GetView(), emissive.GetSampler());
+      writer.WriteCombinedImageSampler(5, emissive.GetView(), emissive.GetSampler());
       textureMask |= (1 << 4);
     }
     if (textures.Has(material.normalTexture))
     {
       auto& normal = textures.GetVulkanTexture(material.normalTexture);
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(6, normal.GetView(), normal.GetSampler());
+      writer.WriteCombinedImageSampler(6, normal.GetView(), normal.GetSampler());
       textureMask |= (1 << 5);
     }
     if (textures.Has(material.heightTexture))
     {
       auto& height = textures.GetVulkanTexture(material.heightTexture);
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(7, height.GetView(), height.GetSampler());
+      writer.WriteCombinedImageSampler(7, height.GetView(), height.GetSampler());
       textureMask |= (1 << 6);
     }
     if (cubeMaps.Has(material.cubemap))
     {
       auto& cubemap = cubeMaps.GetVulkanCubicTexture(material.cubemap);
       auto& brdfLut = app->GetRender().GetCubicResources().brdfLut;
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(8, cubemap.GetPrefilterView(), cubemap.GetPrefilterSampler());
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(9, brdfLut.GetView(), brdfLut.GetSampler());
-      m_DescriptorSets[currentFrame].WriteCombinedImageSampler(10, cubemap.GetIrradianceView(), cubemap.GetIrradianceSampler());
+      writer.WriteCombinedImageSampler(8, cubemap.GetPrefilterView(), cubemap.GetPrefilterSampler());
+      writer.WriteCombinedImageSampler(9, brdfLut.GetView(), brdfLut.GetSampler());
+      writer.WriteCombinedImageSampler(10, cubemap.GetIrradianceView(), cubemap.GetIrradianceSampler());
       textureMask |= (1 << 7);
     }
     textureMask |= (material.combinedTextures << 8);
@@ -128,6 +137,9 @@ namespace YAEngine
     uniforms.sg = material.sg;
 
     m_UniformBuffers[currentFrame].Update(uniforms);
-    m_DescriptorSets[currentFrame].WriteUniformBuffer(0, m_UniformBuffers[currentFrame].Get(), sizeof(MaterialUniforms));
+    writer.WriteUniformBuffer(0, m_UniformBuffers[currentFrame].Get(), sizeof(MaterialUniforms));
+    writer.Flush();
+
+    m_BoundGenerations[currentFrame] = material.generation;
   }
 }

@@ -2,6 +2,8 @@
 
 #include "Log.h"
 
+#include <fstream>
+
 namespace YAEngine
 {
   void RenderBackend::Init(GLFWwindow* window, const RenderSpecs& specs)
@@ -21,8 +23,27 @@ namespace YAEngine
 
     m_DescriptorPool.Init(m_Device.Get());
 
+    // Load pipeline cache from disk if available
+    std::vector<char> cacheData;
+    {
+      std::ifstream file("pipeline_cache.bin", std::ios::binary | std::ios::ate);
+      if (file.is_open())
+      {
+        auto size = file.tellg();
+        if (size > 0)
+        {
+          cacheData.resize(static_cast<size_t>(size));
+          file.seekg(0);
+          file.read(cacheData.data(), size);
+          YA_LOG_INFO("Render", "Loaded pipeline cache from disk (%zu bytes)", cacheData.size());
+        }
+      }
+    }
+
     VkPipelineCacheCreateInfo cacheInfo{};
     cacheInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_CACHE_CREATE_INFO;
+    cacheInfo.initialDataSize = cacheData.size();
+    cacheInfo.pInitialData = cacheData.empty() ? nullptr : cacheData.data();
     if (vkCreatePipelineCache(m_Device.Get(), &cacheInfo, nullptr, &m_PipelineCache) != VK_SUCCESS)
     {
       YA_LOG_ERROR("Render", "Failed to create pipeline cache");
@@ -41,6 +62,27 @@ namespace YAEngine
 
   void RenderBackend::Destroy()
   {
+    // Save pipeline cache to disk
+    {
+      size_t cacheSize = 0;
+      vkGetPipelineCacheData(m_Device.Get(), m_PipelineCache, &cacheSize, nullptr);
+      if (cacheSize > 0)
+      {
+        std::vector<char> cacheData(cacheSize);
+        vkGetPipelineCacheData(m_Device.Get(), m_PipelineCache, &cacheSize, cacheData.data());
+        std::ofstream file("pipeline_cache.bin", std::ios::binary);
+        if (file.is_open())
+        {
+          file.write(cacheData.data(), static_cast<std::streamsize>(cacheSize));
+          YA_LOG_INFO("Render", "Saved pipeline cache to disk (%zu bytes)", cacheSize);
+        }
+        else
+        {
+          YA_LOG_WARN("Render", "Failed to open pipeline_cache.bin for writing");
+        }
+      }
+    }
+
     m_Sync.Destroy();
     m_ImGUI.Destroy();
     m_CommandBuffer.Destroy();

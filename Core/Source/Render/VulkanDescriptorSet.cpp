@@ -74,6 +74,105 @@ namespace YAEngine
     }
   }
 
+  // DescriptorWriter
+
+  DescriptorWriter& DescriptorWriter::WriteUniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size)
+  {
+    auto& bufferInfo = m_BufferInfos[m_BufferInfoCount++];
+    bufferInfo = {};
+    bufferInfo.buffer = buffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range  = size;
+
+    auto& write = m_Writes[m_WriteCount++];
+    write = {};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_Set;
+    write.dstBinding = binding;
+    write.dstArrayElement = 0;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+    write.descriptorCount = 1;
+    write.pBufferInfo = &bufferInfo;
+    return *this;
+  }
+
+  DescriptorWriter& DescriptorWriter::WriteStorageBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size)
+  {
+    auto& bufferInfo = m_BufferInfos[m_BufferInfoCount++];
+    bufferInfo = {};
+    bufferInfo.buffer = buffer;
+    bufferInfo.offset = 0;
+    bufferInfo.range  = size;
+
+    auto& write = m_Writes[m_WriteCount++];
+    write = {};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_Set;
+    write.dstBinding = binding;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+    write.descriptorCount = 1;
+    write.pBufferInfo = &bufferInfo;
+    return *this;
+  }
+
+  DescriptorWriter& DescriptorWriter::WriteCombinedImageSampler(
+    uint32_t binding,
+    VkImageView imageView,
+    VkSampler sampler,
+    VkImageLayout layout)
+  {
+    auto& imageInfo = m_ImageInfos[m_ImageInfoCount++];
+    imageInfo = {};
+    imageInfo.imageView = imageView;
+    imageInfo.sampler   = sampler;
+    imageInfo.imageLayout = layout;
+
+    auto& write = m_Writes[m_WriteCount++];
+    write = {};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_Set;
+    write.dstBinding = binding;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+    write.descriptorCount = 1;
+    write.pImageInfo = &imageInfo;
+    return *this;
+  }
+
+  DescriptorWriter& DescriptorWriter::WriteStorageImage(
+    uint32_t binding,
+    VkImageView imageView,
+    VkImageLayout layout)
+  {
+    auto& imageInfo = m_ImageInfos[m_ImageInfoCount++];
+    imageInfo = {};
+    imageInfo.imageView = imageView;
+    imageInfo.sampler   = VK_NULL_HANDLE;
+    imageInfo.imageLayout = layout;
+
+    auto& write = m_Writes[m_WriteCount++];
+    write = {};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.dstSet = m_Set;
+    write.dstBinding = binding;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+    write.descriptorCount = 1;
+    write.pImageInfo = &imageInfo;
+    return *this;
+  }
+
+  void DescriptorWriter::Flush()
+  {
+    if (m_WriteCount > 0)
+    {
+      vkUpdateDescriptorSets(m_Device, m_WriteCount, m_Writes.data(), 0, nullptr);
+      m_WriteCount = 0;
+      m_BufferInfoCount = 0;
+      m_ImageInfoCount = 0;
+    }
+  }
+
+  // VulkanDescriptorSet Write* methods (immediate, backward-compatible)
+
   void VulkanDescriptorSet::WriteUniformBuffer(
     uint32_t binding,
     VkBuffer buffer,

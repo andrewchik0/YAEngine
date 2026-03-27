@@ -9,6 +9,7 @@ namespace YAEngine
     Entity e = m_Registry.create();
     m_Registry.emplace<TransformComponent>(e);
     m_Registry.emplace<HierarchyComponent>(e);
+    m_Registry.emplace<RootTag>(e);
     m_Registry.emplace<Name>(e, name);
     return e;
   }
@@ -84,6 +85,12 @@ namespace YAEngine
       auto& parentH = m_Registry.get<HierarchyComponent>(parent);
       childH.nextSibling = parentH.firstChild;
       parentH.firstChild = child;
+      m_Registry.remove<RootTag>(child);
+    }
+    else
+    {
+      if (!m_Registry.all_of<RootTag>(child))
+        m_Registry.emplace<RootTag>(child);
     }
 
     m_Registry.get<TransformComponent>(child).dirty = true;
@@ -155,23 +162,13 @@ namespace YAEngine
   void Scene::MarkDirty(Entity e)
   {
     auto& t = m_Registry.get<TransformComponent>(e);
-    auto& hc = m_Registry.get<HierarchyComponent>(e);
-
-    if (hc.parent != entt::null)
-    {
-      entt::entity parent = hc.parent;
-      while (parent != entt::null)
-      {
-        m_Registry.get<TransformComponent>(parent).dirty = true;
-        parent = m_Registry.get<HierarchyComponent>(parent).parent;
-      }
-    }
 
     if (t.dirty)
       return;
 
     t.dirty = true;
 
+    auto& hc = m_Registry.get<HierarchyComponent>(e);
     entt::entity child = hc.firstChild;
     while (child != entt::null)
     {

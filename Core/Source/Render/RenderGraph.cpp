@@ -518,7 +518,19 @@ namespace YAEngine
 
   void RenderGraph::InsertBarriers(VkCommandBuffer cmd, uint32_t passIndex)
   {
+    static constexpr uint32_t MAX_BARRIERS = 16;
+
     auto& pass = m_Passes[passIndex];
+
+    struct BarrierStages
+    {
+      VkPipelineStageFlags srcStage;
+      VkPipelineStageFlags dstStage;
+    };
+
+    std::array<VkImageMemoryBarrier, MAX_BARRIERS> barriers{};
+    std::array<BarrierStages, MAX_BARRIERS> stages{};
+    uint32_t barrierCount = 0;
 
     // Transition inputs to SHADER_READ_ONLY_OPTIMAL
     for (auto handle : pass.info.inputs)
@@ -528,10 +540,25 @@ namespace YAEngine
 
       auto& res = m_Resources[handle];
       auto& image = ResolveResource(handle);
+      auto info = LookupBarrierInfo(layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-      TransitionImageLayout(cmd, image.GetImage(),
-        layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-        res.desc.aspect, 0, res.desc.mipLevels);
+      assert(barrierCount < MAX_BARRIERS && "InsertBarriers: too many barriers");
+      auto& barrier = barriers[barrierCount];
+      barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      barrier.oldLayout = layout;
+      barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      barrier.image = image.GetImage();
+      barrier.subresourceRange.aspectMask = res.desc.aspect;
+      barrier.subresourceRange.baseMipLevel = 0;
+      barrier.subresourceRange.levelCount = res.desc.mipLevels;
+      barrier.subresourceRange.baseArrayLayer = 0;
+      barrier.subresourceRange.layerCount = 1;
+      barrier.srcAccessMask = info.srcAccess;
+      barrier.dstAccessMask = info.dstAccess;
+      stages[barrierCount] = { info.srcStage, info.dstStage };
+      barrierCount++;
 
       layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
       image.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -547,14 +574,65 @@ namespace YAEngine
 
         auto& res = m_Resources[handle];
         auto& image = ResolveResource(handle);
+        auto info = LookupBarrierInfo(layout, VK_IMAGE_LAYOUT_GENERAL);
 
-        TransitionImageLayout(cmd, image.GetImage(),
-          layout, VK_IMAGE_LAYOUT_GENERAL,
-          res.desc.aspect, 0, res.desc.mipLevels);
+        assert(barrierCount < MAX_BARRIERS && "InsertBarriers: too many barriers");
+        auto& barrier = barriers[barrierCount];
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = layout;
+        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image.GetImage();
+        barrier.subresourceRange.aspectMask = res.desc.aspect;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = res.desc.mipLevels;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+        barrier.srcAccessMask = info.srcAccess;
+        barrier.dstAccessMask = info.dstAccess;
+        stages[barrierCount] = { info.srcStage, info.dstStage };
+        barrierCount++;
 
         layout = VK_IMAGE_LAYOUT_GENERAL;
         image.SetLayout(VK_IMAGE_LAYOUT_GENERAL);
       }
+    }
+
+    // Group barriers by matching stage pairs and issue one vkCmdPipelineBarrier per group
+    for (uint32_t i = 0; i < barrierCount; )
+    {
+      VkPipelineStageFlags srcStage = stages[i].srcStage;
+      VkPipelineStageFlags dstStage = stages[i].dstStage;
+
+      // Collect contiguous run of barriers with the same stages starting at i
+      // Also swap matching barriers from later positions into the group
+      uint32_t groupStart = i;
+      uint32_t groupEnd = i + 1;
+
+      for (uint32_t j = groupEnd; j < barrierCount; j++)
+      {
+        if (stages[j].srcStage == srcStage && stages[j].dstStage == dstStage)
+        {
+          if (j != groupEnd)
+          {
+            std::swap(barriers[j], barriers[groupEnd]);
+            std::swap(stages[j], stages[groupEnd]);
+          }
+          groupEnd++;
+        }
+      }
+
+      vkCmdPipelineBarrier(
+        cmd,
+        srcStage, dstStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        groupEnd - groupStart, &barriers[groupStart]
+      );
+
+      i = groupEnd;
     }
   }
 

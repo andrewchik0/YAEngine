@@ -42,6 +42,7 @@ namespace YAEngine
     auto& hc = m_Scene->GetHierarchy(entity);
 
     hc.parent = parent;
+    m_Scene->RemoveComponent<RootTag>(entity);
     tc.position = node.position;
     tc.rotation = node.rotation;
     tc.scale = node.scale;

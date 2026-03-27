@@ -1,9 +1,11 @@
 cmake-build-debug
 cmake-build-debugeditor
 cmake-build-release
+cmake-build-releaseeditor
 bin
 out
 CLAUDE.md
 .claude
 build
 build-no-editor
+build-release

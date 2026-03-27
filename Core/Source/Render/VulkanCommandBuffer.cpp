@@ -35,10 +35,19 @@ namespace YAEngine
       YA_LOG_ERROR("Render", "Failed to allocate command buffers");
       throw std::runtime_error("failed to allocate command buffers!");
     }
+
+    VkFenceCreateInfo fenceInfo{};
+    fenceInfo.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    if (vkCreateFence(m_Device, &fenceInfo, nullptr, &m_SingleTimeFence) != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to create single-time fence");
+      throw std::runtime_error("Failed to create single-time fence!");
+    }
   }
 
   void VulkanCommandBuffer::Destroy()
   {
+    vkDestroyFence(m_Device, m_SingleTimeFence, nullptr);
     vkDestroyCommandPool(m_Device, m_CommandPool, nullptr);
   }
 
@@ -105,18 +114,20 @@ namespace YAEngine
   {
     vkEndCommandBuffer(commandBuffer);
 
+    vkResetFences(m_Device, 1, &m_SingleTimeFence);
+
     VkSubmitInfo submitInfo{};
     submitInfo.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    VkResult result = vkQueueSubmit(m_Queue, 1, &submitInfo, VK_NULL_HANDLE);
+    VkResult result = vkQueueSubmit(m_Queue, 1, &submitInfo, m_SingleTimeFence);
     if (result != VK_SUCCESS)
     {
       YA_LOG_ERROR("Render", "Failed to submit single-time command buffer: %d", result);
       throw std::runtime_error("Failed to submit single-time command buffer");
     }
-    vkQueueWaitIdle(m_Queue);
+    vkWaitForFences(m_Device, 1, &m_SingleTimeFence, VK_TRUE, UINT64_MAX);
 
     vkFreeCommandBuffers(m_Device, m_CommandPool, 1, &commandBuffer);
   }

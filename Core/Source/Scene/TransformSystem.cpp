@@ -4,15 +4,10 @@ namespace YAEngine
 {
   void TransformSystem::Update(entt::registry& registry)
   {
-    auto view = registry.view<TransformComponent, HierarchyComponent>();
-
+    auto view = registry.view<RootTag, TransformComponent, HierarchyComponent>();
     for (auto e : view)
     {
-      auto& hc = view.get<HierarchyComponent>(e);
-      if (hc.parent == entt::null)
-      {
-        UpdateWorldTransform(registry, e);
-      }
+      UpdateWorldTransform(registry, e);
     }
   }
 
