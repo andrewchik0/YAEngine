@@ -137,6 +137,10 @@ namespace YAEngine
   {
     MaterialDescription matDesc;
 
+    aiString matName;
+    material->Get(AI_MATKEY_NAME, matName);
+    matDesc.name = matName.C_Str();
+
     aiColor3D diffuse(-1.0f);
     aiColor3D specular(-1.0f);
     aiColor3D emissive(-1.0f);

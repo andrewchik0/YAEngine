@@ -19,6 +19,7 @@ namespace YAEngine
 
   struct MaterialDescription
   {
+    std::string name;
     glm::vec3 albedo {};
     glm::vec3 emissivity {};
     float roughness = -1.0f;

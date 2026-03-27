@@ -10,12 +10,16 @@
 #include "Editor/Panels/RenderSettingsPanel.h"
 #include "Editor/Panels/OutlinerPanel.h"
 #include "Editor/Panels/DetailsPanel.h"
+#include "Editor/Panels/MaterialBrowserPanel.h"
+#include "Editor/Panels/MaterialInspectorPanel.h"
 #include "Editor/EditorCameraLayer.h"
+#include "Editor/Utils/FileDialog.h"
 
 namespace YAEngine
 {
   void EditorLayer::OnAttach()
   {
+    FileDialog::Init();
     EditorStyle::Apply();
     App().PushLayer<EditorCameraLayer>();
     m_Panels.push_back(std::make_unique<ViewportPanel>());
@@ -23,6 +27,8 @@ namespace YAEngine
     m_Panels.push_back(std::make_unique<DetailsPanel>());
     m_Panels.push_back(std::make_unique<RenderSettingsPanel>());
     m_Panels.push_back(std::make_unique<PerformancePanel>());
+    m_Panels.push_back(std::make_unique<MaterialBrowserPanel>());
+    m_Panels.push_back(std::make_unique<MaterialInspectorPanel>());
   }
 
   void EditorLayer::OnSceneReady()
@@ -30,6 +36,9 @@ namespace YAEngine
     m_Context.scene = &App().GetScene();
     m_Context.assetManager = &App().GetAssetManager();
     m_Context.render = &App().GetRender();
+
+    m_TextureCache.Init(m_Context.assetManager);
+    m_Context.textureCache = &m_TextureCache;
 
     for (auto& panel : m_Panels)
       panel->OnSceneReady(m_Context);
@@ -39,13 +48,17 @@ namespace YAEngine
   {
     ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
 
-    if (!b_LayoutBuilt)
+    if (b_ResetLayout)
     {
-      if (ImGui::DockBuilderGetNode(dockspaceId) == nullptr ||
-          ImGui::DockBuilderGetNode(dockspaceId)->IsSplitNode() == false)
-      {
+      BuildDefaultLayout(dockspaceId);
+      b_ResetLayout = false;
+    }
+    else if (!b_LayoutBuilt)
+    {
+      auto* node = ImGui::DockBuilderGetNode(dockspaceId);
+      if (node == nullptr || !node->IsSplitNode())
         BuildDefaultLayout(dockspaceId);
-      }
+
       b_LayoutBuilt = true;
     }
 
@@ -65,7 +78,7 @@ namespace YAEngine
 
         if (ImGui::MenuItem("Reset Layout"))
         {
-          b_LayoutBuilt = false;
+          b_ResetLayout = true;
         }
 
         ImGui::EndMenu();
@@ -85,7 +98,10 @@ namespace YAEngine
 
   void EditorLayer::OnDetach()
   {
+    App().GetRender().WaitIdle();
     m_Panels.clear();
+    m_TextureCache.Destroy();
+    FileDialog::Shutdown();
   }
 
   void EditorLayer::BuildDefaultLayout(ImGuiID dockspaceId)
@@ -98,7 +114,7 @@ namespace YAEngine
 
     ImGuiID dockLeft;
     ImGuiID dockRemaining;
-    ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Left, 0.15f, &dockLeft, &dockRemaining);
+    ImGui::DockBuilderSplitNode(dockspaceId, ImGuiDir_Left, 0.18f, &dockLeft, &dockRemaining);
 
     ImGuiID dockBottom;
     ImGuiID dockCenterRight;
@@ -106,13 +122,19 @@ namespace YAEngine
 
     ImGuiID dockCenter;
     ImGuiID dockRight;
-    ImGui::DockBuilderSplitNode(dockCenterRight, ImGuiDir_Right, 0.30f, &dockRight, &dockCenter);
+    ImGui::DockBuilderSplitNode(dockCenterRight, ImGuiDir_Right, 0.25f, &dockRight, &dockCenter);
+
+    ImGuiID dockRightTop;
+    ImGuiID dockRightBottom;
+    ImGui::DockBuilderSplitNode(dockRight, ImGuiDir_Down, 0.45f, &dockRightBottom, &dockRightTop);
 
     ImGui::DockBuilderDockWindow("Outliner", dockLeft);
     ImGui::DockBuilderDockWindow("Viewport", dockCenter);
-    ImGui::DockBuilderDockWindow("Details", dockRight);
-    ImGui::DockBuilderDockWindow("Render Settings", dockRight);
-    ImGui::DockBuilderDockWindow("Debug Viz", dockRight);
+    ImGui::DockBuilderDockWindow("Details", dockRightTop);
+    ImGui::DockBuilderDockWindow("Render Settings", dockRightTop);
+    ImGui::DockBuilderDockWindow("Materials", dockRightTop);
+    ImGui::DockBuilderDockWindow("Debug Viz", dockRightTop);
+    ImGui::DockBuilderDockWindow("Material Inspector", dockRightBottom);
     ImGui::DockBuilderDockWindow("Performance", dockBottom);
     ImGui::DockBuilderDockWindow("Console", dockBottom);
     ImGui::DockBuilderDockWindow("Content Browser", dockBottom);

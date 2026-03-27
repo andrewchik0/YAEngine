@@ -29,6 +29,15 @@ namespace YAEngine
       m_Assets.ForEach(std::forward<Fn>(fn));
     }
 
+    template<typename Fn>
+    void ForEachWithHandle(Fn&& fn)
+    {
+      m_Assets.ForEachWithKey([&](auto key, T& value)
+      {
+        fn(HandleType{ key.index, key.generation }, value);
+      });
+    }
+
     uint32_t Size() const { return m_Assets.Size(); }
 
   protected:

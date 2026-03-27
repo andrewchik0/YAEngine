@@ -36,6 +36,7 @@ target_compile_definitions(Core PRIVATE
 
 if(YA_EDITOR)
   target_compile_definitions(Core PUBLIC YA_EDITOR)
+  target_link_libraries(Core PRIVATE nfd)
 endif()
 
 # Match VS filters to folder tree

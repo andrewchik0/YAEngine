@@ -1,6 +1,6 @@
 #include "Application.h"
 
-#include "../../cmake-build-release/_deps/imgui-src/imgui.h"
+#include <imgui.h>
 
 #ifdef YA_EDITOR
 #include "Editor/EditorLayer.h"

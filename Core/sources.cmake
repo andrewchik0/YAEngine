@@ -120,6 +120,14 @@ if(YA_EDITOR)
     Source/Editor/Panels/OutlinerPanel.cpp
     Source/Editor/Panels/DetailsPanel.h
     Source/Editor/Panels/DetailsPanel.cpp
+    Source/Editor/Panels/MaterialBrowserPanel.h
+    Source/Editor/Panels/MaterialBrowserPanel.cpp
+    Source/Editor/Panels/MaterialInspectorPanel.h
+    Source/Editor/Panels/MaterialInspectorPanel.cpp
+    Source/Editor/Utils/EditorTextureCache.h
+    Source/Editor/Utils/EditorTextureCache.cpp
+    Source/Editor/Utils/FileDialog.h
+    Source/Editor/Utils/FileDialog.cpp
     Source/Editor/EditorCameraLayer.h
     Source/Editor/EditorCameraLayer.cpp
   )

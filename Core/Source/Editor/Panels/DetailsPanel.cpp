@@ -123,11 +123,43 @@ namespace YAEngine
     }
   }
 
-  static void DrawMaterial(MaterialComponent& mc)
+  static void DrawMaterial(EditorContext& context, MaterialComponent& mc)
   {
     if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen))
     {
-      ImGui::Text("Handle: %u", mc.asset.index);
+      auto& materials = context.assetManager->Materials();
+
+      const char* currentName = "None";
+      if (materials.Has(mc.asset))
+      {
+        auto& mat = materials.Get(mc.asset);
+        currentName = mat.name.c_str();
+        ImGui::ColorButton("##matcolor", ImVec4(mat.albedo.x, mat.albedo.y, mat.albedo.z, 1.0f),
+          ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop, ImVec2(20, 20));
+        ImGui::SameLine();
+      }
+
+      ImGui::SetNextItemWidth(-1);
+      if (ImGui::BeginCombo("##material", currentName))
+      {
+        materials.ForEachWithHandle([&](MaterialHandle handle, Material& mat)
+        {
+          bool isSelected = (mc.asset == handle);
+          if (ImGui::Selectable(mat.name.c_str(), isSelected))
+            mc.asset = handle;
+
+          if (isSelected)
+            ImGui::SetItemDefaultFocus();
+        });
+
+        ImGui::EndCombo();
+      }
+
+      if (materials.Has(mc.asset))
+      {
+        if (ImGui::Button("Select in Browser"))
+          context.SelectMaterial(mc.asset);
+      }
     }
   }
 
@@ -175,7 +207,7 @@ namespace YAEngine
       DrawMesh(context, scene.GetComponent<MeshComponent>(entity));
 
     if (scene.HasComponent<MaterialComponent>(entity))
-      DrawMaterial(scene.GetComponent<MaterialComponent>(entity));
+      DrawMaterial(context, scene.GetComponent<MaterialComponent>(entity));
 
     if (scene.HasComponent<CameraComponent>(entity))
       DrawCamera(scene.GetComponent<CameraComponent>(entity));

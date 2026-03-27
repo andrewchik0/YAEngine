@@ -14,6 +14,8 @@ namespace YAEngine
 
   struct Material
   {
+    std::string name;
+
     glm::vec3 albedo{1.0f, 1.0f, 1.0f};
     glm::vec3 emissivity{0.0f, 0.0f, 0.0f};
     float roughness{0.5f};
@@ -50,6 +52,8 @@ namespace YAEngine
 
     [[nodiscard]]
     MaterialHandle Create();
+    [[nodiscard]]
+    MaterialHandle Duplicate(MaterialHandle source);
     void Destroy(MaterialHandle handle);
     void DestroyAll() override;
 
@@ -60,5 +64,6 @@ namespace YAEngine
   private:
     const RenderContext* m_Ctx = nullptr;
     const VulkanTexture* m_NoneTexture = nullptr;
+    uint32_t m_NextId = 0;
   };
 }

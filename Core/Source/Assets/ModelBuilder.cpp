@@ -67,6 +67,9 @@ namespace YAEngine
       auto materialHandle = m_AssetManager->Materials().Create();
       auto& mat = m_AssetManager->Materials().Get(materialHandle);
 
+      if (!matDesc.name.empty())
+        mat.name = matDesc.name;
+
       mat.albedo = matDesc.albedo;
       mat.emissivity = matDesc.emissivity;
       mat.roughness = matDesc.roughness;

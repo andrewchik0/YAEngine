@@ -84,6 +84,17 @@ namespace YAEngine
       }
     }
 
+    template<typename Fn>
+    void ForEachWithKey(Fn&& fn)
+    {
+      for (uint32_t i = 0; i < static_cast<uint32_t>(m_Slots.size()); ++i)
+      {
+        auto& slot = m_Slots[i];
+        if (slot.data)
+          fn(Key{ i, slot.generation }, *slot.data);
+      }
+    }
+
     void Clear()
     {
       m_Slots.clear();

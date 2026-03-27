@@ -1,18 +1,22 @@
 #pragma once
 
 #include "Scene/Scene.h"
+#include "Assets/Handle.h"
 
 namespace YAEngine
 {
   class AssetManager;
   class Render;
+  class EditorTextureCache;
 
   struct EditorContext
   {
     Entity selectedEntity = entt::null;
+    MaterialHandle selectedMaterial;
     Scene* scene = nullptr;
     AssetManager* assetManager = nullptr;
     Render* render = nullptr;
+    EditorTextureCache* textureCache = nullptr;
     bool selectionChangedFlag = false;
     bool viewportHovered = false;
     uint32_t viewportWidth = 0;
@@ -35,6 +39,16 @@ namespace YAEngine
       bool changed = selectionChangedFlag;
       selectionChangedFlag = false;
       return changed;
+    }
+
+    void SelectMaterial(MaterialHandle h)
+    {
+      selectedMaterial = h;
+    }
+
+    void ClearMaterialSelection()
+    {
+      selectedMaterial = MaterialHandle::Invalid();
     }
   };
 }
