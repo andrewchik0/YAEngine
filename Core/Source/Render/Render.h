@@ -159,6 +159,24 @@ namespace YAEngine
     std::vector<VkImageView> m_HiZMipViews;
     std::vector<VulkanDescriptorSet> m_HiZDescriptorSets;
 
+    struct DrawCommand
+    {
+      uint8_t pipelineKey;
+      uint32_t materialIndex;
+      uint32_t materialGeneration;
+      uint32_t meshIndex;
+      uint32_t meshGeneration;
+      glm::mat4 worldTransform;
+      std::vector<glm::mat4>* instanceData;
+      uint32_t instanceOffset;
+    };
+
+    std::vector<DrawCommand> m_DrawCommands;
+    std::vector<DrawCommand> m_DepthDrawCommands;
+
+    VulkanPipeline& GetForwardPipeline(uint8_t key);
+    VulkanPipeline& GetDepthPipeline(uint8_t key);
+
   public:
     const RenderContext& GetContext() const { return m_Backend.GetContext(); }
     const VulkanTexture& GetNoneTexture() const { return m_NoneTexture; }

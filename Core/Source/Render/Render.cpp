@@ -876,6 +876,31 @@ namespace YAEngine
     m_GlobalFrameIndex++;
   }
 
+  VulkanPipeline& Render::GetForwardPipeline(uint8_t key)
+  {
+    switch (key)
+    {
+      case 0: return m_ForwardPipeline;
+      case 1: return m_ForwardPipelineDoubleSided;
+      case 2: return m_ForwardPipelineInstanced;
+      case 3: return m_ForwardPipelineDoubleSidedInstanced;
+      case 4: return m_ForwardPipelineNoShading;
+      default: return m_ForwardPipeline;
+    }
+  }
+
+  VulkanPipeline& Render::GetDepthPipeline(uint8_t key)
+  {
+    switch (key)
+    {
+      case 0: return m_DepthPrepassPipeline;
+      case 1: return m_DepthPrepassPipelineDoubleSided;
+      case 2: return m_DepthPrepassPipelineInstanced;
+      case 3: return m_DepthPrepassPipelineDoubleSidedInstanced;
+      default: return m_DepthPrepassPipeline;
+    }
+  }
+
   void Render::DrawMeshes(Application* app)
   {
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
@@ -883,23 +908,91 @@ namespace YAEngine
     auto& meshManager = app->GetAssetManager().Meshes();
     auto& materialManager = app->GetAssetManager().Materials();
     auto& cubeMapManager = app->GetAssetManager().CubeMaps();
+    auto skybox = app->GetScene().GetSkybox();
+
+    // === Collect ===
+    m_DrawCommands.clear();
 
     auto view = app->GetScene().GetView<MeshComponent, TransformComponent, MaterialComponent>();
-
     view.each([&](MeshComponent mesh, TransformComponent transform, MaterialComponent material)
     {
       if (!mesh.shouldRender) return;
 
       auto* instanceData = meshManager.GetInstanceData(mesh.asset);
-
-      auto& currentPipeline = mesh.noShading ? m_ForwardPipelineNoShading :
-        instanceData == nullptr
-          ? mesh.doubleSided ? m_ForwardPipelineDoubleSided : m_ForwardPipeline
-          : mesh.doubleSided ? m_ForwardPipelineDoubleSidedInstanced : m_ForwardPipelineInstanced;
-
-      currentPipeline.Bind(cmd);
-
       bool isInstanced = (instanceData != nullptr) && !mesh.noShading;
+
+      uint8_t pipelineKey;
+      if (mesh.noShading)
+        pipelineKey = 4;
+      else if (isInstanced)
+        pipelineKey = mesh.doubleSided ? 3 : 2;
+      else
+        pipelineKey = mesh.doubleSided ? 1 : 0;
+
+      m_DrawCommands.push_back({
+        .pipelineKey = pipelineKey,
+        .materialIndex = material.asset.index,
+        .materialGeneration = material.asset.generation,
+        .meshIndex = mesh.asset.index,
+        .meshGeneration = mesh.asset.generation,
+        .worldTransform = transform.world,
+        .instanceData = instanceData,
+        .instanceOffset = meshManager.GetInstanceOffset(mesh.asset),
+      });
+    });
+
+    // === Sort ===
+    std::sort(m_DrawCommands.begin(), m_DrawCommands.end(),
+      [](const DrawCommand& a, const DrawCommand& b)
+      {
+        if (a.pipelineKey != b.pipelineKey) return a.pipelineKey < b.pipelineKey;
+        if (a.materialIndex != b.materialIndex) return a.materialIndex < b.materialIndex;
+        return a.meshIndex < b.meshIndex;
+      });
+
+    // === Update (descriptor sets — host-side, before any cmd recording) ===
+    uint32_t lastMaterialIndex = UINT32_MAX;
+    uint32_t lastMaterialGeneration = UINT32_MAX;
+    for (auto& dc : m_DrawCommands)
+    {
+      if (dc.materialIndex == lastMaterialIndex && dc.materialGeneration == lastMaterialGeneration) continue;
+      lastMaterialIndex = dc.materialIndex;
+      lastMaterialGeneration = dc.materialGeneration;
+
+      MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+      auto& mat = materialManager.Get(matHandle);
+      mat.cubemap = skybox;
+      materialManager.GetVulkanMaterial(matHandle).Bind(app, mat, currentFrame, m_NoneTexture);
+    }
+
+    // === Record (command buffer) ===
+    uint8_t lastPipelineKey = UINT8_MAX;
+    lastMaterialIndex = UINT32_MAX;
+    uint32_t lastMaterialGen = UINT32_MAX;
+    VulkanPipeline* currentPipeline = nullptr;
+
+    for (auto& dc : m_DrawCommands)
+    {
+      MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+      MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
+      bool isInstanced = dc.instanceData != nullptr;
+
+      if (dc.pipelineKey != lastPipelineKey)
+      {
+        currentPipeline = &GetForwardPipeline(dc.pipelineKey);
+        currentPipeline->Bind(cmd);
+        currentPipeline->BindDescriptorSets(cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        lastPipelineKey = dc.pipelineKey;
+        lastMaterialIndex = UINT32_MAX;
+        lastMaterialGen = UINT32_MAX;
+      }
+
+      if (dc.materialIndex != lastMaterialIndex || dc.materialGeneration != lastMaterialGen)
+      {
+        currentPipeline->BindDescriptorSets(cmd, {materialManager.GetVulkanMaterial(matHandle).GetDescriptorSet(currentFrame)}, 1);
+        lastMaterialIndex = dc.materialIndex;
+        lastMaterialGen = dc.materialGeneration;
+      }
 
       if (!isInstanced)
       {
@@ -911,12 +1004,12 @@ namespace YAEngine
           glm::vec4 normalCol2;
           int offset = 0;
         } data;
-        data.model = transform.world;
-        glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(transform.world)));
+        data.model = dc.worldTransform;
+        glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(dc.worldTransform)));
         data.normalCol0 = glm::vec4(normalMat[0], 0.0f);
         data.normalCol1 = glm::vec4(normalMat[1], 0.0f);
         data.normalCol2 = glm::vec4(normalMat[2], 0.0f);
-        currentPipeline.PushConstants(cmd, &data);
+        currentPipeline->PushConstants(cmd, &data);
       }
       else
       {
@@ -925,36 +1018,31 @@ namespace YAEngine
           glm::mat4 model;
           int offset = 0;
         } data;
-        data.model = transform.world;
-        data.offset = meshManager.GetInstanceOffset(mesh.asset) / sizeof(glm::mat4);
-        currentPipeline.PushConstants(cmd, &data);
+        data.model = dc.worldTransform;
+        data.offset = dc.instanceOffset / sizeof(glm::mat4);
+        currentPipeline->PushConstants(cmd, &data);
       }
 
-      currentPipeline.BindDescriptorSets(cmd, {materialManager.GetVulkanMaterial(material.asset).GetDescriptorSet(currentFrame)}, 1);
       uint32_t instanceCount = 1;
       if (isInstanced)
       {
-        instanceCount = uint32_t(instanceData->size());
-        currentPipeline.BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 2);
-        m_InstanceBuffer.Update(meshManager.GetInstanceOffset(mesh.asset), instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
+        instanceCount = uint32_t(dc.instanceData->size());
+        currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 2);
+        m_InstanceBuffer.Update(dc.instanceOffset, dc.instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
       }
 
-      auto& mat = materialManager.Get(material.asset);
-      mat.cubemap = app->GetScene().GetSkybox();
-      materialManager.GetVulkanMaterial(material.asset).Bind(app, mat, currentFrame, m_NoneTexture);
-
-      auto& vb = meshManager.GetVertexBuffer(mesh.asset);
+      auto& vb = meshManager.GetVertexBuffer(meshHandle);
       m_Stats.drawCalls++;
       m_Stats.triangles += uint32_t(vb.GetIndexCount() / 3) * instanceCount;
       m_Stats.vertices += uint32_t(vb.GetIndexCount()) * instanceCount;
       vb.Draw(cmd, instanceCount);
-    });
+    }
 
     if (!app->GetScene().HasComponent<CameraComponent>(app->GetScene().GetActiveCamera())) return;
     auto& camTransform = app->GetScene().GetComponent<TransformComponent>(app->GetScene().GetActiveCamera());
     glm::mat4 camDir = glm::mat4_cast(camTransform.rotation);
-    if (app->GetScene().GetSkybox())
-      m_SkyBox.Draw(currentFrame, &cubeMapManager.GetVulkanCubicTexture(app->GetScene().GetSkybox()), cmd, camDir, m_PerFrameData.ubo.proj, m_CubicResources);
+    if (skybox)
+      m_SkyBox.Draw(currentFrame, &cubeMapManager.GetVulkanCubicTexture(skybox), cmd, camDir, m_PerFrameData.ubo.proj, m_CubicResources);
   }
 
   void Render::SetUpCamera(Application* app)
@@ -1292,42 +1380,81 @@ namespace YAEngine
     auto cmd = m_Backend.GetCurrentCommandBuffer();
     auto& meshManager = app->GetAssetManager().Meshes();
 
-    auto view = app->GetScene().GetView<MeshComponent, TransformComponent, MaterialComponent>();
+    // === Collect ===
+    m_DepthDrawCommands.clear();
 
+    auto view = app->GetScene().GetView<MeshComponent, TransformComponent, MaterialComponent>();
     view.each([&](MeshComponent mesh, TransformComponent transform, MaterialComponent material)
     {
       if (!mesh.shouldRender) return;
       if (mesh.noShading) return;
 
       auto* instanceData = meshManager.GetInstanceData(mesh.asset);
+      bool isInstanced = (instanceData != nullptr);
 
-      auto& pipeline = instanceData == nullptr
-        ? (mesh.doubleSided ? m_DepthPrepassPipelineDoubleSided : m_DepthPrepassPipeline)
-        : (mesh.doubleSided ? m_DepthPrepassPipelineDoubleSidedInstanced : m_DepthPrepassPipelineInstanced);
+      uint8_t pipelineKey;
+      if (isInstanced)
+        pipelineKey = mesh.doubleSided ? 3 : 2;
+      else
+        pipelineKey = mesh.doubleSided ? 1 : 0;
 
-      pipeline.Bind(cmd);
-      pipeline.BindDescriptorSets(cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+      m_DepthDrawCommands.push_back({
+        .pipelineKey = pipelineKey,
+        .materialIndex = 0,
+        .materialGeneration = 0,
+        .meshIndex = mesh.asset.index,
+        .meshGeneration = mesh.asset.generation,
+        .worldTransform = transform.world,
+        .instanceData = instanceData,
+        .instanceOffset = meshManager.GetInstanceOffset(mesh.asset),
+      });
+    });
 
-      struct _
+    // === Sort (by pipeline, then mesh — no material in depth) ===
+    std::sort(m_DepthDrawCommands.begin(), m_DepthDrawCommands.end(),
+      [](const DrawCommand& a, const DrawCommand& b)
+      {
+        if (a.pipelineKey != b.pipelineKey) return a.pipelineKey < b.pipelineKey;
+        return a.meshIndex < b.meshIndex;
+      });
+
+    // === Record ===
+    uint8_t lastPipelineKey = UINT8_MAX;
+    VulkanPipeline* currentPipeline = nullptr;
+
+    for (auto& dc : m_DepthDrawCommands)
+    {
+      MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
+      bool isInstanced = dc.instanceData != nullptr;
+
+      if (dc.pipelineKey != lastPipelineKey)
+      {
+        currentPipeline = &GetDepthPipeline(dc.pipelineKey);
+        currentPipeline->Bind(cmd);
+        currentPipeline->BindDescriptorSets(cmd, {m_PerFrameData.GetDescriptorSet(currentFrame)}, 0);
+        lastPipelineKey = dc.pipelineKey;
+      }
+
+      struct
       {
         glm::mat4 model;
         int offset = 0;
       } data;
-      data.model = transform.world;
-      data.offset = meshManager.GetInstanceOffset(mesh.asset) / sizeof(glm::mat4);
-      pipeline.PushConstants(cmd, &data);
+      data.model = dc.worldTransform;
+      data.offset = dc.instanceOffset / sizeof(glm::mat4);
+      currentPipeline->PushConstants(cmd, &data);
 
       uint32_t instanceCount = 1;
-      if (instanceData != nullptr)
+      if (isInstanced)
       {
-        instanceCount = uint32_t(instanceData->size());
-        pipeline.BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 1);
-        m_InstanceBuffer.Update(meshManager.GetInstanceOffset(mesh.asset), instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
+        instanceCount = uint32_t(dc.instanceData->size());
+        currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 1);
+        m_InstanceBuffer.Update(dc.instanceOffset, dc.instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
       }
 
-      auto& vb = meshManager.GetVertexBuffer(mesh.asset);
+      auto& vb = meshManager.GetVertexBuffer(meshHandle);
       vb.Draw(cmd, instanceCount);
-    });
+    }
   }
 
   void Render::CreateHiZResources()
