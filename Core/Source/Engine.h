@@ -61,7 +61,7 @@ namespace YAEngine
     SystemScheduler& GetScheduler() { return m_Scheduler; }
 
   private:
-    FrameContext MakeFrameContext();
+    FrameContext MakeFrameContext(SceneSnapshot& snapshot);
 
     ServiceRegistry m_Registry;
 

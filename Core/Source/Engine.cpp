@@ -1,5 +1,6 @@
 #include "Engine.h"
 #include "Render/FrameContext.h"
+#include "SceneSnapshot.h"
 #include "Scene/TransformSystem.h"
 #include "Scene/BoundsUpdateSystem.h"
 
@@ -16,10 +17,10 @@ namespace YAEngine
     static_cast<Engine*>(userData)->RenderUI();
   }
 
-  FrameContext Engine::MakeFrameContext()
+  FrameContext Engine::MakeFrameContext(SceneSnapshot& snapshot)
   {
     return FrameContext {
-      .scene = m_Scene,
+      .snapshot = snapshot,
       .assets = m_AssetManager,
       .cubicResources = m_Render.GetCubicResources(),
       .time = m_Timer.GetTime(),
@@ -53,7 +54,8 @@ namespace YAEngine
 
     m_Render.Init(m_Window.Get(), renderSpecs);
 
-    auto frame = MakeFrameContext();
+    SceneSnapshot emptySnapshot;
+    auto frame = MakeFrameContext(emptySnapshot);
     m_Render.Draw(frame);
   }
 
@@ -73,7 +75,8 @@ namespace YAEngine
     m_AssetManager.SetRenderContext(m_Render.GetContext(), m_Render.GetNoneTexture(), m_Render.GetCubicResources());
     m_Render.Resize();
     {
-      auto frame = MakeFrameContext();
+      SceneSnapshot emptySnapshot;
+      auto frame = MakeFrameContext(emptySnapshot);
       m_Render.Draw(frame);
     }
 
@@ -127,7 +130,8 @@ namespace YAEngine
       m_LayerManager.CallLateUpdate(frameDt);
       m_InputSystem.EndFrame();
 
-      auto frame = MakeFrameContext();
+      auto snapshot = BuildSceneSnapshot(m_Scene, m_AssetManager.Meshes());
+      auto frame = MakeFrameContext(snapshot);
       m_Render.Draw(frame);
     }
 

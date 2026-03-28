@@ -13,6 +13,7 @@ namespace YAEngine
 
     void OnAttach() override;
     void OnSceneReady() override;
+    void Update(double deltaTime) override;
     void RenderUI() override;
     void OnDetach() override;
 
@@ -25,5 +26,7 @@ namespace YAEngine
     std::vector<std::unique_ptr<IEditorPanel>> m_Panels;
     bool b_LayoutBuilt = false;
     bool b_ResetLayout = false;
+    uint32_t m_LastViewportWidth = 0;
+    uint32_t m_LastViewportHeight = 0;
   };
 }

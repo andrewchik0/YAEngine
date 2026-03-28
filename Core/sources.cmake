@@ -96,6 +96,8 @@ set(SOURCE_FILES
   Source/Render/VulkanStorageBuffer.cpp
   Source/Render/VulkanStorageBuffer.h
   Source/Render/FrameContext.h
+  Source/Render/RenderObject.h
+  Source/SceneSnapshot.h
   Source/Render/RenderContext.h
   Source/Render/ImageBarrier.h
   Source/Render/VulkanBuffer.cpp

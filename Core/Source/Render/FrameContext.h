@@ -1,17 +1,17 @@
 #pragma once
 
 #include "Pch.h"
+#include "RenderObject.h"
 
 namespace YAEngine
 {
-  class Scene;
   class AssetManager;
 
   struct CubicTextureResources;
 
   struct FrameContext
   {
-    Scene& scene;
+    SceneSnapshot& snapshot;
     AssetManager& assets;
     CubicTextureResources& cubicResources;
     double time;

@@ -8,7 +8,7 @@
 #include "Log.h"
 #include "SSAOKernel.h"
 #include "Assets/AssetManager.h"
-#include "Scene/Scene.h"
+#include "RenderObject.h"
 
 #include "Utils/Utils.h"
 
@@ -802,10 +802,6 @@ namespace YAEngine
       if (m_PendingViewportWidth > 0 && m_PendingViewportHeight > 0)
       {
         ResizeViewport();
-
-        // Update aspect ratio for all cameras so switching doesn't produce distortion
-        for (auto [entity, cam] : frame.scene.GetView<CameraComponent>().each())
-          cam.Resize(float(m_ViewportWidth), float(m_ViewportHeight));
       }
     }
 #endif
@@ -900,47 +896,40 @@ namespace YAEngine
 
   void Render::DrawMeshes(FrameContext& frame)
   {
+
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     auto cmd = m_Backend.GetCurrentCommandBuffer();
     auto& meshManager = frame.assets.Meshes();
     auto& materialManager = frame.assets.Materials();
     auto& cubeMapManager = frame.assets.CubeMaps();
-    auto skybox = frame.scene.GetSkybox();
+    auto skybox = frame.snapshot.skybox;
 
     // === Collect ===
     m_DrawCommands.clear();
 
-    auto view = frame.scene.GetView<MeshComponent, WorldTransform, MaterialComponent>();
-    auto& reg = frame.scene.GetRegistry();
-    view.each([&](entt::entity entity, MeshComponent& mesh, WorldTransform& wt, MaterialComponent& material)
+    for (auto& obj : frame.snapshot.objects)
     {
-      if (reg.all_of<HiddenTag>(entity)) return;
-
-      bool doubleSided = reg.all_of<DoubleSidedTag>(entity);
-      bool noShading = reg.all_of<NoShadingTag>(entity);
-
-      auto* instanceData = meshManager.GetInstanceData(mesh.asset);
-      bool isInstanced = (instanceData != nullptr) && !noShading;
+      bool isInstanced = (obj.instanceData != nullptr) && !obj.noShading;
 
       uint8_t pipelineKey;
-      if (noShading)
+      if (obj.noShading)
         pipelineKey = 4;
       else if (isInstanced)
-        pipelineKey = doubleSided ? 3 : 2;
+        pipelineKey = obj.doubleSided ? 3 : 2;
       else
-        pipelineKey = doubleSided ? 1 : 0;
+        pipelineKey = obj.doubleSided ? 1 : 0;
 
       m_DrawCommands.push_back({
         .pipelineKey = pipelineKey,
-        .materialIndex = material.asset.index,
-        .materialGeneration = material.asset.generation,
-        .meshIndex = mesh.asset.index,
-        .meshGeneration = mesh.asset.generation,
-        .worldTransform = wt.world,
-        .instanceData = instanceData,
-        .instanceOffset = meshManager.GetInstanceOffset(mesh.asset),
+        .materialIndex = obj.material.index,
+        .materialGeneration = obj.material.generation,
+        .meshIndex = obj.mesh.index,
+        .meshGeneration = obj.mesh.generation,
+        .worldTransform = obj.worldTransform,
+        .instanceData = obj.instanceData,
+        .instanceOffset = obj.instanceOffset,
       });
-    });
+    }
 
     // === Sort ===
     std::sort(m_DrawCommands.begin(), m_DrawCommands.end(),
@@ -1039,32 +1028,27 @@ namespace YAEngine
       vb.Draw(cmd, instanceCount);
     }
 
-    if (!frame.scene.HasComponent<CameraComponent>(frame.scene.GetActiveCamera())) return;
-    auto& camTransform = frame.scene.GetComponent<LocalTransform>(frame.scene.GetActiveCamera());
-    glm::mat4 camDir = glm::mat4_cast(camTransform.rotation);
+    glm::mat4 camDir = glm::mat4_cast(frame.snapshot.camera.rotation);
     if (skybox)
       m_SkyBox.Draw(currentFrame, &cubeMapManager.GetVulkanCubicTexture(skybox), cmd, camDir, m_FrameUniformBuffer.uniforms.proj, m_CubicResources);
   }
 
   void Render::SetUpCamera(FrameContext& frame)
   {
-    if (!frame.scene.HasComponent<CameraComponent>(frame.scene.GetActiveCamera()))
-      return;
 
-    auto& transform = frame.scene.GetComponent<LocalTransform>(frame.scene.GetActiveCamera());
-    auto& camera    = frame.scene.GetComponent<CameraComponent>(frame.scene.GetActiveCamera());
+    auto& cam = frame.snapshot.camera;
 
     glm::mat4 world =
-      glm::translate(glm::mat4(1.0f), transform.position) *
-      glm::mat4_cast(transform.rotation);
+      glm::translate(glm::mat4(1.0f), cam.position) *
+      glm::mat4_cast(cam.rotation);
 
     glm::mat4 view = glm::inverse(world);
 
     glm::mat4 proj = glm::perspective(
-      camera.fov,
-      camera.aspectRatio,
-      camera.nearPlane,
-      camera.farPlane
+      cam.fov,
+      cam.aspectRatio,
+      cam.nearPlane,
+      cam.farPlane
     );
 
     proj[1][1] *= -1.0f;
@@ -1102,11 +1086,11 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.view = view;
     m_FrameUniformBuffer.uniforms.proj = proj;
     m_FrameUniformBuffer.uniforms.invProj = glm::inverse(proj);
-    m_FrameUniformBuffer.uniforms.nearPlane = camera.nearPlane;
-    m_FrameUniformBuffer.uniforms.farPlane = camera.farPlane;
-    m_FrameUniformBuffer.uniforms.cameraPosition = transform.position;
+    m_FrameUniformBuffer.uniforms.nearPlane = cam.nearPlane;
+    m_FrameUniformBuffer.uniforms.farPlane = cam.farPlane;
+    m_FrameUniformBuffer.uniforms.cameraPosition = cam.position;
     m_FrameUniformBuffer.uniforms.cameraDirection = glm::normalize(-glm::vec3(world[2]));
-    m_FrameUniformBuffer.uniforms.fov = camera.fov;
+    m_FrameUniformBuffer.uniforms.fov = cam.fov;
   }
 
   void Render::InitPipelines()
@@ -1377,6 +1361,7 @@ namespace YAEngine
 
   void Render::DrawMeshesDepthOnly(FrameContext& frame)
   {
+
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     auto cmd = m_Backend.GetCurrentCommandBuffer();
     auto& meshManager = frame.assets.Meshes();
@@ -1384,34 +1369,29 @@ namespace YAEngine
     // === Collect ===
     m_DepthDrawCommands.clear();
 
-    auto view = frame.scene.GetView<MeshComponent, WorldTransform, MaterialComponent>();
-    auto& reg = frame.scene.GetRegistry();
-    view.each([&](entt::entity entity, MeshComponent& mesh, WorldTransform& wt, MaterialComponent& material)
+    for (auto& obj : frame.snapshot.objects)
     {
-      if (reg.all_of<HiddenTag>(entity)) return;
-      if (reg.all_of<NoShadingTag>(entity)) return;
+      if (obj.noShading) continue;
 
-      bool doubleSided = reg.all_of<DoubleSidedTag>(entity);
-      auto* instanceData = meshManager.GetInstanceData(mesh.asset);
-      bool isInstanced = (instanceData != nullptr);
+      bool isInstanced = (obj.instanceData != nullptr);
 
       uint8_t pipelineKey;
       if (isInstanced)
-        pipelineKey = doubleSided ? 3 : 2;
+        pipelineKey = obj.doubleSided ? 3 : 2;
       else
-        pipelineKey = doubleSided ? 1 : 0;
+        pipelineKey = obj.doubleSided ? 1 : 0;
 
       m_DepthDrawCommands.push_back({
         .pipelineKey = pipelineKey,
         .materialIndex = 0,
         .materialGeneration = 0,
-        .meshIndex = mesh.asset.index,
-        .meshGeneration = mesh.asset.generation,
-        .worldTransform = wt.world,
-        .instanceData = instanceData,
-        .instanceOffset = meshManager.GetInstanceOffset(mesh.asset),
+        .meshIndex = obj.mesh.index,
+        .meshGeneration = obj.mesh.generation,
+        .worldTransform = obj.worldTransform,
+        .instanceData = obj.instanceData,
+        .instanceOffset = obj.instanceOffset,
       });
-    });
+    }
 
     // === Sort (by pipeline, then mesh — no material in depth) ===
     std::sort(m_DepthDrawCommands.begin(), m_DepthDrawCommands.end(),

@@ -46,6 +46,19 @@ namespace YAEngine
       panel->OnSceneReady(m_Context);
   }
 
+  void EditorLayer::Update(double deltaTime)
+  {
+    uint32_t w = m_Context.viewportWidth;
+    uint32_t h = m_Context.viewportHeight;
+    if (w > 0 && h > 0 && (w != m_LastViewportWidth || h != m_LastViewportHeight))
+    {
+      m_LastViewportWidth = w;
+      m_LastViewportHeight = h;
+      for (auto [entity, cam] : GetScene().GetView<CameraComponent>().each())
+        cam.Resize(float(w), float(h));
+    }
+  }
+
   void EditorLayer::RenderUI()
   {
     ImGuiID dockspaceId = ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport());
