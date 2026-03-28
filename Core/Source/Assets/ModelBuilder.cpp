@@ -29,6 +29,7 @@ namespace YAEngine
     }
 
     m_Scene->AddComponent<LocalBounds>(rootEntity, LocalBounds { .min = rootMinBB, .max = rootMaxBB });
+    m_Scene->AddComponent<BoundsDirty>(rootEntity);
 
     return rootEntity;
   }
@@ -113,6 +114,7 @@ namespace YAEngine
     }
 
     m_Scene->AddComponent<LocalBounds>(entity, LocalBounds { .min = nodeMinBB, .max = nodeMaxBB });
+    m_Scene->AddComponent<BoundsDirty>(entity);
 
     return entity;
   }

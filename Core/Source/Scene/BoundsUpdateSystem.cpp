@@ -4,7 +4,7 @@ namespace YAEngine
 {
   void BoundsUpdateSystem::Update(entt::registry& registry, double dt)
   {
-    auto view = registry.view<LocalBounds, WorldTransform>();
+    auto view = registry.view<BoundsDirty, LocalBounds, WorldTransform>();
     for (auto e : view)
     {
       auto& lb = registry.get<LocalBounds>(e);
@@ -32,6 +32,7 @@ namespace YAEngine
       }
 
       registry.emplace_or_replace<WorldBounds>(e, WorldBounds { .min = worldMin, .max = worldMax });
+      registry.remove<BoundsDirty>(e);
     }
   }
 }

@@ -6,12 +6,39 @@
 
 namespace YAEngine
 {
+  using ActionId = uint32_t;
+  static constexpr ActionId INVALID_ACTION = UINT32_MAX;
+
   class InputActionSystem
   {
   public:
-    void MapAction(const std::string& action, int key)
+    ActionId RegisterAction(const std::string& name)
     {
-      m_ActionKeys[action].push_back(key);
+      auto it = m_NameToId.find(name);
+      if (it != m_NameToId.end())
+        return it->second;
+
+      ActionId id = m_NextActionId++;
+      m_NameToId[name] = id;
+      return id;
+    }
+
+    ActionId GetActionId(const std::string& name) const
+    {
+      auto it = m_NameToId.find(name);
+      return it != m_NameToId.end() ? it->second : INVALID_ACTION;
+    }
+
+    void MapAction(ActionId action, int key)
+    {
+      m_KeyToActions[key].push_back(action);
+    }
+
+    ActionId MapAction(const std::string& name, int key)
+    {
+      ActionId id = RegisterAction(name);
+      MapAction(id, key);
+      return id;
     }
 
     void Connect(EventBus& bus)
@@ -32,19 +59,19 @@ namespace YAEngine
       }
     }
 
-    bool IsActive(const std::string& action) const
+    bool IsActive(ActionId action) const
     {
       auto it = m_ActionStates.find(action);
       return it != m_ActionStates.end() && it->second;
     }
 
-    bool WasJustPressed(const std::string& action) const
+    bool WasJustPressed(ActionId action) const
     {
       auto it = m_JustPressed.find(action);
       return it != m_JustPressed.end() && it->second;
     }
 
-    bool WasJustReleased(const std::string& action) const
+    bool WasJustReleased(ActionId action) const
     {
       auto it = m_JustReleased.find(action);
       return it != m_JustReleased.end() && it->second;
@@ -59,30 +86,30 @@ namespace YAEngine
   private:
     void OnKeyEvent(const KeyEvent& e)
     {
-      for (auto& [action, keys] : m_ActionKeys)
-      {
-        for (int key : keys)
-        {
-          if (static_cast<int>(e.key) != key) continue;
+      auto it = m_KeyToActions.find(static_cast<int>(e.key));
+      if (it == m_KeyToActions.end()) return;
 
-          if (e.action == GLFW_PRESS)
-          {
-            m_ActionStates[action] = true;
-            m_JustPressed[action] = true;
-          }
-          else if (e.action == GLFW_RELEASE)
-          {
-            m_ActionStates[action] = false;
-            m_JustReleased[action] = true;
-          }
+      for (ActionId action : it->second)
+      {
+        if (e.action == GLFW_PRESS)
+        {
+          m_ActionStates[action] = true;
+          m_JustPressed[action] = true;
+        }
+        else if (e.action == GLFW_RELEASE)
+        {
+          m_ActionStates[action] = false;
+          m_JustReleased[action] = true;
         }
       }
     }
 
-    std::unordered_map<std::string, std::vector<int>> m_ActionKeys;
-    std::unordered_map<std::string, bool> m_ActionStates;
-    std::unordered_map<std::string, bool> m_JustPressed;
-    std::unordered_map<std::string, bool> m_JustReleased;
+    std::unordered_map<std::string, ActionId> m_NameToId;
+    std::unordered_map<int, std::vector<ActionId>> m_KeyToActions;
+    std::unordered_map<ActionId, bool> m_ActionStates;
+    std::unordered_map<ActionId, bool> m_JustPressed;
+    std::unordered_map<ActionId, bool> m_JustReleased;
+    ActionId m_NextActionId = 0;
     EventBus* m_Bus = nullptr;
     SubscriptionId m_Subscription {};
   };

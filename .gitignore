@@ -10,3 +10,4 @@ build
 build-editor
 build-no-editor
 build-release
+.idea/vcs.xml

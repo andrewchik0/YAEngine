@@ -60,6 +60,8 @@ namespace YAEngine
       {
         for (auto& h : list.handlers)
           if (h.id == id) { h.removed = true; return; }
+        for (auto& h : list.pendingAdds)
+          if (h.id == id) { h.removed = true; return; }
       }
       else
       {
@@ -140,9 +142,12 @@ namespace YAEngine
           [](const HandlerWrapper& h){ return h.removed; }),
         vec.end());
 
-      // Insert pending adds
+      // Insert pending adds (skip those marked for removal during iteration)
       for (auto& wrapper : list.pendingAdds)
-        InsertSorted(list.handlers, std::move(wrapper));
+      {
+        if (!wrapper.removed)
+          InsertSorted(list.handlers, std::move(wrapper));
+      }
       list.pendingAdds.clear();
     }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Pch.h"
+#include "Log.h"
 
 namespace YAEngine
 {
@@ -17,7 +18,11 @@ namespace YAEngine
     T& Get() const
     {
       auto it = m_Services.find(typeid(T));
-      assert(it != m_Services.end());
+      if (it == m_Services.end())
+      {
+        YA_LOG_ERROR("ServiceRegistry", "Service not registered: %s", typeid(T).name());
+        throw std::runtime_error("Service not registered");
+      }
       return *static_cast<T*>(it->second);
     }
 

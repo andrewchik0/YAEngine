@@ -34,6 +34,9 @@ namespace YAEngine
 
     registry.remove<TransformDirty>(e);
 
+    if (registry.all_of<LocalBounds>(e) && !registry.all_of<BoundsDirty>(e))
+      registry.emplace<BoundsDirty>(e);
+
     entt::entity child = hc.firstChild;
     while (child != entt::null)
     {

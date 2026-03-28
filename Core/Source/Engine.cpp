@@ -11,6 +11,25 @@
 
 namespace YAEngine
 {
+  static void RenderUICallback(void* userData)
+  {
+    static_cast<Engine*>(userData)->RenderUI();
+  }
+
+  FrameContext Engine::MakeFrameContext()
+  {
+    return FrameContext {
+      .scene = m_Scene,
+      .assets = m_AssetManager,
+      .cubicResources = m_Render.GetCubicResources(),
+      .time = m_Timer.GetTime(),
+      .windowWidth = m_Window.GetWidth(),
+      .windowHeight = m_Window.GetHeight(),
+      .renderUI = RenderUICallback,
+      .renderUIData = this
+    };
+  }
+
   Engine::Engine(const EngineSpecs& specs)
     : m_Window(specs.windowSpecs),
       m_InputSystem(m_Window, m_EventBus)
@@ -35,7 +54,7 @@ namespace YAEngine
 
     m_Render.Init(m_Window.Get(), renderSpecs);
 
-    FrameContext frame { m_Scene, m_AssetManager, m_Render.GetCubicResources(), m_Timer.GetTime(), m_Window.GetWidth(), m_Window.GetHeight(), [this]() { RenderUI(); } };
+    auto frame = MakeFrameContext();
     m_Render.Draw(frame);
   }
 
@@ -56,7 +75,7 @@ namespace YAEngine
     m_AssetManager.SetRenderContext(m_Render.GetContext(), m_Render.GetNoneTexture(), m_Render.GetCubicResources());
     m_Render.Resize();
     {
-      FrameContext frame { m_Scene, m_AssetManager, m_Render.GetCubicResources(), m_Timer.GetTime(), m_Window.GetWidth(), m_Window.GetHeight(), [this]() { RenderUI(); } };
+      auto frame = MakeFrameContext();
       m_Render.Draw(frame);
     }
 
@@ -97,6 +116,8 @@ namespace YAEngine
 
       double frameDt = m_Timer.GetDeltaTime();
       m_Accumulator += frameDt;
+      if (m_Accumulator > FIXED_DT * MAX_FIXED_STEPS)
+        m_Accumulator = FIXED_DT * MAX_FIXED_STEPS;
       while (m_Accumulator >= FIXED_DT)
       {
         m_LayerManager.CallFixedUpdate(FIXED_DT);
@@ -107,7 +128,7 @@ namespace YAEngine
       m_LayerManager.CallUpdate(frameDt);
       m_LayerManager.CallLateUpdate(frameDt);
 
-      FrameContext frame { m_Scene, m_AssetManager, m_Render.GetCubicResources(), m_Timer.GetTime(), m_Window.GetWidth(), m_Window.GetHeight(), [this]() { RenderUI(); } };
+      auto frame = MakeFrameContext();
       m_Render.Draw(frame);
     }
 

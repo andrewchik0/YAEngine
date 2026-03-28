@@ -29,7 +29,7 @@ namespace YAEngine
     void Resize();
     void WaitIdle();
 
-    void Draw(const FrameContext& frame);
+    void Draw(FrameContext& frame);
 
     void DrawQuad();
 
@@ -59,9 +59,9 @@ namespace YAEngine
 
     RenderStats m_Stats {};
 
-    void DrawMeshes(const FrameContext& frame);
-    void DrawMeshesDepthOnly(const FrameContext& frame);
-    void SetUpCamera(const FrameContext& frame);
+    void DrawMeshes(FrameContext& frame);
+    void DrawMeshesDepthOnly(FrameContext& frame);
+    void SetUpCamera(FrameContext& frame);
     void InitPipelines();
 
     void SetupRenderGraph(uint32_t width, uint32_t height);

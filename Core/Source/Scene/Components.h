@@ -25,6 +25,7 @@ namespace YAEngine
   };
 
   struct TransformDirty {};
+  struct BoundsDirty {};
 
   struct LocalBounds
   {

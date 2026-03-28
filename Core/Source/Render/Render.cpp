@@ -362,7 +362,7 @@ namespace YAEngine
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        if (frame->renderUI) frame->renderUI();
+        if (frame->renderUI) frame->renderUI(frame->renderUIData);
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), ctx.cmd);
       }
@@ -405,7 +405,7 @@ namespace YAEngine
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        if (frame->renderUI) frame->renderUI();
+        if (frame->renderUI) frame->renderUI(frame->renderUIData);
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), ctx.cmd);
       }
@@ -792,7 +792,7 @@ namespace YAEngine
   }
 #endif
 
-  void Render::Draw(const FrameContext& frame)
+  void Render::Draw(FrameContext& frame)
   {
 #ifdef YA_EDITOR
     // Handle deferred viewport resize BEFORE acquiring the frame —
@@ -863,7 +863,7 @@ namespace YAEngine
     m_FrameUniformBuffer.SetUp(currentFrame);
 
     // Execute all passes
-    m_Graph.Execute(cmd, const_cast<FrameContext*>(&frame));
+    m_Graph.Execute(cmd, &frame);
 
     if (!m_Backend.EndFrame(*imageIndex, b_Resized))
     {
@@ -898,7 +898,7 @@ namespace YAEngine
     }
   }
 
-  void Render::DrawMeshes(const FrameContext& frame)
+  void Render::DrawMeshes(FrameContext& frame)
   {
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     auto cmd = m_Backend.GetCurrentCommandBuffer();
@@ -1046,7 +1046,7 @@ namespace YAEngine
       m_SkyBox.Draw(currentFrame, &cubeMapManager.GetVulkanCubicTexture(skybox), cmd, camDir, m_FrameUniformBuffer.uniforms.proj, m_CubicResources);
   }
 
-  void Render::SetUpCamera(const FrameContext& frame)
+  void Render::SetUpCamera(FrameContext& frame)
   {
     if (!frame.scene.HasComponent<CameraComponent>(frame.scene.GetActiveCamera()))
       return;
@@ -1375,7 +1375,7 @@ namespace YAEngine
     hizLayoutHelper.Destroy();
   }
 
-  void Render::DrawMeshesDepthOnly(const FrameContext& frame)
+  void Render::DrawMeshesDepthOnly(FrameContext& frame)
   {
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     auto cmd = m_Backend.GetCurrentCommandBuffer();

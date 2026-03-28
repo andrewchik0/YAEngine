@@ -63,6 +63,8 @@ namespace YAEngine
     SystemScheduler& GetScheduler() { return m_Scheduler; }
 
   private:
+    FrameContext MakeFrameContext();
+
     ServiceRegistry m_Registry;
 
     Window m_Window;
@@ -78,6 +80,7 @@ namespace YAEngine
     SubscriptionId m_ResizeSubscription {};
 
     static constexpr double FIXED_DT = 1.0 / 60.0;
+    static constexpr int MAX_FIXED_STEPS = 5;
     double m_Accumulator = 0.0;
   };
 }

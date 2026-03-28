@@ -17,6 +17,7 @@ namespace YAEngine
     double time;
     uint32_t windowWidth;
     uint32_t windowHeight;
-    std::function<void()> renderUI;
+    void(*renderUI)(void* userData) = nullptr;
+    void* renderUIData = nullptr;
   };
 }
