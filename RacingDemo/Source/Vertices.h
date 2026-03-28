@@ -93,12 +93,10 @@ inline SphereMesh GenerateSphere(
       uint32_t i2 = i0 + ringVertexCount;
       uint32_t i3 = i2 + 1;
 
-      // triangle 1
       mesh.indices.push_back(i0);
       mesh.indices.push_back(i1);
       mesh.indices.push_back(i2);
 
-      // triangle 2
       mesh.indices.push_back(i1);
       mesh.indices.push_back(i3);
       mesh.indices.push_back(i2);

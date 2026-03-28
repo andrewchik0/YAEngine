@@ -36,12 +36,10 @@ namespace YAEngine
 
     VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
 
-    // Transition all mip levels to TRANSFER_DST for the initial copy
     TransitionImageLayout(cmd, m_Image.GetImage(),
       VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
       VK_IMAGE_ASPECT_COLOR_BIT, 0, mipLevels);
 
-    // Copy staging buffer to mip level 0
     VkBufferImageCopy region{};
     region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     region.imageSubresource.mipLevel = 0;

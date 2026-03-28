@@ -38,7 +38,6 @@ void main()
   worldNormal = normalize(worldNormal);
   vec3 viewNormal = normalize(mat3(u_Frame.view) * worldNormal);
 
-  // Full-res noise tiling: noise is 4x4, screen is full-res
   vec2 noiseScale = vec2(float(u_Frame.screenWidth) / 4.0, float(u_Frame.screenHeight) / 4.0);
   vec3 randomVec = textureLod(noiseTexture, uv * noiseScale, 0.0).rgb;
 
@@ -52,13 +51,11 @@ void main()
   {
     vec3 samplePos = viewPos + (TBN * u_Kernel.samples[i].xyz) * RADIUS;
 
-    // Project to clip space
     vec4 clip = u_Frame.proj * vec4(samplePos, 1.0);
     vec2 sampleUV = (clip.xy / clip.w) * 0.5 + 0.5;
 
     float sampledDepth = textureLod(depthTexture, sampleUV, 0.0).r;
 
-    // Mask out skybox samples
     float notSky = step(sampledDepth, 0.9998);
 
     float sampleLinearDepth = linearizeDepth(sampledDepth);

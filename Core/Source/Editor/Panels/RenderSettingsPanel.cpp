@@ -22,7 +22,6 @@ namespace YAEngine
       return;
     }
 
-    // Display section
     if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen))
     {
       ImGui::DragFloat("Gamma", &context.render->GetGamma(), 0.01f, 0.0f, 10.0f);
@@ -36,7 +35,6 @@ namespace YAEngine
         context.render->SetDebugView(debugViewIndex);
     }
 
-    // Post-Processing section
     if (ImGui::CollapsingHeader("Post-Processing", ImGuiTreeNodeFlags_DefaultOpen))
     {
       ImGui::Checkbox("SSAO", &context.render->GetSSAOEnabled());

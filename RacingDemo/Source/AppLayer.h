@@ -39,7 +39,6 @@ public:
       auto carHandle = GetAssets().Models().Load(APP_WORKING_DIR "/Assets/Models/koenigsegg/scene.gltf", true);
       auto car = GetAssets().Models().Get(carHandle).rootEntity;
 
-      // Add VehicleComponent to car
       GetScene().AddComponent<VehicleComponent>(car);
 
       auto wheels = std::array<YAEngine::Entity, 4> {
@@ -49,7 +48,6 @@ public:
         GetScene().GetChildByName(car, "wheel-right-back")
       };
 
-      // Add WheelComponent to each wheel
       for (int i = 0; i < 4; i++)
       {
         auto baseRot = GetScene().GetTransform(wheels[i]).rotation;

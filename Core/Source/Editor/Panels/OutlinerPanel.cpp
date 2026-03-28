@@ -15,7 +15,6 @@ namespace YAEngine
 
     auto& scene = *context.scene;
 
-    // Check this entity's name
     if (scene.HasComponent<Name>(entity))
     {
       const auto& name = scene.GetName(entity);
@@ -23,7 +22,6 @@ namespace YAEngine
         return true;
     }
 
-    // Check children recursively
     auto& hc = scene.GetComponent<HierarchyComponent>(entity);
     Entity child = hc.firstChild;
     while (child != entt::null)
@@ -51,7 +49,6 @@ namespace YAEngine
     if (scene.HasComponent<Name>(entity))
       name = scene.GetName(entity);
 
-    // Icon based on components
     const char* icon = " ";
     if (scene.HasComponent<CameraComponent>(entity))
       icon = "[C]";
@@ -81,7 +78,6 @@ namespace YAEngine
     if (ImGui::IsItemClicked())
       context.SelectEntity(entity);
 
-    // Context menu
     if (ImGui::BeginPopupContextItem())
     {
       if (scene.HasComponent<MeshComponent>(entity))
@@ -111,7 +107,6 @@ namespace YAEngine
       ImGui::EndPopup();
     }
 
-    // Visibility toggle for mesh entities
     if (scene.HasComponent<MeshComponent>(entity))
     {
       bool visible = !scene.HasComponent<HiddenTag>(entity);
@@ -157,13 +152,11 @@ namespace YAEngine
       return;
     }
 
-    // Search filter
     ImGui::SetNextItemWidth(-1);
     ImGui::InputTextWithHint("##filter", "Search...", m_FilterText, sizeof(m_FilterText));
 
     ImGui::Separator();
 
-    // Draw root entities
     auto hierarchyView = context.scene->GetView<LocalTransform, HierarchyComponent>();
     hierarchyView.each([&](auto entity, LocalTransform&, HierarchyComponent& hc)
     {

@@ -13,7 +13,7 @@ layout(set = 1, binding = 4) uniform sampler2D albedoTexture;
 layout(set = 1, binding = 5) uniform sampler2D ssaoTexture;
 layout(set = 1, binding = 6) uniform sampler2D hiZTexture;
 
-// --- Configuration constants ---
+// --- Configuration ---
 const int MAX_ITERATIONS = 128;
 const int REFINEMENT_STEPS = 8;
 const float MAX_RAY_DISTANCE = 30.0;
@@ -26,10 +26,8 @@ const float SAME_SURFACE_THRESHOLD = 0.99;
 const float MAX_THICKNESS = 2.0;
 
 // --- Main ---
-
 void main()
 {
-  // Read G-buffer
   float depth = texture(depthTexture, uv).r;
   vec3 worldNormal = texture(normalTexture, uv).rgb;
   vec2 material = texture(materialTexture, uv).rg;
@@ -154,17 +152,14 @@ void main()
 
     if (cellMinDepth >= DEPTH_EPSILON)
     {
-      // Sky — go coarser to skip faster
       mipLevel = min(mipLevel + 1, effectiveMaxMip);
       continue;
     }
 
     if (rayDepth > cellMinDepth)
     {
-      // Ray is behind the closest surface in this cell
       if (mipLevel == 0)
       {
-        // Finest level — potential hit, validate it
         float sampleLinearDepth = linearizeDepth(cellMinDepth);
 
         // Reject self-intersection
@@ -211,7 +206,6 @@ void main()
     }
     else
     {
-      // Ray is in front of everything — advance and try coarser
       mipLevel = min(mipLevel + 1, effectiveMaxMip);
     }
   }
@@ -267,26 +261,20 @@ void main()
   float hitScreenDist = hitT * rayScreenLen; // pixels the ray traveled
   float contactFade = smoothstep(0.0, 32.0, hitScreenDist);
 
-  // Contribution calculation
   vec3 reflectedColor = texture(frame, hitUV).rgb;
 
-  // Fresnel
   vec3 F0 = mix(vec3(0.04), albedo, metallic);
   float NdotV = clamp(dot(-viewDir, viewNormal), 0.01, 1.0);
   vec3 F = fresnelSchlickRoughness(NdotV, F0, roughness);
 
-  // Screen edge fade
   vec2 edgeCoords = hitUV * 2.0 - 1.0;
   float edgeFade = (1.0 - smoothstep(EDGE_FADE_START, 1.0, abs(edgeCoords.x)))
                  * (1.0 - smoothstep(EDGE_FADE_START, 1.0, abs(edgeCoords.y)));
 
-  // Distance fade
   float distanceFade = 1.0 - smoothstep(0.0, 1.0, hitT);
 
-  // Roughness fade
   float roughnessFade = 1.0 - smoothstep(0.0, MAX_ROUGHNESS, roughness);
 
-  // Final SSR mask
   vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade * silhouetteFade * contactFade, vec3(0.0), vec3(1.0));
 
   outColor = vec4(originalColor * (1.0 - ssrMask) + reflectedColor * ssrMask, 1.0);

@@ -23,7 +23,6 @@ void main()
     return;
   }
 
-  // Each output texel covers a 2x2 block in the source
   vec2 srcSize = vec2(textureSize(inputMip, pc.srcMip));
   vec2 texelSize = 1.0 / srcSize;
   vec2 uv = (vec2(pos) * 2.0 + 1.0) * texelSize;

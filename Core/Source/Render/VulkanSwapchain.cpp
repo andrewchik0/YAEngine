@@ -255,7 +255,6 @@ namespace YAEngine
     for (auto imageView : m_SwapChainImageViews)
       vkDestroyImageView(m_Device, imageView, nullptr);
 
-    // Create new swapchain reusing the old one
     SwapChainSupportDetails swapChainSupport = VulkanPhysicalDevice::QuerySwapChainSupport(m_PhysicalDevice, m_Surface);
     VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
     VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.presentModes);
@@ -300,7 +299,6 @@ namespace YAEngine
       throw std::runtime_error("Failed to recreate swap chain!");
     }
 
-    // Destroy old swapchain after new one is created
     vkDestroySwapchainKHR(m_Device, oldSwapchain, nullptr);
 
     vkGetSwapchainImagesKHR(m_Device, m_SwapChain, &imageCount, nullptr);

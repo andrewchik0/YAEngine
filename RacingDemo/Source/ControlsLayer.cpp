@@ -62,7 +62,6 @@ void ControlsLayer::Update(double dt)
   GetScene().GetTransform(car).rotation = rotation;
   GetScene().MarkDirty(car);
 
-  // Update follow camera
   if (m_Camera != entt::null && GetScene().HasComponent<FollowCameraComponent>(m_Camera))
   {
     auto& follow = GetScene().GetComponent<FollowCameraComponent>(m_Camera);
@@ -104,7 +103,6 @@ void ControlsLayer::Update(double dt)
     }
   }
 
-  // Update wheels via ECS
   auto wheelView = GetScene().GetView<WheelComponent, YAEngine::LocalTransform>();
 
   for (auto wheelEntity : wheelView)

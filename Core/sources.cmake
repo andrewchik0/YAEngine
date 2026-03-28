@@ -8,6 +8,10 @@ set(SOURCE_FILES
   Source/Layer.h
   Source/Render/Render.cpp
   Source/Render/Render.h
+  Source/Render/Render.Setup.cpp
+  Source/Render/Render.Pipelines.cpp
+  Source/Render/Render.Draw.cpp
+  Source/Render/Render.HiZ.cpp
   Source/Render/VulkanInstance.cpp
   Source/Render/VulkanInstance.h
   Source/Render/VulkanDebugExtension.cpp
@@ -113,10 +117,13 @@ set(SOURCE_FILES
   Source/Render/RenderGraph.h
   Source/Render/VulkanComputePipeline.cpp
   Source/Render/VulkanComputePipeline.h
+  Source/Render/PipelineCache.cpp
+  Source/Render/PipelineCache.h
 )
 
 if(YA_EDITOR)
   list(APPEND SOURCE_FILES
+    Source/Render/Render.Editor.cpp
     Source/Editor/EditorLayer.cpp
     Source/Editor/EditorLayer.h
     Source/Editor/IEditorPanel.h

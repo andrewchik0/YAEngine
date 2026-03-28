@@ -54,67 +54,50 @@ void getVarianceClippingBounds(vec3 color, sampler2D colorSampler, ivec2 screenS
   vec3 colorVar = tm * tm;
 
   // Marco Salvi's Implementation (by Chris Wyman)
-  // unrolled loop version
 
   vec3 fetch = vec3(0);
 
-  // unwinded the for loop
   {
-       // top
      {
-           // left / top
        fetch = texelFetch(colorSampler, screenSpaceUV + ivec2(-1, -1), 0).rgb;
        fetch = tonemapYCoCg(rgbToYCoCg(fetch));
        colorAvg += fetch;
        colorVar += fetch * fetch;
 
-           // center / top
        fetch = texelFetch(colorSampler, screenSpaceUV + ivec2( 0, -1), 0).rgb;
        fetch = tonemapYCoCg(rgbToYCoCg(fetch));
        colorAvg += fetch;
        colorVar += fetch * fetch;
 
-       // right / top
        fetch = texelFetch(colorSampler, screenSpaceUV + ivec2( 1, -1), 0).rgb;
        fetch = tonemapYCoCg(rgbToYCoCg(fetch));
        colorAvg += fetch;
        colorVar += fetch * fetch;
      }
 
-     // center
      {
-       // left / center
        fetch = texelFetch(colorSampler, screenSpaceUV + ivec2(-1,  0), 0).rgb;
        fetch = tonemapYCoCg(rgbToYCoCg(fetch));
        colorAvg += fetch;
        colorVar += fetch * fetch;
 
-
-       // center / center is intentionally skipped
-
-
-       // right / center
        fetch = texelFetch(colorSampler, screenSpaceUV + ivec2( 1,  0), 0).rgb;
        fetch = tonemapYCoCg(rgbToYCoCg(fetch));
        colorAvg += fetch;
        colorVar += fetch * fetch;
      }
 
-       // bottom
      {
-       // left / bottom
        fetch = texelFetch(colorSampler, screenSpaceUV + ivec2(-1,  1), 0).rgb;
        fetch = tonemapYCoCg(rgbToYCoCg(fetch));
        colorAvg += fetch;
        colorVar += fetch * fetch;
 
-       // center / bottom
        fetch = texelFetch(colorSampler, screenSpaceUV + ivec2( 0,  1), 0).rgb;
        fetch = tonemapYCoCg(rgbToYCoCg(fetch));
        colorAvg += fetch;
        colorVar += fetch * fetch;
 
-       // right / bottom
        fetch = texelFetch(colorSampler, screenSpaceUV + ivec2( 1,  1), 0).rgb;
        fetch = tonemapYCoCg(rgbToYCoCg(fetch));
        colorAvg += fetch;

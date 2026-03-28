@@ -7,8 +7,7 @@
 #include "VulkanCubicTexture.h"
 #include "VulkanMaterial.h"
 #include "SkyBox.h"
-#include "VulkanComputePipeline.h"
-#include "VulkanPipeline.h"
+#include "PipelineCache.h"
 #include "VulkanStorageBuffer.h"
 #include "VulkanUniformBuffer.h"
 
@@ -134,22 +133,16 @@ namespace YAEngine
     VulkanDescriptorSet m_InstanceDescriptorSet;
     VulkanStorageBuffer m_InstanceBuffer;
 
-    VulkanPipeline m_ForwardPipeline;
-    VulkanPipeline m_ForwardPipelineNoShading;
-    VulkanPipeline m_ForwardPipelineDoubleSided;
-    VulkanPipeline m_ForwardPipelineInstanced;
-    VulkanPipeline m_ForwardPipelineDoubleSidedInstanced;
-    VulkanPipeline m_QuadPipeline;
-    VulkanPipeline m_TAAPipeline;
-    VulkanPipeline m_SSRPipeline;
-    VulkanPipeline m_DepthPrepassPipeline;
-    VulkanPipeline m_DepthPrepassPipelineDoubleSided;
-    VulkanPipeline m_DepthPrepassPipelineInstanced;
-    VulkanPipeline m_DepthPrepassPipelineDoubleSidedInstanced;
-    VulkanPipeline m_SSAOPipeline;
-    VulkanPipeline m_SSAOBlurHPipeline;
-    VulkanPipeline m_SSAOBlurVPipeline;
-    VulkanComputePipeline m_HiZPipeline;
+    PipelineCache m_PSOCache;
+    PipelineHandle m_ForwardPipelines[5] {};
+    PipelineHandle m_DepthPipelines[4] {};
+    PipelineHandle m_QuadPipeline {};
+    PipelineHandle m_TAAPipeline {};
+    PipelineHandle m_SSRPipeline {};
+    PipelineHandle m_SSAOPipeline {};
+    PipelineHandle m_SSAOBlurHPipeline {};
+    PipelineHandle m_SSAOBlurVPipeline {};
+    PipelineHandle m_HiZPipeline {};
 
     VulkanMaterial m_DefaultMaterial {};
     VulkanTexture m_NoneTexture;
@@ -162,7 +155,9 @@ namespace YAEngine
 
     struct DrawCommand
     {
-      uint8_t pipelineKey;
+      bool instanced;
+      bool doubleSided;
+      bool noShading;
       uint32_t materialIndex;
       uint32_t materialGeneration;
       uint32_t meshIndex;
@@ -170,13 +165,19 @@ namespace YAEngine
       glm::mat4 worldTransform;
       std::vector<glm::mat4>* instanceData;
       uint32_t instanceOffset;
+
+      uint8_t SortKey() const
+      {
+        if (noShading) return 4;
+        return (instanced ? 2 : 0) + (doubleSided ? 1 : 0);
+      }
     };
 
     std::vector<DrawCommand> m_DrawCommands;
     std::vector<DrawCommand> m_DepthDrawCommands;
 
-    VulkanPipeline& GetForwardPipeline(uint8_t key);
-    VulkanPipeline& GetDepthPipeline(uint8_t key);
+    VulkanPipeline& GetForwardPipeline(const DrawCommand& dc);
+    VulkanPipeline& GetDepthPipeline(const DrawCommand& dc);
 
   public:
     const RenderContext& GetContext() const { return m_Backend.GetContext(); }

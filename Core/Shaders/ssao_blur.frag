@@ -32,11 +32,9 @@ void main()
     float ao = textureLod(ssaoTexture, sampleUV, 0.0).r;
     float sampleDepth = linearizeDepth(textureLod(depthTexture, sampleUV, 0.0).r);
 
-    // Spatial weight: gaussian
     float dist2 = float(i * i);
     float spatialWeight = exp(-dist2 / 4.5);
 
-    // Depth weight: reject samples across depth discontinuities
     float depthDiff = abs(centerDepth - sampleDepth) / max(centerDepth, 0.001);
     float depthWeight = exp(-depthDiff * depthDiff * 2000.0);
 
