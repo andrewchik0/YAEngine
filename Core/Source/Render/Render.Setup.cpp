@@ -15,30 +15,29 @@ namespace YAEngine
 
     m_Graph.Init(ctx, {width, height});
 
-    m_MainColor = m_Graph.CreateResource({
-      .name = "mainColor",
-      .format = VK_FORMAT_R16G16B16A16_SFLOAT
+    // G-buffer resources (16 bytes/pixel, down from 30)
+    m_GBuffer0 = m_Graph.CreateResource({
+      .name = "gbuffer0",
+      .format = VK_FORMAT_R8G8B8A8_UNORM
     });
-    m_MainNormals = m_Graph.CreateResource({
-      .name = "mainNormals",
-      .format = VK_FORMAT_R16G16B16A16_SFLOAT
+    m_GBuffer1 = m_Graph.CreateResource({
+      .name = "gbuffer1",
+      .format = VK_FORMAT_A2B10G10R10_UNORM_PACK32
     });
     m_MainDepth = m_Graph.CreateResource({
       .name = "mainDepth",
       .format = VK_FORMAT_D32_SFLOAT,
       .aspect = VK_IMAGE_ASPECT_DEPTH_BIT
     });
-    m_MainMaterial = m_Graph.CreateResource({
-      .name = "mainMaterial",
-      .format = VK_FORMAT_R8G8_UNORM
-    });
-    m_MainAlbedo = m_Graph.CreateResource({
-      .name = "mainAlbedo",
-      .format = VK_FORMAT_R8G8B8A8_UNORM
-    });
     m_MainVelocity = m_Graph.CreateResource({
       .name = "mainVelocity",
       .format = VK_FORMAT_R16G16_SFLOAT
+    });
+
+    // Deferred lighting output (replaces old mainColor)
+    m_LitColor = m_Graph.CreateResource({
+      .name = "litColor",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT
     });
     m_SSAOColor = m_Graph.CreateResource({
       .name = "ssaoColor",
@@ -87,11 +86,11 @@ namespace YAEngine
       }
     });
 
-    // 2. Main pass — forward PBR, reuses depth from prepass (EQUAL test, no depth write)
-    m_MainPassIndex = m_Graph.AddPass({
-      .name = "MainPass",
+    // 2. G-buffer pass — writes geometry/material data only, no lighting
+    m_GBufferPassIndex = m_Graph.AddPass({
+      .name = "GBufferPass",
       .inputs = {},
-      .colorOutputs = {m_MainColor, m_MainNormals, m_MainMaterial, m_MainAlbedo, m_MainVelocity},
+      .colorOutputs = {m_GBuffer0, m_GBuffer1, m_MainVelocity},
       .depthOutput = m_MainDepth,
       .clearColor = true,
       .clearDepth = false,
@@ -103,21 +102,21 @@ namespace YAEngine
 
     m_SSAOPassIndex = m_Graph.AddPass({
       .name = "SSAOPass",
-      .inputs = {m_MainDepth, m_MainNormals},
+      .inputs = {m_MainDepth, m_GBuffer1},
       .colorOutputs = {m_SSAOColor},
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_SSAOEnabled) return;
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
-        auto& mainNormals = m_Graph.GetResource(m_MainNormals);
+        auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
 
         auto& pipeline = m_PSOCache.Get(m_SSAOPipeline);
         pipeline.Bind(ctx.cmd);
         m_SSAOPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
           mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSAOPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
-          mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SSAOPassDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
@@ -174,7 +173,38 @@ namespace YAEngine
       }
     });
 
-    // 5. Hi-Z mip chain generation (compute)
+    // 5. Deferred Lighting — fullscreen IBL computation from G-buffer
+    m_DeferredLightingPassIndex = m_Graph.AddPass({
+      .name = "DeferredLighting",
+      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_SSAOBlurred},
+      .colorOutputs = {m_LitColor},
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+
+        auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
+        auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
+        auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+        auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
+
+        auto& pipeline = m_PSOCache.Get(m_DeferredLightingPipeline);
+        pipeline.Bind(ctx.cmd);
+        m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
+          gbuffer0.GetView(), gbuffer0.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
+          mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
+          ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_DeferredLightingDescriptorSets[currentFrame].Get()}, 1);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_IBLDescriptorSet.Get()}, 2);
+        DrawQuad();
+      }
+    });
+
+    // 6. Hi-Z mip chain generation (compute)
     m_HiZPassIndex = m_Graph.AddPass({
       .name = "HiZPass",
       .inputs = {m_MainDepth},
@@ -227,37 +257,34 @@ namespace YAEngine
       }
     });
 
-    // 6. SSR — Hi-Z accelerated screen-space reflections
+    // 7. SSR — Hi-Z accelerated screen-space reflections
     m_SSRPassIndex = m_Graph.AddPass({
       .name = "SSRPass",
-      .inputs = {m_MainColor, m_MainDepth, m_MainNormals, m_MainMaterial, m_MainAlbedo, m_SSAOBlurred, m_HiZResource},
+      .inputs = {m_LitColor, m_MainDepth, m_GBuffer1, m_GBuffer0, m_SSAOBlurred, m_HiZResource},
       .colorOutputs = {m_SSRColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
 
-        auto& mainColor = m_Graph.GetResource(m_MainColor);
+        auto& litColor = m_Graph.GetResource(m_LitColor);
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
-        auto& mainNormals = m_Graph.GetResource(m_MainNormals);
-        auto& mainMaterial = m_Graph.GetResource(m_MainMaterial);
-        auto& mainAlbedo = m_Graph.GetResource(m_MainAlbedo);
+        auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
+        auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
         auto& hiZ = m_Graph.GetResource(m_HiZResource);
 
         auto& pipeline = m_PSOCache.Get(m_SSRPipeline);
         pipeline.Bind(ctx.cmd);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
-          mainColor.GetView(), mainColor.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          litColor.GetView(), litColor.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
           mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
-          mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
-          mainMaterial.GetView(), mainMaterial.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          gbuffer0.GetView(), gbuffer0.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
-          mainAlbedo.GetView(), mainAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(5,
           ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(6,
+        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(5,
           hiZ.GetView(), hiZ.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
@@ -302,15 +329,14 @@ namespace YAEngine
 
     m_SceneComposePassIndex = m_Graph.AddPass({
       .name = "SceneComposePass",
-      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_MainAlbedo, m_MainNormals, m_MainMaterial},
+      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_GBuffer0, m_GBuffer1},
       .colorOutputs = {m_SceneColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
         auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
         auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
-        auto& mainAlbedo = m_Graph.GetResource(m_MainAlbedo);
-        auto& mainNormals = m_Graph.GetResource(m_MainNormals);
-        auto& mainMaterial = m_Graph.GetResource(m_MainMaterial);
+        auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
+        auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         auto& pipeline = m_PSOCache.Get(m_QuadPipeline);
@@ -320,11 +346,9 @@ namespace YAEngine
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
           ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
-          mainAlbedo.GetView(), mainAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          gbuffer0.GetView(), gbuffer0.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
-          mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
-          mainMaterial.GetView(), mainMaterial.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
@@ -354,7 +378,7 @@ namespace YAEngine
     // Swapchain pass — production mode: tone mapping + ImGui overlay
     m_SwapchainPassIndex = m_Graph.AddPass({
       .name = "SwapchainPass",
-      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_MainAlbedo, m_MainNormals, m_MainMaterial},
+      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_GBuffer0, m_GBuffer1},
       .colorOutputs = {},
       .externalFramebuffer = true,
       .externalFormat = swapFormat,
@@ -365,9 +389,8 @@ namespace YAEngine
         auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
         auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
         auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
-        auto& mainAlbedo = m_Graph.GetResource(m_MainAlbedo);
-        auto& mainNormals = m_Graph.GetResource(m_MainNormals);
-        auto& mainMaterial = m_Graph.GetResource(m_MainMaterial);
+        auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
+        auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         auto& pipeline = m_PSOCache.Get(m_QuadPipeline);
@@ -377,11 +400,9 @@ namespace YAEngine
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
           ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
-          mainAlbedo.GetView(), mainAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          gbuffer0.GetView(), gbuffer0.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
-          mainNormals.GetView(), mainNormals.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
-          mainMaterial.GetView(), mainMaterial.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();

@@ -31,6 +31,10 @@ struct FrameUniforms
   float jitterX;
   float jitterY;
   int hizMipCount;
+  float _pad0;
+  float _pad1;
+  float _pad2;
+  mat4 invView;
 };
 
 #ifdef __cplusplus

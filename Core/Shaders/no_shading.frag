@@ -9,11 +9,11 @@ layout(location = 7) in vec4 inPrevClipPos;
 
 #include "material.glsl"
 
-layout(location = 0) out vec4 outColor;
-layout(location = 1) out vec4 outNormal;
-layout(location = 2) out vec2 outMaterial;
-layout(location = 3) out vec4 outAlbedo;
-layout(location = 4) out vec2 outVelocity;
+layout(location = 0) out vec4 outGBuffer0;
+layout(location = 1) out vec4 outGBuffer1;
+layout(location = 2) out vec2 outVelocity;
+
+#include "octahedron.glsl"
 
 void main() {
   float base = float(u_Material.textureMask & 1);
@@ -29,10 +29,12 @@ void main() {
   }
   else
   {
-    outColor = vec4(albedo.rgb, 1.0);
-    outNormal = vec4(inNormal, 1.0);
-    outMaterial = vec2(1.0, 0.0);
-    outAlbedo = vec4(albedo.rgb, 1.0);
+    outGBuffer0 = vec4(albedo.rgb, 0.0);
+
+    vec2 octNorm = octEncode(inNormal) * 0.5 + 0.5;
+    float shadingModelUnlit = 1.0 / 3.0;
+    outGBuffer1 = vec4(octNorm, 1.0, shadingModelUnlit);
+
     outVelocity = velocity;
   }
 }

@@ -6,7 +6,6 @@
 #include "RenderGraph.h"
 #include "VulkanCubicTexture.h"
 #include "VulkanMaterial.h"
-#include "SkyBox.h"
 #include "PipelineCache.h"
 #include "VulkanStorageBuffer.h"
 #include "VulkanUniformBuffer.h"
@@ -72,14 +71,15 @@ namespace YAEngine
     RenderBackend m_Backend;
     RenderGraph m_Graph;
 
-    // Render graph resource handles
-    RGHandle m_MainColor {};
-    RGHandle m_MainNormals {};
+    // Render graph resource handles — G-buffer
+    RGHandle m_GBuffer0 {};       // R8G8B8A8_UNORM: albedo.rgb + metallic
+    RGHandle m_GBuffer1 {};       // A2B10G10R10_UNORM: octNormal.xy + roughness + shadingModel
     RGHandle m_MainDepth {};
-    RGHandle m_MainMaterial {};
-    RGHandle m_MainAlbedo {};
-    RGHandle m_SSRColor {};
     RGHandle m_MainVelocity {};
+
+    // Render graph resource handles — lighting & post
+    RGHandle m_LitColor {};       // R16G16B16A16_SFLOAT: deferred lighting output
+    RGHandle m_SSRColor {};
     RGHandle m_HiZResource {};
     RGHandle m_SSAOColor {};
     RGHandle m_SSAOBlurIntermediate {};
@@ -100,11 +100,12 @@ namespace YAEngine
 
     // Pass indices
     uint32_t m_DepthPrepassIndex {};
-    uint32_t m_MainPassIndex {};
+    uint32_t m_GBufferPassIndex {};
     uint32_t m_SSAOPassIndex {};
     uint32_t m_HiZPassIndex {};
     uint32_t m_SSAOBlurHPassIndex {};
     uint32_t m_SSAOBlurVPassIndex {};
+    uint32_t m_DeferredLightingPassIndex {};
     uint32_t m_SSRPassIndex {};
     uint32_t m_TAAPassIndex {};
     uint32_t m_SwapchainPassIndex {};
@@ -120,8 +121,9 @@ namespace YAEngine
     glm::mat4 m_PrevView = glm::mat4(1.0f);
     glm::mat4 m_PrevProj = glm::mat4(1.0f);
 
+    CubeMapHandle m_BoundSkybox {};
+
     FrameUniformBuffer m_FrameUniformBuffer {};
-    SkyBox m_SkyBox;
 
     std::vector<VulkanDescriptorSet> m_SwapChainDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
@@ -129,6 +131,8 @@ namespace YAEngine
     std::vector<VulkanDescriptorSet> m_SSAOPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSAOBlurHPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSAOBlurVPassDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_DeferredLightingDescriptorSets;
+    VulkanDescriptorSet m_IBLDescriptorSet;
 
     VulkanDescriptorSet m_InstanceDescriptorSet;
     VulkanStorageBuffer m_InstanceBuffer;
@@ -143,9 +147,11 @@ namespace YAEngine
     PipelineHandle m_SSAOBlurHPipeline {};
     PipelineHandle m_SSAOBlurVPipeline {};
     PipelineHandle m_HiZPipeline {};
+    PipelineHandle m_DeferredLightingPipeline {};
 
     VulkanMaterial m_DefaultMaterial {};
     VulkanTexture m_NoneTexture;
+    VulkanImage m_NoneCubeMap;
     VulkanTexture m_SSAONoise;
     VulkanUniformBuffer m_SSAOKernelUBO;
     CubicTextureResources m_CubicResources;

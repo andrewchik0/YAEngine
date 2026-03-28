@@ -52,14 +52,14 @@ namespace YAEngine
     depthInfo.doubleSided = true;
     m_DepthPipelines[3] = m_PSOCache.Register(ctx.device, depthRP, depthInfo, pipelineCache);
 
-    VkRenderPass mainRP = m_Graph.GetPassRenderPass(m_MainPassIndex);
+    VkRenderPass mainRP = m_Graph.GetPassRenderPass(m_GBufferPassIndex);
 
     PipelineCreateInfo forwardInfo = {
       .fragmentShaderFile = "shader.frag",
       .vertexShaderFile = "mesh.vert",
       .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
       .depthWrite = false,
-      .colorAttachmentCount = 5,
+      .colorAttachmentCount = 3,
       .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
       .vertexInputFormat = "f3f2f3f4",
       .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
@@ -94,7 +94,6 @@ namespace YAEngine
           { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
@@ -227,7 +226,7 @@ namespace YAEngine
     VkRenderPass ssaoBlurVRP = m_Graph.GetPassRenderPass(m_SSAOBlurVPassIndex);
     m_SSAOBlurVPipeline = m_PSOCache.Register(ctx.device, ssaoBlurVRP, ssaoBlurInfo, pipelineCache);
 
-    // SSR descriptor sets and pipeline (7 bindings: frame, depth, normals, material, albedo, ssao, hiZ)
+    // SSR descriptor sets and pipeline (6 bindings: litColor, depth, gbuffer1, gbuffer0, ssao, hiZ)
     VkRenderPass ssrRP = m_Graph.GetPassRenderPass(m_SSRPassIndex);
 
     m_SSRPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
@@ -243,7 +242,6 @@ namespace YAEngine
             { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-            { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
@@ -260,6 +258,57 @@ namespace YAEngine
       })
     };
     m_SSRPipeline = m_PSOCache.Register(ctx.device, ssrRP, ssrPipelineDesc, pipelineCache);
+
+    // Deferred Lighting descriptor sets and pipeline
+    VkRenderPass deferredRP = m_Graph.GetPassRenderPass(m_DeferredLightingPassIndex);
+
+    m_DeferredLightingDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      SetDescription dlDesc = {
+        .set = 1,
+        .bindings = {
+          {
+            { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          }
+        }
+      };
+      m_DeferredLightingDescriptorSets[i].Init(ctx, dlDesc);
+    }
+
+    // IBL descriptor set (irradiance, prefilter, BRDF LUT, skybox cubemap)
+    SetDescription iblDesc = {
+      .set = 2,
+      .bindings = {
+        {
+          { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        }
+      }
+    };
+    m_IBLDescriptorSet.Init(ctx, iblDesc);
+    m_IBLDescriptorSet.WriteCombinedImageSampler(0, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+    m_IBLDescriptorSet.WriteCombinedImageSampler(1, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+    m_IBLDescriptorSet.WriteCombinedImageSampler(2, m_NoneTexture.GetView(), m_NoneTexture.GetSampler());
+    m_IBLDescriptorSet.WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+
+    PipelineCreateInfo deferredInfo = {
+      .fragmentShaderFile = "deferred_lighting.frag",
+      .vertexShaderFile = "quad.vert",
+      .depthTesting = false,
+      .vertexInputFormat = "",
+      .sets = std::vector({
+        m_FrameUniformBuffer.GetLayout(),
+        m_DeferredLightingDescriptorSets[0].GetLayout(),
+        m_IBLDescriptorSet.GetLayout(),
+      })
+    };
+    m_DeferredLightingPipeline = m_PSOCache.Register(ctx.device, deferredRP, deferredInfo, pipelineCache);
 
     // Hi-Z compute pipeline
     SetDescription hizSetDesc = {

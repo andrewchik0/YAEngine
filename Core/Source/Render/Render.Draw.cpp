@@ -115,9 +115,6 @@ namespace YAEngine
       vb.Draw(cmd, instanceCount);
     }
 
-    glm::mat4 camDir = glm::mat4_cast(frame.snapshot.camera.rotation);
-    if (skybox)
-      m_SkyBox.Draw(currentFrame, &cubeMapManager.GetVulkanCubicTexture(skybox), cmd, camDir, m_FrameUniformBuffer.uniforms.proj, m_CubicResources);
   }
 
   void Render::SetUpCamera(FrameContext& frame)
@@ -172,6 +169,7 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.view = view;
     m_FrameUniformBuffer.uniforms.proj = proj;
     m_FrameUniformBuffer.uniforms.invProj = glm::inverse(proj);
+    m_FrameUniformBuffer.uniforms.invView = glm::inverse(view);
     m_FrameUniformBuffer.uniforms.nearPlane = cam.nearPlane;
     m_FrameUniformBuffer.uniforms.farPlane = cam.farPlane;
     m_FrameUniformBuffer.uniforms.cameraPosition = cam.position;

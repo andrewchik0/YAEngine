@@ -3,15 +3,15 @@ layout(location = 0) out vec4 outColor;
 
 #include "common.glsl"
 #include "utils.glsl"
+#include "octahedron.glsl"
 #include "pbr.glsl"
 
-layout(set = 1, binding = 0) uniform sampler2D frame;
+layout(set = 1, binding = 0) uniform sampler2D litColorTexture;
 layout(set = 1, binding = 1) uniform sampler2D depthTexture;
-layout(set = 1, binding = 2) uniform sampler2D normalTexture;
-layout(set = 1, binding = 3) uniform sampler2D materialTexture;
-layout(set = 1, binding = 4) uniform sampler2D albedoTexture;
-layout(set = 1, binding = 5) uniform sampler2D ssaoTexture;
-layout(set = 1, binding = 6) uniform sampler2D hiZTexture;
+layout(set = 1, binding = 2) uniform sampler2D gbuffer1Texture;
+layout(set = 1, binding = 3) uniform sampler2D gbuffer0Texture;
+layout(set = 1, binding = 4) uniform sampler2D ssaoTexture;
+layout(set = 1, binding = 5) uniform sampler2D hiZTexture;
 
 // --- Configuration ---
 const int MAX_ITERATIONS = 128;
@@ -29,12 +29,15 @@ const float MAX_THICKNESS = 2.0;
 void main()
 {
   float depth = texture(depthTexture, uv).r;
-  vec3 worldNormal = texture(normalTexture, uv).rgb;
-  vec2 material = texture(materialTexture, uv).rg;
-  float roughness = material.r;
-  float metallic = material.g;
-  vec3 albedo = texture(albedoTexture, uv).rgb;
-  vec3 originalColor = texture(frame, uv).rgb;
+
+  // Read G-buffer data
+  vec4 gb1 = texture(gbuffer1Texture, uv);
+  vec4 gb0 = texture(gbuffer0Texture, uv);
+  vec3 worldNormal = octDecode(gb1.rg * 2.0 - 1.0);
+  float roughness = gb1.b;
+  float metallic = gb0.a;
+  vec3 albedo = gb0.rgb;
+  vec3 originalColor = texture(litColorTexture, uv).rgb;
   float ao = texture(ssaoTexture, uv).r;
 
   if (u_Frame.ssaoEnabled == 0)
@@ -124,8 +127,6 @@ void main()
   vec2 hitUV = vec2(0.0);
   float hitT = 0.0;
   // Stochastic jitter: sub-pixel offset that varies per pixel per frame.
-  // This randomizes the hit/miss boundary position so TAA can smooth it.
-  // Interleaved gradient noise (Jimenez, SIGGRAPH 2014)
   float ign = fract(52.9829189 * fract(dot(
       gl_FragCoord.xy + fract(u_Frame.time * 7.23) * vec2(131.0, 257.0),
       vec2(0.06711056, 0.00583715))));
@@ -170,24 +171,17 @@ void main()
         float rayLinearDepth = linearizeDepth(rayDepth);
         if (rayLinearDepth - sampleLinearDepth > MAX_THICKNESS)
         {
-          // Ray passed through — go coarser
           mipLevel = min(mipLevel + 1, effectiveMaxMip);
           continue;
         }
 
-        // Reject same-surface hits (only for grazing-angle reflections
-        // where the ray slides along the surface, e.g. wall reflecting itself).
-        // Skip for steep reflections (e.g. floor reflecting car above) to avoid
-        // rejecting valid hits on different objects with similar normals.
+        // Reject same-surface hits
         if (reflNormalDot < 0.5)
         {
-          vec3 sampleNormalRaw = texture(normalTexture, sampleUV).rgb;
-          if (dot(sampleNormalRaw, sampleNormalRaw) > 0.000001)
-          {
-            vec3 sampleNormal = normalize(sampleNormalRaw);
-            if (dot(sampleNormal, worldNormal) > SAME_SURFACE_THRESHOLD)
-              continue;
-          }
+          vec4 sampleGB1 = texture(gbuffer1Texture, sampleUV);
+          vec3 sampleNormal = octDecode(sampleGB1.rg * 2.0 - 1.0);
+          if (dot(sampleNormal, worldNormal) > SAME_SURFACE_THRESHOLD)
+            continue;
         }
 
         hit = true;
@@ -199,7 +193,6 @@ void main()
       {
         // Go finer for more precision
         mipLevel--;
-        // Undo current step to re-test at finer level
         t -= max(1.0, float(1 << (mipLevel + 1))) / rayScreenLen;
         t = max(t, 0.0);
       }
@@ -244,7 +237,7 @@ void main()
   hitUV = mix(startScreen, endScreen, finalT);
   hitT = finalT;
 
-  // Silhouette edge detection — fade out hits at depth discontinuities
+  // Silhouette edge detection
   vec2 texelSize = 1.0 / screenSize;
   float hitLinearDepth = linearizeDepth(textureLod(hiZTexture, hitUV, 0.0).r);
   float dU = abs(hitLinearDepth - linearizeDepth(textureLod(hiZTexture, hitUV + vec2(texelSize.x, 0.0), 0.0).r));
@@ -254,14 +247,11 @@ void main()
   float maxDepthDiff = max(max(dU, dD), max(dR, dL));
   float silhouetteFade = 1.0 - smoothstep(0.01, 0.3, maxDepthDiff);
 
-  // Contact fade — near the contact line between an object and its reflection,
-  // SSR catches thin edge geometry (splitters, lips) that's only 1-2 pixels wide.
-  // This creates stretched vertical streaks. Fade out hits that are too close
-  // to the origin in screen space — these are unreliable edge reflections.
-  float hitScreenDist = hitT * rayScreenLen; // pixels the ray traveled
+  // Contact fade
+  float hitScreenDist = hitT * rayScreenLen;
   float contactFade = smoothstep(0.0, 32.0, hitScreenDist);
 
-  vec3 reflectedColor = texture(frame, hitUV).rgb;
+  vec3 reflectedColor = texture(litColorTexture, hitUV).rgb;
 
   vec3 F0 = mix(vec3(0.04), albedo, metallic);
   float NdotV = clamp(dot(-viewDir, viewNormal), 0.01, 1.0);

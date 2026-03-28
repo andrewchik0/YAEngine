@@ -2,12 +2,12 @@ layout(location = 0) in vec2 uv;
 layout(location = 0) out vec4 outColor;
 
 #include "common.glsl"
+#include "octahedron.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D frame;
 layout(set = 1, binding = 1) uniform sampler2D ssaoTexture;
-layout(set = 1, binding = 2) uniform sampler2D albedoTexture;
-layout(set = 1, binding = 3) uniform sampler2D normalTexture;
-layout(set = 1, binding = 4) uniform sampler2D materialTexture;
+layout(set = 1, binding = 2) uniform sampler2D gbuffer0Texture;
+layout(set = 1, binding = 3) uniform sampler2D gbuffer1Texture;
 
 #include "post.glsl"
 
@@ -17,16 +17,20 @@ void main()
   switch (u_Frame.currentTexture)
   {
   case 1: // Albedo
-    outColor = vec4(texture(albedoTexture, uv).rgb, 1.0);
+    outColor = vec4(texture(gbuffer0Texture, uv).rgb, 1.0);
     return;
-  case 2: // Metallic
-    outColor = vec4(vec3(texture(materialTexture, uv).g), 1.0);
+  case 2: // Metallic (from GBuffer0.a)
+    outColor = vec4(vec3(texture(gbuffer0Texture, uv).a), 1.0);
     return;
-  case 3: // Roughness
-    outColor = vec4(vec3(texture(materialTexture, uv).r), 1.0);
+  case 3: // Roughness (from GBuffer1.b)
+    outColor = vec4(vec3(texture(gbuffer1Texture, uv).b), 1.0);
     return;
-  case 4: // Normals
-    outColor = vec4(texture(normalTexture, uv).rgb * 0.5 + 0.5, 1.0);
+  case 4: // Normals (octahedron decode from GBuffer1.rg)
+    {
+      vec2 enc = texture(gbuffer1Texture, uv).rg;
+      vec3 normal = octDecode(enc * 2.0 - 1.0);
+      outColor = vec4(normal * 0.5 + 0.5, 1.0);
+    }
     return;
   case 5: // SSAO
     {

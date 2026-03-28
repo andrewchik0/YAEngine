@@ -3,6 +3,9 @@
 #include <imgui_impl_glfw.h>
 #include <ImGui/imgui_impl_vulkan.h>
 
+#include "Assets/AssetManager.h"
+#include "Assets/CubeMapManager.h"
+#include "ImageBarrier.h"
 #include "Log.h"
 #include "SSAOKernel.h"
 
@@ -22,6 +25,25 @@ namespace YAEngine
 
     uint32_t whitePixel = 0xFFFFFFFF;
     m_NoneTexture.Load(ctx, &whitePixel, 1, 1, 4, VK_FORMAT_R8G8B8A8_SRGB);
+
+    // 1x1 black cubemap placeholder for IBL descriptors before skybox is loaded
+    {
+      ImageDesc cubeDesc;
+      cubeDesc.format = VK_FORMAT_R8G8B8A8_UNORM;
+      cubeDesc.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+      cubeDesc.arrayLayers = 6;
+      cubeDesc.flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT;
+      cubeDesc.viewType = VK_IMAGE_VIEW_TYPE_CUBE;
+      SamplerDesc sampDesc;
+      m_NoneCubeMap.Init(ctx, cubeDesc, &sampDesc);
+
+      auto cmd = m_Backend.GetCommandBuffer().BeginSingleTimeCommands();
+      TransitionImageLayout(cmd, m_NoneCubeMap.GetImage(),
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
+      m_Backend.GetCommandBuffer().EndSingleTimeCommands(cmd);
+      m_NoneCubeMap.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
 
     m_DefaultMaterial.Init(ctx, m_NoneTexture);
     m_FrameUniformBuffer.Init(ctx);
@@ -93,7 +115,6 @@ namespace YAEngine
 #endif
 
     m_CubicResources.Init(ctx);
-    m_SkyBox.Init(ctx, m_Graph.GetPassRenderPass(m_MainPassIndex));
 
     vkDeviceWaitIdle(ctx.device);
   }
@@ -113,8 +134,8 @@ namespace YAEngine
     DestroySceneImGuiDescriptor();
 #endif
 
-    m_SkyBox.Destroy();
     m_CubicResources.Destroy(ctx);
+    m_NoneCubeMap.Destroy(ctx);
     m_NoneTexture.Destroy(ctx);
 
     DestroyHiZResources();
@@ -141,6 +162,9 @@ namespace YAEngine
       set.Destroy();
     for (auto& set : m_SSAOBlurVPassDescriptorSets)
       set.Destroy();
+    for (auto& set : m_DeferredLightingDescriptorSets)
+      set.Destroy();
+    m_IBLDescriptorSet.Destroy();
 
     m_SSAONoise.Destroy(ctx);
     m_SSAOKernelUBO.Destroy(ctx);
@@ -261,6 +285,22 @@ namespace YAEngine
     // Upload per-frame UBO before executing passes
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     m_FrameUniformBuffer.SetUp(currentFrame);
+
+    // Update IBL descriptor set when skybox changes
+    auto skybox = frame.snapshot.skybox;
+    if (skybox && skybox != m_BoundSkybox)
+    {
+      auto& cubeMap = frame.assets.CubeMaps().GetVulkanCubicTexture(skybox);
+      m_IBLDescriptorSet.WriteCombinedImageSampler(0,
+        cubeMap.GetIrradianceView(), cubeMap.GetIrradianceSampler());
+      m_IBLDescriptorSet.WriteCombinedImageSampler(1,
+        cubeMap.GetPrefilterView(), cubeMap.GetPrefilterSampler());
+      m_IBLDescriptorSet.WriteCombinedImageSampler(2,
+        frame.cubicResources.brdfLut.GetView(), frame.cubicResources.brdfLut.GetSampler());
+      m_IBLDescriptorSet.WriteCombinedImageSampler(3,
+        cubeMap.GetView(), cubeMap.GetSampler());
+      m_BoundSkybox = skybox;
+    }
 
     // Execute all passes
     m_Graph.Execute(cmd, &frame);

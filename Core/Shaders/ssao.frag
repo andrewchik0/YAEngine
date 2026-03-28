@@ -3,9 +3,10 @@ layout(location = 0) out vec4 outColor;
 
 #include "common.glsl"
 #include "utils.glsl"
+#include "octahedron.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D depthTexture;
-layout(set = 1, binding = 1) uniform sampler2D normalTexture;
+layout(set = 1, binding = 1) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 2) uniform sampler2D noiseTexture;
 
 #include "../Shared/SSAOKernel.h"
@@ -27,7 +28,10 @@ void main()
 
   vec3 viewPos = reconstructViewPos(uv, depth);
   float linearDepthCenter = linearizeDepth(depth);
-  vec3 worldNormal = textureLod(normalTexture, uv, 0.0).rgb;
+
+  // Decode octahedron-encoded normal from GBuffer1
+  vec2 encodedNormal = textureLod(gbuffer1Texture, uv, 0.0).rg;
+  vec3 worldNormal = octDecode(encodedNormal * 2.0 - 1.0);
 
   if (dot(worldNormal, worldNormal) < 0.000001)
   {
@@ -61,14 +65,10 @@ void main()
     float sampleLinearDepth = linearizeDepth(sampledDepth);
     float expectedLinearDepth = linearizeDepth(clip.z / clip.w);
 
-    // Occlusion: sampled surface is closer than expected sample position
-    // Scale bias with distance to prevent Z-fighting at far range
     float scaledBias = BIAS * max(1.0, linearDepthCenter * 0.1);
     float depthDiff = sampleLinearDepth - expectedLinearDepth;
     float isOccluded = step(scaledBias, -depthDiff);
 
-    // Range check: smooth, depth-proportional rejection of distant occluders
-    // When sample is farther than center, rangeCheck = 1.0
     float maxRange = max(RADIUS * 2.0, linearDepthCenter * 0.02);
     float rangeSmooth = smoothstep(maxRange, maxRange * 0.5, abs(linearDepthCenter - sampleLinearDepth));
     float rangeCheck = mix(1.0, rangeSmooth, step(sampleLinearDepth, linearDepthCenter));

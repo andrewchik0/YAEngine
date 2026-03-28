@@ -9,13 +9,11 @@ layout(location = 7) in vec4 inPrevClipPos;
 
 #include "material.glsl"
 
-layout(location = 0) out vec4 outColor;
-layout(location = 1) out vec4 outNormal;
-layout(location = 2) out vec2 outMaterial;
-layout(location = 3) out vec4 outAlbedo;
-layout(location = 4) out vec2 outVelocity;
+layout(location = 0) out vec4 outGBuffer0;
+layout(location = 1) out vec4 outGBuffer1;
+layout(location = 2) out vec2 outVelocity;
 
-#include "pbr.glsl"
+#include "octahedron.glsl"
 
 void main() {
   float gamma = u_Frame.gamma;
@@ -42,36 +40,17 @@ void main() {
     combinedTextures
   );
 
-  vec3 viewVec = normalize(u_Frame.cameraPosition - inPosition);
-
-  float NdotV = clamp(abs(dot(normal, viewVec)), 0.01, 0.99);
-  vec3 f0 = mix(vec3(0.04), albedo.rgb, metallic);
-
-  // IBL ambient
-  vec3 F = fresnelSchlickRoughness(NdotV, f0, roughness);
-
-  vec3 kD = 1.0 - F;
-  kD *= (1.0 - metallic);
-
-  vec3 irradiance = texture(irradianceCubemap, normal).rgb;
-  vec3 diffuse = irradiance * albedo.rgb;
-
-  vec3 R = reflect(-viewVec, normal);
-  const float MAX_REFLECTION_LOD = 9.0;
-  vec3 prefilteredColor = textureLod(prefilterTexture, R, roughness * MAX_REFLECTION_LOD).rgb;
-  vec2 brdf = texture(brdfTexture, vec2(NdotV, clamp(roughness, 0.01, 0.99))).rg;
-  vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
-
-  vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
-  vec3 resultColor = max(ambient, vec3(0.0));
-
   vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;
   vec2 prevNDC = inPrevClipPos.xy / inPrevClipPos.w;
   vec2 velocity = (curNDC - prevNDC) * 0.5;
 
-  outColor = vec4(resultColor, 1.0);
-  outNormal = vec4(normal, 1.0);
-  outMaterial = vec2(roughness, metallic);
-  outAlbedo = vec4(albedo.rgb, 1.0);
+  // GBuffer0: albedo.rgb + metallic
+  outGBuffer0 = vec4(albedo.rgb, metallic);
+
+  // GBuffer1: octahedron-encoded normal (10+10 bit) + roughness (10 bit) + shadingModel (2 bit)
+  vec2 octNorm = octEncode(normal) * 0.5 + 0.5;
+  float shadingModelPBR = 0.0;
+  outGBuffer1 = vec4(octNorm, roughness, shadingModelPBR);
+
   outVelocity = velocity;
 }
