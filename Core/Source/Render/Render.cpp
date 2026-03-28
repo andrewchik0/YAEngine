@@ -904,11 +904,13 @@ namespace YAEngine
     auto& cubeMapManager = frame.assets.CubeMaps();
     auto skybox = frame.snapshot.skybox;
 
-    // === Collect ===
+    // === Collect (only visible objects) ===
     m_DrawCommands.clear();
 
-    for (auto& obj : frame.snapshot.objects)
+    uint32_t visibleCount = frame.snapshot.visibleCount;
+    for (uint32_t i = 0; i < visibleCount; i++)
     {
+      auto& obj = frame.snapshot.objects[i];
       bool isInstanced = (obj.instanceData != nullptr) && !obj.noShading;
 
       uint8_t pipelineKey;
@@ -1366,11 +1368,13 @@ namespace YAEngine
     auto cmd = m_Backend.GetCurrentCommandBuffer();
     auto& meshManager = frame.assets.Meshes();
 
-    // === Collect ===
+    // === Collect (only visible objects) ===
     m_DepthDrawCommands.clear();
 
-    for (auto& obj : frame.snapshot.objects)
+    uint32_t visibleCount = frame.snapshot.visibleCount;
+    for (uint32_t i = 0; i < visibleCount; i++)
     {
+      auto& obj = frame.snapshot.objects[i];
       if (obj.noShading) continue;
 
       bool isInstanced = (obj.instanceData != nullptr);

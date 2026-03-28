@@ -10,6 +10,8 @@ namespace YAEngine
     MeshHandle mesh;
     MaterialHandle material;
     glm::mat4 worldTransform;
+    glm::vec3 boundsMin { std::numeric_limits<float>::max() };
+    glm::vec3 boundsMax { std::numeric_limits<float>::lowest() };
     std::vector<glm::mat4>* instanceData = nullptr;
     uint32_t instanceOffset = 0;
     bool doubleSided = false;
@@ -29,6 +31,7 @@ namespace YAEngine
   struct SceneSnapshot
   {
     std::vector<RenderObject> objects;
+    uint32_t visibleCount = 0;
     CameraData camera;
     CubeMapHandle skybox;
   };

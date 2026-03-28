@@ -97,6 +97,7 @@ set(SOURCE_FILES
   Source/Render/VulkanStorageBuffer.h
   Source/Render/FrameContext.h
   Source/Render/RenderObject.h
+  Source/Render/FrustumCull.h
   Source/SceneSnapshot.h
   Source/Render/RenderContext.h
   Source/Render/ImageBarrier.h

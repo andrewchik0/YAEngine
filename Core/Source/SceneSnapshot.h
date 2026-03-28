@@ -34,7 +34,7 @@ namespace YAEngine
     {
       if (reg.all_of<HiddenTag>(entity)) return;
 
-      snapshot.objects.push_back({
+      RenderObject obj {
         .mesh = mesh.asset,
         .material = material.asset,
         .worldTransform = wt.world,
@@ -42,9 +42,19 @@ namespace YAEngine
         .instanceOffset = meshManager.GetInstanceOffset(mesh.asset),
         .doubleSided = reg.all_of<DoubleSidedTag>(entity),
         .noShading = reg.all_of<NoShadingTag>(entity),
-      });
+      };
+
+      if (reg.all_of<WorldBounds>(entity))
+      {
+        auto& wb = reg.get<WorldBounds>(entity);
+        obj.boundsMin = wb.min;
+        obj.boundsMax = wb.max;
+      }
+
+      snapshot.objects.push_back(obj);
     });
 
+    snapshot.visibleCount = uint32_t(snapshot.objects.size());
     return snapshot;
   }
 }

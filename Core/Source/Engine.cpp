@@ -1,5 +1,6 @@
 #include "Engine.h"
 #include "Render/FrameContext.h"
+#include "Render/FrustumCull.h"
 #include "SceneSnapshot.h"
 #include "Scene/TransformSystem.h"
 #include "Scene/BoundsUpdateSystem.h"
@@ -131,6 +132,14 @@ namespace YAEngine
       m_InputSystem.EndFrame();
 
       auto snapshot = BuildSceneSnapshot(m_Scene, m_AssetManager.Meshes());
+
+      // Frustum cull: compute viewProj from camera data, partition visible objects to front
+      auto& cam = snapshot.camera;
+      glm::mat4 world = glm::translate(glm::mat4(1.0f), cam.position) * glm::mat4_cast(cam.rotation);
+      glm::mat4 view = glm::inverse(world);
+      glm::mat4 proj = glm::perspective(cam.fov, cam.aspectRatio, cam.nearPlane, cam.farPlane);
+      snapshot.visibleCount = FrustumCull(snapshot.objects, proj * view);
+
       auto frame = MakeFrameContext(snapshot);
       m_Render.Draw(frame);
     }
