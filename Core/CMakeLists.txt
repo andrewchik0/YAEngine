@@ -31,6 +31,14 @@ add_shader_compilation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders)
 target_compile_definitions(Core PRIVATE
   SHADER_BIN_DIR="${SHADER_BIN_DIR}"
 )
+
+# mesh.vert permutations (default permutation compiled by directory mode above)
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  mesh.vert mesh_instanced.vert.spv -DINSTANCED)
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  mesh.vert mesh_depth.vert.spv -DDEPTH_ONLY)
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  mesh.vert mesh_instanced_depth.vert.spv -DINSTANCED -DDEPTH_ONLY)
 target_compile_definitions(Core PRIVATE
   WORKING_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )

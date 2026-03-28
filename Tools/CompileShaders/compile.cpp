@@ -263,11 +263,11 @@ bool ParseShaderFromFile(const fs::path& filePath, std::set<std::string>& includ
   return true;
 }
 
-static fs::path WriteTempShader(const std::string& source, const fs::path& shaderPath)
+static fs::path WriteTempShader(const std::string& source, const fs::path& shaderPath, const std::string& suffix = "")
 {
   std::string stem = shaderPath.stem().string();
   std::string ext = shaderPath.extension().string();
-  std::string tempName = "shader_tmp_" + stem + ext + ".glsl";
+  std::string tempName = "shader_tmp_" + stem + (suffix.empty() ? "" : "_" + suffix) + ext + ".glsl";
 
   fs::path temp = fs::temp_directory_path() / tempName;
 
@@ -279,6 +279,30 @@ static fs::path WriteTempShader(const std::string& source, const fs::path& shade
 static void RemoveTempShader(const fs::path& tempPath)
 {
   std::remove(tempPath.string().c_str());
+}
+
+static constexpr const char* GLSL_VERSION = "450";
+
+static std::string PrepareSource(const std::string& source, const std::vector<std::string>& defines = {})
+{
+  std::string body = source;
+
+  // Strip existing #version if present (transition: works with or without it)
+  size_t versionPos = body.find("#version");
+  if (versionPos != std::string::npos)
+  {
+    size_t lineEnd = body.find('\n', versionPos);
+    if (lineEnd == std::string::npos)
+      body.clear();
+    else
+      body = body.substr(lineEnd + 1);
+  }
+
+  std::string result = std::string("#version ") + GLSL_VERSION + "\n";
+  for (const auto& def : defines)
+    result += "#define " + def + "\n";
+  result += body;
+  return result;
 }
 
 static int RunGlslc(const fs::path& glslc,
@@ -378,22 +402,88 @@ static int RunGlslc(const fs::path& glslc,
 int main(int argc, char** argv)
 {
   fs::path sourceDir;
-  fs::path outputDir;
+  fs::path outputPath;
+  fs::path inputFile;
   fs::path glslc;
+  bool singleMode = false;
+  std::vector<std::string> defines;
 
   for (int i = 1; i < argc; ++i)
   {
     std::string arg = argv[i];
 
-    if (arg == "--source" && i + 1 < argc)
+    if (arg == "--single")
+      singleMode = true;
+    else if (arg == "--source" && i + 1 < argc)
       sourceDir = argv[++i];
+    else if (arg == "--input" && i + 1 < argc)
+      inputFile = argv[++i];
     else if (arg == "--output" && i + 1 < argc)
-      outputDir = argv[++i];
+      outputPath = argv[++i];
     else if (arg == "--glslc" && i + 1 < argc)
       glslc = argv[++i];
+    else if (arg.size() > 2 && arg[0] == '-' && arg[1] == 'D')
+    {
+      std::string def = arg.substr(2);
+      size_t eq = def.find('=');
+      if (eq != std::string::npos)
+        def[eq] = ' ';
+      defines.push_back(def);
+    }
   }
 
-  if (sourceDir.empty() || outputDir.empty() || glslc.empty())
+  if (singleMode)
+  {
+    if (inputFile.empty() || outputPath.empty() || glslc.empty())
+    {
+      std::cerr << "Usage: CompileShaders --single --input <file> --output <file> --glslc <path> [-DKEY[=VALUE] ...]\n";
+      return 1;
+    }
+
+    std::set<std::string> includedFiles;
+    std::string text;
+
+    if (!ParseShaderFromFile(inputFile, includedFiles, text))
+    {
+      std::cerr << "Failed to preprocess shader: " << inputFile.string() << std::endl;
+      return 1;
+    }
+
+    text = PrepareSource(text, defines);
+
+    auto tempPath = WriteTempShader(text, inputFile, outputPath.stem().string());
+
+    fs::create_directories(outputPath.parent_path());
+
+    std::string stage = inputFile.extension().string().substr(1);
+
+    std::wcout << L"Compiling " << inputFile.filename().wstring();
+    if (!defines.empty())
+    {
+      std::wcout << L" [";
+      for (size_t i = 0; i < defines.size(); ++i)
+      {
+        if (i > 0) std::wcout << L", ";
+        std::wcout << std::wstring(defines[i].begin(), defines[i].end());
+      }
+      std::wcout << L"]";
+    }
+    std::wcout << std::endl;
+
+    int exitCode = RunGlslc(glslc, tempPath, outputPath, stage);
+    RemoveTempShader(tempPath);
+
+    if (exitCode != 0)
+    {
+      std::cerr << "glslc failed for " << inputFile.string() << " (exit code " << exitCode << ")" << std::endl;
+      return 1;
+    }
+
+    return 0;
+  }
+
+  // Directory mode (original behavior)
+  if (sourceDir.empty() || outputPath.empty() || glslc.empty())
   {
     std::cerr << "Usage: CompileShaders --source <dir> --output <dir> --glslc <path>\n";
     return 1;
@@ -415,12 +505,14 @@ int main(int argc, char** argv)
       continue;
     }
 
+    text = PrepareSource(text);
+
     auto tempPath = WriteTempShader(text, shader);
 
-    fs::path output = outputDir / (shader.filename().string() + ".spv");
+    fs::path output = outputPath / (shader.filename().string() + ".spv");
     fs::create_directories(output.parent_path());
 
-    std::string stage = shader.extension().string().substr(1); // strip leading '.'
+    std::string stage = shader.extension().string().substr(1);
 
     std::wcout << L"Compiling " << shader.filename().wstring() << std::endl;
 

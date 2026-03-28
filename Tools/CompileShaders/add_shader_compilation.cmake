@@ -18,3 +18,32 @@ function(add_shader_compilation TARGET_NAME SHADER_SOURCE_DIR)
     SHADER_BIN_DIR="${SHADER_BIN_DIR}"
   )
 endfunction()
+
+# Compile a single shader with preprocessor defines (permutation).
+# Usage: add_shader_permutation(TARGET_NAME SOURCE_DIR INPUT_FILE OUTPUT_NAME DEFINES...)
+function(add_shader_permutation TARGET_NAME SOURCE_DIR INPUT_FILE OUTPUT_NAME)
+  set(SHADER_BIN_DIR ${CMAKE_BINARY_DIR}/Shaders/${TARGET_NAME})
+  set(INPUT_PATH ${SOURCE_DIR}/${INPUT_FILE})
+  set(OUTPUT_PATH ${SHADER_BIN_DIR}/${OUTPUT_NAME})
+
+  # Remaining args are -D defines
+  set(DEFINE_ARGS ${ARGN})
+
+  add_custom_command(
+    OUTPUT ${OUTPUT_PATH}
+    COMMAND CompileShaders
+      --single
+      --glslc ${GLSLC_EXECUTABLE}
+      --input ${INPUT_PATH}
+      --output ${OUTPUT_PATH}
+      ${DEFINE_ARGS}
+    DEPENDS CompileShaders ${INPUT_PATH}
+    COMMENT "Compiling permutation ${OUTPUT_NAME}"
+  )
+
+  # Attach to the existing shader target
+  if(TARGET ${TARGET_NAME}_Shaders)
+    add_custom_target(${TARGET_NAME}_Shader_${OUTPUT_NAME} DEPENDS ${OUTPUT_PATH})
+    add_dependencies(${TARGET_NAME}_Shaders ${TARGET_NAME}_Shader_${OUTPUT_NAME})
+  endif()
+endfunction()

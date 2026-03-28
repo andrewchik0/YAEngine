@@ -13,6 +13,20 @@ namespace YAEngine
     m_VulkanInstance.Init(specs);
     m_Surface.Init(m_VulkanInstance.Get(), window);
     m_PhysicalDevice.Init(m_VulkanInstance.Get(), m_Surface.Get());
+
+    {
+      VkPhysicalDeviceProperties props;
+      vkGetPhysicalDeviceProperties(m_PhysicalDevice.Get(), &props);
+      uint32_t major = VK_API_VERSION_MAJOR(props.apiVersion);
+      uint32_t minor = VK_API_VERSION_MINOR(props.apiVersion);
+      if (props.apiVersion < VK_API_VERSION_1_3)
+      {
+        YA_LOG_ERROR("Render", "Vulkan %u.%u found, but 1.3+ required", major, minor);
+        throw std::runtime_error("Vulkan 1.3+ required");
+      }
+      YA_LOG_INFO("Render", "Vulkan %u.%u — %s", major, minor, props.deviceName);
+    }
+
     m_Device.Init(m_VulkanInstance, m_PhysicalDevice, m_Surface.Get());
     m_Allocator.Init(m_VulkanInstance.Get(), m_Device.Get(), m_PhysicalDevice.Get());
     m_SwapChain.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), window, m_Allocator.Get());

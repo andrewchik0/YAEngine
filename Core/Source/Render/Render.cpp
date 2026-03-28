@@ -986,34 +986,15 @@ namespace YAEngine
         lastMaterialGen = dc.materialGeneration;
       }
 
-      if (!isInstanced)
+      struct
       {
-        struct
-        {
-          glm::mat4 model;
-          glm::vec4 normalCol0;
-          glm::vec4 normalCol1;
-          glm::vec4 normalCol2;
-          int offset = 0;
-        } data;
-        data.model = dc.worldTransform;
-        glm::mat3 normalMat = glm::transpose(glm::inverse(glm::mat3(dc.worldTransform)));
-        data.normalCol0 = glm::vec4(normalMat[0], 0.0f);
-        data.normalCol1 = glm::vec4(normalMat[1], 0.0f);
-        data.normalCol2 = glm::vec4(normalMat[2], 0.0f);
-        currentPipeline->PushConstants(cmd, &data);
-      }
-      else
-      {
-        struct
-        {
-          glm::mat4 model;
-          int offset = 0;
-        } data;
-        data.model = dc.worldTransform;
+        glm::mat4 model;
+        int offset = 0;
+      } data;
+      data.model = dc.worldTransform;
+      if (isInstanced)
         data.offset = dc.instanceOffset / sizeof(glm::mat4);
-        currentPipeline->PushConstants(cmd, &data);
-      }
+      currentPipeline->PushConstants(cmd, &data);
 
       uint32_t instanceCount = 1;
       if (isInstanced)
@@ -1115,7 +1096,7 @@ namespace YAEngine
     VkRenderPass depthRP = m_Graph.GetPassRenderPass(m_DepthPrepassIndex);
 
     PipelineCreateInfo depthPrepassInfo = {
-      .vertexShaderFile = "depth_prepass.vert",
+      .vertexShaderFile = "mesh_depth.vert",
       .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
       .colorAttachmentCount = 0,
       .vertexInputFormat = "f3f2f3f4",
@@ -1128,7 +1109,7 @@ namespace YAEngine
     m_DepthPrepassPipelineDoubleSided.Init(ctx.device, depthRP, depthPrepassInfo, pipelineCache);
 
     depthPrepassInfo.doubleSided = false;
-    depthPrepassInfo.vertexShaderFile = "depth_prepass_instanced.vert";
+    depthPrepassInfo.vertexShaderFile = "mesh_instanced_depth.vert";
     depthPrepassInfo.sets = std::vector({
       m_FrameUniformBuffer.GetLayout(),
       m_InstanceDescriptorSet.GetLayout(),
@@ -1143,8 +1124,8 @@ namespace YAEngine
 
     PipelineCreateInfo forwardInfo = {
       .fragmentShaderFile = "shader.frag",
-      .vertexShaderFile = "shader.vert",
-      .pushConstantSize = sizeof(glm::mat4) + 3 * sizeof(glm::vec4) + sizeof(int),
+      .vertexShaderFile = "mesh.vert",
+      .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
       .depthWrite = false,
       .colorAttachmentCount = 5,
       .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
@@ -1158,18 +1139,16 @@ namespace YAEngine
     forwardInfo.doubleSided = true;
     m_ForwardPipelineDoubleSided.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
-    forwardInfo.pushConstantSize = sizeof(glm::mat4) + sizeof(int);
     forwardInfo.sets.push_back(m_InstanceDescriptorSet.GetLayout());
-    forwardInfo.vertexShaderFile = "instanced.vert",
+    forwardInfo.vertexShaderFile = "mesh_instanced.vert";
     m_ForwardPipelineDoubleSidedInstanced.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
     forwardInfo.doubleSided = false;
     m_ForwardPipelineInstanced.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
-    forwardInfo.pushConstantSize = sizeof(glm::mat4) + 3 * sizeof(glm::vec4) + sizeof(int);
     forwardInfo.sets.pop_back();
     forwardInfo.doubleSided = true;
     forwardInfo.fragmentShaderFile = "no_shading.frag";
-    forwardInfo.vertexShaderFile = "shader.vert";
+    forwardInfo.vertexShaderFile = "mesh.vert";
     m_ForwardPipelineNoShading.Init(ctx.device, mainRP, forwardInfo, pipelineCache);
 
     // Swapchain descriptor sets (set 1 — set 0 is FrameUniformBuffer)
