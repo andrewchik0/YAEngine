@@ -20,5 +20,10 @@ namespace YAEngine
     float m_Yaw = 0.0f;
     float m_Pitch = 0.0f;
     float m_Speed = 1.0f;
+
+  public:
+    glm::vec3 initialPosition { 0.0f, 0.0f, 3.0f };
+    float initialYaw = 0.0f;
+    float initialPitch = 0.0f;
   };
 }

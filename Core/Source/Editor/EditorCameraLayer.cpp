@@ -10,7 +10,9 @@ namespace YAEngine
     m_Camera = GetScene().CreateEntity("EditorCamera");
     GetScene().AddComponent<CameraComponent>(m_Camera);
     GetScene().AddComponent<EditorOnlyTag>(m_Camera);
-    GetScene().GetTransform(m_Camera).position = glm::vec3(0.0f, 0.0f, 3.0f);
+    m_Pitch = initialPitch;
+    m_Yaw = initialYaw;
+    GetScene().GetTransform(m_Camera).position = initialPosition;
     GetScene().SetActiveCamera(m_Camera);
 
     glm::quat qPitch = glm::angleAxis(m_Pitch, glm::vec3(1.0f, 0.0f, 0.0f));

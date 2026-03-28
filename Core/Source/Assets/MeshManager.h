@@ -12,6 +12,8 @@ namespace YAEngine
   {
   private:
     VulkanVertexBuffer vertexBuffer;
+    glm::vec3 minBB { 0.0f };
+    glm::vec3 maxBB { 0.0f };
     std::vector<glm::mat4>* instanceData = nullptr;
     uint32_t offset = 0;
 
@@ -45,6 +47,9 @@ namespace YAEngine
     {
       return Get(handle).offset;
     }
+
+    glm::vec3 GetMinBB(MeshHandle handle) { return Get(handle).minBB; }
+    glm::vec3 GetMaxBB(MeshHandle handle) { return Get(handle).maxBB; }
   private:
     const RenderContext* m_Ctx = nullptr;
   };

@@ -9,6 +9,20 @@ namespace YAEngine
     auto mesh = std::make_unique<Mesh>();
 
     mesh->vertexBuffer.Create(*m_Ctx, (void*)vertices.data(), vertices.size(), sizeof(Vertex), indices);
+
+    if (!vertices.empty())
+    {
+      glm::vec3 bbMin = vertices[0].position;
+      glm::vec3 bbMax = vertices[0].position;
+      for (size_t i = 1; i < vertices.size(); i++)
+      {
+        bbMin = glm::min(bbMin, vertices[i].position);
+        bbMax = glm::max(bbMax, vertices[i].position);
+      }
+      mesh->minBB = bbMin;
+      mesh->maxBB = bbMax;
+    }
+
     return Store(std::move(mesh));
   }
 

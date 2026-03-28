@@ -33,18 +33,18 @@ inline std::vector<uint32_t> indices = {
   0, 1, 2, 1, 3, 2
 };
 
-struct SphereMesh
+struct ProcMesh
 {
   std::vector<YAEngine::Vertex> vertices;
   std::vector<uint32_t> indices;
 };
 
-inline SphereMesh GenerateSphere(
+inline ProcMesh GenerateSphere(
     float radius,
     uint32_t stacks,
     uint32_t slices)
 {
-  SphereMesh mesh;
+  ProcMesh mesh;
 
   for (uint32_t y = 0; y <= stacks; y++)
   {
@@ -103,5 +103,55 @@ inline SphereMesh GenerateSphere(
     }
   }
 
+  return mesh;
+}
+
+inline ProcMesh GenerateBox(float sx, float sy, float sz)
+{
+  ProcMesh mesh;
+  float hx = sx * 0.5f, hy = sy * 0.5f, hz = sz * 0.5f;
+
+  auto face = [&](glm::vec3 n, glm::vec3 right, glm::vec3 up) {
+    uint32_t base = (uint32_t)mesh.vertices.size();
+    glm::vec3 center = n * glm::vec3(hx, hy, hz);
+    glm::vec3 r = right * glm::vec3(hx, hy, hz);
+    glm::vec3 u = up * glm::vec3(hx, hy, hz);
+
+    mesh.vertices.push_back({center - r - u, {0, 0}, n, {right, 1.0f}});
+    mesh.vertices.push_back({center + r - u, {1, 0}, n, {right, 1.0f}});
+    mesh.vertices.push_back({center + r + u, {1, 1}, n, {right, 1.0f}});
+    mesh.vertices.push_back({center - r + u, {0, 1}, n, {right, 1.0f}});
+
+    mesh.indices.push_back(base);
+    mesh.indices.push_back(base + 1);
+    mesh.indices.push_back(base + 2);
+    mesh.indices.push_back(base);
+    mesh.indices.push_back(base + 2);
+    mesh.indices.push_back(base + 3);
+  };
+
+  face({ 0, 0, 1}, { 1, 0, 0}, {0, 1, 0});  // +Z
+  face({ 0, 0,-1}, {-1, 0, 0}, {0, 1, 0});  // -Z
+  face({ 1, 0, 0}, { 0, 0,-1}, {0, 1, 0});  // +X
+  face({-1, 0, 0}, { 0, 0, 1}, {0, 1, 0});  // -X
+  face({ 0, 1, 0}, { 1, 0, 0}, {0, 0,-1});  // +Y
+  face({ 0,-1, 0}, { 1, 0, 0}, {0, 0, 1});  // -Y
+
+  return mesh;
+}
+
+inline ProcMesh GeneratePlane(float size, float uvScale = 1.0f)
+{
+  ProcMesh mesh;
+  float h = size * 0.5f;
+  glm::vec3 n = {0, 1, 0};
+  glm::vec4 t = {1, 0, 0, 1};
+
+  mesh.vertices.push_back({{-h, 0, -h}, {0, 0},             n, t});
+  mesh.vertices.push_back({{ h, 0, -h}, {uvScale, 0},       n, t});
+  mesh.vertices.push_back({{ h, 0,  h}, {uvScale, uvScale},  n, t});
+  mesh.vertices.push_back({{-h, 0,  h}, {0, uvScale},       n, t});
+
+  mesh.indices = {0, 2, 1, 0, 3, 2};
   return mesh;
 }

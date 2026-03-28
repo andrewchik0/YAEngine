@@ -33,6 +33,16 @@ namespace YAEngine
     {
       if (reg.all_of<HiddenTag>(entity)) return;
 
+      // Auto-add LocalBounds from mesh data if missing
+      if (!reg.all_of<LocalBounds>(entity) && meshManager.Has(mesh.asset))
+      {
+        reg.emplace<LocalBounds>(entity, LocalBounds {
+          .min = meshManager.GetMinBB(mesh.asset),
+          .max = meshManager.GetMaxBB(mesh.asset)
+        });
+        reg.emplace_or_replace<BoundsDirty>(entity);
+      }
+
       RenderObject obj {
         .mesh = mesh.asset,
         .material = material.asset,
