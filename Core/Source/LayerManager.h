@@ -8,11 +8,17 @@ namespace YAEngine
   class LayerManager
   {
   public:
+
+    void SetRegistry(ServiceRegistry& registry) { m_Registry = &registry; }
+
     template<typename T>
     requires std::is_base_of<Layer, T>::value
     void PushLayer()
     {
-      m_LayerStack.push_back(std::make_unique<T>());
+      auto layer = std::make_unique<T>();
+      if (m_Registry)
+        layer->SetRegistry(*m_Registry);
+      m_LayerStack.push_back(std::move(layer));
     }
 
     template<typename T>
@@ -39,10 +45,22 @@ namespace YAEngine
         m_LayerStack[i]->OnSceneReady();
     }
 
+    void CallFixedUpdate(double fixedDt)
+    {
+      for (auto& layer : m_LayerStack)
+        layer->FixedUpdate(fixedDt);
+    }
+
     void CallUpdate(double dt)
     {
       for (auto& layer : m_LayerStack)
         layer->Update(dt);
+    }
+
+    void CallLateUpdate(double dt)
+    {
+      for (auto& layer : m_LayerStack)
+        layer->LateUpdate(dt);
     }
 
     void CallRenderUI()
@@ -58,6 +76,7 @@ namespace YAEngine
     }
 
   private:
+    ServiceRegistry* m_Registry = nullptr;
     std::vector<std::unique_ptr<Layer>> m_LayerStack;
   };
 }

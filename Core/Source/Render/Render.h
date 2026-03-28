@@ -1,5 +1,6 @@
 #pragma once
 
+#include "FrameContext.h"
 #include "FrameUniformBuffer.h"
 #include "RenderBackend.h"
 #include "RenderGraph.h"
@@ -28,7 +29,7 @@ namespace YAEngine
     void Resize();
     void WaitIdle();
 
-    void Draw(Application* app);
+    void Draw(const FrameContext& frame);
 
     void DrawQuad();
 
@@ -58,9 +59,9 @@ namespace YAEngine
 
     RenderStats m_Stats {};
 
-    void DrawMeshes(Application* app);
-    void DrawMeshesDepthOnly(Application* app);
-    void SetUpCamera(Application* app);
+    void DrawMeshes(const FrameContext& frame);
+    void DrawMeshesDepthOnly(const FrameContext& frame);
+    void SetUpCamera(const FrameContext& frame);
     void InitPipelines();
 
     void SetupRenderGraph(uint32_t width, uint32_t height);

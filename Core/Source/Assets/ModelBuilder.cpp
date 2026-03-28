@@ -15,10 +15,10 @@ namespace YAEngine
     for (auto& childNode : desc.root.children)
     {
       Entity child = BuildNode(childNode, rootEntity, desc);
-      auto& childTc = m_Scene->GetTransform(child);
+      auto& childBounds = m_Scene->GetComponent<LocalBounds>(child);
 
-      rootMinBB = glm::min(rootMinBB, childTc.minBB);
-      rootMaxBB = glm::max(rootMaxBB, childTc.maxBB);
+      rootMinBB = glm::min(rootMinBB, childBounds.min);
+      rootMaxBB = glm::max(rootMaxBB, childBounds.max);
 
       if (prevChild == entt::null)
         m_Scene->GetHierarchy(rootEntity).firstChild = child;
@@ -28,9 +28,7 @@ namespace YAEngine
       prevChild = child;
     }
 
-    auto& rootTc = m_Scene->GetTransform(rootEntity);
-    rootTc.minBB = rootMinBB;
-    rootTc.maxBB = rootMaxBB;
+    m_Scene->AddComponent<LocalBounds>(rootEntity, LocalBounds { .min = rootMinBB, .max = rootMaxBB });
 
     return rootEntity;
   }
@@ -38,19 +36,19 @@ namespace YAEngine
   Entity ModelBuilder::BuildNode(const NodeDescription& node, Entity parent, const ModelDescription& desc)
   {
     Entity entity = m_Scene->CreateEntity(node.name);
-    auto& tc = m_Scene->GetTransform(entity);
+    auto& lt = m_Scene->GetTransform(entity);
     auto& hc = m_Scene->GetHierarchy(entity);
 
     hc.parent = parent;
     m_Scene->RemoveComponent<RootTag>(entity);
-    tc.position = node.position;
-    tc.rotation = node.rotation;
-    tc.scale = node.scale;
+    lt.position = node.position;
+    lt.rotation = node.rotation;
+    lt.scale = node.scale;
 
-    tc.local = glm::translate(glm::mat4(1.0f), tc.position)
-             * glm::mat4_cast(tc.rotation)
-             * glm::scale(glm::mat4(1.0f), tc.scale);
-    tc.dirty = true;
+    m_Scene->MarkDirty(entity);
+
+    glm::vec3 nodeMinBB( std::numeric_limits<float>::max());
+    glm::vec3 nodeMaxBB(-std::numeric_limits<float>::max());
 
     if (node.meshIndex.has_value())
     {
@@ -58,8 +56,8 @@ namespace YAEngine
       auto meshHandle = m_AssetManager->Meshes().Load(meshDesc.vertices, meshDesc.indices);
       m_Scene->AddComponent<MeshComponent>(entity, meshHandle);
 
-      tc.minBB = meshDesc.minBB;
-      tc.maxBB = meshDesc.maxBB;
+      nodeMinBB = meshDesc.minBB;
+      nodeMaxBB = meshDesc.maxBB;
     }
 
     if (node.materialIndex.has_value())
@@ -97,16 +95,14 @@ namespace YAEngine
     }
 
     Entity prevChild = entt::null;
-    glm::vec3 nodeMinBB = node.meshIndex.has_value() ? tc.minBB : glm::vec3( std::numeric_limits<float>::max());
-    glm::vec3 nodeMaxBB = node.meshIndex.has_value() ? tc.maxBB : glm::vec3(-std::numeric_limits<float>::max());
 
     for (auto& childNode : node.children)
     {
       Entity child = BuildNode(childNode, entity, desc);
-      auto& childTc = m_Scene->GetTransform(child);
+      auto& childBounds = m_Scene->GetComponent<LocalBounds>(child);
 
-      nodeMinBB = glm::min(nodeMinBB, childTc.minBB);
-      nodeMaxBB = glm::max(nodeMaxBB, childTc.maxBB);
+      nodeMinBB = glm::min(nodeMinBB, childBounds.min);
+      nodeMaxBB = glm::max(nodeMaxBB, childBounds.max);
 
       if (prevChild == entt::null)
         hc.firstChild = child;
@@ -116,8 +112,7 @@ namespace YAEngine
       prevChild = child;
     }
 
-    tc.minBB = nodeMinBB;
-    tc.maxBB = nodeMaxBB;
+    m_Scene->AddComponent<LocalBounds>(entity, LocalBounds { .min = nodeMinBB, .max = nodeMaxBB });
 
     return entity;
   }

@@ -3,13 +3,13 @@
 void ControlsLayer::Update(double dt)
 {
   if (m_Car == entt::null) return;
-  if (!App().GetScene().HasComponent<VehicleComponent>(m_Car)) return;
+  if (!GetScene().HasComponent<VehicleComponent>(m_Car)) return;
 
   auto car = m_Car;
-  auto* vehicle = &App().GetScene().GetComponent<VehicleComponent>(car);
+  auto* vehicle = &GetScene().GetComponent<VehicleComponent>(car);
 
-  glm::dvec3 position = App().GetScene().GetTransform(car).position;
-  glm::dquat rotation = App().GetScene().GetTransform(car).rotation;
+  glm::dvec3 position = GetScene().GetTransform(car).position;
+  glm::dquat rotation = GetScene().GetTransform(car).rotation;
 
   if (b_ArrowLeft)
   {
@@ -50,16 +50,16 @@ void ControlsLayer::Update(double dt)
   glm::dvec3 forward = rotation * glm::dvec3(0, 0, 1);
   position += forward * vehicle->speed * dt;
 
-  App().GetScene().GetTransform(car).position = position;
-  App().GetScene().GetTransform(car).rotation = rotation;
-  App().GetScene().MarkDirty(car);
+  GetScene().GetTransform(car).position = position;
+  GetScene().GetTransform(car).rotation = rotation;
+  GetScene().MarkDirty(car);
 
   // Update follow camera
-  if (m_Camera != entt::null && App().GetScene().HasComponent<FollowCameraComponent>(m_Camera))
+  if (m_Camera != entt::null && GetScene().HasComponent<FollowCameraComponent>(m_Camera))
   {
-    auto& follow = App().GetScene().GetComponent<FollowCameraComponent>(m_Camera);
-    auto& cam = App().GetScene().GetComponent<YAEngine::CameraComponent>(m_Camera);
-    auto& camTc = App().GetScene().GetTransform(m_Camera);
+    auto& follow = GetScene().GetComponent<FollowCameraComponent>(m_Camera);
+    auto& cam = GetScene().GetComponent<YAEngine::CameraComponent>(m_Camera);
+    auto& camTc = GetScene().GetTransform(m_Camera);
 
     glm::dvec3 eulerDegrees = glm::dvec3(160.0, -0.0, -180.0);
     glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
@@ -97,12 +97,12 @@ void ControlsLayer::Update(double dt)
   }
 
   // Update wheels via ECS
-  auto wheelView = App().GetScene().GetView<WheelComponent, YAEngine::TransformComponent>();
+  auto wheelView = GetScene().GetView<WheelComponent, YAEngine::LocalTransform>();
 
   for (auto wheelEntity : wheelView)
   {
-    auto& wc = App().GetScene().GetComponent<WheelComponent>(wheelEntity);
-    auto& tc = App().GetScene().GetTransform(wheelEntity);
+    auto& wc = GetScene().GetComponent<WheelComponent>(wheelEntity);
+    auto& tc = GetScene().GetTransform(wheelEntity);
 
     wc.spinAngle += (vehicle->speed / wc.radius) * dt;
 

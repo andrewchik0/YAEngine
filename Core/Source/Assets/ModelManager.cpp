@@ -1,7 +1,6 @@
 #include "ModelManager.h"
 
 #include "AssetManager.h"
-#include "Application.h"
 
 namespace YAEngine
 {
@@ -28,7 +27,7 @@ namespace YAEngine
     auto& model = Get(handle);
 
     model.modelMatrices = instances;
-    model.offset = Application::Get().GetRender().AllocateInstanceData(uint32_t(instances.size() * sizeof(glm::mat4)));
+    model.offset = m_AllocateInstanceData(uint32_t(instances.size() * sizeof(glm::mat4)));
 
     TraverseInstanceData(model.rootEntity, &model.modelMatrices, model.offset);
 

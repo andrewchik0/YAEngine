@@ -1,0 +1,119 @@
+#include "Engine.h"
+#include "Render/FrameContext.h"
+#include "Scene/TransformSystem.h"
+#include "Scene/BoundsUpdateSystem.h"
+
+#include <imgui.h>
+
+#ifdef YA_EDITOR
+#include "Editor/EditorLayer.h"
+#endif
+
+namespace YAEngine
+{
+  Engine::Engine(const EngineSpecs& specs)
+    : m_Window(specs.windowSpecs),
+      m_InputSystem(m_Window, m_EventBus)
+  {
+    m_Registry.Register<Window>(&m_Window);
+    m_Registry.Register<EventBus>(&m_EventBus);
+    m_Registry.Register<Timer>(&m_Timer);
+    m_Registry.Register<InputSystem>(&m_InputSystem);
+    m_Registry.Register<Render>(&m_Render);
+    m_Registry.Register<AssetManager>(&m_AssetManager);
+    m_Registry.Register<Scene>(&m_Scene);
+    m_Registry.Register<SystemScheduler>(&m_Scheduler);
+    m_Registry.Register<LayerManager>(&m_LayerManager);
+    m_LayerManager.SetRegistry(m_Registry);
+
+    m_Scheduler.AddSystem<TransformSystem>();
+    m_Scheduler.AddSystem<BoundsUpdateSystem>();
+
+    RenderSpecs renderSpecs;
+    renderSpecs.validationLayers = specs.isDebug;
+    renderSpecs.applicationName = specs.windowSpecs.title;
+
+    m_Render.Init(m_Window.Get(), renderSpecs);
+
+    FrameContext frame { m_Scene, m_AssetManager, m_Render.GetCubicResources(), m_Timer.GetTime(), m_Window.GetWidth(), m_Window.GetHeight(), [this]() { RenderUI(); } };
+    m_Render.Draw(frame);
+  }
+
+  void Engine::Destroy()
+  {
+    m_EventBus.Unsubscribe<ResizeEvent>(m_ResizeSubscription);
+    m_Render.Destroy();
+    m_Window.Destroy();
+  }
+
+  void Engine::Run()
+  {
+#ifdef YA_EDITOR
+    m_LayerManager.PushLayer<EditorLayer>();
+#endif
+    m_LayerManager.CallOnAttach();
+    m_AssetManager.Init(m_Scene, [this](uint32_t size) { return m_Render.AllocateInstanceData(size); });
+    m_AssetManager.SetRenderContext(m_Render.GetContext(), m_Render.GetNoneTexture(), m_Render.GetCubicResources());
+    m_Render.Resize();
+    {
+      FrameContext frame { m_Scene, m_AssetManager, m_Render.GetCubicResources(), m_Timer.GetTime(), m_Window.GetWidth(), m_Window.GetHeight(), [this]() { RenderUI(); } };
+      m_Render.Draw(frame);
+    }
+
+    m_LayerManager.CallOnSceneReady();
+    m_InputSystem.SetImGuiFiltering(true);
+
+    auto swapExtent = m_Render.GetSwapChainExtent();
+    m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(
+      (float)swapExtent.width, (float)swapExtent.height);
+
+    m_ResizeSubscription = m_EventBus.Subscribe<ResizeEvent>(
+      std::function<void(const ResizeEvent&)>([this](const ResizeEvent& e)
+      {
+        float width = static_cast<float>(e.width);
+        float height = static_cast<float>(e.height);
+        if (width != 0.0f && height != 0.0f)
+        {
+          m_Render.Resize();
+#ifndef YA_EDITOR
+          auto extent = m_Render.GetSwapChainExtent();
+          m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(
+            (float)extent.width, (float)extent.height);
+#endif
+        }
+      }), -1000);
+
+    while (m_Window.IsOpen())
+    {
+      m_InputSystem.ProcessEvents();
+
+      if (m_Window.GetWidth() == 0 || m_Window.GetHeight() == 0)
+      {
+        glfwWaitEvents();
+        continue;
+      }
+
+      m_Timer.Step();
+
+      double frameDt = m_Timer.GetDeltaTime();
+      m_Accumulator += frameDt;
+      while (m_Accumulator >= FIXED_DT)
+      {
+        m_LayerManager.CallFixedUpdate(FIXED_DT);
+        m_Accumulator -= FIXED_DT;
+      }
+
+      m_Scheduler.Run(m_Scene.GetRegistry(), frameDt);
+      m_LayerManager.CallUpdate(frameDt);
+      m_LayerManager.CallLateUpdate(frameDt);
+
+      FrameContext frame { m_Scene, m_AssetManager, m_Render.GetCubicResources(), m_Timer.GetTime(), m_Window.GetWidth(), m_Window.GetHeight(), [this]() { RenderUI(); } };
+      m_Render.Draw(frame);
+    }
+
+    m_LayerManager.CallOnDetach();
+
+    m_Render.WaitIdle();
+    m_AssetManager.DestroyAll();
+  }
+}

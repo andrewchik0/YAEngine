@@ -6,14 +6,11 @@
 
 namespace YAEngine
 {
-  class TransformSystem : public ISystem
+  class BoundsUpdateSystem : public ISystem
   {
   public:
     void Update(entt::registry& registry, double dt) override;
     SystemPhase GetPhase() const override { return SystemPhase::TransformUpdate; }
-
-  private:
-    static void UpdateWorldTransform(entt::registry& registry, entt::entity e);
-    static glm::mat4 ComposeLocal(const LocalTransform& t);
+    int GetPriority() const override { return 100; }
   };
 }

@@ -86,10 +86,12 @@ namespace YAEngine
     {
       if (scene.HasComponent<MeshComponent>(entity))
       {
-        auto& mesh = scene.GetComponent<MeshComponent>(entity);
-        bool visible = mesh.shouldRender;
+        bool visible = !scene.HasComponent<HiddenTag>(entity);
         if (ImGui::MenuItem(visible ? "Hide" : "Show"))
-          mesh.shouldRender = !visible;
+        {
+          if (visible) scene.AddComponent<HiddenTag>(entity);
+          else scene.RemoveComponent<HiddenTag>(entity);
+        }
 
         ImGui::Separator();
       }
@@ -112,12 +114,15 @@ namespace YAEngine
     // Visibility toggle for mesh entities
     if (scene.HasComponent<MeshComponent>(entity))
     {
-      auto& mesh = scene.GetComponent<MeshComponent>(entity);
+      bool visible = !scene.HasComponent<HiddenTag>(entity);
       ImGui::SameLine(ImGui::GetWindowWidth() - 40);
       ImGui::PushID((void*)(uintptr_t)entity);
       ImGui::PushID("vis");
-      if (ImGui::SmallButton(mesh.shouldRender ? "o" : "-"))
-        mesh.shouldRender = !mesh.shouldRender;
+      if (ImGui::SmallButton(visible ? "o" : "-"))
+      {
+        if (visible) scene.AddComponent<HiddenTag>(entity);
+        else scene.RemoveComponent<HiddenTag>(entity);
+      }
       ImGui::PopID();
       ImGui::PopID();
     }
@@ -159,8 +164,8 @@ namespace YAEngine
     ImGui::Separator();
 
     // Draw root entities
-    auto hierarchyView = context.scene->GetView<TransformComponent, HierarchyComponent>();
-    hierarchyView.each([&](auto entity, TransformComponent&, HierarchyComponent& hc)
+    auto hierarchyView = context.scene->GetView<LocalTransform, HierarchyComponent>();
+    hierarchyView.each([&](auto entity, LocalTransform&, HierarchyComponent& hc)
     {
       if (hc.parent == entt::null)
         DrawEntity(context, entity);

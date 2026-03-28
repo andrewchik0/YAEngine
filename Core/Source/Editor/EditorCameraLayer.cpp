@@ -1,36 +1,36 @@
 #include "Editor/EditorCameraLayer.h"
 
-#include "Application.h"
+#include "InputSystem.h"
 #include "Scene/Components.h"
 
 namespace YAEngine
 {
   void EditorCameraLayer::OnSceneReady()
   {
-    m_Camera = App().GetScene().CreateEntity("EditorCamera");
-    App().GetScene().AddComponent<CameraComponent>(m_Camera);
-    App().GetScene().AddComponent<EditorOnlyTag>(m_Camera);
-    App().GetScene().GetTransform(m_Camera).position = glm::vec3(0.0f, 0.0f, 3.0f);
-    App().GetScene().SetActiveCamera(m_Camera);
+    m_Camera = GetScene().CreateEntity("EditorCamera");
+    GetScene().AddComponent<CameraComponent>(m_Camera);
+    GetScene().AddComponent<EditorOnlyTag>(m_Camera);
+    GetScene().GetTransform(m_Camera).position = glm::vec3(0.0f, 0.0f, 3.0f);
+    GetScene().SetActiveCamera(m_Camera);
 
     glm::quat qPitch = glm::angleAxis(m_Pitch, glm::vec3(1.0f, 0.0f, 0.0f));
     glm::quat qYaw   = glm::angleAxis(m_Yaw,   glm::vec3(0.0f, 1.0f, 0.0f));
 
     glm::quat orientation = qYaw * qPitch;
-    App().GetScene().GetTransform(m_Camera).rotation = glm::normalize(orientation);
+    GetScene().GetTransform(m_Camera).rotation = glm::normalize(orientation);
 
-    m_OnMouseButton = App().Events().Subscribe<MouseButtonEvent>([&](const MouseButtonEvent& e) { OnMouseButton(e); });
-    m_OnMouseMove = App().Events().Subscribe<MouseMovedEvent>([&](const MouseMovedEvent& e) { OnMouseMoved(e); });
-    m_OnKeyboard = App().Events().Subscribe<KeyEvent>([&](const KeyEvent& e) { OnKeyboard(e); });
-    m_OnMouseScroll = App().Events().Subscribe<MouseWheelEvent>([&](const MouseWheelEvent& e) { OnMouseScroll(e); });
+    m_OnMouseButton = Events().Subscribe<MouseButtonEvent>([&](const MouseButtonEvent& e) { OnMouseButton(e); });
+    m_OnMouseMove = Events().Subscribe<MouseMovedEvent>([&](const MouseMovedEvent& e) { OnMouseMoved(e); });
+    m_OnKeyboard = Events().Subscribe<KeyEvent>([&](const KeyEvent& e) { OnKeyboard(e); });
+    m_OnMouseScroll = Events().Subscribe<MouseWheelEvent>([&](const MouseWheelEvent& e) { OnMouseScroll(e); });
   }
 
   void EditorCameraLayer::OnDetach()
   {
-    App().Events().Unsubscribe<MouseButtonEvent>(m_OnMouseButton);
-    App().Events().Unsubscribe<MouseMovedEvent>(m_OnMouseMove);
-    App().Events().Unsubscribe<KeyEvent>(m_OnKeyboard);
-    App().Events().Unsubscribe<MouseWheelEvent>(m_OnMouseScroll);
+    Events().Unsubscribe<MouseButtonEvent>(m_OnMouseButton);
+    Events().Unsubscribe<MouseMovedEvent>(m_OnMouseMove);
+    Events().Unsubscribe<KeyEvent>(m_OnKeyboard);
+    Events().Unsubscribe<MouseWheelEvent>(m_OnMouseScroll);
   }
 
   void EditorCameraLayer::ResetInputState()
@@ -46,9 +46,9 @@ namespace YAEngine
 
   void EditorCameraLayer::Update(double deltaTime)
   {
-    if (App().GetScene().GetActiveCamera() != m_Camera) return;
+    if (GetScene().GetActiveCamera() != m_Camera) return;
 
-    if (!App().GetInputSystem().IsViewportHovered())
+    if (!GetInput().IsViewportHovered())
     {
       ResetInputState();
       return;
@@ -69,11 +69,11 @@ namespace YAEngine
       glm::quat qYaw   = glm::angleAxis(m_Yaw,   glm::vec3(0.0f, 1.0f, 0.0f));
 
       glm::quat orientation = qYaw * qPitch;
-      App().GetScene().GetTransform(m_Camera).rotation = glm::normalize(orientation);
+      GetScene().GetTransform(m_Camera).rotation = glm::normalize(orientation);
     }
 
-    glm::vec3 forward = App().GetScene().GetTransform(m_Camera).rotation * glm::vec3(0, 0, -1);
-    glm::vec3 right   = App().GetScene().GetTransform(m_Camera).rotation * glm::vec3(1, 0, 0);
+    glm::vec3 forward = GetScene().GetTransform(m_Camera).rotation * glm::vec3(0, 0, -1);
+    glm::vec3 right   = GetScene().GetTransform(m_Camera).rotation * glm::vec3(1, 0, 0);
 
     glm::vec3 velocity(0.0f);
     velocity += forward * float(b_KeyW - b_KeyS);
@@ -82,7 +82,7 @@ namespace YAEngine
     if (velocity != glm::vec3(0.0f))
     {
       velocity = glm::normalize(velocity) * (float)deltaTime * 2.0f * m_Speed;
-      App().GetScene().GetTransform(m_Camera).position += velocity;
+      GetScene().GetTransform(m_Camera).position += velocity;
     }
   }
 

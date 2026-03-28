@@ -1,7 +1,5 @@
 #include "AssetManager.h"
 
-#include "Application.h"
-
 namespace YAEngine
 {
   AssetManager::AssetManager()
@@ -13,9 +11,9 @@ namespace YAEngine
     Register<ModelManager>();
   }
 
-  void AssetManager::Init()
+  void AssetManager::Init(Scene& scene, std::function<uint32_t(uint32_t)> allocateInstanceData)
   {
-    Models().SetDependencies(&Application::Get().GetScene(), this);
+    Models().SetDependencies(&scene, this, std::move(allocateInstanceData));
   }
 
   void AssetManager::SetRenderContext(const RenderContext& ctx, const VulkanTexture& noneTexture, CubicTextureResources& cubicResources)

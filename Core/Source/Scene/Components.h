@@ -12,19 +12,30 @@ namespace YAEngine
     entt::entity nextSibling { entt::null };
   };
 
-  struct TransformComponent
+  struct LocalTransform
   {
     glm::vec3 position { 0 };
     glm::quat rotation { 1, 0, 0, 0 };
     glm::vec3 scale { 1 };
+  };
 
-    glm::mat4 local { 1.0f };
+  struct WorldTransform
+  {
     glm::mat4 world { 1.0f };
+  };
 
-    glm::vec3 minBB{};
-    glm::vec3 maxBB{};
+  struct TransformDirty {};
 
-    bool dirty = true;
+  struct LocalBounds
+  {
+    glm::vec3 min {};
+    glm::vec3 max {};
+  };
+
+  struct WorldBounds
+  {
+    glm::vec3 min {};
+    glm::vec3 max {};
   };
 
   struct CameraComponent
@@ -43,10 +54,11 @@ namespace YAEngine
   struct MeshComponent
   {
     MeshHandle asset {};
-    bool shouldRender = true;
-    bool doubleSided = false;
-    bool noShading = false;
   };
+
+  struct DoubleSidedTag {};
+  struct NoShadingTag {};
+  struct HiddenTag {};
 
 
   struct MaterialComponent

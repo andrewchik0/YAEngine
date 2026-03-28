@@ -19,8 +19,10 @@ namespace YAEngine
     void DestroyEntity(Entity e);
     void SetParent(Entity child, Entity parent);
 
-    TransformComponent& GetTransform(Entity e);
-    const TransformComponent& GetTransform(Entity e) const;
+    LocalTransform& GetTransform(Entity e);
+    const LocalTransform& GetTransform(Entity e) const;
+    WorldTransform& GetWorldTransform(Entity e);
+    const WorldTransform& GetWorldTransform(Entity e) const;
     HierarchyComponent& GetHierarchy(Entity e);
     const HierarchyComponent& GetHierarchy(Entity e) const;
     Name& GetName(Entity e);
@@ -95,7 +97,6 @@ namespace YAEngine
     }
 
     void MarkDirty(Entity e);
-    void Update();
     void SetDoubleSided(Entity e);
     void NoShading(Entity e);
 
@@ -108,6 +109,8 @@ namespace YAEngine
     {
       return m_Skybox;
     }
+
+    entt::registry& GetRegistry() { return m_Registry; }
 
   private:
     entt::registry m_Registry;

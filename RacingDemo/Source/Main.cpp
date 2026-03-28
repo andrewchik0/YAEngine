@@ -1,15 +1,16 @@
+#include "Engine.h"
 #include "AppLayer.h"
 
 int main()
 {
-  YAEngine::ApplicationSpecs specs;
+  YAEngine::EngineSpecs specs;
 
   specs.isDebug = true;
 
-  YAEngine::Application::Init(specs);
-  YAEngine::Application::Get().PushLayer<AppLayer>();
-  YAEngine::Application::Get().Run();
-  YAEngine::Application::Get().Destroy();
+  YAEngine::Engine engine(specs);
+  engine.PushLayer<AppLayer>();
+  engine.Run();
+  engine.Destroy();
 
   return 0;
 }

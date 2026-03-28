@@ -1,6 +1,6 @@
 #pragma once
 
-#include "Application.h"
+#include "Render/VulkanVertexBuffer.h"
 
 inline std::vector<YAEngine::Vertex> vertices = {
   {

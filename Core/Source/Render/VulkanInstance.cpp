@@ -1,6 +1,5 @@
 #include "VulkanInstance.h"
 
-#include "Application.h"
 #include "Log.h"
 
 namespace YAEngine

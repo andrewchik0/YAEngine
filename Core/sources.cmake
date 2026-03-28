@@ -1,6 +1,6 @@
 set(SOURCE_FILES
-  Source/Application.cpp
-  Source/Application.h
+  Source/Engine.cpp
+  Source/Engine.h
   Source/Window.cpp
   Source/Window.h
   Source/Events.h
@@ -47,6 +47,11 @@ set(SOURCE_FILES
   Source/Scene/Scene.h
   Source/Scene/TransformSystem.cpp
   Source/Scene/TransformSystem.h
+  Source/Scene/ISystem.h
+  Source/Scene/SystemScheduler.cpp
+  Source/Scene/SystemScheduler.h
+  Source/Scene/BoundsUpdateSystem.cpp
+  Source/Scene/BoundsUpdateSystem.h
   Source/Assets/AssetManager.cpp
   Source/Assets/AssetManager.h
   Source/Assets/MeshManager.cpp
@@ -71,6 +76,8 @@ set(SOURCE_FILES
   Source/Assets/ModelManager.h
   Source/Log.h
   Source/EventBus.h
+  Source/InputActionSystem.h
+  Source/ServiceRegistry.h
   Source/LayerManager.h
   Source/InputSystem.cpp
   Source/InputSystem.h
@@ -87,6 +94,7 @@ set(SOURCE_FILES
   Source/Utils/Utils.h
   Source/Render/VulkanStorageBuffer.cpp
   Source/Render/VulkanStorageBuffer.h
+  Source/Render/FrameContext.h
   Source/Render/RenderContext.h
   Source/Render/ImageBarrier.h
   Source/Render/VulkanBuffer.cpp

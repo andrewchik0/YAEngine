@@ -3,11 +3,12 @@
 #include <imgui_impl_glfw.h>
 #include <ImGui/imgui_impl_vulkan.h>
 
-#include "Application.h"
 #include "ImageBarrier.h"
 #include "VulkanVertexBuffer.h"
 #include "Log.h"
 #include "SSAOKernel.h"
+#include "Assets/AssetManager.h"
+#include "Scene/Scene.h"
 
 #include "Utils/Utils.h"
 
@@ -92,8 +93,8 @@ namespace YAEngine
       .clearDepth = true,
       .depthOnly = true,
       .execute = [this](const RGExecuteContext& ctx) {
-        auto* app = static_cast<Application*>(ctx.userData);
-        DrawMeshesDepthOnly(app);
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
+        DrawMeshesDepthOnly(*frame);
       }
     });
 
@@ -106,7 +107,7 @@ namespace YAEngine
       .clearColor = true,
       .clearDepth = false,
       .execute = [this](const RGExecuteContext& ctx) {
-        auto* app = static_cast<Application*>(ctx.userData);
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
 
         m_ForwardPipeline.Bind(ctx.cmd);
@@ -114,7 +115,7 @@ namespace YAEngine
         m_ForwardPipelineDoubleSided.Bind(ctx.cmd);
         m_ForwardPipelineDoubleSided.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
 
-        DrawMeshes(app);
+        DrawMeshes(*frame);
       }
     });
 
@@ -356,12 +357,12 @@ namespace YAEngine
       .externalFormat = swapFormat,
       .finalColorLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
       .execute = [this](const RGExecuteContext& ctx) {
-        auto* app = static_cast<Application*>(ctx.userData);
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
 
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        app->RenderUI();
+        if (frame->renderUI) frame->renderUI();
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), ctx.cmd);
       }
@@ -376,7 +377,7 @@ namespace YAEngine
       .externalFormat = swapFormat,
       .finalColorLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
       .execute = [this](const RGExecuteContext& ctx) {
-        auto* app = static_cast<Application*>(ctx.userData);
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
 
         auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
         auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
@@ -404,7 +405,7 @@ namespace YAEngine
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();
         ImGui::NewFrame();
-        app->RenderUI();
+        if (frame->renderUI) frame->renderUI();
         ImGui::Render();
         ImGui_ImplVulkan_RenderDrawData(ImGui::GetDrawData(), ctx.cmd);
       }
@@ -791,7 +792,7 @@ namespace YAEngine
   }
 #endif
 
-  void Render::Draw(Application *app)
+  void Render::Draw(const FrameContext& frame)
   {
 #ifdef YA_EDITOR
     // Handle deferred viewport resize BEFORE acquiring the frame —
@@ -803,7 +804,7 @@ namespace YAEngine
         ResizeViewport();
 
         // Update aspect ratio for all cameras so switching doesn't produce distortion
-        for (auto [entity, cam] : app->GetScene().GetView<CameraComponent>().each())
+        for (auto [entity, cam] : frame.scene.GetView<CameraComponent>().each())
           cam.Resize(float(m_ViewportWidth), float(m_ViewportHeight));
       }
     }
@@ -820,8 +821,8 @@ namespace YAEngine
 
     auto cmd = m_Backend.GetCurrentCommandBuffer();
 
-    SetUpCamera(app);
-    m_FrameUniformBuffer.uniforms.time = (float)app->GetTimer().GetTime();
+    SetUpCamera(frame);
+    m_FrameUniformBuffer.uniforms.time = (float)frame.time;
     m_FrameUniformBuffer.uniforms.gamma = m_Gamma;
     m_FrameUniformBuffer.uniforms.exposure = m_Exposure;
     m_FrameUniformBuffer.uniforms.currentTexture = m_CurrentTexture;
@@ -829,8 +830,8 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.screenWidth = int(m_ViewportWidth);
     m_FrameUniformBuffer.uniforms.screenHeight = int(m_ViewportHeight);
 #else
-    m_FrameUniformBuffer.uniforms.screenWidth = int(app->GetWindow().GetWidth());
-    m_FrameUniformBuffer.uniforms.screenHeight = int(app->GetWindow().GetHeight());
+    m_FrameUniformBuffer.uniforms.screenWidth = int(frame.windowWidth);
+    m_FrameUniformBuffer.uniforms.screenHeight = int(frame.windowHeight);
 #endif
     m_FrameUniformBuffer.uniforms.ssaoEnabled = b_SSAOEnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.ssrEnabled = b_SSREnabled ? 1 : 0;
@@ -862,7 +863,7 @@ namespace YAEngine
     m_FrameUniformBuffer.SetUp(currentFrame);
 
     // Execute all passes
-    m_Graph.Execute(cmd, app);
+    m_Graph.Execute(cmd, const_cast<FrameContext*>(&frame));
 
     if (!m_Backend.EndFrame(*imageIndex, b_Resized))
     {
@@ -897,33 +898,37 @@ namespace YAEngine
     }
   }
 
-  void Render::DrawMeshes(Application* app)
+  void Render::DrawMeshes(const FrameContext& frame)
   {
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     auto cmd = m_Backend.GetCurrentCommandBuffer();
-    auto& meshManager = app->GetAssetManager().Meshes();
-    auto& materialManager = app->GetAssetManager().Materials();
-    auto& cubeMapManager = app->GetAssetManager().CubeMaps();
-    auto skybox = app->GetScene().GetSkybox();
+    auto& meshManager = frame.assets.Meshes();
+    auto& materialManager = frame.assets.Materials();
+    auto& cubeMapManager = frame.assets.CubeMaps();
+    auto skybox = frame.scene.GetSkybox();
 
     // === Collect ===
     m_DrawCommands.clear();
 
-    auto view = app->GetScene().GetView<MeshComponent, TransformComponent, MaterialComponent>();
-    view.each([&](MeshComponent mesh, TransformComponent transform, MaterialComponent material)
+    auto view = frame.scene.GetView<MeshComponent, WorldTransform, MaterialComponent>();
+    auto& reg = frame.scene.GetRegistry();
+    view.each([&](entt::entity entity, MeshComponent& mesh, WorldTransform& wt, MaterialComponent& material)
     {
-      if (!mesh.shouldRender) return;
+      if (reg.all_of<HiddenTag>(entity)) return;
+
+      bool doubleSided = reg.all_of<DoubleSidedTag>(entity);
+      bool noShading = reg.all_of<NoShadingTag>(entity);
 
       auto* instanceData = meshManager.GetInstanceData(mesh.asset);
-      bool isInstanced = (instanceData != nullptr) && !mesh.noShading;
+      bool isInstanced = (instanceData != nullptr) && !noShading;
 
       uint8_t pipelineKey;
-      if (mesh.noShading)
+      if (noShading)
         pipelineKey = 4;
       else if (isInstanced)
-        pipelineKey = mesh.doubleSided ? 3 : 2;
+        pipelineKey = doubleSided ? 3 : 2;
       else
-        pipelineKey = mesh.doubleSided ? 1 : 0;
+        pipelineKey = doubleSided ? 1 : 0;
 
       m_DrawCommands.push_back({
         .pipelineKey = pipelineKey,
@@ -931,7 +936,7 @@ namespace YAEngine
         .materialGeneration = material.asset.generation,
         .meshIndex = mesh.asset.index,
         .meshGeneration = mesh.asset.generation,
-        .worldTransform = transform.world,
+        .worldTransform = wt.world,
         .instanceData = instanceData,
         .instanceOffset = meshManager.GetInstanceOffset(mesh.asset),
       });
@@ -958,7 +963,7 @@ namespace YAEngine
       MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
       auto& mat = materialManager.Get(matHandle);
       mat.cubemap = skybox;
-      materialManager.GetVulkanMaterial(matHandle).Bind(app, mat, currentFrame, m_NoneTexture);
+      materialManager.GetVulkanMaterial(matHandle).Bind(frame.assets.Textures(), cubeMapManager, frame.cubicResources, mat, currentFrame, m_NoneTexture);
     }
 
     // === Record (command buffer) ===
@@ -1034,20 +1039,20 @@ namespace YAEngine
       vb.Draw(cmd, instanceCount);
     }
 
-    if (!app->GetScene().HasComponent<CameraComponent>(app->GetScene().GetActiveCamera())) return;
-    auto& camTransform = app->GetScene().GetComponent<TransformComponent>(app->GetScene().GetActiveCamera());
+    if (!frame.scene.HasComponent<CameraComponent>(frame.scene.GetActiveCamera())) return;
+    auto& camTransform = frame.scene.GetComponent<LocalTransform>(frame.scene.GetActiveCamera());
     glm::mat4 camDir = glm::mat4_cast(camTransform.rotation);
     if (skybox)
       m_SkyBox.Draw(currentFrame, &cubeMapManager.GetVulkanCubicTexture(skybox), cmd, camDir, m_FrameUniformBuffer.uniforms.proj, m_CubicResources);
   }
 
-  void Render::SetUpCamera(Application* app)
+  void Render::SetUpCamera(const FrameContext& frame)
   {
-    if (!app->GetScene().HasComponent<CameraComponent>(app->GetScene().GetActiveCamera()))
+    if (!frame.scene.HasComponent<CameraComponent>(frame.scene.GetActiveCamera()))
       return;
 
-    auto& transform = app->GetScene().GetComponent<TransformComponent>(app->GetScene().GetActiveCamera());
-    auto& camera    = app->GetScene().GetComponent<CameraComponent>(app->GetScene().GetActiveCamera());
+    auto& transform = frame.scene.GetComponent<LocalTransform>(frame.scene.GetActiveCamera());
+    auto& camera    = frame.scene.GetComponent<CameraComponent>(frame.scene.GetActiveCamera());
 
     glm::mat4 world =
       glm::translate(glm::mat4(1.0f), transform.position) *
@@ -1078,8 +1083,8 @@ namespace YAEngine
       jitter.x /= float(m_ViewportWidth);
       jitter.y /= float(m_ViewportHeight);
 #else
-      jitter.x /= float(app->GetWindow().GetWidth());
-      jitter.y /= float(app->GetWindow().GetHeight());
+      jitter.x /= float(frame.windowWidth);
+      jitter.y /= float(frame.windowHeight);
 #endif
 
       m_FrameUniformBuffer.uniforms.jitterX = jitter.x;
@@ -1370,29 +1375,31 @@ namespace YAEngine
     hizLayoutHelper.Destroy();
   }
 
-  void Render::DrawMeshesDepthOnly(Application* app)
+  void Render::DrawMeshesDepthOnly(const FrameContext& frame)
   {
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     auto cmd = m_Backend.GetCurrentCommandBuffer();
-    auto& meshManager = app->GetAssetManager().Meshes();
+    auto& meshManager = frame.assets.Meshes();
 
     // === Collect ===
     m_DepthDrawCommands.clear();
 
-    auto view = app->GetScene().GetView<MeshComponent, TransformComponent, MaterialComponent>();
-    view.each([&](MeshComponent mesh, TransformComponent transform, MaterialComponent material)
+    auto view = frame.scene.GetView<MeshComponent, WorldTransform, MaterialComponent>();
+    auto& reg = frame.scene.GetRegistry();
+    view.each([&](entt::entity entity, MeshComponent& mesh, WorldTransform& wt, MaterialComponent& material)
     {
-      if (!mesh.shouldRender) return;
-      if (mesh.noShading) return;
+      if (reg.all_of<HiddenTag>(entity)) return;
+      if (reg.all_of<NoShadingTag>(entity)) return;
 
+      bool doubleSided = reg.all_of<DoubleSidedTag>(entity);
       auto* instanceData = meshManager.GetInstanceData(mesh.asset);
       bool isInstanced = (instanceData != nullptr);
 
       uint8_t pipelineKey;
       if (isInstanced)
-        pipelineKey = mesh.doubleSided ? 3 : 2;
+        pipelineKey = doubleSided ? 3 : 2;
       else
-        pipelineKey = mesh.doubleSided ? 1 : 0;
+        pipelineKey = doubleSided ? 1 : 0;
 
       m_DepthDrawCommands.push_back({
         .pipelineKey = pipelineKey,
@@ -1400,7 +1407,7 @@ namespace YAEngine
         .materialGeneration = 0,
         .meshIndex = mesh.asset.index,
         .meshGeneration = mesh.asset.generation,
-        .worldTransform = transform.world,
+        .worldTransform = wt.world,
         .instanceData = instanceData,
         .instanceOffset = meshManager.GetInstanceOffset(mesh.asset),
       });

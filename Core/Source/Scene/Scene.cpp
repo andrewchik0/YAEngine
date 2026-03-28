@@ -1,5 +1,4 @@
 #include "Scene.h"
-#include "TransformSystem.h"
 
 namespace YAEngine
 {
@@ -7,7 +6,9 @@ namespace YAEngine
   Entity Scene::CreateEntity(std::string_view name)
   {
     Entity e = m_Registry.create();
-    m_Registry.emplace<TransformComponent>(e);
+    m_Registry.emplace<LocalTransform>(e);
+    m_Registry.emplace<WorldTransform>(e);
+    m_Registry.emplace<TransformDirty>(e);
     m_Registry.emplace<HierarchyComponent>(e);
     m_Registry.emplace<RootTag>(e);
     m_Registry.emplace<Name>(e, name);
@@ -93,17 +94,27 @@ namespace YAEngine
         m_Registry.emplace<RootTag>(child);
     }
 
-    m_Registry.get<TransformComponent>(child).dirty = true;
+    MarkDirty(child);
   }
 
-  TransformComponent& Scene::GetTransform(Entity e)
+  LocalTransform& Scene::GetTransform(Entity e)
   {
-    return m_Registry.get<TransformComponent>(e);
+    return m_Registry.get<LocalTransform>(e);
   }
 
-  const TransformComponent& Scene::GetTransform(Entity e) const
+  const LocalTransform& Scene::GetTransform(Entity e) const
   {
-    return m_Registry.get<TransformComponent>(e);
+    return m_Registry.get<LocalTransform>(e);
+  }
+
+  WorldTransform& Scene::GetWorldTransform(Entity e)
+  {
+    return m_Registry.get<WorldTransform>(e);
+  }
+
+  const WorldTransform& Scene::GetWorldTransform(Entity e) const
+  {
+    return m_Registry.get<WorldTransform>(e);
   }
 
   HierarchyComponent& Scene::GetHierarchy(Entity e)
@@ -161,12 +172,10 @@ namespace YAEngine
 
   void Scene::MarkDirty(Entity e)
   {
-    auto& t = m_Registry.get<TransformComponent>(e);
-
-    if (t.dirty)
+    if (m_Registry.all_of<TransformDirty>(e))
       return;
 
-    t.dirty = true;
+    m_Registry.emplace_or_replace<TransformDirty>(e);
 
     auto& hc = m_Registry.get<HierarchyComponent>(e);
     entt::entity child = hc.firstChild;
@@ -177,17 +186,11 @@ namespace YAEngine
     }
   }
 
-  void Scene::Update()
-  {
-    TransformSystem::Update(m_Registry);
-  }
 
   void Scene::SetDoubleSided(Entity e)
   {
     if (HasComponent<MeshComponent>(e))
-    {
-      GetComponent<MeshComponent>(e).doubleSided = true;
-    }
+      AddComponent<DoubleSidedTag>(e);
 
     auto& hc = GetHierarchy(e);
     Entity child = hc.firstChild;
@@ -201,9 +204,7 @@ namespace YAEngine
   void Scene::NoShading(Entity e)
   {
     if (HasComponent<MeshComponent>(e))
-    {
-      GetComponent<MeshComponent>(e).noShading = true;
-    }
+      AddComponent<NoShadingTag>(e);
 
     auto& hc = GetHierarchy(e);
     Entity child = hc.firstChild;

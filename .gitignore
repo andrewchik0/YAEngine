@@ -7,5 +7,6 @@ out
 CLAUDE.md
 .claude
 build
+build-editor
 build-no-editor
 build-release

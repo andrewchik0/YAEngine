@@ -1,5 +1,9 @@
 #pragma once
-#include "Application.h"
+#include "Layer.h"
+#include "Events.h"
+#include "EventBus.h"
+#include "Scene/Scene.h"
+#include "Scene/Components.h"
 #include "GameComponents.h"
 
 class ControlsLayer : public YAEngine::Layer
@@ -17,28 +21,28 @@ public:
 
   void OnSceneReady() override
   {
-    m_OnKeyboard = App().Events().Subscribe<YAEngine::KeyEvent>([&](auto event) { OnKeyboard(event); });
+    m_OnKeyboard = Events().Subscribe<YAEngine::KeyEvent>([&](auto event) { OnKeyboard(event); });
 
-    m_Camera = App().GetScene().CreateEntity("camera");
-    App().GetScene().AddComponent<YAEngine::CameraComponent>(m_Camera);
-    App().GetScene().AddComponent<FollowCameraComponent>(m_Camera);
+    m_Camera = GetScene().CreateEntity("camera");
+    GetScene().AddComponent<YAEngine::CameraComponent>(m_Camera);
+    GetScene().AddComponent<FollowCameraComponent>(m_Camera);
 
     glm::dvec3 eulerDegrees = glm::vec3(160.0, -0.0, -180.0);
     glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
-    App().GetScene().GetTransform(m_Camera).rotation = glm::quat(eulerRadians);
-    App().GetScene().SetActiveCamera(m_Camera);
+    GetScene().GetTransform(m_Camera).rotation = glm::quat(eulerRadians);
+    GetScene().SetActiveCamera(m_Camera);
   }
 
   void SetTarget(YAEngine::Entity car)
   {
     m_Car = car;
     if (m_Camera != entt::null)
-      App().GetScene().GetComponent<FollowCameraComponent>(m_Camera).target = car;
+      GetScene().GetComponent<FollowCameraComponent>(m_Camera).target = car;
   }
 
   void OnDetach() override
   {
-    App().Events().Unsubscribe<YAEngine::KeyEvent>(m_OnKeyboard);
+    Events().Unsubscribe<YAEngine::KeyEvent>(m_OnKeyboard);
   }
 
   void Update(double deltaTime) override;

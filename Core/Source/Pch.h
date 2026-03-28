@@ -36,8 +36,8 @@
 namespace YAEngine
 {
   struct WindowSpecs;
-  struct ApplicationSpecs;
+  struct EngineSpecs;
 
   class Window;
-  class Application;
+  class Engine;
 }

@@ -9,6 +9,9 @@ namespace YAEngine
 {
   struct Material;
   struct RenderContext;
+  struct CubicTextureResources;
+  class TextureManager;
+  class CubeMapManager;
 
   class VulkanMaterial
   {
@@ -29,7 +32,8 @@ namespace YAEngine
       return m_DescriptorSets[currentFrame].Get();
     }
 
-    void Bind(Application* app, Material& material, uint32_t currentFrame, const VulkanTexture& noneTexture);
+    void Bind(TextureManager& textures, CubeMapManager& cubeMaps, CubicTextureResources& cubicResources,
+              Material& material, uint32_t currentFrame, const VulkanTexture& noneTexture);
 
   private:
 

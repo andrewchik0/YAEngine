@@ -2,6 +2,12 @@
 <project version="4">
   <component name="VcsDirectoryMappings">
     <mapping directory="$PROJECT_DIR$" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-editor/_deps/assimp-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-editor/_deps/entt-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-editor/_deps/glfw-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-editor/_deps/glm-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-editor/_deps/imgui-src" vcs="Git" />
+    <mapping directory="$PROJECT_DIR$/build-editor/_deps/nativefiledialog-extended-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build-release/_deps/assimp-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build-release/_deps/entt-src" vcs="Git" />
     <mapping directory="$PROJECT_DIR$/build-release/_deps/glfw-src" vcs="Git" />

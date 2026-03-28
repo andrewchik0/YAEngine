@@ -31,11 +31,12 @@ namespace YAEngine
 
     ModelManager() = default;
 
-    void SetDependencies(Scene* scene, AssetManager* assetManager)
+    void SetDependencies(Scene* scene, AssetManager* assetManager, std::function<uint32_t(uint32_t)> allocateInstanceData)
     {
       m_Scene = scene;
       m_AssetManager = assetManager;
       m_Builder = ModelBuilder(scene, assetManager);
+      m_AllocateInstanceData = std::move(allocateInstanceData);
     }
 
     ModelHandle Load(const std::string& path, bool combinedTextures = false);
@@ -49,6 +50,7 @@ namespace YAEngine
     Scene* m_Scene = nullptr;
     AssetManager* m_AssetManager = nullptr;
     ModelBuilder m_Builder {};
+    std::function<uint32_t(uint32_t)> m_AllocateInstanceData;
 
     void DestroyEntityAssets(Entity entity);
     void TraverseInstanceData(Entity entity, std::vector<glm::mat4>* instanceData, uint32_t offset);

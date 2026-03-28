@@ -2,7 +2,6 @@
 
 #include <imgui.h>
 
-#include "Application.h"
 #include "Editor/EditorContext.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
@@ -79,27 +78,31 @@ namespace YAEngine
     return changed;
   }
 
-  static void DrawTransform(EditorContext& context, TransformComponent& tc)
+  static void DrawTransform(EditorContext& context, LocalTransform& lt)
   {
     if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
     {
       bool dirty = false;
 
-      if (ColoredDragFloat3("Position", &tc.position.x, 0.1f, 0.0f, 0.0f, 0.0f))
+      if (ColoredDragFloat3("Position", &lt.position.x, 0.1f, 0.0f, 0.0f, 0.0f))
         dirty = true;
 
-      glm::vec3 euler = glm::degrees(glm::eulerAngles(tc.rotation));
+      glm::vec3 euler = glm::degrees(glm::eulerAngles(lt.rotation));
       if (ColoredDragFloat3("Rotation", &euler.x, 0.5f, 0.0f, 0.0f, 0.0f))
       {
-        tc.rotation = glm::quat(glm::radians(euler));
+        lt.rotation = glm::quat(glm::radians(euler));
         dirty = true;
       }
 
-      if (ColoredDragFloat3("Scale", &tc.scale.x, 0.1f, 1.0f, 0.001f, 1000.0f))
+      if (ColoredDragFloat3("Scale", &lt.scale.x, 0.1f, 1.0f, 0.001f, 1000.0f))
         dirty = true;
 
-      ImGui::Text("MinBB: (%.1f, %.1f, %.1f)", tc.minBB.x, tc.minBB.y, tc.minBB.z);
-      ImGui::Text("MaxBB: (%.1f, %.1f, %.1f)", tc.maxBB.x, tc.maxBB.y, tc.maxBB.z);
+      if (context.scene->HasComponent<LocalBounds>(context.selectedEntity))
+      {
+        auto& bounds = context.scene->GetComponent<LocalBounds>(context.selectedEntity);
+        ImGui::Text("MinBB: (%.1f, %.1f, %.1f)", bounds.min.x, bounds.min.y, bounds.min.z);
+        ImGui::Text("MaxBB: (%.1f, %.1f, %.1f)", bounds.max.x, bounds.max.y, bounds.max.z);
+      }
 
       if (dirty)
         context.scene->MarkDirty(context.selectedEntity);
@@ -110,9 +113,29 @@ namespace YAEngine
   {
     if (ImGui::CollapsingHeader("Mesh", ImGuiTreeNodeFlags_DefaultOpen))
     {
-      ImGui::Checkbox("Render", &mc.shouldRender);
-      ImGui::Checkbox("Double Sided", &mc.doubleSided);
-      ImGui::Checkbox("No Shading", &mc.noShading);
+      auto entity = context.selectedEntity;
+      auto& scene = *context.scene;
+
+      bool visible = !scene.HasComponent<HiddenTag>(entity);
+      if (ImGui::Checkbox("Render", &visible))
+      {
+        if (!visible) scene.AddComponent<HiddenTag>(entity);
+        else scene.RemoveComponent<HiddenTag>(entity);
+      }
+
+      bool doubleSided = scene.HasComponent<DoubleSidedTag>(entity);
+      if (ImGui::Checkbox("Double Sided", &doubleSided))
+      {
+        if (doubleSided) scene.AddComponent<DoubleSidedTag>(entity);
+        else scene.RemoveComponent<DoubleSidedTag>(entity);
+      }
+
+      bool noShading = scene.HasComponent<NoShadingTag>(entity);
+      if (ImGui::Checkbox("No Shading", &noShading))
+      {
+        if (noShading) scene.AddComponent<NoShadingTag>(entity);
+        else scene.RemoveComponent<NoShadingTag>(entity);
+      }
 
       auto* instanceData = context.assetManager->Meshes().GetInstanceData(mc.asset);
       if (instanceData != nullptr)
@@ -202,8 +225,8 @@ namespace YAEngine
 
     ImGui::Separator();
 
-    if (scene.HasComponent<TransformComponent>(entity))
-      DrawTransform(context, scene.GetComponent<TransformComponent>(entity));
+    if (scene.HasComponent<LocalTransform>(entity))
+      DrawTransform(context, scene.GetComponent<LocalTransform>(entity));
 
     if (scene.HasComponent<MeshComponent>(entity))
       DrawMesh(context, scene.GetComponent<MeshComponent>(entity));

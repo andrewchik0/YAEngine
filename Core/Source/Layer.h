@@ -1,29 +1,43 @@
 #pragma once
 
+#include "ServiceRegistry.h"
+
 namespace YAEngine
 {
-  class Application;
+  class Scene;
+  class Render;
+  class AssetManager;
+  class EventBus;
+  class Timer;
+  class InputSystem;
+  class Window;
+  class LayerManager;
 
   class Layer
   {
   public:
     virtual ~Layer() = default;
 
-    Application& App();
+    void SetRegistry(ServiceRegistry& registry) { m_Registry = &registry; }
 
-    // Called when the layer is added to the stack. EventBus is available.
-    // Asset manager and scene are NOT yet initialized.
+    Scene& GetScene();
+    Render& GetRender();
+    AssetManager& GetAssets();
+    EventBus& Events();
+    Timer& GetTimer();
+    InputSystem& GetInput();
+    Window& GetWindow();
+    LayerManager& GetLayerManager();
+
     virtual void OnAttach() {}
-
-    // Called after asset manager and render are initialized.
-    // Scene is ready — create entities and load assets here.
     virtual void OnSceneReady() {}
-
-    // Called when the layer is removed or application shuts down.
     virtual void OnDetach() {}
-
+    virtual void FixedUpdate(double fixedDt) {}
     virtual void Update(double deltaTime) {}
+    virtual void LateUpdate(double deltaTime) {}
     virtual void RenderUI() {}
 
+  protected:
+    ServiceRegistry* m_Registry = nullptr;
   };
 }

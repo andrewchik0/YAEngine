@@ -15,12 +15,17 @@ namespace YAEngine
     SubscriptionId Subscribe(std::function<bool(const Event&)> handler, int priority = 0)
     {
       auto id = ++m_NextId;
-      auto& handlers = m_Handlers[typeid(Event)];
-      HandlerWrapper wrapper {id, priority, [handler](const void* e)
+      auto& list = m_Handlers[typeid(Event)];
+      HandlerWrapper wrapper {id, priority, false, [handler](const void* e)
       {
           return handler(*static_cast<const Event*>(e));
       }};
-      InsertSorted(handlers, std::move(wrapper));
+
+      if (list.iterating)
+        list.pendingAdds.push_back(std::move(wrapper));
+      else
+        InsertSorted(list.handlers, std::move(wrapper));
+
       return id;
     }
 
@@ -29,13 +34,18 @@ namespace YAEngine
     SubscriptionId Subscribe(std::function<void(const Event&)> handler, int priority = 0)
     {
       auto id = ++m_NextId;
-      auto& handlers = m_Handlers[typeid(Event)];
-      HandlerWrapper wrapper {id, priority, [handler](const void* e)
+      auto& list = m_Handlers[typeid(Event)];
+      HandlerWrapper wrapper {id, priority, false, [handler](const void* e)
       {
           handler(*static_cast<const Event*>(e));
           return false;
       }};
-      InsertSorted(handlers, std::move(wrapper));
+
+      if (list.iterating)
+        list.pendingAdds.push_back(std::move(wrapper));
+      else
+        InsertSorted(list.handlers, std::move(wrapper));
+
       return id;
     }
 
@@ -45,11 +55,20 @@ namespace YAEngine
       auto it = m_Handlers.find(typeid(Event));
       if (it == m_Handlers.end()) return;
 
-      auto& vec = it->second;
-      vec.erase(
-          std::remove_if(vec.begin(), vec.end(),
-              [id](const HandlerWrapper& h){ return h.id == id; }),
-          vec.end());
+      auto& list = it->second;
+      if (list.iterating)
+      {
+        for (auto& h : list.handlers)
+          if (h.id == id) { h.removed = true; return; }
+      }
+      else
+      {
+        auto& vec = list.handlers;
+        vec.erase(
+            std::remove_if(vec.begin(), vec.end(),
+                [id](const HandlerWrapper& h){ return h.id == id; }),
+            vec.end());
+      }
     }
 
     template<typename Event>
@@ -58,12 +77,32 @@ namespace YAEngine
       auto it = m_Handlers.find(typeid(Event));
       if (it == m_Handlers.end()) return;
 
-      auto handlersCopy = it->second;
-      for (auto& h : handlersCopy)
+      auto& list = it->second;
+      list.iterating = true;
+
+      for (size_t i = 0; i < list.handlers.size(); i++)
       {
+        auto& h = list.handlers[i];
+        if (h.removed) continue;
         if (h.callback(&event))
           break;
       }
+
+      list.iterating = false;
+      ApplyPending(list);
+    }
+
+    template<typename Event>
+    void EmitDeferred(const Event& event)
+    {
+      m_DeferredQueue.push_back([this, event]() { Emit(event); });
+    }
+
+    void FlushDeferred()
+    {
+      auto queue = std::move(m_DeferredQueue);
+      for (auto& fn : queue)
+        fn();
     }
 
   private:
@@ -71,7 +110,15 @@ namespace YAEngine
     {
       SubscriptionId id;
       int priority;
+      bool removed;
       std::function<bool(const void*)> callback;
+    };
+
+    struct HandlerList
+    {
+      std::vector<HandlerWrapper> handlers;
+      std::vector<HandlerWrapper> pendingAdds;
+      bool iterating = false;
     };
 
     static void InsertSorted(std::vector<HandlerWrapper>& handlers, HandlerWrapper&& wrapper)
@@ -84,7 +131,23 @@ namespace YAEngine
       handlers.insert(pos, std::move(wrapper));
     }
 
-    std::unordered_map<std::type_index, std::vector<HandlerWrapper>> m_Handlers;
+    static void ApplyPending(HandlerList& list)
+    {
+      // Remove handlers marked for deletion
+      auto& vec = list.handlers;
+      vec.erase(
+        std::remove_if(vec.begin(), vec.end(),
+          [](const HandlerWrapper& h){ return h.removed; }),
+        vec.end());
+
+      // Insert pending adds
+      for (auto& wrapper : list.pendingAdds)
+        InsertSorted(list.handlers, std::move(wrapper));
+      list.pendingAdds.clear();
+    }
+
+    std::unordered_map<std::type_index, HandlerList> m_Handlers;
+    std::vector<std::function<void()>> m_DeferredQueue;
     SubscriptionId m_NextId{0};
   };
 }

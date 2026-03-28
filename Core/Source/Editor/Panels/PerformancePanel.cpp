@@ -2,9 +2,9 @@
 
 #include <imgui.h>
 
-#include "Application.h"
 #include "Editor/EditorContext.h"
 #include "Render/Render.h"
+#include "Utils/Timer.h"
 
 namespace YAEngine
 {
@@ -16,7 +16,13 @@ namespace YAEngine
       return;
     }
 
-    auto& timer = Application::Get().GetTimer();
+    if (!context.timer)
+    {
+      ImGui::End();
+      return;
+    }
+
+    auto& timer = *context.timer;
 
     float frametime = (float)timer.GetDeltaTime() * 1000.0f;
 

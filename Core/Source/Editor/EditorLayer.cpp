@@ -3,7 +3,8 @@
 #include <imgui.h>
 #include <imgui_internal.h>
 
-#include "Application.h"
+#include "InputSystem.h"
+#include "LayerManager.h"
 #include "Editor/Utils/EditorStyle.h"
 #include "Editor/Panels/ViewportPanel.h"
 #include "Editor/Panels/PerformancePanel.h"
@@ -21,7 +22,7 @@ namespace YAEngine
   {
     FileDialog::Init();
     EditorStyle::Apply();
-    App().PushLayer<EditorCameraLayer>();
+    GetLayerManager().PushLayer<EditorCameraLayer>();
     m_Panels.push_back(std::make_unique<ViewportPanel>());
     m_Panels.push_back(std::make_unique<OutlinerPanel>());
     m_Panels.push_back(std::make_unique<DetailsPanel>());
@@ -33,9 +34,10 @@ namespace YAEngine
 
   void EditorLayer::OnSceneReady()
   {
-    m_Context.scene = &App().GetScene();
-    m_Context.assetManager = &App().GetAssetManager();
-    m_Context.render = &App().GetRender();
+    m_Context.scene = &GetScene();
+    m_Context.assetManager = &GetAssets();
+    m_Context.render = &GetRender();
+    m_Context.timer = &GetTimer();
 
     m_TextureCache.Init(m_Context.assetManager);
     m_Context.textureCache = &m_TextureCache;
@@ -93,12 +95,12 @@ namespace YAEngine
         panel->OnRender(m_Context);
     }
 
-    App().GetInputSystem().SetViewportHovered(m_Context.viewportHovered);
+    GetInput().SetViewportHovered(m_Context.viewportHovered);
   }
 
   void EditorLayer::OnDetach()
   {
-    App().GetRender().WaitIdle();
+    GetRender().WaitIdle();
     m_Panels.clear();
     m_TextureCache.Destroy();
     FileDialog::Shutdown();

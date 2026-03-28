@@ -1,7 +1,9 @@
 #include "VulkanMaterial.h"
 
-#include "Application.h"
 #include "RenderContext.h"
+#include "VulkanCubicTexture.h"
+#include "Assets/TextureManager.h"
+#include "Assets/CubeMapManager.h"
 #include "Assets/MaterialManager.h"
 
 namespace YAEngine
@@ -64,14 +66,13 @@ namespace YAEngine
     }
   }
 
-  void VulkanMaterial::Bind(Application* app, Material& material, uint32_t currentFrame, const VulkanTexture& noneTexture)
+  void VulkanMaterial::Bind(TextureManager& textures, CubeMapManager& cubeMaps, CubicTextureResources& cubicResources,
+                            Material& material, uint32_t currentFrame, const VulkanTexture& noneTexture)
   {
     if (m_BoundGenerations[currentFrame] == material.generation)
       return;
 
     int textureMask = 0;
-    auto& textures = app->GetAssetManager().Textures();
-    auto& cubeMaps = app->GetAssetManager().CubeMaps();
 
     auto writer = m_DescriptorSets[currentFrame].Writer();
 
@@ -120,7 +121,7 @@ namespace YAEngine
     if (cubeMaps.Has(material.cubemap))
     {
       auto& cubemap = cubeMaps.GetVulkanCubicTexture(material.cubemap);
-      auto& brdfLut = app->GetRender().GetCubicResources().brdfLut;
+      auto& brdfLut = cubicResources.brdfLut;
       writer.WriteCombinedImageSampler(8, cubemap.GetPrefilterView(), cubemap.GetPrefilterSampler());
       writer.WriteCombinedImageSampler(9, brdfLut.GetView(), brdfLut.GetSampler());
       writer.WriteCombinedImageSampler(10, cubemap.GetIrradianceView(), cubemap.GetIrradianceSampler());

@@ -2,9 +2,9 @@
 
 namespace YAEngine
 {
-  void TransformSystem::Update(entt::registry& registry)
+  void TransformSystem::Update(entt::registry& registry, double dt)
   {
-    auto view = registry.view<RootTag, TransformComponent, HierarchyComponent>();
+    auto view = registry.view<RootTag, LocalTransform, WorldTransform, HierarchyComponent>();
     for (auto e : view)
     {
       UpdateWorldTransform(registry, e);
@@ -13,37 +13,38 @@ namespace YAEngine
 
   void TransformSystem::UpdateWorldTransform(entt::registry& registry, entt::entity e)
   {
-    auto& t = registry.get<TransformComponent>(e);
+    auto& lt = registry.get<LocalTransform>(e);
+    auto& wt = registry.get<WorldTransform>(e);
     auto& hc = registry.get<HierarchyComponent>(e);
 
-    if (!t.dirty)
+    if (!registry.all_of<TransformDirty>(e))
       return;
 
-    t.local = ComposeLocal(t);
+    glm::mat4 local = ComposeLocal(lt);
 
     if (hc.parent != entt::null)
     {
-      auto& parentT = registry.get<TransformComponent>(hc.parent);
-      t.world = parentT.world * t.local;
+      auto& parentWt = registry.get<WorldTransform>(hc.parent);
+      wt.world = parentWt.world * local;
     }
     else
     {
-      t.world = t.local;
+      wt.world = local;
     }
 
-    t.dirty = false;
+    registry.remove<TransformDirty>(e);
 
     entt::entity child = hc.firstChild;
     while (child != entt::null)
     {
-      auto& ct = registry.get<TransformComponent>(child);
-      ct.dirty = true;
+      if (!registry.all_of<TransformDirty>(child))
+        registry.emplace<TransformDirty>(child);
       UpdateWorldTransform(registry, child);
       child = registry.get<HierarchyComponent>(child).nextSibling;
     }
   }
 
-  glm::mat4 TransformSystem::ComposeLocal(const TransformComponent& t)
+  glm::mat4 TransformSystem::ComposeLocal(const LocalTransform& t)
   {
     glm::mat4 T = glm::translate(glm::mat4(1.0f), t.position);
     glm::mat4 R = glm::toMat4(t.rotation);
