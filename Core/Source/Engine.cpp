@@ -131,16 +131,16 @@ namespace YAEngine
       m_LayerManager.CallLateUpdate(frameDt);
       m_InputSystem.EndFrame();
 
-      auto snapshot = BuildSceneSnapshot(m_Scene, m_AssetManager.Meshes());
+      BuildSceneSnapshot(m_Snapshot, m_Scene, m_AssetManager.Meshes());
 
       // Frustum cull: compute viewProj from camera data, partition visible objects to front
-      auto& cam = snapshot.camera;
+      auto& cam = m_Snapshot.camera;
       glm::mat4 world = glm::translate(glm::mat4(1.0f), cam.position) * glm::mat4_cast(cam.rotation);
       glm::mat4 view = glm::inverse(world);
       glm::mat4 proj = glm::perspective(cam.fov, cam.aspectRatio, cam.nearPlane, cam.farPlane);
-      snapshot.visibleCount = FrustumCull(snapshot.objects, proj * view);
+      m_Snapshot.visibleCount = FrustumCull(m_Snapshot.objects, proj * view);
 
-      auto frame = MakeFrameContext(snapshot);
+      auto frame = MakeFrameContext(m_Snapshot);
       m_Render.Draw(frame);
     }
 

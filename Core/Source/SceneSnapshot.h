@@ -6,10 +6,9 @@
 
 namespace YAEngine
 {
-  inline SceneSnapshot BuildSceneSnapshot(Scene& scene, MeshManager& meshManager)
+  inline void BuildSceneSnapshot(SceneSnapshot& snapshot, Scene& scene, MeshManager& meshManager)
   {
-    SceneSnapshot snapshot;
-
+    snapshot.objects.clear();
     snapshot.skybox = scene.GetSkybox();
 
     // Extract camera
@@ -55,6 +54,5 @@ namespace YAEngine
     });
 
     snapshot.visibleCount = uint32_t(snapshot.objects.size());
-    return snapshot;
   }
 }

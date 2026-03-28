@@ -8,6 +8,7 @@
 #include "InputSystem.h"
 #include "Assets/AssetManager.h"
 #include "Render/Render.h"
+#include "Render/RenderObject.h"
 #include "Scene/Scene.h"
 #include "Scene/SystemScheduler.h"
 #include "Utils/Timer.h"
@@ -73,6 +74,8 @@ namespace YAEngine
     Scene m_Scene;
     SystemScheduler m_Scheduler;
     LayerManager m_LayerManager;
+
+    SceneSnapshot m_Snapshot;
 
     static constexpr double FIXED_DT = 1.0 / 60.0;
     static constexpr int MAX_FIXED_STEPS = 5;
