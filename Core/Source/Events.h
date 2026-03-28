@@ -4,84 +4,30 @@
 
 namespace YAEngine
 {
-  enum class EventType
+  struct KeyEvent
   {
-    None = 0,
-    MouseMoved,
-    MouseButton,
-    MouseScroll,
-    Key,
-    Resize
+    int32_t key;
+    int32_t scancode;
+    int32_t action;
+    int32_t mods;
   };
 
-  class Event
+  struct MouseMovedEvent
   {
-  public:
-    virtual ~Event() = default;
-
-    EventType type = EventType::None;
-  };
-
-  class MouseMovedEvent : public Event
-  {
-  public:
     double x, y;
-
-    MouseMovedEvent(double x, double y)
-      : x(x), y(y)
-    {
-      type = EventType::MouseMoved;
-    }
   };
 
-  class MouseWheelEvent : public Event
+  struct MouseWheelEvent
   {
-  public:
     double x, y;
-
-    MouseWheelEvent(double x, double y)
-      : x(x), y(y)
-    {
-      type = EventType::MouseScroll;
-    }
   };
 
-  class MouseButtonEvent : public Event
+  struct MouseButtonEvent
   {
-  public:
-    uint32_t button, action, mods;
-
-    MouseButtonEvent(uint32_t button, uint32_t action, uint32_t mods)
-      : button(button), action(action), mods(mods)
-    {
-      type = EventType::MouseButton;
-    }
+    int32_t button;
+    int32_t action;
+    int32_t mods;
   };
 
-  class KeyEvent : public Event
-  {
-  public:
-    uint32_t key, scancode, action, mods;
-
-    KeyEvent(uint32_t key, uint32_t scancode, uint32_t action, uint32_t mods)
-      : key(key), scancode(scancode), action(action), mods(mods)
-    {
-      type = EventType::Key;
-    }
-  };
-
-  class  ResizeEvent : public Event
-  {
-  public:
-    uint32_t width, height;
-
-    ResizeEvent(uint32_t width, uint32_t height)
-      : width(width), height(height)
-    {
-      type = EventType::Resize;
-    }
-
-  };
-
-
+  using WindowEvent = std::variant<KeyEvent, MouseMovedEvent, MouseButtonEvent, MouseWheelEvent>;
 }

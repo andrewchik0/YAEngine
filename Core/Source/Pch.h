@@ -20,6 +20,7 @@
 #include <typeindex>
 #include <unordered_map>
 #include <unordered_set>
+#include <variant>
 #include <vector>
 
 #define VK_USE_PLATFORM_WIN32_KHR

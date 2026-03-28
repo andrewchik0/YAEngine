@@ -10,7 +10,7 @@ namespace YAEngine
     );
 
     if (self)
-      self->m_WindowEventStack.push_back(std::make_unique<KeyEvent>(key, scancode, action, mods));
+      self->m_WindowEventStack.push_back(KeyEvent{key, scancode, action, mods});
   }
 
   void Window::CursorPositionCallback(GLFWwindow* window, double xpos, double ypos)
@@ -20,7 +20,7 @@ namespace YAEngine
     );
 
     if (self)
-      self->m_WindowEventStack.push_back(std::make_unique<MouseMovedEvent>(xpos, ypos));
+      self->m_WindowEventStack.push_back(MouseMovedEvent{xpos, ypos});
   }
 
   void Window::MouseButtonCallback(GLFWwindow* window, int32_t button, int32_t action, int32_t mods)
@@ -30,7 +30,7 @@ namespace YAEngine
     );
 
     if (self)
-      self->m_WindowEventStack.push_back(std::make_unique<MouseButtonEvent>(button, action, mods));
+      self->m_WindowEventStack.push_back(MouseButtonEvent{button, action, mods});
   }
 
   void Window::FramebufferSizeCallback(GLFWwindow* window, int32_t width, int32_t height)
@@ -43,7 +43,7 @@ namespace YAEngine
     {
       self->m_WindowWidth = width;
       self->m_WindowHeight = height;
-      self->m_WindowEventStack.push_back(std::make_unique<ResizeEvent>(width, height));
+      self->b_Resized = true;
     }
   }
 
@@ -54,7 +54,7 @@ namespace YAEngine
     );
 
     if (self)
-      self->m_WindowEventStack.push_back(std::make_unique<MouseWheelEvent>(xOffset, yOffset));
+      self->m_WindowEventStack.push_back(MouseWheelEvent{xOffset, yOffset});
   }
 
   Window::Window(const WindowSpecs& specs)
@@ -90,7 +90,7 @@ namespace YAEngine
     return !glfwWindowShouldClose(m_WindowHandle);
   }
 
-  std::vector<std::unique_ptr<Event>>& Window::PollEvents()
+  const std::vector<WindowEvent>& Window::PollEvents()
   {
     m_WindowEventStack.clear();
     glfwPollEvents();

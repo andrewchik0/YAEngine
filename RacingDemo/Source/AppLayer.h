@@ -3,7 +3,7 @@
 #include "Layer.h"
 #include "LayerManager.h"
 #include "Window.h"
-#include "EventBus.h"
+#include "InputSystem.h"
 #include "ControlsLayer.h"
 #include "GameComponents.h"
 #include "Scene/Scene.h"
@@ -20,8 +20,6 @@ class AppLayer : public YAEngine::Layer
 public:
   AppLayer() = default;
 
-  YAEngine::SubscriptionId key {};
-
   void OnAttach() override
   {
     GetWindow().Maximize();
@@ -33,8 +31,6 @@ public:
   void OnSceneReady() override
   {
     GetScene().SetSkybox(GetAssets().CubeMaps().Load(APP_WORKING_DIR "/Assets/Textures/sky.hdr"));
-
-    key = Events().Subscribe<YAEngine::KeyEvent>([&](auto e) { OnKeyBoard(e); });
 
 #ifndef TEST
     GetRender().GetGamma() = 1.9f;
@@ -119,17 +115,11 @@ public:
 
   }
 
-  void OnDetach() override
-  {
-    Events().Unsubscribe<YAEngine::KeyEvent>(key);
-  }
-
-  void OnKeyBoard(const YAEngine::KeyEvent event)
+  void Update(double deltaTime) override
   {
 #ifdef YA_EDITOR
-    if (event.action == GLFW_PRESS && event.key == GLFW_KEY_ESCAPE)
+    if (GetInput().IsKeyPressed(YAEngine::Key::Escape))
     {
-      // Find follow camera and editor camera via ECS
       auto followView = GetScene().GetView<FollowCameraComponent, YAEngine::CameraComponent>();
       auto editorView = GetScene().GetView<YAEngine::EditorOnlyTag, YAEngine::CameraComponent>();
 

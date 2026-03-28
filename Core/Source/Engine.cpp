@@ -32,10 +32,9 @@ namespace YAEngine
 
   Engine::Engine(const EngineSpecs& specs)
     : m_Window(specs.windowSpecs),
-      m_InputSystem(m_Window, m_EventBus)
+      m_InputSystem(m_Window)
   {
     m_Registry.Register<Window>(&m_Window);
-    m_Registry.Register<EventBus>(&m_EventBus);
     m_Registry.Register<Timer>(&m_Timer);
     m_Registry.Register<InputSystem>(&m_InputSystem);
     m_Registry.Register<Render>(&m_Render);
@@ -60,7 +59,6 @@ namespace YAEngine
 
   void Engine::Destroy()
   {
-    m_EventBus.Unsubscribe<ResizeEvent>(m_ResizeSubscription);
     m_Render.Destroy();
     m_Window.Destroy();
   }
@@ -86,11 +84,15 @@ namespace YAEngine
     m_Scene.GetComponent<CameraComponent>(m_Scene.GetActiveCamera()).Resize(
       (float)swapExtent.width, (float)swapExtent.height);
 
-    m_ResizeSubscription = m_EventBus.Subscribe<ResizeEvent>(
-      std::function<void(const ResizeEvent&)>([this](const ResizeEvent& e)
+    while (m_Window.IsOpen())
+    {
+      m_InputSystem.ProcessEvents();
+
+      if (m_Window.WasResized())
       {
-        float width = static_cast<float>(e.width);
-        float height = static_cast<float>(e.height);
+        m_Window.ResetResized();
+        float width = static_cast<float>(m_Window.GetWidth());
+        float height = static_cast<float>(m_Window.GetHeight());
         if (width != 0.0f && height != 0.0f)
         {
           m_Render.Resize();
@@ -100,11 +102,7 @@ namespace YAEngine
             (float)extent.width, (float)extent.height);
 #endif
         }
-      }), -1000);
-
-    while (m_Window.IsOpen())
-    {
-      m_InputSystem.ProcessEvents();
+      }
 
       if (m_Window.GetWidth() == 0 || m_Window.GetHeight() == 0)
       {
@@ -127,6 +125,7 @@ namespace YAEngine
       m_Scheduler.Run(m_Scene.GetRegistry(), frameDt);
       m_LayerManager.CallUpdate(frameDt);
       m_LayerManager.CallLateUpdate(frameDt);
+      m_InputSystem.EndFrame();
 
       auto frame = MakeFrameContext();
       m_Render.Draw(frame);

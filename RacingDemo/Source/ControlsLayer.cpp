@@ -1,9 +1,12 @@
 #include "ControlsLayer.h"
+#include "InputSystem.h"
 
 void ControlsLayer::Update(double dt)
 {
   if (m_Car == entt::null) return;
   if (!GetScene().HasComponent<VehicleComponent>(m_Car)) return;
+
+  auto& input = GetInput();
 
   auto car = m_Car;
   auto* vehicle = &GetScene().GetComponent<VehicleComponent>(car);
@@ -11,23 +14,28 @@ void ControlsLayer::Update(double dt)
   glm::dvec3 position = GetScene().GetTransform(car).position;
   glm::dquat rotation = GetScene().GetTransform(car).rotation;
 
-  if (b_ArrowLeft)
+  bool arrowLeft  = input.IsKeyDown(YAEngine::Key::Left);
+  bool arrowRight = input.IsKeyDown(YAEngine::Key::Right);
+  bool arrowUp    = input.IsKeyDown(YAEngine::Key::Up);
+  bool arrowDown  = input.IsKeyDown(YAEngine::Key::Down);
+
+  if (arrowLeft)
   {
     vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer + 0.1 * dt, 0.0, 0.03);
   }
-  if (b_ArrowRight)
+  if (arrowRight)
   {
     vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer - 0.1 * dt, -0.03, 0.0);
   }
-  if (!b_ArrowLeft && !b_ArrowRight)
+  if (!arrowLeft && !arrowRight)
   {
     if (vehicle->wheelsSteer > 0.0) vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer - 0.2 * dt, 0.0, 0.03);
     if (vehicle->wheelsSteer < 0.0) vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer + 0.2 * dt, -0.03, 0.0);
   }
 
-  if (b_ArrowUp)
+  if (arrowUp)
     vehicle->speed += vehicle->acceleration * dt;
-  else if (b_ArrowDown)
+  else if (arrowDown)
   {
     if (vehicle->speed > 0)
       vehicle->speed -= vehicle->brake * dt;

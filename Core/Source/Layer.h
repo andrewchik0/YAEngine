@@ -7,7 +7,6 @@ namespace YAEngine
   class Scene;
   class Render;
   class AssetManager;
-  class EventBus;
   class Timer;
   class InputSystem;
   class Window;
@@ -23,7 +22,6 @@ namespace YAEngine
     Scene& GetScene();
     Render& GetRender();
     AssetManager& GetAssets();
-    EventBus& Events();
     Timer& GetTimer();
     InputSystem& GetInput();
     Window& GetWindow();

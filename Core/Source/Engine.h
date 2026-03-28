@@ -2,7 +2,6 @@
 
 #include "Pch.h"
 #include "ServiceRegistry.h"
-#include "EventBus.h"
 #include "Window.h"
 #include "Layer.h"
 #include "LayerManager.h"
@@ -55,7 +54,6 @@ namespace YAEngine
     Scene& GetScene() { return m_Scene; }
     Render& GetRender() { return m_Render; }
     AssetManager& GetAssetManager() { return m_AssetManager; }
-    EventBus& Events() { return m_EventBus; }
     Window& GetWindow() { return m_Window; }
     Timer& GetTimer() { return m_Timer; }
     InputSystem& GetInputSystem() { return m_InputSystem; }
@@ -68,7 +66,6 @@ namespace YAEngine
     ServiceRegistry m_Registry;
 
     Window m_Window;
-    EventBus m_EventBus;
     Timer m_Timer;
     InputSystem m_InputSystem;
     Render m_Render {};
@@ -76,8 +73,6 @@ namespace YAEngine
     Scene m_Scene;
     SystemScheduler m_Scheduler;
     LayerManager m_LayerManager;
-
-    SubscriptionId m_ResizeSubscription {};
 
     static constexpr double FIXED_DT = 1.0 / 60.0;
     static constexpr int MAX_FIXED_STEPS = 5;

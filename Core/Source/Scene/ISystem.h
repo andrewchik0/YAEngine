@@ -6,11 +6,9 @@ namespace YAEngine
 {
   enum class SystemPhase : uint8_t
   {
-    PrePhysics,
     Physics,
-    PostPhysics,
     TransformUpdate,
-    PreRender
+    PostTransformUpdate,
   };
 
   class ISystem

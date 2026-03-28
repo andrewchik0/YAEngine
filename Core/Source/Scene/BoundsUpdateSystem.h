@@ -10,7 +10,7 @@ namespace YAEngine
   {
   public:
     void Update(entt::registry& registry, double dt) override;
-    SystemPhase GetPhase() const override { return SystemPhase::TransformUpdate; }
+    SystemPhase GetPhase() const override { return SystemPhase::PostTransformUpdate; }
     int GetPriority() const override { return 100; }
   };
 }

@@ -22,7 +22,7 @@ namespace YAEngine
 
     bool IsOpen() const;
 
-    std::vector<std::unique_ptr<Event>>& PollEvents();
+    const std::vector<WindowEvent>& PollEvents();
 
     [[nodiscard]] const char** GetRequiredInstanceExtensions(uint32_t& extensionsCount) const;
 
@@ -41,6 +41,9 @@ namespace YAEngine
       return m_WindowHeight;
     }
 
+    bool WasResized() const { return b_Resized; }
+    void ResetResized() { b_Resized = false; }
+
     void Maximize(bool maximize = true)
     {
       bool maximized = glfwGetWindowAttrib(m_WindowHandle, GLFW_MAXIMIZED);
@@ -54,8 +57,9 @@ namespace YAEngine
 
     GLFWwindow* m_WindowHandle = nullptr;
     uint32_t m_WindowWidth = 0, m_WindowHeight = 0;
+    bool b_Resized = false;
 
-    std::vector<std::unique_ptr<Event>> m_WindowEventStack;
+    std::vector<WindowEvent> m_WindowEventStack;
 
     static void KeyCallback(GLFWwindow* window, int32_t key, int32_t scancode, int32_t action, int32_t mods);
     static void CursorPositionCallback(GLFWwindow* window, double xpos, double ypos);

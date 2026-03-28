@@ -1,11 +1,12 @@
 #pragma once
 
 #include "Pch.h"
-#include "Events.h"
-#include "EventBus.h"
+#include "KeyCodes.h"
 
 namespace YAEngine
 {
+  class InputSystem;
+
   using ActionId = uint32_t;
   static constexpr ActionId INVALID_ACTION = UINT32_MAX;
 
@@ -29,35 +30,19 @@ namespace YAEngine
       return it != m_NameToId.end() ? it->second : INVALID_ACTION;
     }
 
-    void MapAction(ActionId action, int key)
+    void MapAction(ActionId action, Key key)
     {
-      m_KeyToActions[key].push_back(action);
+      m_KeyToActions[static_cast<int32_t>(key)].push_back(action);
     }
 
-    ActionId MapAction(const std::string& name, int key)
+    ActionId MapAction(const std::string& name, Key key)
     {
       ActionId id = RegisterAction(name);
       MapAction(id, key);
       return id;
     }
 
-    void Connect(EventBus& bus)
-    {
-      m_Subscription = bus.Subscribe<KeyEvent>([this](const KeyEvent& e)
-      {
-        OnKeyEvent(e);
-      });
-      m_Bus = &bus;
-    }
-
-    void Disconnect()
-    {
-      if (m_Bus)
-      {
-        m_Bus->Unsubscribe<KeyEvent>(m_Subscription);
-        m_Bus = nullptr;
-      }
-    }
+    void Update(const InputSystem& input);
 
     bool IsActive(ActionId action) const
     {
@@ -77,40 +62,12 @@ namespace YAEngine
       return it != m_JustReleased.end() && it->second;
     }
 
-    void ResetFrameState()
-    {
-      for (auto& [action, state] : m_JustPressed) state = false;
-      for (auto& [action, state] : m_JustReleased) state = false;
-    }
-
   private:
-    void OnKeyEvent(const KeyEvent& e)
-    {
-      auto it = m_KeyToActions.find(static_cast<int>(e.key));
-      if (it == m_KeyToActions.end()) return;
-
-      for (ActionId action : it->second)
-      {
-        if (e.action == GLFW_PRESS)
-        {
-          m_ActionStates[action] = true;
-          m_JustPressed[action] = true;
-        }
-        else if (e.action == GLFW_RELEASE)
-        {
-          m_ActionStates[action] = false;
-          m_JustReleased[action] = true;
-        }
-      }
-    }
-
     std::unordered_map<std::string, ActionId> m_NameToId;
-    std::unordered_map<int, std::vector<ActionId>> m_KeyToActions;
+    std::unordered_map<int32_t, std::vector<ActionId>> m_KeyToActions;
     std::unordered_map<ActionId, bool> m_ActionStates;
     std::unordered_map<ActionId, bool> m_JustPressed;
     std::unordered_map<ActionId, bool> m_JustReleased;
     ActionId m_NextActionId = 0;
-    EventBus* m_Bus = nullptr;
-    SubscriptionId m_Subscription {};
   };
 }
