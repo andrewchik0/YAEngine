@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Pch.h"
+#include "Utils/ThreadPool.h"
 
 namespace YAEngine
 {
@@ -25,7 +26,7 @@ namespace YAEngine
     {
       {
         std::lock_guard lock(m_Mutex);
-        std::swap(m_PendingQueue, m_ExecutionQueue);
+        m_ExecutionQueue = std::move(m_PendingQueue);
       }
 
       for (auto& task : m_ExecutionQueue)
@@ -41,8 +42,8 @@ namespace YAEngine
     }
 
   private:
-    std::vector<std::function<void()>> m_PendingQueue;
-    std::vector<std::function<void()>> m_ExecutionQueue;
+    std::vector<MoveOnlyFunction> m_PendingQueue;
+    std::vector<MoveOnlyFunction> m_ExecutionQueue;
     std::mutex m_Mutex;
   };
 }
