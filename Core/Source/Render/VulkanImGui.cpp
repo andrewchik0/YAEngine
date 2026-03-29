@@ -91,7 +91,7 @@ namespace YAEngine
 
     ImGui_ImplVulkan_Init(&init_info);
 
-    io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/Roboto-Regular.ttf", 15.0f);
+    io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/Roboto-Regular.ttf", 16.0f);
 
 #ifdef YA_EDITOR
     // Merge Font Awesome icons into the default font
@@ -100,7 +100,7 @@ namespace YAEngine
     iconConfig.GlyphMinAdvanceX = 15.0f;
     iconConfig.PixelSnapH = true;
     static const ImWchar iconRanges[] = { ICON_MIN_FA, ICON_MAX_FA, 0 };
-    io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/FontAwesome7.otf", 14.0f, &iconConfig, iconRanges);
+    io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/FontAwesome7.ttf", 16.0f, &iconConfig, iconRanges);
 #endif
 
     io.Fonts->Build();

@@ -6,7 +6,7 @@
 #include "Utils/Log.h"
 
 #define STB_IMAGE_IMPLEMENTATION
-#include <StbImage/stb_image.h>
+#include <Stb/stb_image.h>
 
 namespace YAEngine
 {

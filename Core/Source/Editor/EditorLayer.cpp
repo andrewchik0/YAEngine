@@ -57,6 +57,17 @@ namespace YAEngine
       for (auto [entity, cam] : GetScene().GetView<CameraComponent>().each())
         cam.Resize(float(w), float(h));
     }
+
+    if (m_Context.selectedEntity != entt::null && m_Context.scene->HasComponent<WorldTransform>(m_Context.selectedEntity))
+    {
+      auto& t = m_Context.scene->GetComponent<WorldTransform>(m_Context.selectedEntity);
+      glm::vec3 pos(t.world[3]);
+      m_Context.render->SetSelectedEntityPosition(pos);
+    }
+    else
+    {
+      m_Context.render->ClearSelectedEntity();
+    }
   }
 
   void EditorLayer::RenderUI()

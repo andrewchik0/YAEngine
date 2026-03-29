@@ -156,5 +156,7 @@ if(YA_EDITOR)
     Source/Editor/EditorCameraLayer.cpp
     Source/Editor/GizmoRenderer.h
     Source/Editor/GizmoRenderer.cpp
+    Source/Editor/GlyphRasterizer.h
+    Source/Editor/GlyphRasterizer.cpp
   )
 endif()

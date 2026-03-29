@@ -7,7 +7,7 @@
 #include "ShaderUtils.h"
 #include "ImageBarrier.h"
 
-#include "StbImage/stb_image.h"
+#include <Stb/stb_image.h>
 
 namespace YAEngine
 {
@@ -31,8 +31,6 @@ namespace YAEngine
     {1, -1, -1}, {1, 1, -1}, {-1, 1, -1},
     {1, -1, -1}, {-1, 1, -1}, {-1, -1, -1},
   };
-
-  // ─── CubicTextureResources ─────────────────────────────────────────
 
   void CubicTextureResources::Init(const RenderContext& ctx)
   {
@@ -339,8 +337,6 @@ namespace YAEngine
     vkDestroyShaderModule(device, vertStage.module, nullptr);
     vkDestroyShaderModule(device, fragStageInfo.module, nullptr);
   }
-
-  // ─── VulkanCubicTexture ────────────────────────────────────────────
 
   void VulkanCubicTexture::Create(const RenderContext& ctx, CubicTextureResources& res, void* data, uint32_t width, uint32_t height)
   {

@@ -1,7 +1,7 @@
 #include "CubeMapManager.h"
 
 #include <filesystem>
-#include <StbImage/stb_image.h>
+#include <Stb/stb_image.h>
 
 #include "Render/RenderContext.h"
 #include "Utils/Log.h"

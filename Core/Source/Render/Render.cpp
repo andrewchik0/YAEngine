@@ -314,7 +314,7 @@ namespace YAEngine
       {
         glm::vec3 pos(frame.lights.pointLights[i].positionRadius);
         glm::vec3 col(frame.lights.pointLights[i].colorIntensity);
-        m_GizmoRenderer.DrawWireSphere(pos, 0.5f, glm::vec4(col, 0.85f));
+        m_GizmoRenderer.DrawSprite(pos, 0.5f, 0xf0eb, glm::vec4(col, 0.85f));
       }
 
       for (int i = 0; i < frame.lights.spotLightCount; i++)
@@ -324,6 +324,7 @@ namespace YAEngine
         glm::vec3 col(frame.lights.spotLights[i].colorOuterCone);
         float outerCos = std::clamp(frame.lights.spotLights[i].colorOuterCone.w, -1.0f, 1.0f);
         float angle = std::acos(outerCos);
+        m_GizmoRenderer.DrawSprite(pos, 0.5f, 0xf0eb, glm::vec4(col, 0.85f));
         m_GizmoRenderer.DrawWireCone(pos, dir, 2.0f, angle, glm::vec4(col, 0.85f));
       }
 
@@ -331,7 +332,17 @@ namespace YAEngine
       glm::vec3 dirCol(frame.lights.directional.colorPad);
       float dirIntensity = frame.lights.directional.directionIntensity.w;
       if (dirIntensity > 0.0f)
+      {
+        m_GizmoRenderer.DrawSprite(glm::vec3(0, 5, 0), 0.5f, 0xf185, glm::vec4(dirCol, 0.85f));
         m_GizmoRenderer.DrawArrow(glm::vec3(0, 5, 0), -dirLightDir, 3.0f, glm::vec4(dirCol, 0.85f));
+      }
+
+      if (b_HasSelectedEntity)
+      {
+        glm::vec3 camPos = frame.snapshot.camera.position;
+        m_GizmoRenderer.DrawTranslateGizmo(m_SelectedEntityPosition, camPos);
+        m_GizmoRenderer.DrawRotateGizmo(m_SelectedEntityPosition, camPos);
+      }
     }
 #endif
 
