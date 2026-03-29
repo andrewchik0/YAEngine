@@ -20,7 +20,8 @@ namespace YAEngine
 
   glm::mat4 GizmoRenderer::BuildRotation(const glm::vec3& direction)
   {
-    // Rotate from default -Y axis to target direction
+    assert(glm::dot(direction, direction) > 0.0f && "BuildRotation: direction must be non-zero");
+
     glm::vec3 from(0.0f, -1.0f, 0.0f);
     glm::vec3 to = glm::normalize(direction);
 
@@ -45,7 +46,7 @@ namespace YAEngine
     PipelineCreateInfo info = {
       .fragmentShaderFile = "gizmo.frag",
       .vertexShaderFile = "gizmo.vert",
-      .pushConstantSize = uint32_t(sizeof(PushConstantData)),
+      .pushConstantSize = uint32_t(sizeof(GizmoPushConstants)),
       .depthWrite = false,
       .blending = true,
       .doubleSided = true,
@@ -116,7 +117,7 @@ namespace YAEngine
         case GizmoShape::Arrow:  mesh = &m_ArrowMesh; break;
       }
 
-      PushConstantData pc { req.transform, req.color };
+      GizmoPushConstants pc { req.transform, req.color };
       pipeline.PushConstants(cmd, &pc);
 
       VkBuffer vb = mesh->vertexBuffer.Get();

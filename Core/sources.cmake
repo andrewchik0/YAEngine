@@ -122,6 +122,7 @@ set(SOURCE_FILES
   Source/Render/PipelineCache.cpp
   Source/Render/PipelineCache.h
   Source/Utils/Topology.h
+  Source/Utils/Topology.cpp
 )
 
 if(YA_EDITOR)

@@ -322,7 +322,7 @@ namespace YAEngine
         glm::vec3 pos(frame.lights.spotLights[i].positionRadius);
         glm::vec3 dir(frame.lights.spotLights[i].directionInnerCone);
         glm::vec3 col(frame.lights.spotLights[i].colorOuterCone);
-        float outerCos = frame.lights.spotLights[i].colorOuterCone.w;
+        float outerCos = std::clamp(frame.lights.spotLights[i].colorOuterCone.w, -1.0f, 1.0f);
         float angle = std::acos(outerCos);
         m_GizmoRenderer.DrawWireCone(pos, dir, 2.0f, angle, glm::vec4(col, 0.85f));
       }

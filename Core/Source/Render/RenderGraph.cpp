@@ -537,21 +537,20 @@ namespace YAEngine
     std::array<BarrierStages, MAX_BARRIERS> stages{};
     uint32_t barrierCount = 0;
 
-    // Transition inputs to SHADER_READ_ONLY_OPTIMAL
-    for (auto handle : pass.info.inputs)
+    auto emitBarrier = [&](RGHandle handle, VkImageLayout targetLayout)
     {
       auto& layout = m_CurrentLayouts[handle];
-      if (layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) continue;
+      if (layout == targetLayout) return;
 
       auto& res = m_Resources[handle];
       auto& image = ResolveResource(handle);
-      auto info = LookupBarrierInfo(layout, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      auto info = LookupBarrierInfo(layout, targetLayout);
 
       assert(barrierCount < MAX_BARRIERS && "InsertBarriers: too many barriers");
       auto& barrier = barriers[barrierCount];
       barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
       barrier.oldLayout = layout;
-      barrier.newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+      barrier.newLayout = targetLayout;
       barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
       barrier.image = image.GetImage();
@@ -565,113 +564,30 @@ namespace YAEngine
       stages[barrierCount] = { info.srcStage, info.dstStage };
       barrierCount++;
 
-      layout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-      image.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    }
+      layout = targetLayout;
+      image.SetLayout(targetLayout);
+    };
+
+    // Transition inputs to SHADER_READ_ONLY_OPTIMAL
+    for (auto handle : pass.info.inputs)
+      emitBarrier(handle, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     // For compute passes: transition storage outputs to GENERAL
     if (pass.info.isCompute)
     {
       for (auto handle : pass.info.storageOutputs)
-      {
-        auto& layout = m_CurrentLayouts[handle];
-        if (layout == VK_IMAGE_LAYOUT_GENERAL) continue;
-
-        auto& res = m_Resources[handle];
-        auto& image = ResolveResource(handle);
-        auto info = LookupBarrierInfo(layout, VK_IMAGE_LAYOUT_GENERAL);
-
-        assert(barrierCount < MAX_BARRIERS && "InsertBarriers: too many barriers");
-        auto& barrier = barriers[barrierCount];
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.oldLayout = layout;
-        barrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = image.GetImage();
-        barrier.subresourceRange.aspectMask = res.desc.aspect;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = res.desc.mipLevels;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
-        barrier.srcAccessMask = info.srcAccess;
-        barrier.dstAccessMask = info.dstAccess;
-        stages[barrierCount] = { info.srcStage, info.dstStage };
-        barrierCount++;
-
-        layout = VK_IMAGE_LAYOUT_GENERAL;
-        image.SetLayout(VK_IMAGE_LAYOUT_GENERAL);
-      }
+        emitBarrier(handle, VK_IMAGE_LAYOUT_GENERAL);
     }
 
     // Transition non-clearing depth output to DEPTH_STENCIL_ATTACHMENT_OPTIMAL
     if (!pass.info.isCompute && pass.info.depthOutput != RG_INVALID_HANDLE && !pass.info.clearDepth)
-    {
-      auto handle = pass.info.depthOutput;
-      auto& layout = m_CurrentLayouts[handle];
-      if (layout != VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
-      {
-        auto& res = m_Resources[handle];
-        auto& image = ResolveResource(handle);
-        auto info = LookupBarrierInfo(layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-
-        assert(barrierCount < MAX_BARRIERS && "InsertBarriers: too many barriers");
-        auto& barrier = barriers[barrierCount];
-        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-        barrier.oldLayout = layout;
-        barrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barrier.image = image.GetImage();
-        barrier.subresourceRange.aspectMask = res.desc.aspect;
-        barrier.subresourceRange.baseMipLevel = 0;
-        barrier.subresourceRange.levelCount = res.desc.mipLevels;
-        barrier.subresourceRange.baseArrayLayer = 0;
-        barrier.subresourceRange.layerCount = 1;
-        barrier.srcAccessMask = info.srcAccess;
-        barrier.dstAccessMask = info.dstAccess;
-        stages[barrierCount] = { info.srcStage, info.dstStage };
-        barrierCount++;
-
-        layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        image.SetLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-      }
-    }
+      emitBarrier(pass.info.depthOutput, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
     // Transition non-clearing color outputs to COLOR_ATTACHMENT_OPTIMAL
     if (!pass.info.isCompute && !pass.info.clearColor)
     {
       for (auto handle : pass.info.colorOutputs)
-      {
-        auto& layout = m_CurrentLayouts[handle];
-        if (layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
-        {
-          auto& res = m_Resources[handle];
-          auto& image = ResolveResource(handle);
-          auto info = LookupBarrierInfo(layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-
-          assert(barrierCount < MAX_BARRIERS && "InsertBarriers: too many barriers");
-          auto& barrier = barriers[barrierCount];
-          barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-          barrier.oldLayout = layout;
-          barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-          barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-          barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-          barrier.image = image.GetImage();
-          barrier.subresourceRange.aspectMask = res.desc.aspect;
-          barrier.subresourceRange.baseMipLevel = 0;
-          barrier.subresourceRange.levelCount = res.desc.mipLevels;
-          barrier.subresourceRange.baseArrayLayer = 0;
-          barrier.subresourceRange.layerCount = 1;
-          barrier.srcAccessMask = info.srcAccess;
-          barrier.dstAccessMask = info.dstAccess;
-          stages[barrierCount] = { info.srcStage, info.dstStage };
-          barrierCount++;
-
-          layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-          image.SetLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
-        }
-      }
+        emitBarrier(handle, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
     }
 
     // Group barriers by matching stage pairs and issue one vkCmdPipelineBarrier per group

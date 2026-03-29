@@ -5,12 +5,9 @@ layout(location = 0) in vec3 inPosition;
 layout(location = 0) out vec4 outColor;
 
 #include "common.glsl"
+#include "../Shared/GizmoPushConstants.h"
 
-layout(push_constant) uniform PushConstants
-{
-  mat4 world;
-  vec4 color;
-} pc;
+layout(push_constant) uniform PushConstantBlock { GizmoPushConstants pc; };
 
 void main()
 {

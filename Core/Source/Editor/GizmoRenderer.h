@@ -4,6 +4,7 @@
 #include "Utils/Topology.h"
 #include "Render/VulkanBuffer.h"
 #include "Render/PipelineCache.h"
+#include "GizmoPushConstants.h"
 
 namespace YAEngine
 {
@@ -42,12 +43,6 @@ namespace YAEngine
       VulkanBuffer vertexBuffer;
       VulkanBuffer indexBuffer;
       uint32_t indexCount = 0;
-    };
-
-    struct PushConstantData
-    {
-      glm::mat4 world;
-      glm::vec4 color;
     };
 
     static GizmoMesh UploadTopology(const RenderContext& ctx, const TopologyData& data);
