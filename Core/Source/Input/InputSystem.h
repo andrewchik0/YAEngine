@@ -1,7 +1,7 @@
 #pragma once
 
 #include "Window.h"
-#include "KeyCodes.h"
+#include "Utils/KeyCodes.h"
 
 namespace YAEngine
 {

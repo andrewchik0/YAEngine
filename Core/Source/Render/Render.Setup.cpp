@@ -4,7 +4,7 @@
 #include <ImGui/imgui_impl_vulkan.h>
 
 #include "ImageBarrier.h"
-#include "Log.h"
+#include "Utils/Log.h"
 
 namespace YAEngine
 {
@@ -353,6 +353,20 @@ namespace YAEngine
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad();
+      }
+    });
+
+    // Gizmo pass — wireframe overlays for editor gizmos (depth-tested against scene)
+    m_GizmoPassIndex = m_Graph.AddPass({
+      .name = "GizmoPass",
+      .colorOutputs = {m_SceneColor},
+      .depthOutput = m_MainDepth,
+      .clearColor = false,
+      .clearDepth = false,
+      .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_GizmosEnabled) return;
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        m_GizmoRenderer.Flush(ctx.cmd, m_FrameUniformBuffer.GetDescriptorSet(currentFrame));
       }
     });
 

@@ -19,6 +19,7 @@ namespace YAEngine
     bool doubleSided = false;
     uint32_t colorAttachmentCount = 1;
     VkCompareOp compareOp = VK_COMPARE_OP_LESS;
+    VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
 
     // "f2i3u4"
     //    |

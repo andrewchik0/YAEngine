@@ -1,5 +1,5 @@
-#include "InputActionSystem.h"
-#include "InputSystem.h"
+#include "Input/InputActionSystem.h"
+#include "Input/InputSystem.h"
 
 namespace YAEngine
 {

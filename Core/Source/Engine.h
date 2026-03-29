@@ -1,18 +1,18 @@
 #pragma once
 
 #include "Pch.h"
-#include "ServiceRegistry.h"
+#include "Utils/ServiceRegistry.h"
 #include "Window.h"
 #include "Layer.h"
 #include "LayerManager.h"
-#include "InputSystem.h"
+#include "Input/InputSystem.h"
 #include "Assets/AssetManager.h"
 #include "Render/Render.h"
 #include "Render/RenderObject.h"
 #include "Scene/Scene.h"
 #include "Scene/SystemScheduler.h"
 #include "Utils/Timer.h"
-#include "Log.h"
+#include "Utils/Log.h"
 
 namespace YAEngine
 {

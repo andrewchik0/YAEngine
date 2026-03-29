@@ -139,6 +139,13 @@ namespace YAEngine
     };
     m_QuadPipeline = m_PSOCache.Register(ctx.device, quadRP, quadInfo, pipelineCache);
 
+#ifdef YA_EDITOR
+    {
+      VkRenderPass gizmoRP = m_Graph.GetPassRenderPass(m_GizmoPassIndex);
+      m_GizmoRenderer.Init(ctx, m_PSOCache, gizmoRP, m_FrameUniformBuffer.GetLayout());
+    }
+#endif
+
     // TAA pipeline — use TAA render pass (compatible format)
     VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
     PipelineCreateInfo taaInfo = {

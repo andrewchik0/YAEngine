@@ -15,6 +15,7 @@ namespace YAEngine
   private:
 
     void DrawEntity(EditorContext& context, Entity entity);
+    void DrawCreateMenu(EditorContext& context);
     bool MatchesFilter(EditorContext& context, Entity entity);
 
     char m_FilterText[256] = {};

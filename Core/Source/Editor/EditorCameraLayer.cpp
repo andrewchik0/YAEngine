@@ -1,6 +1,6 @@
 #include "Editor/EditorCameraLayer.h"
 
-#include "InputSystem.h"
+#include "Input/InputSystem.h"
 #include "Scene/Components.h"
 
 namespace YAEngine

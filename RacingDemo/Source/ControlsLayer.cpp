@@ -1,5 +1,5 @@
 #include "ControlsLayer.h"
-#include "InputSystem.h"
+#include "Input/InputSystem.h"
 
 void ControlsLayer::Update(double dt)
 {

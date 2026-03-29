@@ -11,6 +11,10 @@
 #include "VulkanUniformBuffer.h"
 #include "LightStorageBuffer.h"
 
+#ifdef YA_EDITOR
+#include "Editor/GizmoRenderer.h"
+#endif
+
 namespace YAEngine
 {
   struct RenderStats
@@ -91,12 +95,15 @@ namespace YAEngine
 #ifdef YA_EDITOR
     RGHandle m_SceneColor {};
     uint32_t m_SceneComposePassIndex {};
+    uint32_t m_GizmoPassIndex {};
     VkDescriptorSet m_SceneImGuiDescriptor {};
     uint32_t m_ViewportWidth = 0;
     uint32_t m_ViewportHeight = 0;
     uint32_t m_PendingViewportWidth = 0;
     uint32_t m_PendingViewportHeight = 0;
     void ResizeViewport();
+    GizmoRenderer m_GizmoRenderer;
+    bool b_GizmosEnabled = true;
 #endif
 
     // Pass indices
@@ -200,6 +207,8 @@ namespace YAEngine
     void RequestViewportResize(uint32_t w, uint32_t h);
     uint32_t GetViewportWidth() const { return m_ViewportWidth; }
     uint32_t GetViewportHeight() const { return m_ViewportHeight; }
+    bool& GetGizmosEnabled() { return b_GizmosEnabled; }
+    GizmoRenderer& GetGizmoRenderer() { return m_GizmoRenderer; }
 #endif
   };
 }

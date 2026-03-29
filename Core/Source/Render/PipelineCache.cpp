@@ -1,6 +1,6 @@
 #include "PipelineCache.h"
 
-#include "Log.h"
+#include "Utils/Log.h"
 
 namespace YAEngine
 {
@@ -15,6 +15,7 @@ namespace YAEngine
     if (blending != other.blending) return false;
     if (doubleSided != other.doubleSided) return false;
     if (compareOp != other.compareOp) return false;
+    if (topology != other.topology) return false;
     if (colorAttachmentCount != other.colorAttachmentCount) return false;
     if (pushConstantSize != other.pushConstantSize) return false;
     if (vertexInputFormat != other.vertexInputFormat) return false;
@@ -42,6 +43,7 @@ namespace YAEngine
     combine(std::hash<bool>{}(key.blending));
     combine(std::hash<bool>{}(key.doubleSided));
     combine(std::hash<uint32_t>{}(static_cast<uint32_t>(key.compareOp)));
+    combine(std::hash<uint32_t>{}(static_cast<uint32_t>(key.topology)));
     combine(std::hash<uint32_t>{}(key.colorAttachmentCount));
     combine(std::hash<uint32_t>{}(key.pushConstantSize));
     combine(std::hash<std::string>{}(key.vertexInputFormat));
@@ -94,6 +96,7 @@ namespace YAEngine
       .blending = info.blending,
       .doubleSided = info.doubleSided,
       .compareOp = info.compareOp,
+      .topology = info.topology,
       .colorAttachmentCount = info.colorAttachmentCount,
       .pushConstantSize = info.pushConstantSize,
       .vertexInputFormat = info.vertexInputFormat,

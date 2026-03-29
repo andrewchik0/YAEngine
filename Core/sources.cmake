@@ -3,7 +3,7 @@ set(SOURCE_FILES
   Source/Engine.h
   Source/Window.cpp
   Source/Window.h
-  Source/Events.h
+  Source/Utils/Events.h
   Source/Layer.cpp
   Source/Layer.h
   Source/Render/Render.cpp
@@ -80,14 +80,14 @@ set(SOURCE_FILES
   Source/Assets/ModelBuilder.h
   Source/Assets/ModelManager.cpp
   Source/Assets/ModelManager.h
-  Source/Log.h
-  Source/KeyCodes.h
-  Source/InputActionSystem.h
-  Source/InputActionSystem.cpp
-  Source/ServiceRegistry.h
+  Source/Utils/Log.h
+  Source/Utils/KeyCodes.h
+  Source/Input/InputActionSystem.h
+  Source/Input/InputActionSystem.cpp
+  Source/Utils/ServiceRegistry.h
   Source/LayerManager.h
-  Source/InputSystem.cpp
-  Source/InputSystem.h
+  Source/Input/InputSystem.cpp
+  Source/Input/InputSystem.h
   Source/Render/VulkanImGui.cpp
   Source/Render/VulkanImGui.h
   Vendor/ImGui/imgui_impl_glfw.cpp
@@ -104,7 +104,7 @@ set(SOURCE_FILES
   Source/Render/FrameContext.h
   Source/Render/RenderObject.h
   Source/Render/FrustumCull.h
-  Source/SceneSnapshot.h
+  Source/Scene/SceneSnapshot.h
   Source/Render/RenderContext.h
   Source/Render/ImageBarrier.h
   Source/Render/VulkanBuffer.cpp
@@ -121,6 +121,7 @@ set(SOURCE_FILES
   Source/Render/VulkanComputePipeline.h
   Source/Render/PipelineCache.cpp
   Source/Render/PipelineCache.h
+  Source/Utils/Topology.h
 )
 
 if(YA_EDITOR)
@@ -151,5 +152,7 @@ if(YA_EDITOR)
     Source/Editor/Utils/FileDialog.cpp
     Source/Editor/EditorCameraLayer.h
     Source/Editor/EditorCameraLayer.cpp
+    Source/Editor/GizmoRenderer.h
+    Source/Editor/GizmoRenderer.cpp
   )
 endif()

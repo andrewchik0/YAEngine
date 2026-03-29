@@ -42,6 +42,11 @@ namespace YAEngine
       ImGui::Checkbox("TAA", &context.render->GetTAAEnabled());
     }
 
+    if (ImGui::CollapsingHeader("Debug", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+      ImGui::Checkbox("Light Gizmos", &context.render->GetGizmosEnabled());
+    }
+
     ImGui::End();
   }
 }

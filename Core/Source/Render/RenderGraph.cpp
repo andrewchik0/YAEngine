@@ -2,7 +2,7 @@
 
 #include "RenderContext.h"
 #include "ImageBarrier.h"
-#include "Log.h"
+#include "Utils/Log.h"
 
 #include <algorithm>
 #include <queue>
@@ -447,39 +447,44 @@ namespace YAEngine
   {
     uint32_t n = static_cast<uint32_t>(m_Passes.size());
 
-    // Map: resource → pass that writes it
-    std::unordered_map<RGHandle, uint32_t> writers;
-    for (uint32_t i = 0; i < n; i++)
-    {
-      for (auto handle : m_Passes[i].info.colorOutputs)
-      {
-        writers[handle] = i;
-      }
-      for (auto handle : m_Passes[i].info.storageOutputs)
-      {
-        writers[handle] = i;
-      }
-      if (m_Passes[i].info.depthOutput != RG_INVALID_HANDLE)
-      {
-        writers[m_Passes[i].info.depthOutput] = i;
-      }
-    }
-
-    // Build adjacency: if pass B reads a resource written by pass A → edge A→B
+    // Build adjacency with both read->write and write->write dependencies.
+    // Single-pass over passes in AddPass order: lastWriter tracks the most recent
+    // writer for each resource. Read deps link to the latest writer; write deps
+    // chain consecutive writers so ordering is preserved.
     std::vector<std::vector<uint32_t>> adj(n);
     std::vector<uint32_t> inDegree(n, 0);
+    std::unordered_map<RGHandle, uint32_t> lastWriter;
 
     for (uint32_t i = 0; i < n; i++)
     {
+      // Read->write: pass i reads resource written by an earlier pass
       for (auto input : m_Passes[i].info.inputs)
       {
-        auto it = writers.find(input);
-        if (it != writers.end() && it->second != i)
+        auto it = lastWriter.find(input);
+        if (it != lastWriter.end() && it->second != i)
         {
           adj[it->second].push_back(i);
           inDegree[i]++;
         }
       }
+
+      // Write->write: chain consecutive writers of the same resource
+      auto trackWrite = [&](RGHandle handle) {
+        auto it = lastWriter.find(handle);
+        if (it != lastWriter.end() && it->second != i)
+        {
+          adj[it->second].push_back(i);
+          inDegree[i]++;
+        }
+        lastWriter[handle] = i;
+      };
+
+      for (auto handle : m_Passes[i].info.colorOutputs)
+        trackWrite(handle);
+      for (auto handle : m_Passes[i].info.storageOutputs)
+        trackWrite(handle);
+      if (m_Passes[i].info.depthOutput != RG_INVALID_HANDLE)
+        trackWrite(m_Passes[i].info.depthOutput);
     }
 
     // Kahn's BFS
@@ -596,6 +601,76 @@ namespace YAEngine
 
         layout = VK_IMAGE_LAYOUT_GENERAL;
         image.SetLayout(VK_IMAGE_LAYOUT_GENERAL);
+      }
+    }
+
+    // Transition non-clearing depth output to DEPTH_STENCIL_ATTACHMENT_OPTIMAL
+    if (!pass.info.isCompute && pass.info.depthOutput != RG_INVALID_HANDLE && !pass.info.clearDepth)
+    {
+      auto handle = pass.info.depthOutput;
+      auto& layout = m_CurrentLayouts[handle];
+      if (layout != VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+      {
+        auto& res = m_Resources[handle];
+        auto& image = ResolveResource(handle);
+        auto info = LookupBarrierInfo(layout, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+
+        assert(barrierCount < MAX_BARRIERS && "InsertBarriers: too many barriers");
+        auto& barrier = barriers[barrierCount];
+        barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+        barrier.oldLayout = layout;
+        barrier.newLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barrier.image = image.GetImage();
+        barrier.subresourceRange.aspectMask = res.desc.aspect;
+        barrier.subresourceRange.baseMipLevel = 0;
+        barrier.subresourceRange.levelCount = res.desc.mipLevels;
+        barrier.subresourceRange.baseArrayLayer = 0;
+        barrier.subresourceRange.layerCount = 1;
+        barrier.srcAccessMask = info.srcAccess;
+        barrier.dstAccessMask = info.dstAccess;
+        stages[barrierCount] = { info.srcStage, info.dstStage };
+        barrierCount++;
+
+        layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+        image.SetLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+      }
+    }
+
+    // Transition non-clearing color outputs to COLOR_ATTACHMENT_OPTIMAL
+    if (!pass.info.isCompute && !pass.info.clearColor)
+    {
+      for (auto handle : pass.info.colorOutputs)
+      {
+        auto& layout = m_CurrentLayouts[handle];
+        if (layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        {
+          auto& res = m_Resources[handle];
+          auto& image = ResolveResource(handle);
+          auto info = LookupBarrierInfo(layout, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+          assert(barrierCount < MAX_BARRIERS && "InsertBarriers: too many barriers");
+          auto& barrier = barriers[barrierCount];
+          barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+          barrier.oldLayout = layout;
+          barrier.newLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+          barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          barrier.image = image.GetImage();
+          barrier.subresourceRange.aspectMask = res.desc.aspect;
+          barrier.subresourceRange.baseMipLevel = 0;
+          barrier.subresourceRange.levelCount = res.desc.mipLevels;
+          barrier.subresourceRange.baseArrayLayer = 0;
+          barrier.subresourceRange.layerCount = 1;
+          barrier.srcAccessMask = info.srcAccess;
+          barrier.dstAccessMask = info.dstAccess;
+          stages[barrierCount] = { info.srcStage, info.dstStage };
+          barrierCount++;
+
+          layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+          image.SetLayout(VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        }
       }
     }
 

@@ -1,7 +1,7 @@
 #include "Engine.h"
 #include "Render/FrameContext.h"
 #include "Render/FrustumCull.h"
-#include "SceneSnapshot.h"
+#include "Scene/SceneSnapshot.h"
 #include "Scene/TransformSystem.h"
 #include "Scene/BoundsUpdateSystem.h"
 

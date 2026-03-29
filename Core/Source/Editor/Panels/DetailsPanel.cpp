@@ -185,6 +185,44 @@ namespace YAEngine
     }
   }
 
+  static bool DrawLight(EditorContext& context, LightComponent& light)
+  {
+    bool open = ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen);
+
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    if (ImGui::Button("X##RemoveLight", ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight())))
+    {
+      ImGui::PopStyleColor(3);
+      return true;
+    }
+    ImGui::PopStyleColor(3);
+
+    if (open)
+    {
+      const char* lightTypes[] = { "Point", "Spot", "Directional" };
+      int currentType = static_cast<int>(light.type);
+      if (ImGui::Combo("Type", &currentType, lightTypes, IM_ARRAYSIZE(lightTypes)))
+        light.type = static_cast<LightType>(currentType);
+
+      ImGui::ColorEdit3("Color", &light.color.x);
+      ImGui::DragFloat("Intensity", &light.intensity, 0.1f, 0.0f, FLT_MAX);
+
+      if (light.type == LightType::Point || light.type == LightType::Spot)
+        ImGui::DragFloat("Radius", &light.radius, 0.5f, 0.0f, FLT_MAX);
+
+      if (light.type == LightType::Spot)
+      {
+        ImGui::SliderAngle("Inner Cone", &light.innerCone, 0.0f, 90.0f);
+        ImGui::SliderAngle("Outer Cone", &light.outerCone, 0.0f, 90.0f);
+      }
+    }
+
+    return false;
+  }
+
   static void DrawCamera(CameraComponent& cc)
   {
     if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen))
@@ -231,8 +269,31 @@ namespace YAEngine
     if (scene.HasComponent<MaterialComponent>(entity))
       DrawMaterial(context, scene.GetComponent<MaterialComponent>(entity));
 
+    if (scene.HasComponent<LightComponent>(entity))
+    {
+      if (DrawLight(context, scene.GetComponent<LightComponent>(entity)))
+        scene.RemoveComponent<LightComponent>(entity);
+    }
+
     if (scene.HasComponent<CameraComponent>(entity))
       DrawCamera(scene.GetComponent<CameraComponent>(entity));
+
+    ImGui::Separator();
+
+    float buttonWidth = ImGui::GetContentRegionAvail().x;
+    if (ImGui::Button("Add Component", ImVec2(buttonWidth, 0)))
+      ImGui::OpenPopup("AddComponentPopup");
+
+    if (ImGui::BeginPopup("AddComponentPopup"))
+    {
+      if (!scene.HasComponent<LightComponent>(entity))
+      {
+        if (ImGui::MenuItem("Light"))
+          scene.AddComponent<LightComponent>(entity);
+      }
+
+      ImGui::EndPopup();
+    }
 
     ImGui::End();
   }

@@ -8,6 +8,14 @@
 
 namespace YAEngine
 {
+  static std::string ToLower(std::string_view str)
+  {
+    std::string result(str);
+    for (auto& c : result)
+      c = static_cast<char>(std::tolower(static_cast<unsigned char>(c)));
+    return result;
+  }
+
   bool OutlinerPanel::MatchesFilter(EditorContext& context, Entity entity)
   {
     if (m_FilterText[0] == '\0')
@@ -18,7 +26,7 @@ namespace YAEngine
     if (scene.HasComponent<Name>(entity))
     {
       const auto& name = scene.GetName(entity);
-      if (name.find(m_FilterText) != std::string::npos)
+      if (ToLower(name).find(ToLower(m_FilterText)) != std::string::npos)
         return true;
     }
 
@@ -32,6 +40,45 @@ namespace YAEngine
     }
 
     return false;
+  }
+
+  void OutlinerPanel::DrawCreateMenu(EditorContext& context)
+  {
+    auto& scene = *context.scene;
+
+    if (ImGui::BeginMenu("Create"))
+    {
+      if (ImGui::MenuItem("Empty Entity"))
+      {
+        Entity e = scene.CreateEntity("Entity");
+        context.SelectEntity(e);
+      }
+
+      ImGui::Separator();
+
+      if (ImGui::MenuItem("Point Light"))
+      {
+        Entity e = scene.CreateEntity("PointLight");
+        scene.AddComponent<LightComponent>(e, LightType::Point);
+        context.SelectEntity(e);
+      }
+
+      if (ImGui::MenuItem("Spot Light"))
+      {
+        Entity e = scene.CreateEntity("SpotLight");
+        scene.AddComponent<LightComponent>(e, LightType::Spot);
+        context.SelectEntity(e);
+      }
+
+      if (ImGui::MenuItem("Directional Light"))
+      {
+        Entity e = scene.CreateEntity("DirectionalLight");
+        scene.AddComponent<LightComponent>(e, LightType::Directional);
+        context.SelectEntity(e);
+      }
+
+      ImGui::EndMenu();
+    }
   }
 
   void OutlinerPanel::DrawEntity(EditorContext& context, Entity entity)
@@ -50,10 +97,16 @@ namespace YAEngine
       name = scene.GetName(entity);
 
     const char* icon = " ";
+    bool isLight = false;
     if (scene.HasComponent<CameraComponent>(entity))
       icon = "[C]";
     else if (scene.HasComponent<MeshComponent>(entity))
       icon = "[M]";
+    else if (scene.HasComponent<LightComponent>(entity))
+    {
+      icon = "   ";
+      isLight = true;
+    }
 
     char label[512];
     snprintf(label, sizeof(label), "%s %s", icon, name.c_str());
@@ -78,7 +131,15 @@ namespace YAEngine
     if (ImGui::IsItemClicked())
       context.SelectEntity(entity);
 
-    if (ImGui::BeginPopupContextItem())
+    if (isLight)
+    {
+      ImGui::SameLine(ImGui::GetTreeNodeToLabelSpacing());
+      ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.3f, 1.0f), "[L]");
+    }
+
+    char popupId[64];
+    snprintf(popupId, sizeof(popupId), "##entity_ctx_%u", static_cast<uint32_t>(entity));
+    if (ImGui::BeginPopupContextItem(popupId))
     {
       if (scene.HasComponent<MeshComponent>(entity))
       {
@@ -91,6 +152,10 @@ namespace YAEngine
 
         ImGui::Separator();
       }
+
+      DrawCreateMenu(context);
+
+      ImGui::Separator();
 
       if (ImGui::MenuItem("Delete"))
       {
@@ -163,6 +228,12 @@ namespace YAEngine
       if (hc.parent == entt::null)
         DrawEntity(context, entity);
     });
+
+    if (ImGui::BeginPopupContextWindow("##OutlinerContextWindow", ImGuiPopupFlags_NoOpenOverItems | ImGuiPopupFlags_MouseButtonRight))
+    {
+      DrawCreateMenu(context);
+      ImGui::EndPopup();
+    }
 
     // Click empty space to deselect
     if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsAnyItemHovered())

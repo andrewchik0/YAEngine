@@ -6,7 +6,7 @@
 #include "Assets/AssetManager.h"
 #include "Assets/CubeMapManager.h"
 #include "ImageBarrier.h"
-#include "Log.h"
+#include "Utils/Log.h"
 #include "SSAOKernel.h"
 
 #include "Utils/Utils.h"
@@ -133,6 +133,7 @@ namespace YAEngine
 
 #ifdef YA_EDITOR
     DestroySceneImGuiDescriptor();
+    m_GizmoRenderer.Destroy(ctx);
 #endif
 
     m_CubicResources.Destroy(ctx);
@@ -304,6 +305,35 @@ namespace YAEngine
         cubeMap.GetView(), cubeMap.GetSampler());
       m_BoundSkybox = skybox;
     }
+
+#ifdef YA_EDITOR
+    m_GizmoRenderer.Clear();
+    if (b_GizmosEnabled)
+    {
+      for (int i = 0; i < frame.lights.pointLightCount; i++)
+      {
+        glm::vec3 pos(frame.lights.pointLights[i].positionRadius);
+        glm::vec3 col(frame.lights.pointLights[i].colorIntensity);
+        m_GizmoRenderer.DrawWireSphere(pos, 0.5f, glm::vec4(col, 0.85f));
+      }
+
+      for (int i = 0; i < frame.lights.spotLightCount; i++)
+      {
+        glm::vec3 pos(frame.lights.spotLights[i].positionRadius);
+        glm::vec3 dir(frame.lights.spotLights[i].directionInnerCone);
+        glm::vec3 col(frame.lights.spotLights[i].colorOuterCone);
+        float outerCos = frame.lights.spotLights[i].colorOuterCone.w;
+        float angle = std::acos(outerCos);
+        m_GizmoRenderer.DrawWireCone(pos, dir, 2.0f, angle, glm::vec4(col, 0.85f));
+      }
+
+      glm::vec3 dirLightDir(frame.lights.directional.directionIntensity);
+      glm::vec3 dirCol(frame.lights.directional.colorPad);
+      float dirIntensity = frame.lights.directional.directionIntensity.w;
+      if (dirIntensity > 0.0f)
+        m_GizmoRenderer.DrawArrow(glm::vec3(0, 5, 0), -dirLightDir, 3.0f, glm::vec4(dirCol, 0.85f));
+    }
+#endif
 
     // Execute all passes
     m_Graph.Execute(cmd, &frame);
