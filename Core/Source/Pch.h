@@ -4,6 +4,7 @@
 #include <array>
 #include <cassert>
 #include <cstdint>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -11,7 +12,11 @@
 #include <limits>
 #include <map>
 #include <memory>
+#include <atomic>
+#include <condition_variable>
+#include <future>
 #include <mutex>
+#include <thread>
 #include <optional>
 #include <random>
 #include <set>

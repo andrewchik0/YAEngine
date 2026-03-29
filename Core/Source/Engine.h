@@ -12,6 +12,8 @@
 #include "Scene/Scene.h"
 #include "Scene/SystemScheduler.h"
 #include "Utils/Timer.h"
+#include "Utils/ThreadPool.h"
+#include "Utils/MainThreadDispatcher.h"
 #include "Utils/Log.h"
 
 namespace YAEngine
@@ -60,11 +62,15 @@ namespace YAEngine
     InputSystem& GetInputSystem() { return m_InputSystem; }
     ServiceRegistry& GetRegistry() { return m_Registry; }
     SystemScheduler& GetScheduler() { return m_Scheduler; }
+    ThreadPool& GetThreadPool() { return m_ThreadPool; }
+    MainThreadDispatcher& GetDispatcher() { return m_Dispatcher; }
 
   private:
     FrameContext MakeFrameContext(SceneSnapshot& snapshot);
 
     ServiceRegistry m_Registry;
+    ThreadPool m_ThreadPool;
+    MainThreadDispatcher m_Dispatcher;
 
     Window m_Window;
     Timer m_Timer;

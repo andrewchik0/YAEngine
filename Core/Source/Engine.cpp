@@ -37,6 +37,8 @@ namespace YAEngine
     : m_Window(specs.windowSpecs),
       m_InputSystem(m_Window)
   {
+    m_Registry.Register<ThreadPool>(&m_ThreadPool);
+    m_Registry.Register<MainThreadDispatcher>(&m_Dispatcher);
     m_Registry.Register<Window>(&m_Window);
     m_Registry.Register<Timer>(&m_Timer);
     m_Registry.Register<InputSystem>(&m_InputSystem);
@@ -92,6 +94,7 @@ namespace YAEngine
     while (m_Window.IsOpen())
     {
       m_InputSystem.ProcessEvents();
+      m_Dispatcher.ProcessAll();
 
       if (m_Window.WasResized())
       {

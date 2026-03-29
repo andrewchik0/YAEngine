@@ -123,6 +123,9 @@ set(SOURCE_FILES
   Source/Render/PipelineCache.h
   Source/Utils/Topology.h
   Source/Utils/Topology.cpp
+  Source/Utils/ThreadPool.h
+  Source/Utils/ThreadPool.cpp
+  Source/Utils/MainThreadDispatcher.h
 )
 
 if(YA_EDITOR)
