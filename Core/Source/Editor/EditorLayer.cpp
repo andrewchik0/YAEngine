@@ -49,6 +49,31 @@ namespace YAEngine
       panel->OnSceneReady(m_Context);
   }
 
+  static glm::vec3 AxisToDirection(GizmoAxis axis)
+  {
+    switch (axis)
+    {
+      case GizmoAxis::X: return { 1, 0, 0 };
+      case GizmoAxis::Y: return { 0, 1, 0 };
+      case GizmoAxis::Z: return { 0, 0, 1 };
+      default: return { 0, 0, 0 };
+    }
+  }
+
+  static glm::vec3 ComputeDragPlaneNormal(const glm::vec3& axisDir, const glm::vec3& camDir)
+  {
+    // Plane that contains the drag axis and faces the camera as much as possible
+    glm::vec3 projected = camDir - glm::dot(camDir, axisDir) * axisDir;
+    float len = glm::length(projected);
+    if (len < 1e-4f)
+    {
+      // Camera looking along the axis — pick an arbitrary perpendicular
+      glm::vec3 up = (std::abs(axisDir.y) < 0.9f) ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
+      return glm::normalize(glm::cross(axisDir, up));
+    }
+    return projected / len;
+  }
+
   void EditorLayer::Update(double deltaTime)
   {
     uint32_t w = m_Context.viewportWidth;
@@ -61,9 +86,22 @@ namespace YAEngine
         cam.Resize(float(w), float(h));
     }
 
-    // Entity picking by LMB
     auto& input = GetInput();
-    if (input.IsMousePressed(MouseButton::Left) && m_Context.mouseInViewportValid)
+    auto& gizmo = m_Context.render->GetGizmoRenderer();
+
+    // Gizmo mode switching (1/2/3) — blocked during drag
+    if (m_Context.viewportHovered && !m_DragActive)
+    {
+      if (input.IsKeyPressed(Key::D1)) m_Context.render->GetGizmoMode() = GizmoMode::Translate;
+      if (input.IsKeyPressed(Key::D2)) m_Context.render->GetGizmoMode() = GizmoMode::Rotate;
+      if (input.IsKeyPressed(Key::D3)) m_Context.render->GetGizmoMode() = GizmoMode::Scale;
+    }
+
+    // Build viewport ray
+    Ray viewportRay {};
+    bool hasViewportRay = false;
+
+    if (m_Context.mouseInViewportValid)
     {
       Entity camEntity = GetScene().GetActiveCamera();
       if (camEntity != entt::null && GetScene().HasComponent<CameraComponent>(camEntity))
@@ -76,45 +114,198 @@ namespace YAEngine
         glm::mat4 view = glm::inverse(world);
         glm::mat4 proj = glm::perspective(cam.fov, cam.aspectRatio, cam.nearPlane, cam.farPlane);
 
-        Ray ray = ScreenToRay(m_Context.mouseInViewport, glm::inverse(proj), glm::inverse(view));
-
-        Entity closest = entt::null;
-        float closestDist = std::numeric_limits<float>::max();
-
-        for (auto [entity, wt] : GetScene().GetView<WorldTransform>().each())
-        {
-          if (GetScene().HasComponent<EditorOnlyTag>(entity))
-            continue;
-
-          std::optional<float> hit;
-
-          if (GetScene().HasComponent<WorldBounds>(entity))
-          {
-            auto& bounds = GetScene().GetComponent<WorldBounds>(entity);
-            if (bounds.min != bounds.max)
-              hit = RayAABBIntersect(ray, bounds.min, bounds.max);
-          }
-
-          if (!hit)
-          {
-            glm::vec3 center(wt.world[3]);
-            hit = RaySphereIntersect(ray, center, 0.5f);
-          }
-
-          if (hit && *hit < closestDist)
-          {
-            closestDist = *hit;
-            closest = entity;
-          }
-        }
-
-        if (closest != entt::null)
-          m_Context.SelectEntity(closest);
-        else
-          m_Context.ClearSelection();
+        viewportRay = ScreenToRay(m_Context.mouseInViewport, glm::inverse(proj), glm::inverse(view));
+        hasViewportRay = true;
       }
     }
 
+    // --- Drag state machine ---
+    if (m_DragActive)
+    {
+      if (input.IsMouseReleased(MouseButton::Left))
+      {
+        // End drag
+        m_DragActive = false;
+        gizmo.SetDraggedAxis(GizmoAxis::None);
+        input.SetGizmoDragging(false);
+      }
+      else if (hasViewportRay)
+      {
+        // Continue drag
+        auto hitT = RayPlaneIntersect(viewportRay, m_DragStartWorldPos, m_DragPlaneNormal);
+        if (hitT)
+        {
+          glm::vec3 currentHit = viewportRay.origin + *hitT * viewportRay.direction;
+          glm::vec3 delta = currentHit - m_DragStartHitPoint;
+          Entity entity = m_Context.selectedEntity;
+          auto& scene = *m_Context.scene;
+          auto& localTransform = scene.GetTransform(entity);
+
+          // Get parent inverse world transform for hierarchy support
+          auto& hierarchy = scene.GetHierarchy(entity);
+          bool hasParent = hierarchy.parent != entt::null
+                        && scene.HasComponent<WorldTransform>(hierarchy.parent);
+          glm::mat4 parentWorldInv(1.0f);
+          if (hasParent)
+            parentWorldInv = glm::inverse(scene.GetComponent<WorldTransform>(hierarchy.parent).world);
+
+          if (m_DragMode == GizmoMode::Translate)
+          {
+            float projectedDist = glm::dot(delta, m_DragAxisDir);
+            glm::vec3 worldDelta = projectedDist * m_DragAxisDir;
+            glm::vec3 newWorldPos = m_DragStartWorldPos + worldDelta;
+
+            if (hasParent)
+              localTransform.position = glm::vec3(parentWorldInv * glm::vec4(newWorldPos, 1.0f));
+            else
+              localTransform.position = newWorldPos;
+          }
+          else if (m_DragMode == GizmoMode::Rotate)
+          {
+            glm::vec3 v1 = m_DragStartHitPoint - m_DragStartWorldPos;
+            glm::vec3 v2 = currentHit - m_DragStartWorldPos;
+
+            float l1 = glm::length(v1);
+            float l2 = glm::length(v2);
+            if (l1 > 1e-6f && l2 > 1e-6f)
+            {
+              v1 /= l1;
+              v2 /= l2;
+              float cosAngle = glm::clamp(glm::dot(v1, v2), -1.0f, 1.0f);
+              float sinAngle = glm::dot(glm::cross(v1, v2), m_DragAxisDir);
+              float angle = std::atan2(sinAngle, cosAngle);
+
+              glm::quat worldRotDelta = glm::angleAxis(angle, m_DragAxisDir);
+
+              if (hasParent)
+              {
+                glm::quat parentRot = glm::quat_cast(glm::mat3(
+                  scene.GetComponent<WorldTransform>(hierarchy.parent).world));
+                localTransform.rotation = glm::normalize(
+                  glm::inverse(parentRot) * worldRotDelta * parentRot
+                  * m_DragStartLocalTransform.rotation);
+              }
+              else
+              {
+                localTransform.rotation = glm::normalize(
+                  worldRotDelta * m_DragStartLocalTransform.rotation);
+              }
+            }
+          }
+          else if (m_DragMode == GizmoMode::Scale)
+          {
+            float projectedDist = glm::dot(delta, m_DragAxisDir);
+            float scaleFactor = 1.0f + projectedDist / m_DragGizmoScale;
+            scaleFactor = glm::max(scaleFactor, 0.01f);
+
+            int axisIdx = static_cast<int>(m_DragAxis) - 1;
+            localTransform.scale[axisIdx] =
+              m_DragStartLocalTransform.scale[axisIdx] * scaleFactor;
+          }
+
+          scene.MarkDirty(entity);
+        }
+      }
+    }
+    else
+    {
+      // Hover detection (only when not dragging)
+      if (hasViewportRay && m_Context.selectedEntity != entt::null && m_Context.viewportHovered)
+        gizmo.UpdateHover(viewportRay);
+      else
+        gizmo.ClearHover();
+
+      // LMB: begin drag or pick entity
+      if (input.IsMousePressed(MouseButton::Left) && hasViewportRay)
+      {
+        GizmoAxis hoveredAxis = gizmo.GetHoveredAxis();
+
+        if (hoveredAxis != GizmoAxis::None && m_Context.selectedEntity != entt::null)
+        {
+          // Begin drag
+          Entity entity = m_Context.selectedEntity;
+          auto& scene = *m_Context.scene;
+          auto& wt = scene.GetComponent<WorldTransform>(entity);
+          glm::vec3 gizmoPos(wt.world[3]);
+
+          m_DragAxis = hoveredAxis;
+          m_DragMode = m_Context.render->GetGizmoMode();
+          m_DragStartLocalTransform = scene.GetTransform(entity);
+          m_DragStartWorldPos = gizmoPos;
+          m_DragAxisDir = AxisToDirection(hoveredAxis);
+
+          // Compute drag plane
+          Entity camEntity = GetScene().GetActiveCamera();
+          glm::vec3 camPos = GetScene().GetTransform(camEntity).position;
+
+          if (m_DragMode == GizmoMode::Rotate)
+          {
+            // Rotation ring plane: normal = axis direction
+            m_DragPlaneNormal = m_DragAxisDir;
+          }
+          else
+          {
+            // Translate/Scale: plane containing axis, facing camera
+            glm::vec3 camDir = glm::normalize(camPos - gizmoPos);
+            m_DragPlaneNormal = ComputeDragPlaneNormal(m_DragAxisDir, camDir);
+          }
+
+          // Store gizmo scale for scale mode normalization
+          float dist = glm::length(camPos - gizmoPos);
+          m_DragGizmoScale = dist * 0.15f;
+
+          // Intersect start ray with drag plane
+          auto hitT = RayPlaneIntersect(viewportRay, m_DragStartWorldPos, m_DragPlaneNormal);
+          if (hitT)
+          {
+            m_DragStartHitPoint = viewportRay.origin + *hitT * viewportRay.direction;
+            m_DragActive = true;
+            gizmo.SetDraggedAxis(hoveredAxis);
+            input.SetGizmoDragging(true);
+          }
+        }
+        else
+        {
+          // Entity picking
+          Entity closest = entt::null;
+          float closestDist = std::numeric_limits<float>::max();
+
+          for (auto [entity, wt] : GetScene().GetView<WorldTransform>().each())
+          {
+            if (GetScene().HasComponent<EditorOnlyTag>(entity))
+              continue;
+
+            std::optional<float> hit;
+
+            if (GetScene().HasComponent<WorldBounds>(entity))
+            {
+              auto& bounds = GetScene().GetComponent<WorldBounds>(entity);
+              if (bounds.min != bounds.max)
+                hit = RayAABBIntersect(viewportRay, bounds.min, bounds.max);
+            }
+
+            if (!hit)
+            {
+              glm::vec3 center(wt.world[3]);
+              hit = RaySphereIntersect(viewportRay, center, 0.5f);
+            }
+
+            if (hit && *hit < closestDist)
+            {
+              closestDist = *hit;
+              closest = entity;
+            }
+          }
+
+          if (closest != entt::null)
+            m_Context.SelectEntity(closest);
+          else
+            m_Context.ClearSelection();
+        }
+      }
+    }
+
+    // Update selected entity position for gizmo rendering
     if (m_Context.selectedEntity != entt::null && m_Context.scene->HasComponent<WorldTransform>(m_Context.selectedEntity))
     {
       auto& t = m_Context.scene->GetComponent<WorldTransform>(m_Context.selectedEntity);
@@ -168,6 +359,27 @@ namespace YAEngine
       }
 
       ImGui::EndMainMenuBar();
+    }
+
+    // Auto-open Details and auto-select material on entity selection
+    if (m_Context.ConsumeSelectionChanged() && m_Context.selectedEntity != entt::null)
+    {
+      for (auto& panel : m_Panels)
+      {
+        if (std::strcmp(panel->GetName(), "Details") == 0)
+          panel->SetVisible(true);
+      }
+      ImGui::SetWindowFocus("Details");
+
+      if (m_Context.scene->HasComponent<MaterialComponent>(m_Context.selectedEntity))
+      {
+        auto& mc = m_Context.scene->GetComponent<MaterialComponent>(m_Context.selectedEntity);
+        m_Context.SelectMaterial(mc.asset);
+      }
+      else
+      {
+        m_Context.ClearMaterialSelection();
+      }
     }
 
     for (auto& panel : m_Panels)

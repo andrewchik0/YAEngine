@@ -356,13 +356,13 @@ namespace YAEngine
       }
     });
 
-    // Gizmo pass — wireframe overlays for editor gizmos (depth-tested against scene)
+    // Gizmo pass — editor gizmos rendered on top of scene (depth cleared so gizmos only test against each other)
     m_GizmoPassIndex = m_Graph.AddPass({
       .name = "GizmoPass",
       .colorOutputs = {m_SceneColor},
       .depthOutput = m_MainDepth,
       .clearColor = false,
-      .clearDepth = false,
+      .clearDepth = true,
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_GizmosEnabled) return;
         auto currentFrame = m_Backend.GetCurrentFrameIndex();

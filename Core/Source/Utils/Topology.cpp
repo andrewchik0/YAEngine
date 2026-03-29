@@ -207,6 +207,83 @@ namespace YAEngine
     return data;
   }
 
+  TopologyData Topology::SolidScaleArrow(float shaftRadius, float shaftLength, float cubeHalf, uint32_t segments)
+  {
+    TopologyData data;
+    float step = glm::two_pi<float>() / float(segments);
+
+    // Shaft cylinder along -Y: top ring at y=0, bottom ring at y=-shaftLength
+    uint32_t shaftTopBase = 0;
+    for (uint32_t i = 0; i < segments; ++i)
+    {
+      float a = step * float(i);
+      data.positions.push_back({shaftRadius * glm::cos(a), 0.0f, shaftRadius * glm::sin(a)});
+    }
+
+    uint32_t shaftBotBase = segments;
+    for (uint32_t i = 0; i < segments; ++i)
+    {
+      float a = step * float(i);
+      data.positions.push_back({shaftRadius * glm::cos(a), -shaftLength, shaftRadius * glm::sin(a)});
+    }
+
+    for (uint32_t i = 0; i < segments; ++i)
+    {
+      uint32_t next = (i + 1) % segments;
+      data.indices.push_back(shaftTopBase + i);
+      data.indices.push_back(shaftBotBase + i);
+      data.indices.push_back(shaftBotBase + next);
+      data.indices.push_back(shaftTopBase + i);
+      data.indices.push_back(shaftBotBase + next);
+      data.indices.push_back(shaftTopBase + next);
+    }
+
+    // Shaft top cap
+    uint32_t shaftTopCenter = uint32_t(data.positions.size());
+    data.positions.push_back({0.0f, 0.0f, 0.0f});
+    for (uint32_t i = 0; i < segments; ++i)
+    {
+      uint32_t next = (i + 1) % segments;
+      data.indices.push_back(shaftTopCenter);
+      data.indices.push_back(shaftTopBase + next);
+      data.indices.push_back(shaftTopBase + i);
+    }
+
+    // Cube at tip, centered at y = -(shaftLength + cubeHalf)
+    float cy = -(shaftLength + cubeHalf);
+    float h = cubeHalf;
+    uint32_t cubeBase = uint32_t(data.positions.size());
+
+    // 8 vertices of the cube
+    data.positions.push_back({-h, cy - h, -h}); // 0
+    data.positions.push_back({ h, cy - h, -h}); // 1
+    data.positions.push_back({ h, cy - h,  h}); // 2
+    data.positions.push_back({-h, cy - h,  h}); // 3
+    data.positions.push_back({-h, cy + h, -h}); // 4
+    data.positions.push_back({ h, cy + h, -h}); // 5
+    data.positions.push_back({ h, cy + h,  h}); // 6
+    data.positions.push_back({-h, cy + h,  h}); // 7
+
+    // 6 faces, 2 triangles each
+    auto quad = [&](uint32_t a, uint32_t b, uint32_t c, uint32_t d)
+    {
+      data.indices.push_back(cubeBase + a);
+      data.indices.push_back(cubeBase + b);
+      data.indices.push_back(cubeBase + c);
+      data.indices.push_back(cubeBase + a);
+      data.indices.push_back(cubeBase + c);
+      data.indices.push_back(cubeBase + d);
+    };
+    quad(0, 1, 2, 3); // bottom
+    quad(4, 7, 6, 5); // top
+    quad(0, 4, 5, 1); // front
+    quad(2, 6, 7, 3); // back
+    quad(0, 3, 7, 4); // left
+    quad(1, 5, 6, 2); // right
+
+    return data;
+  }
+
   TopologyData Topology::SolidRing(float innerRadius, float outerRadius, uint32_t segments, uint32_t ringSegments)
   {
     TopologyData data;

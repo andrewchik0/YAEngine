@@ -21,6 +21,8 @@ namespace YAEngine
       float tipRadius = 0.06f, float tipLength = 0.2f, uint32_t segments = 16);
     static TopologyData SolidRing(float innerRadius = 0.9f, float outerRadius = 1.0f,
       uint32_t segments = 64, uint32_t ringSegments = 12);
+    static TopologyData SolidScaleArrow(float shaftRadius = 0.02f, float shaftLength = 0.8f,
+      float cubeHalf = 0.04f, uint32_t segments = 16);
     static TopologyData SolidCircle(float radius = 1.0f, uint32_t segments = 32);
   };
 }

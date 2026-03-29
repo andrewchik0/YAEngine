@@ -2,6 +2,7 @@
 
 #include "Pch.h"
 #include "Utils/Topology.h"
+#include "Utils/Ray.h"
 #include "Render/VulkanBuffer.h"
 #include "Render/VulkanTexture.h"
 #include "Render/VulkanDescriptorSet.h"
@@ -19,6 +20,7 @@ namespace YAEngine
     Cone,
     Arrow,
     SolidArrow,
+    SolidScaleArrow,
     SolidRing
   };
 
@@ -27,6 +29,9 @@ namespace YAEngine
     Wire,
     Solid
   };
+
+  enum class GizmoMode : uint8_t { Translate, Rotate, Scale };
+  enum class GizmoAxis : uint8_t { None, X, Y, Z };
 
   class GizmoRenderer
   {
@@ -39,12 +44,20 @@ namespace YAEngine
     void DrawArrow(const glm::vec3& origin, const glm::vec3& direction, float length, const glm::vec4& color);
 
     void DrawSolidArrow(const glm::vec3& origin, const glm::vec3& direction, float length, const glm::vec4& color);
+    void DrawSolidScaleArrow(const glm::vec3& origin, const glm::vec3& direction, float length, const glm::vec4& color);
     void DrawSolidRing(const glm::vec3& center, const glm::vec3& normal, float radius, const glm::vec4& color);
 
     void DrawSprite(const glm::vec3& position, float size, uint32_t codepoint, const glm::vec4& color);
 
     void DrawTranslateGizmo(const glm::vec3& position, const glm::vec3& cameraPos);
     void DrawRotateGizmo(const glm::vec3& position, const glm::vec3& cameraPos);
+    void DrawScaleGizmo(const glm::vec3& position, const glm::vec3& cameraPos);
+
+    void UpdateHover(const Ray& ray);
+    void ClearHover() { m_HoveredAxis = GizmoAxis::None; }
+    GizmoAxis GetHoveredAxis() const { return m_HoveredAxis; }
+
+    void SetDraggedAxis(GizmoAxis axis) { m_DraggedAxis = axis; }
 
     void Clear();
     void Flush(VkCommandBuffer cmd, VkDescriptorSet frameDescriptor);
@@ -92,6 +105,7 @@ namespace YAEngine
 
     // Solid meshes
     GizmoMesh m_SolidArrowMesh;
+    GizmoMesh m_SolidScaleArrowMesh;
     GizmoMesh m_SolidRingMesh;
 
     PipelineHandle m_WirePipeline;
@@ -105,5 +119,12 @@ namespace YAEngine
     std::vector<SpriteDrawRequest> m_SpriteRequests;
 
     std::unordered_map<uint32_t, SpriteEntry> m_SpriteEntries;
+
+    // Hover and drag state
+    GizmoAxis m_HoveredAxis = GizmoAxis::None;
+    GizmoAxis m_DraggedAxis = GizmoAxis::None;
+    glm::mat4 m_AxisTransforms[3] {};
+    bool m_HasActiveGizmo = false;
+    bool m_IsRingGizmo = false;
   };
 }

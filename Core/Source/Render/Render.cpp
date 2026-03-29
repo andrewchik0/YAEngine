@@ -340,8 +340,12 @@ namespace YAEngine
       if (b_HasSelectedEntity)
       {
         glm::vec3 camPos = frame.snapshot.camera.position;
-        m_GizmoRenderer.DrawTranslateGizmo(m_SelectedEntityPosition, camPos);
-        m_GizmoRenderer.DrawRotateGizmo(m_SelectedEntityPosition, camPos);
+        switch (m_GizmoMode)
+        {
+          case GizmoMode::Translate: m_GizmoRenderer.DrawTranslateGizmo(m_SelectedEntityPosition, camPos); break;
+          case GizmoMode::Rotate:    m_GizmoRenderer.DrawRotateGizmo(m_SelectedEntityPosition, camPos); break;
+          case GizmoMode::Scale:     m_GizmoRenderer.DrawScaleGizmo(m_SelectedEntityPosition, camPos); break;
+        }
       }
     }
 #endif

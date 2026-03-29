@@ -178,11 +178,6 @@ namespace YAEngine
         ImGui::EndCombo();
       }
 
-      if (materials.Has(mc.asset))
-      {
-        if (ImGui::Button(ICON_FA_MAGNIFYING_GLASS " Select in Material Inspector"))
-          context.SelectMaterial(mc.asset);
-      }
     }
   }
 

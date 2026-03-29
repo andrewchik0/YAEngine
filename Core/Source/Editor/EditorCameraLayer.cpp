@@ -28,7 +28,7 @@ namespace YAEngine
 
     auto& input = GetInput();
 
-    if (!input.IsViewportHovered())
+    if (!input.IsViewportHovered() || input.IsGizmoDragging())
       return;
 
     if (input.IsMouseDown(MouseButton::Right))

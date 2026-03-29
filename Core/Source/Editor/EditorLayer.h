@@ -4,9 +4,13 @@
 #include "Editor/EditorContext.h"
 #include "Editor/IEditorPanel.h"
 #include "Editor/Utils/EditorTextureCache.h"
+#include "Utils/Ray.h"
 
 namespace YAEngine
 {
+  enum class GizmoAxis : uint8_t;
+  enum class GizmoMode : uint8_t;
+
   class EditorLayer : public Layer
   {
   public:
@@ -28,5 +32,16 @@ namespace YAEngine
     bool b_ResetLayout = false;
     uint32_t m_LastViewportWidth = 0;
     uint32_t m_LastViewportHeight = 0;
+
+    // Gizmo drag state
+    bool m_DragActive = false;
+    GizmoAxis m_DragAxis {};
+    GizmoMode m_DragMode {};
+    LocalTransform m_DragStartLocalTransform;
+    glm::vec3 m_DragStartWorldPos { 0.0f };
+    glm::vec3 m_DragPlaneNormal { 0.0f };
+    glm::vec3 m_DragStartHitPoint { 0.0f };
+    glm::vec3 m_DragAxisDir { 0.0f };
+    float m_DragGizmoScale = 1.0f;
   };
 }

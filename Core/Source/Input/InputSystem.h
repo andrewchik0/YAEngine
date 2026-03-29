@@ -30,6 +30,9 @@ namespace YAEngine
     void SetViewportHovered(bool hovered) { b_ViewportHovered = hovered; }
     bool IsViewportHovered() const { return b_ViewportHovered; }
 
+    void SetGizmoDragging(bool dragging) { b_GizmoDragging = dragging; }
+    bool IsGizmoDragging() const { return b_GizmoDragging; }
+
   private:
     static constexpr int MAX_KEYS = 349;
     static constexpr int MAX_MOUSE_BUTTONS = 8;
@@ -48,5 +51,6 @@ namespace YAEngine
 
     bool b_ImGuiFiltering = false;
     bool b_ViewportHovered = false;
+    bool b_GizmoDragging = false;
   };
 }

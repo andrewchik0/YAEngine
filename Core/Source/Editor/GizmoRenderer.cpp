@@ -6,6 +6,21 @@
 
 #include <glm/gtc/matrix_transform.hpp>
 
+namespace
+{
+  const glm::vec4 kAxisDim[3] = {
+    {0.7f, 0.15f, 0.15f, 0.9f},   // X - red
+    {0.15f, 0.7f, 0.15f, 0.9f},   // Y - green
+    {0.15f, 0.3f, 0.7f, 0.9f}     // Z - blue
+  };
+  const glm::vec4 kAxisBright[3] = {
+    {0.95f, 0.3f, 0.3f, 0.9f},    // X - bright red
+    {0.3f, 0.95f, 0.3f, 0.9f},    // Y - bright green
+    {0.3f, 0.5f, 0.95f, 0.9f}     // Z - bright blue
+  };
+  const glm::vec3 kAxisDirs[3] = { {1,0,0}, {0,1,0}, {0,0,1} };
+}
+
 namespace YAEngine
 {
   GizmoRenderer::GizmoMesh GizmoRenderer::UploadTopology(const RenderContext& ctx, const TopologyData& data)
@@ -82,6 +97,7 @@ namespace YAEngine
 
     // Solid meshes
     m_SolidArrowMesh = UploadTopology(ctx, Topology::SolidArrow());
+    m_SolidScaleArrowMesh = UploadTopology(ctx, Topology::SolidScaleArrow());
     m_SolidRingMesh = UploadTopology(ctx, Topology::SolidRing());
 
     // Wire pipeline (LINE_LIST)
@@ -89,6 +105,7 @@ namespace YAEngine
       .fragmentShaderFile = "gizmo.frag",
       .vertexShaderFile = "gizmo.vert",
       .pushConstantSize = uint32_t(sizeof(GizmoPushConstants)),
+      .depthTesting = false,
       .depthWrite = false,
       .blending = true,
       .doubleSided = true,
@@ -103,7 +120,8 @@ namespace YAEngine
       .fragmentShaderFile = "gizmo.frag",
       .vertexShaderFile = "gizmo.vert",
       .pushConstantSize = uint32_t(sizeof(GizmoPushConstants)),
-      .depthWrite = false,
+      .depthTesting = true,
+      .depthWrite = true,
       .blending = true,
       .doubleSided = true,
       .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
@@ -131,6 +149,7 @@ namespace YAEngine
       .fragmentShaderFile = "gizmo_sprite.frag",
       .vertexShaderFile = "gizmo_sprite.vert",
       .pushConstantSize = uint32_t(sizeof(SpritePushConstants)),
+      .depthTesting = false,
       .depthWrite = false,
       .blending = true,
       .doubleSided = true,
@@ -156,6 +175,8 @@ namespace YAEngine
 
     m_SolidArrowMesh.vertexBuffer.Destroy(ctx);
     m_SolidArrowMesh.indexBuffer.Destroy(ctx);
+    m_SolidScaleArrowMesh.vertexBuffer.Destroy(ctx);
+    m_SolidScaleArrowMesh.indexBuffer.Destroy(ctx);
     m_SolidRingMesh.vertexBuffer.Destroy(ctx);
     m_SolidRingMesh.indexBuffer.Destroy(ctx);
 
@@ -208,6 +229,15 @@ namespace YAEngine
     m_Requests.push_back({ GizmoShape::SolidArrow, GizmoRenderMode::Solid, transform, color });
   }
 
+  void GizmoRenderer::DrawSolidScaleArrow(const glm::vec3& origin, const glm::vec3& direction, float length, const glm::vec4& color)
+  {
+    glm::mat4 rotation = BuildRotation(direction);
+    glm::mat4 transform = glm::translate(glm::mat4(1.0f), origin)
+                         * rotation
+                         * glm::scale(glm::mat4(1.0f), glm::vec3(length));
+    m_Requests.push_back({ GizmoShape::SolidScaleArrow, GizmoRenderMode::Solid, transform, color });
+  }
+
   void GizmoRenderer::DrawSolidRing(const glm::vec3& center, const glm::vec3& normal, float radius, const glm::vec4& color)
   {
     // Default ring lies in XZ plane (normal = Y). Rotate to target normal.
@@ -240,19 +270,125 @@ namespace YAEngine
     float dist = glm::length(cameraPos - position);
     float scale = dist * 0.15f;
 
-    DrawSolidArrow(position, glm::vec3(1, 0, 0), scale, glm::vec4(0.9f, 0.2f, 0.2f, 0.9f));
-    DrawSolidArrow(position, glm::vec3(0, 1, 0), scale, glm::vec4(0.2f, 0.9f, 0.2f, 0.9f));
-    DrawSolidArrow(position, glm::vec3(0, 0, 1), scale, glm::vec4(0.2f, 0.4f, 0.9f, 0.9f));
+    for (int i = 0; i < 3; ++i)
+    {
+      glm::mat4 rotation = BuildRotation(kAxisDirs[i]);
+      glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
+                           * rotation
+                           * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+      m_AxisTransforms[i] = transform;
+
+      auto axis = static_cast<GizmoAxis>(i + 1);
+      bool highlight = (m_DraggedAxis != GizmoAxis::None) ? (m_DraggedAxis == axis) : (m_HoveredAxis == axis);
+      glm::vec4 color = highlight ? kAxisBright[i] : kAxisDim[i];
+      m_Requests.push_back({ GizmoShape::SolidArrow, GizmoRenderMode::Solid, transform, color });
+    }
+
+    m_HasActiveGizmo = true;
+    m_IsRingGizmo = false;
   }
 
   void GizmoRenderer::DrawRotateGizmo(const glm::vec3& position, const glm::vec3& cameraPos)
   {
     float dist = glm::length(cameraPos - position);
+    float scale = dist * 0.12f;
+
+    for (int i = 0; i < 3; ++i)
+    {
+      glm::vec3 from(0.0f, 1.0f, 0.0f);
+      glm::vec3 to = kAxisDirs[i];
+      glm::mat4 rotation(1.0f);
+
+      float d = glm::dot(from, to);
+      if (d < -0.999f)
+        rotation = glm::rotate(glm::mat4(1.0f), glm::pi<float>(), glm::vec3(1, 0, 0));
+      else if (d < 0.999f)
+      {
+        glm::vec3 rotAxis = glm::normalize(glm::cross(from, to));
+        rotation = glm::rotate(glm::mat4(1.0f), std::acos(d), rotAxis);
+      }
+
+      glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
+                           * rotation
+                           * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+      m_AxisTransforms[i] = transform;
+
+      auto axis = static_cast<GizmoAxis>(i + 1);
+      bool highlight = (m_DraggedAxis != GizmoAxis::None) ? (m_DraggedAxis == axis) : (m_HoveredAxis == axis);
+      glm::vec4 color = highlight ? kAxisBright[i] : kAxisDim[i];
+      m_Requests.push_back({ GizmoShape::SolidRing, GizmoRenderMode::Solid, transform, color });
+    }
+
+    m_HasActiveGizmo = true;
+    m_IsRingGizmo = true;
+  }
+
+  void GizmoRenderer::DrawScaleGizmo(const glm::vec3& position, const glm::vec3& cameraPos)
+  {
+    float dist = glm::length(cameraPos - position);
     float scale = dist * 0.15f;
 
-    DrawSolidRing(position, glm::vec3(1, 0, 0), scale, glm::vec4(0.9f, 0.2f, 0.2f, 0.9f));
-    DrawSolidRing(position, glm::vec3(0, 1, 0), scale, glm::vec4(0.2f, 0.9f, 0.2f, 0.9f));
-    DrawSolidRing(position, glm::vec3(0, 0, 1), scale, glm::vec4(0.2f, 0.4f, 0.9f, 0.9f));
+    for (int i = 0; i < 3; ++i)
+    {
+      glm::mat4 rotation = BuildRotation(kAxisDirs[i]);
+      glm::mat4 transform = glm::translate(glm::mat4(1.0f), position)
+                           * rotation
+                           * glm::scale(glm::mat4(1.0f), glm::vec3(scale));
+      m_AxisTransforms[i] = transform;
+
+      auto axis = static_cast<GizmoAxis>(i + 1);
+      bool highlight = (m_DraggedAxis != GizmoAxis::None) ? (m_DraggedAxis == axis) : (m_HoveredAxis == axis);
+      glm::vec4 color = highlight ? kAxisBright[i] : kAxisDim[i];
+      m_Requests.push_back({ GizmoShape::SolidScaleArrow, GizmoRenderMode::Solid, transform, color });
+    }
+
+    m_HasActiveGizmo = true;
+    m_IsRingGizmo = false;
+  }
+
+  void GizmoRenderer::UpdateHover(const Ray& ray)
+  {
+    m_HoveredAxis = GizmoAxis::None;
+    if (!m_HasActiveGizmo) return;
+
+    float closestT = std::numeric_limits<float>::max();
+
+    for (int i = 0; i < 3; ++i)
+    {
+      glm::mat4 inv = glm::inverse(m_AxisTransforms[i]);
+      glm::vec3 localOrigin = glm::vec3(inv * glm::vec4(ray.origin, 1.0f));
+      glm::vec3 localDir = glm::normalize(glm::vec3(inv * glm::vec4(ray.direction, 0.0f)));
+      Ray localRay { localOrigin, localDir };
+
+      std::optional<float> hit;
+
+      if (m_IsRingGizmo)
+      {
+        // Intersect with Y=0 plane, check radial distance matches ring [0.9, 1.0]
+        if (std::abs(localDir.y) > 1e-6f)
+        {
+          float t = -localOrigin.y / localDir.y;
+          if (t > 0.0f)
+          {
+            glm::vec3 p = localOrigin + t * localDir;
+            float dist = std::sqrt(p.x * p.x + p.z * p.z);
+            if (dist >= 0.75f && dist <= 1.15f)
+              hit = t;
+          }
+        }
+      }
+      else
+      {
+        // AABB test covering arrow/scale arrow meshes with generous padding
+        hit = RayAABBIntersect(localRay, glm::vec3(-0.12f, -1.1f, -0.12f), glm::vec3(0.12f, 0.05f, 0.12f));
+      }
+
+      if (hit && *hit < closestT)
+      {
+        closestT = *hit;
+        m_HoveredAxis = static_cast<GizmoAxis>(i + 1);
+      }
+    }
   }
 
   void GizmoRenderer::Flush(VkCommandBuffer cmd, VkDescriptorSet frameDescriptor)
@@ -274,8 +410,9 @@ namespace YAEngine
       GizmoMesh* mesh = nullptr;
       switch (req.shape)
       {
-        case GizmoShape::SolidArrow: mesh = &m_SolidArrowMesh; break;
-        case GizmoShape::SolidRing:  mesh = &m_SolidRingMesh; break;
+        case GizmoShape::SolidArrow:      mesh = &m_SolidArrowMesh; break;
+        case GizmoShape::SolidScaleArrow: mesh = &m_SolidScaleArrowMesh; break;
+        case GizmoShape::SolidRing:       mesh = &m_SolidRingMesh; break;
         default: continue;
       }
 

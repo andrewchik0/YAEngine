@@ -48,6 +48,15 @@ namespace YAEngine
     return tEnter >= 0.0f ? tEnter : tExit;
   }
 
+  inline std::optional<float> RayPlaneIntersect(const Ray& ray, const glm::vec3& planePoint, const glm::vec3& planeNormal)
+  {
+    float denom = glm::dot(ray.direction, planeNormal);
+    if (std::abs(denom) < 1e-6f) return std::nullopt;
+    float t = glm::dot(planePoint - ray.origin, planeNormal) / denom;
+    if (t < 0.0f) return std::nullopt;
+    return t;
+  }
+
   inline std::optional<float> RaySphereIntersect(const Ray& ray, const glm::vec3& center, float radius)
   {
     glm::vec3 oc = ray.origin - center;

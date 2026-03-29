@@ -106,6 +106,7 @@ namespace YAEngine
     bool b_GizmosEnabled = true;
     bool b_HasSelectedEntity = false;
     glm::vec3 m_SelectedEntityPosition { 0.0f };
+    GizmoMode m_GizmoMode = GizmoMode::Translate;
 #endif
 
     // Pass indices
@@ -213,6 +214,7 @@ namespace YAEngine
     GizmoRenderer& GetGizmoRenderer() { return m_GizmoRenderer; }
     void SetSelectedEntityPosition(const glm::vec3& pos) { b_HasSelectedEntity = true; m_SelectedEntityPosition = pos; }
     void ClearSelectedEntity() { b_HasSelectedEntity = false; }
+    GizmoMode& GetGizmoMode() { return m_GizmoMode; }
 #endif
   };
 }
