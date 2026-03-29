@@ -23,6 +23,8 @@ namespace YAEngine
     bool viewportHovered = false;
     uint32_t viewportWidth = 0;
     uint32_t viewportHeight = 0;
+    glm::vec2 mouseInViewport { 0.0f };
+    bool mouseInViewportValid = false;
 
     void SelectEntity(Entity e)
     {

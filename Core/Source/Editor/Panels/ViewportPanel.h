@@ -34,6 +34,14 @@ namespace YAEngine
             context.viewportHeight = h;
             context.render->RequestViewportResize(w, h);
           }
+
+          auto vpMin = ImGui::GetCursorScreenPos();
+          auto mouse = ImGui::GetMousePos();
+          glm::vec2 rel((mouse.x - vpMin.x) / size.x, (mouse.y - vpMin.y) / size.y);
+          context.mouseInViewportValid = context.viewportHovered
+            && rel.x >= 0.0f && rel.x <= 1.0f && rel.y >= 0.0f && rel.y <= 1.0f;
+          context.mouseInViewport = rel;
+
           ImGui::Image(context.render->GetSceneTextureID(), size);
         }
       }

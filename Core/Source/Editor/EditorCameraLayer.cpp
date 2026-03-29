@@ -31,7 +31,7 @@ namespace YAEngine
     if (!input.IsViewportHovered())
       return;
 
-    if (input.IsMouseDown(MouseButton::Left))
+    if (input.IsMouseDown(MouseButton::Right))
     {
       auto delta = input.GetMouseDelta();
 
@@ -48,8 +48,18 @@ namespace YAEngine
       GetScene().GetTransform(m_Camera).rotation = glm::normalize(orientation);
     }
 
-    glm::vec3 forward = GetScene().GetTransform(m_Camera).rotation * glm::vec3(0, 0, -1);
-    glm::vec3 right   = GetScene().GetTransform(m_Camera).rotation * glm::vec3(1, 0, 0);
+    auto& rot = GetScene().GetTransform(m_Camera).rotation;
+    glm::vec3 forward = rot * glm::vec3(0, 0, -1);
+    glm::vec3 right   = rot * glm::vec3(1, 0, 0);
+    glm::vec3 up      = rot * glm::vec3(0, 1, 0);
+
+    if (input.IsMouseDown(MouseButton::Middle))
+    {
+      auto delta = input.GetMouseDelta();
+      float panSpeed = 0.003f;
+      GetScene().GetTransform(m_Camera).position -= right * delta.x * panSpeed;
+      GetScene().GetTransform(m_Camera).position += up * delta.y * panSpeed;
+    }
 
     glm::vec3 velocity(0.0f);
     velocity += forward * float(input.IsKeyDown(Key::W) - input.IsKeyDown(Key::S));

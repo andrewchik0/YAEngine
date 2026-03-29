@@ -15,6 +15,9 @@
 #include "Editor/Panels/MaterialInspectorPanel.h"
 #include "Editor/EditorCameraLayer.h"
 #include "Editor/Utils/FileDialog.h"
+#include "Utils/Ray.h"
+
+#include <glm/gtc/matrix_transform.hpp>
 
 namespace YAEngine
 {
@@ -56,6 +59,60 @@ namespace YAEngine
       m_LastViewportHeight = h;
       for (auto [entity, cam] : GetScene().GetView<CameraComponent>().each())
         cam.Resize(float(w), float(h));
+    }
+
+    // Entity picking by LMB
+    auto& input = GetInput();
+    if (input.IsMousePressed(MouseButton::Left) && m_Context.mouseInViewportValid)
+    {
+      Entity camEntity = GetScene().GetActiveCamera();
+      if (camEntity != entt::null && GetScene().HasComponent<CameraComponent>(camEntity))
+      {
+        auto& camTransform = GetScene().GetTransform(camEntity);
+        auto& cam = GetScene().GetComponent<CameraComponent>(camEntity);
+
+        glm::mat4 world = glm::translate(glm::mat4(1.0f), camTransform.position)
+                        * glm::mat4_cast(camTransform.rotation);
+        glm::mat4 view = glm::inverse(world);
+        glm::mat4 proj = glm::perspective(cam.fov, cam.aspectRatio, cam.nearPlane, cam.farPlane);
+
+        Ray ray = ScreenToRay(m_Context.mouseInViewport, glm::inverse(proj), glm::inverse(view));
+
+        Entity closest = entt::null;
+        float closestDist = std::numeric_limits<float>::max();
+
+        for (auto [entity, wt] : GetScene().GetView<WorldTransform>().each())
+        {
+          if (GetScene().HasComponent<EditorOnlyTag>(entity))
+            continue;
+
+          std::optional<float> hit;
+
+          if (GetScene().HasComponent<WorldBounds>(entity))
+          {
+            auto& bounds = GetScene().GetComponent<WorldBounds>(entity);
+            if (bounds.min != bounds.max)
+              hit = RayAABBIntersect(ray, bounds.min, bounds.max);
+          }
+
+          if (!hit)
+          {
+            glm::vec3 center(wt.world[3]);
+            hit = RaySphereIntersect(ray, center, 0.5f);
+          }
+
+          if (hit && *hit < closestDist)
+          {
+            closestDist = *hit;
+            closest = entity;
+          }
+        }
+
+        if (closest != entt::null)
+          m_Context.SelectEntity(closest);
+        else
+          m_Context.ClearSelection();
+      }
     }
 
     if (m_Context.selectedEntity != entt::null && m_Context.scene->HasComponent<WorldTransform>(m_Context.selectedEntity))
