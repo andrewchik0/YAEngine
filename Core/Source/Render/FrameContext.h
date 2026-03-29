@@ -2,6 +2,7 @@
 
 #include "Pch.h"
 #include "RenderObject.h"
+#include "LightData.h"
 
 namespace YAEngine
 {
@@ -12,6 +13,7 @@ namespace YAEngine
   struct FrameContext
   {
     SceneSnapshot& snapshot;
+    LightBuffer& lights;
     AssetManager& assets;
     CubicTextureResources& cubicResources;
     double time;

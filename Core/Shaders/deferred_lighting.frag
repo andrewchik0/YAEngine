@@ -12,11 +12,18 @@ layout(set = 1, binding = 1) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 2) uniform sampler2D depthTexture;
 layout(set = 1, binding = 3) uniform sampler2D ssaoTexture;
 
-// IBL (set 2)
-layout(set = 2, binding = 0) uniform samplerCube irradianceCubemap;
-layout(set = 2, binding = 1) uniform samplerCube prefilterTexture;
-layout(set = 2, binding = 2) uniform sampler2D brdfTexture;
-layout(set = 2, binding = 3) uniform samplerCube skyboxCubemap;
+// Lights (set 2)
+#include "../Shared/LightData.h"
+layout(std430, set = 2, binding = 0) readonly buffer LightBufferSSBO
+{
+  LightBuffer u_Lights;
+};
+
+// IBL (set 3)
+layout(set = 3, binding = 0) uniform samplerCube irradianceCubemap;
+layout(set = 3, binding = 1) uniform samplerCube prefilterTexture;
+layout(set = 3, binding = 2) uniform sampler2D brdfTexture;
+layout(set = 3, binding = 3) uniform samplerCube skyboxCubemap;
 
 const float DEPTH_EPSILON = 0.9999;
 const int SHADING_PBR = 0;
@@ -85,7 +92,62 @@ void main()
   vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
   vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
-  vec3 resultColor = max(ambient * ao, vec3(0.0));
+
+  // Analytical lights
+  vec3 Lo = vec3(0.0);
+  float alpha = roughness * roughness;
+
+  // Directional light
+  {
+    vec3 L = normalize(-u_Lights.directional.directionIntensity.xyz);
+    float intensity = u_Lights.directional.directionIntensity.w;
+    vec3 radiance = u_Lights.directional.colorPad.rgb * intensity;
+    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
+  }
+
+  // Point lights
+  for (int i = 0; i < u_Lights.pointLightCount; i++)
+  {
+    vec3 lightPos = u_Lights.pointLights[i].positionRadius.xyz;
+    float lightRadius = u_Lights.pointLights[i].positionRadius.w;
+
+    vec3 L = lightPos - worldPos;
+    float dist = length(L);
+    if (dist > lightRadius) continue;
+    L /= dist;
+
+    float att = 1.0 - (dist * dist) / (lightRadius * lightRadius);
+    att = att * att;
+    vec3 radiance = u_Lights.pointLights[i].colorIntensity.rgb * u_Lights.pointLights[i].colorIntensity.w * att;
+
+    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
+  }
+
+  // Spot lights
+  for (int i = 0; i < u_Lights.spotLightCount; i++)
+  {
+    vec3 lightPos = u_Lights.spotLights[i].positionRadius.xyz;
+    float lightRadius = u_Lights.spotLights[i].positionRadius.w;
+
+    vec3 L = lightPos - worldPos;
+    float dist = length(L);
+    if (dist > lightRadius) continue;
+    L /= dist;
+
+    vec3 lightDir = u_Lights.spotLights[i].directionInnerCone.xyz;
+    float innerCos = u_Lights.spotLights[i].directionInnerCone.w;
+    float outerCos = u_Lights.spotLights[i].colorOuterCone.w;
+    float theta = dot(L, -lightDir);
+    float spotFactor = clamp((theta - outerCos) / (innerCos - outerCos), 0.0, 1.0);
+
+    float att = 1.0 - (dist * dist) / (lightRadius * lightRadius);
+    att = att * att;
+    vec3 radiance = u_Lights.spotLights[i].colorOuterCone.rgb * u_Lights.spotLights[i].intensityPad.x * att * spotFactor;
+
+    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
+  }
+
+  vec3 resultColor = max(ambient * ao + Lo, vec3(0.0));
 
   outColor = vec4(resultColor, 1.0);
 }

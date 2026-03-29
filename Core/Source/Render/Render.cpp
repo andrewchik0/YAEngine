@@ -47,6 +47,7 @@ namespace YAEngine
 
     m_DefaultMaterial.Init(ctx, m_NoneTexture);
     m_FrameUniformBuffer.Init(ctx);
+    m_LightBuffer.Init(ctx);
 
     // Generate SSAO noise texture (4x4 random tangent-space rotations)
     {
@@ -172,6 +173,7 @@ namespace YAEngine
     m_InstanceBuffer.Destroy(ctx);
     m_PSOCache.Destroy();
     m_DefaultMaterial.Destroy(ctx);
+    m_LightBuffer.Destroy(ctx);
     m_FrameUniformBuffer.Destroy(ctx);
 
     m_Graph.Destroy();
@@ -282,9 +284,10 @@ namespace YAEngine
     m_Graph.SetPassFramebuffer(m_SwapchainPassIndex,
       m_Backend.GetSwapChain().GetFramebuffer(*imageIndex));
 
-    // Upload per-frame UBO before executing passes
+    // Upload per-frame data before executing passes
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     m_FrameUniformBuffer.SetUp(currentFrame);
+    m_LightBuffer.SetUp(currentFrame, frame.lights);
 
     // Update IBL descriptor set when skybox changes
     auto skybox = frame.snapshot.skybox;

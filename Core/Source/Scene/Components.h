@@ -69,6 +69,23 @@ namespace YAEngine
 
   struct RootTag {};
 
+  enum class LightType : uint8_t
+  {
+    Point,
+    Spot,
+    Directional
+  };
+
+  struct LightComponent
+  {
+    LightType type = LightType::Point;
+    glm::vec3 color { 1.0f };
+    float intensity = 1.0f;
+    float radius = 10.0f;
+    float innerCone = glm::radians(25.0f);
+    float outerCone = glm::radians(35.0f);
+  };
+
 #ifdef YA_EDITOR
   struct EditorOnlyTag {};
 #endif

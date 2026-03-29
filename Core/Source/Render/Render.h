@@ -9,6 +9,7 @@
 #include "PipelineCache.h"
 #include "VulkanStorageBuffer.h"
 #include "VulkanUniformBuffer.h"
+#include "LightStorageBuffer.h"
 
 namespace YAEngine
 {
@@ -124,6 +125,7 @@ namespace YAEngine
     CubeMapHandle m_BoundSkybox {};
 
     FrameUniformBuffer m_FrameUniformBuffer {};
+    LightStorageBuffer m_LightBuffer;
 
     std::vector<VulkanDescriptorSet> m_SwapChainDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;

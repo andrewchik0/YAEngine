@@ -39,6 +39,8 @@ set(SOURCE_FILES
   Source/Render/VulkanDescriptorPool.h
   Source/Render/FrameUniformBuffer.h
   Source/Render/FrameUniformBuffer.cpp
+  Source/Render/LightStorageBuffer.h
+  Source/Render/LightStorageBuffer.cpp
   Source/Render/VulkanDescriptorSet.cpp
   Source/Render/VulkanDescriptorSet.h
   Source/Render/VulkanUniformBuffer.cpp

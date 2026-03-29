@@ -199,7 +199,8 @@ namespace YAEngine
 
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_DeferredLightingDescriptorSets[currentFrame].Get()}, 1);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_IBLDescriptorSet.Get()}, 2);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_LightBuffer.GetDescriptorSet(currentFrame)}, 2);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_IBLDescriptorSet.Get()}, 3);
         DrawQuad();
       }
     });

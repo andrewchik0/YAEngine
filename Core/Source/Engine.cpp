@@ -22,6 +22,7 @@ namespace YAEngine
   {
     return FrameContext {
       .snapshot = snapshot,
+      .lights = m_LightData,
       .assets = m_AssetManager,
       .cubicResources = m_Render.GetCubicResources(),
       .time = m_Timer.GetTime(),
@@ -131,7 +132,7 @@ namespace YAEngine
       m_LayerManager.CallLateUpdate(frameDt);
       m_InputSystem.EndFrame();
 
-      BuildSceneSnapshot(m_Snapshot, m_Scene, m_AssetManager.Meshes());
+      BuildSceneSnapshot(m_Snapshot, m_LightData, m_Scene, m_AssetManager.Meshes());
 
       // Frustum cull: compute viewProj from camera data, partition visible objects to front
       auto& cam = m_Snapshot.camera;

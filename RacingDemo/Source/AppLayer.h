@@ -215,6 +215,54 @@ public:
         GetScene().GetTransform(e).position = glm::vec3(3.0f, 2.0f, 8.0f);
       }
 
+      // Point light — warm white, above center
+      {
+        auto e = GetScene().CreateEntity("PointLight_Center");
+        GetScene().GetTransform(e).position = glm::vec3(0.0f, 6.0f, 2.0f);
+        GetScene().AddComponent<YAEngine::LightComponent>(e, YAEngine::LightComponent {
+          .type = YAEngine::LightType::Point,
+          .color = glm::vec3(1.0f, 0.95f, 0.8f),
+          .intensity = 5.0f,
+          .radius = 25.0f,
+        });
+      }
+
+      // Point light — red, left side
+      {
+        auto e = GetScene().CreateEntity("PointLight_Red");
+        GetScene().GetTransform(e).position = glm::vec3(-8.0f, 3.0f, 8.0f);
+        GetScene().AddComponent<YAEngine::LightComponent>(e, YAEngine::LightComponent {
+          .type = YAEngine::LightType::Point,
+          .color = glm::vec3(1.0f, 0.2f, 0.1f),
+          .intensity = 3.0f,
+          .radius = 15.0f,
+        });
+      }
+
+      // Point light — blue, right side
+      {
+        auto e = GetScene().CreateEntity("PointLight_Blue");
+        GetScene().GetTransform(e).position = glm::vec3(8.0f, 3.0f, 8.0f);
+        GetScene().AddComponent<YAEngine::LightComponent>(e, YAEngine::LightComponent {
+          .type = YAEngine::LightType::Point,
+          .color = glm::vec3(0.1f, 0.3f, 1.0f),
+          .intensity = 3.0f,
+          .radius = 15.0f,
+        });
+      }
+
+      // Directional light — sun
+      {
+        auto e = GetScene().CreateEntity("DirectionalLight_Sun");
+        GetScene().GetTransform(e).rotation = glm::quat(glm::vec3(
+          glm::radians(-45.0f), glm::radians(30.0f), 0.0f));
+        GetScene().AddComponent<YAEngine::LightComponent>(e, YAEngine::LightComponent {
+          .type = YAEngine::LightType::Directional,
+          .color = glm::vec3(1.0f, 0.98f, 0.9f),
+          .intensity = 1.5f,
+        });
+      }
+
       // Glass-like sphere (dielectric, very smooth)
       {
         auto mat = GetAssets().Materials().Create();

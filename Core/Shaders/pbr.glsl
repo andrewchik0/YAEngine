@@ -77,3 +77,24 @@ float geometrySmith(float alpha, float NdotV, float NdotL)
 {
   return geometrySchlickGGX(alpha, NdotV) * geometrySchlickGGX(alpha, NdotL);
 }
+
+vec3 evaluateDirectLight(
+  vec3 N, vec3 V, vec3 L, vec3 radiance,
+  vec3 albedo, float metallic, float alpha, vec3 f0, float NdotV)
+{
+  vec3 H = normalize(V + L);
+  float NdotL = max(dot(N, L), 0.0);
+  float NdotH = max(dot(N, H), 0.0);
+  float HdotV = max(dot(H, V), 0.0);
+
+  float NDF = normalDistributionGGX(alpha, NdotH);
+  float G = geometrySmith(alpha, NdotV, NdotL);
+  vec3 F = fresnelSchlick(HdotV, f0);
+
+  vec3 numerator = NDF * G * F;
+  float denominator = 4.0 * NdotV * NdotL + 0.0001;
+  vec3 spec = numerator / denominator;
+
+  vec3 kD = (1.0 - F) * (1.0 - metallic);
+  return (kD * albedo / PI + spec) * radiance * NdotL;
+}

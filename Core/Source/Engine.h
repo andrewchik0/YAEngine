@@ -76,6 +76,7 @@ namespace YAEngine
     LayerManager m_LayerManager;
 
     SceneSnapshot m_Snapshot;
+    LightBuffer m_LightData {};
 
     static constexpr double FIXED_DT = 1.0 / 60.0;
     static constexpr int MAX_FIXED_STEPS = 5;

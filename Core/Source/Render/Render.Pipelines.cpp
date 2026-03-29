@@ -281,7 +281,7 @@ namespace YAEngine
 
     // IBL descriptor set (irradiance, prefilter, BRDF LUT, skybox cubemap)
     SetDescription iblDesc = {
-      .set = 2,
+      .set = 3,
       .bindings = {
         {
           { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
@@ -305,6 +305,7 @@ namespace YAEngine
       .sets = std::vector({
         m_FrameUniformBuffer.GetLayout(),
         m_DeferredLightingDescriptorSets[0].GetLayout(),
+        m_LightBuffer.GetLayout(),
         m_IBLDescriptorSet.GetLayout(),
       })
     };

@@ -1,12 +1,13 @@
 #pragma once
 
 #include "Render/RenderObject.h"
+#include "LightData.h"
 #include "Scene/Scene.h"
 #include "Assets/MeshManager.h"
 
 namespace YAEngine
 {
-  inline void BuildSceneSnapshot(SceneSnapshot& snapshot, Scene& scene, MeshManager& meshManager)
+  inline void BuildSceneSnapshot(SceneSnapshot& snapshot, LightBuffer& lights, Scene& scene, MeshManager& meshManager)
   {
     snapshot.objects.clear();
     snapshot.skybox = scene.GetSkybox();
@@ -64,5 +65,52 @@ namespace YAEngine
     });
 
     snapshot.visibleCount = uint32_t(snapshot.objects.size());
+
+    // Extract lights
+    lights.pointLightCount = 0;
+    lights.spotLightCount = 0;
+    lights.directional = {};
+    bool hasDirectional = false;
+    auto lightView = scene.GetView<LightComponent, WorldTransform>();
+    for (auto entity : lightView)
+    {
+      auto& light = lightView.get<LightComponent>(entity);
+      auto& wt = lightView.get<WorldTransform>(entity);
+
+      glm::vec3 position = glm::vec3(wt.world[3]);
+      glm::vec3 forward = glm::normalize(-glm::vec3(wt.world[2]));
+
+      switch (light.type)
+      {
+        case LightType::Point:
+        {
+          if (lights.pointLightCount >= MAX_POINT_LIGHTS) break;
+          auto& pl = lights.pointLights[lights.pointLightCount++];
+          pl.positionRadius = glm::vec4(position, light.radius);
+          pl.colorIntensity = glm::vec4(light.color, light.intensity);
+          break;
+        }
+        case LightType::Spot:
+        {
+          if (lights.spotLightCount >= MAX_SPOT_LIGHTS) break;
+          auto& sl = lights.spotLights[lights.spotLightCount++];
+          sl.positionRadius = glm::vec4(position, light.radius);
+          sl.directionInnerCone = glm::vec4(forward, std::cos(light.innerCone));
+          sl.colorOuterCone = glm::vec4(light.color, std::cos(light.outerCone));
+          sl.intensityPad = glm::vec4(light.intensity, 0.0f, 0.0f, 0.0f);
+          break;
+        }
+        case LightType::Directional:
+        {
+          if (!hasDirectional)
+          {
+            lights.directional.directionIntensity = glm::vec4(forward, light.intensity);
+            lights.directional.colorPad = glm::vec4(light.color, 0.0f);
+            hasDirectional = true;
+          }
+          break;
+        }
+      }
+    }
   }
 }
