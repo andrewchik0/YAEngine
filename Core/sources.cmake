@@ -147,6 +147,7 @@ if(YA_EDITOR)
     Source/Editor/Panels/MaterialBrowserPanel.cpp
     Source/Editor/Panels/MaterialInspectorPanel.h
     Source/Editor/Panels/MaterialInspectorPanel.cpp
+    Source/Editor/Utils/EditorIcons.h
     Source/Editor/Utils/EditorTextureCache.h
     Source/Editor/Utils/EditorTextureCache.cpp
     Source/Editor/Utils/FileDialog.h

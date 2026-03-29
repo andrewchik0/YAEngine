@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include "Editor/EditorContext.h"
+#include "Editor/Utils/EditorIcons.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
 #include "Assets/AssetManager.h"
@@ -77,7 +78,7 @@ namespace YAEngine
 
   static void DrawTransform(EditorContext& context, LocalTransform& lt)
   {
-    if (ImGui::CollapsingHeader("Transform", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(ICON_FA_UP_DOWN_LEFT_RIGHT " Transform", ImGuiTreeNodeFlags_DefaultOpen))
     {
       bool dirty = false;
 
@@ -108,7 +109,7 @@ namespace YAEngine
 
   static void DrawMesh(EditorContext& context, MeshComponent& mc)
   {
-    if (ImGui::CollapsingHeader("Mesh", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(ICON_FA_DRAW_POLYGON " Mesh", ImGuiTreeNodeFlags_DefaultOpen))
     {
       auto entity = context.selectedEntity;
       auto& scene = *context.scene;
@@ -145,7 +146,7 @@ namespace YAEngine
 
   static void DrawMaterial(EditorContext& context, MaterialComponent& mc)
   {
-    if (ImGui::CollapsingHeader("Material", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(ICON_FA_PALETTE " Material", ImGuiTreeNodeFlags_DefaultOpen))
     {
       auto& materials = context.assetManager->Materials();
 
@@ -179,7 +180,7 @@ namespace YAEngine
 
       if (materials.Has(mc.asset))
       {
-        if (ImGui::Button("Select in Material Inspector"))
+        if (ImGui::Button(ICON_FA_MAGNIFYING_GLASS " Select in Material Inspector"))
           context.SelectMaterial(mc.asset);
       }
     }
@@ -187,13 +188,13 @@ namespace YAEngine
 
   static bool DrawLight(EditorContext& context, LightComponent& light)
   {
-    bool open = ImGui::CollapsingHeader("Light", ImGuiTreeNodeFlags_DefaultOpen);
+    bool open = ImGui::CollapsingHeader(ICON_FA_LIGHTBULB " Light", ImGuiTreeNodeFlags_DefaultOpen);
 
     ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
     ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
-    if (ImGui::Button("X##RemoveLight", ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight())))
+    if (ImGui::Button(ICON_FA_XMARK "##RemoveLight", ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight())))
     {
       ImGui::PopStyleColor(3);
       return true;
@@ -225,7 +226,7 @@ namespace YAEngine
 
   static void DrawCamera(CameraComponent& cc)
   {
-    if (ImGui::CollapsingHeader("Camera", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(ICON_FA_VIDEO " Camera", ImGuiTreeNodeFlags_DefaultOpen))
     {
       ImGui::Text("FOV: %.1f", glm::degrees(cc.fov));
       ImGui::Text("Aspect: %.2f", cc.aspectRatio);
@@ -281,14 +282,14 @@ namespace YAEngine
     ImGui::Separator();
 
     float buttonWidth = ImGui::GetContentRegionAvail().x;
-    if (ImGui::Button("Add Component", ImVec2(buttonWidth, 0)))
+    if (ImGui::Button(ICON_FA_CIRCLE_PLUS " Add Component", ImVec2(buttonWidth, 0)))
       ImGui::OpenPopup("AddComponentPopup");
 
     if (ImGui::BeginPopup("AddComponentPopup"))
     {
       if (!scene.HasComponent<LightComponent>(entity))
       {
-        if (ImGui::MenuItem("Light"))
+        if (ImGui::MenuItem(ICON_FA_LIGHTBULB " Light"))
           scene.AddComponent<LightComponent>(entity);
       }
 

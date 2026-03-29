@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include "Editor/EditorContext.h"
+#include "Editor/Utils/EditorIcons.h"
 #include "Assets/AssetManager.h"
 #include "Editor/Utils/EditorTextureCache.h"
 #include "Editor/Utils/FileDialog.h"
@@ -37,7 +38,7 @@ namespace YAEngine
     ImGui::SameLine();
     ImGui::BeginGroup();
 
-    if (ImGui::Button("Load"))
+    if (ImGui::Button(ICON_FA_FOLDER_OPEN " Load"))
     {
       std::string path = FileDialog::OpenFile(s_ImageFilters, 1);
       if (!path.empty())
@@ -51,7 +52,7 @@ namespace YAEngine
     if (handle)
     {
       ImGui::SameLine();
-      if (ImGui::Button("x"))
+      if (ImGui::Button(ICON_FA_TRASH_CAN))
       {
         handle = TextureHandle::Invalid();
         changed = true;
@@ -83,7 +84,7 @@ namespace YAEngine
 
     bool changed = false;
 
-    if (ImGui::CollapsingHeader("Properties", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(ICON_FA_SLIDERS " Properties", ImGuiTreeNodeFlags_DefaultOpen))
     {
       char nameBuf[256] = {};
       snprintf(nameBuf, sizeof(nameBuf), "%s", mat.name.c_str());
@@ -99,7 +100,7 @@ namespace YAEngine
       changed |= ImGui::Checkbox("Combined Textures", &mat.combinedTextures);
     }
 
-    if (ImGui::CollapsingHeader("Textures", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(ICON_FA_IMAGE " Textures", ImGuiTreeNodeFlags_DefaultOpen))
     {
       changed |= DrawTextureSlot("Base Color",  mat.baseColorTexture,  false, context);
       changed |= DrawTextureSlot("Metallic",    mat.metallicTexture,   true,  context);

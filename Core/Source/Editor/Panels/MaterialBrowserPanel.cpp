@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include "Editor/EditorContext.h"
+#include "Editor/Utils/EditorIcons.h"
 #include "Assets/AssetManager.h"
 #include "Editor/Utils/EditorTextureCache.h"
 
@@ -41,7 +42,7 @@ namespace YAEngine
 
     auto& materials = context.assetManager->Materials();
 
-    if (ImGui::Button("Create"))
+    if (ImGui::Button(ICON_FA_CIRCLE_PLUS " Create"))
     {
       MaterialHandle h = materials.Create();
       context.SelectMaterial(h);
@@ -49,7 +50,7 @@ namespace YAEngine
 
     ImGui::SameLine();
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##matfilter", "Search...", m_FilterText, sizeof(m_FilterText));
+    ImGui::InputTextWithHint("##matfilter", ICON_FA_MAGNIFYING_GLASS " Search...", m_FilterText, sizeof(m_FilterText));
 
     ImGui::Separator();
 
@@ -99,7 +100,7 @@ namespace YAEngine
 
       if (ImGui::BeginPopupContextItem())
       {
-        if (ImGui::MenuItem("Duplicate"))
+        if (ImGui::MenuItem(ICON_FA_CLONE " Duplicate"))
         {
           MaterialHandle newHandle = materials.Duplicate(handle);
           context.SelectMaterial(newHandle);

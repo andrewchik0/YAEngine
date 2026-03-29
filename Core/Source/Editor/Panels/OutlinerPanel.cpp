@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include "Editor/EditorContext.h"
+#include "Editor/Utils/EditorIcons.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
 
@@ -50,7 +51,7 @@ namespace YAEngine
 
     if (ImGui::BeginMenu("Create"))
     {
-      if (ImGui::MenuItem("Empty Entity"))
+      if (ImGui::MenuItem(ICON_FA_CUBE " Empty Entity"))
       {
         Entity e = scene.CreateEntity("Entity");
         context.SelectEntity(e);
@@ -58,21 +59,21 @@ namespace YAEngine
 
       ImGui::Separator();
 
-      if (ImGui::MenuItem("Point Light"))
+      if (ImGui::MenuItem(ICON_FA_LIGHTBULB " Point Light"))
       {
         Entity e = scene.CreateEntity("PointLight");
         scene.AddComponent<LightComponent>(e, LightType::Point);
         context.SelectEntity(e);
       }
 
-      if (ImGui::MenuItem("Spot Light"))
+      if (ImGui::MenuItem(ICON_FA_LIGHTBULB " Spot Light"))
       {
         Entity e = scene.CreateEntity("SpotLight");
         scene.AddComponent<LightComponent>(e, LightType::Spot);
         context.SelectEntity(e);
       }
 
-      if (ImGui::MenuItem("Directional Light"))
+      if (ImGui::MenuItem(ICON_FA_SUN " Directional Light"))
       {
         Entity e = scene.CreateEntity("DirectionalLight");
         scene.AddComponent<LightComponent>(e, LightType::Directional);
@@ -99,23 +100,20 @@ namespace YAEngine
       name = scene.GetName(entity);
 
     const char* icon = " ";
-    bool isLight = false;
     if (scene.HasComponent<CameraComponent>(entity))
-      icon = "[C]";
+      icon = ICON_FA_VIDEO;
     else if (scene.HasComponent<MeshComponent>(entity))
-      icon = "[M]";
+      icon = ICON_FA_DRAW_POLYGON;
     else if (scene.HasComponent<LightComponent>(entity))
-    {
-      icon = "   ";
-      isLight = true;
-    }
+      icon = ICON_FA_LIGHTBULB;
 
     char label[512];
     snprintf(label, sizeof(label), "%s %s", icon, name.c_str());
 
     ImGuiTreeNodeFlags flags =
       ImGuiTreeNodeFlags_OpenOnArrow |
-      ImGuiTreeNodeFlags_SpanFullWidth;
+      ImGuiTreeNodeFlags_SpanFullWidth |
+      ImGuiTreeNodeFlags_AllowOverlap;
 
     if (hc.firstChild == entt::null)
       flags |= ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen;
@@ -133,12 +131,6 @@ namespace YAEngine
     if (ImGui::IsItemClicked())
       context.SelectEntity(entity);
 
-    if (isLight)
-    {
-      ImGui::SameLine(ImGui::GetTreeNodeToLabelSpacing());
-      ImGui::TextColored(ImVec4(1.0f, 0.9f, 0.3f, 1.0f), "[L]");
-    }
-
     char popupId[64];
     snprintf(popupId, sizeof(popupId), "##entity_ctx_%u", static_cast<uint32_t>(entity));
     if (ImGui::BeginPopupContextItem(popupId))
@@ -146,7 +138,7 @@ namespace YAEngine
       if (scene.HasComponent<MeshComponent>(entity))
       {
         bool visible = !scene.HasComponent<HiddenTag>(entity);
-        if (ImGui::MenuItem(visible ? "Hide" : "Show"))
+        if (ImGui::MenuItem(visible ? ICON_FA_EYE_SLASH " Hide" : ICON_FA_EYE " Show"))
         {
           if (visible) scene.AddComponent<HiddenTag>(entity);
           else scene.RemoveComponent<HiddenTag>(entity);
@@ -159,7 +151,7 @@ namespace YAEngine
 
       ImGui::Separator();
 
-      if (ImGui::MenuItem("Delete"))
+      if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete"))
       {
         if (context.selectedEntity == entity)
           context.ClearSelection();
@@ -180,7 +172,7 @@ namespace YAEngine
       ImGui::SameLine(ImGui::GetWindowWidth() - 40);
       ImGui::PushID((void*)(uintptr_t)entity);
       ImGui::PushID("vis");
-      if (ImGui::SmallButton(visible ? "o" : "-"))
+      if (ImGui::SmallButton(visible ? ICON_FA_EYE : ICON_FA_EYE_SLASH))
       {
         if (visible) scene.AddComponent<HiddenTag>(entity);
         else scene.RemoveComponent<HiddenTag>(entity);
@@ -220,16 +212,26 @@ namespace YAEngine
     }
 
     ImGui::SetNextItemWidth(-1);
-    ImGui::InputTextWithHint("##filter", "Search...", m_FilterText, sizeof(m_FilterText));
+    ImGui::InputTextWithHint("##filter", ICON_FA_MAGNIFYING_GLASS " Search...", m_FilterText, sizeof(m_FilterText));
 
     ImGui::Separator();
 
-    auto hierarchyView = context.scene->GetView<LocalTransform, HierarchyComponent>();
-    hierarchyView.each([&](auto entity, LocalTransform&, HierarchyComponent& hc)
+    ImGuiTreeNodeFlags sceneFlags =
+      ImGuiTreeNodeFlags_DefaultOpen |
+      ImGuiTreeNodeFlags_OpenOnArrow |
+      ImGuiTreeNodeFlags_SpanFullWidth;
+
+    if (ImGui::TreeNodeEx(ICON_FA_GLOBE " Scene", sceneFlags))
     {
-      if (hc.parent == entt::null)
-        DrawEntity(context, entity);
-    });
+      auto hierarchyView = context.scene->GetView<LocalTransform, HierarchyComponent>();
+      hierarchyView.each([&](auto entity, LocalTransform&, HierarchyComponent& hc)
+      {
+        if (hc.parent == entt::null)
+          DrawEntity(context, entity);
+      });
+
+      ImGui::TreePop();
+    }
 
     if (ImGui::BeginPopupContextWindow("##OutlinerContextWindow", ImGuiPopupFlags_NoOpenOverItems | ImGuiPopupFlags_MouseButtonRight))
     {

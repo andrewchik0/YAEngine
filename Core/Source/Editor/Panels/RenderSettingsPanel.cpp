@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include "Editor/EditorContext.h"
+#include "Editor/Utils/EditorIcons.h"
 #include "Render/Render.h"
 
 namespace YAEngine
@@ -22,7 +23,7 @@ namespace YAEngine
       return;
     }
 
-    if (ImGui::CollapsingHeader("Display", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(ICON_FA_DISPLAY " Display", ImGuiTreeNodeFlags_DefaultOpen))
     {
       ImGui::DragFloat("Gamma", &context.render->GetGamma(), 0.01f, 0.0f, 10.0f);
       ImGui::DragFloat("Exposure", &context.render->GetExposure(), 0.01f, 0.0f, 10.0f);
@@ -35,14 +36,14 @@ namespace YAEngine
         context.render->SetDebugView(debugViewIndex);
     }
 
-    if (ImGui::CollapsingHeader("Post-Processing", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(ICON_FA_SLIDERS " Post-Processing", ImGuiTreeNodeFlags_DefaultOpen))
     {
       ImGui::Checkbox("SSAO", &context.render->GetSSAOEnabled());
       ImGui::Checkbox("SSR", &context.render->GetSSREnabled());
       ImGui::Checkbox("TAA", &context.render->GetTAAEnabled());
     }
 
-    if (ImGui::CollapsingHeader("Debug", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(ICON_FA_WRENCH " Debug", ImGuiTreeNodeFlags_DefaultOpen))
     {
       ImGui::Checkbox("Light Gizmos", &context.render->GetGizmosEnabled());
     }

@@ -3,6 +3,7 @@
 #include <imgui.h>
 
 #include "Editor/EditorContext.h"
+#include "Editor/Utils/EditorIcons.h"
 #include "Render/Render.h"
 #include "Utils/Timer.h"
 
@@ -67,7 +68,7 @@ namespace YAEngine
 
     // Render Stats section
     ImGui::Separator();
-    if (ImGui::CollapsingHeader("Render Stats", ImGuiTreeNodeFlags_DefaultOpen))
+    if (ImGui::CollapsingHeader(ICON_FA_CHART_BAR " Render Stats", ImGuiTreeNodeFlags_DefaultOpen))
     {
       if (context.render)
       {

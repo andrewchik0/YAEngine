@@ -85,6 +85,8 @@ namespace YAEngine
     colors[ImGuiCol_PlotLinesHovered]    = ImVec4(0.40f, 0.40f, 0.39f, 1.00f);
     colors[ImGuiCol_PlotHistogramHovered]= ImVec4(0.40f, 0.40f, 0.39f, 1.00f);
 
+    colors[ImGuiCol_TreeLines]            = ImVec4(0.55f, 0.55f, 0.53f, 0.60f);
+
     colors[ImGuiCol_DragDropTarget]      = ImVec4(0.45f, 0.45f, 0.43f, 0.90f);
     colors[ImGuiCol_DragDropTargetBg]    = ImVec4(0.22f, 0.22f, 0.21f, 0.90f);
     colors[ImGuiCol_NavCursor]           = ImVec4(0.40f, 0.40f, 0.39f, 0.80f);
@@ -93,5 +95,8 @@ namespace YAEngine
 
     colors[ImGuiCol_Text]                = ImVec4(0.91f, 0.91f, 0.89f, 1.00f);
     colors[ImGuiCol_TextDisabled]        = ImVec4(0.48f, 0.48f, 0.46f, 1.00f);
+
+    style.TreeLinesFlags = ImGuiTreeNodeFlags_DrawLinesToNodes;
+    style.TreeLinesSize  = 1.0f;
   }
 }
