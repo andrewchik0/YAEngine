@@ -161,5 +161,11 @@ if(YA_EDITOR)
     Source/Editor/GizmoRenderer.cpp
     Source/Editor/GlyphRasterizer.h
     Source/Editor/GlyphRasterizer.cpp
+    Source/Editor/ShaderCompiler.h
+    Source/Editor/ShaderCompiler.cpp
+    Source/Editor/ShaderDependencyGraph.h
+    Source/Editor/ShaderDependencyGraph.cpp
+    Source/Editor/ShaderHotReload.h
+    Source/Editor/ShaderHotReload.cpp
   )
 endif()

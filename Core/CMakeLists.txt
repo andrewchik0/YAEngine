@@ -45,6 +45,13 @@ target_compile_definitions(Core PRIVATE
 
 if(YA_EDITOR)
   target_compile_definitions(Core PUBLIC YA_EDITOR)
+  target_compile_definitions(Core PRIVATE
+    COMPILE_SHADERS_EXE="$<TARGET_FILE:CompileShaders>"
+    SHADER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Shaders"
+    SHADER_SHARED_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Shared"
+    GLSLC_PATH="${GLSLC_EXECUTABLE}"
+    SHADER_PERMUTATIONS_FILE="${SHADER_PERMUTATIONS_FILE}"
+  )
   target_link_libraries(Core PRIVATE nfd)
 endif()
 

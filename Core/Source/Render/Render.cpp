@@ -132,6 +132,7 @@ namespace YAEngine
     auto& ctx = m_Backend.GetContext();
 
 #ifdef YA_EDITOR
+    m_ShaderHotReload.Destroy();
     DestroySceneImGuiDescriptor();
     m_GizmoRenderer.Destroy(ctx);
 #endif
@@ -235,6 +236,8 @@ namespace YAEngine
         ResizeViewport();
       }
     }
+
+    m_ShaderHotReload.Update(frame.time);
 #endif
 
     auto imageIndex = m_Backend.BeginFrame();

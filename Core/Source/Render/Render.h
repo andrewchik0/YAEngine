@@ -13,6 +13,7 @@
 
 #ifdef YA_EDITOR
 #include "Editor/GizmoRenderer.h"
+#include "Editor/ShaderHotReload.h"
 #endif
 
 namespace YAEngine
@@ -215,6 +216,13 @@ namespace YAEngine
     void SetSelectedEntityPosition(const glm::vec3& pos) { b_HasSelectedEntity = true; m_SelectedEntityPosition = pos; }
     void ClearSelectedEntity() { b_HasSelectedEntity = false; }
     GizmoMode& GetGizmoMode() { return m_GizmoMode; }
+    ShaderHotReload& GetShaderHotReload() { return m_ShaderHotReload; }
+    void InitShaderHotReload(ThreadPool* threadPool);
+#endif
+
+  private:
+#ifdef YA_EDITOR
+    ShaderHotReload m_ShaderHotReload;
 #endif
   };
 }

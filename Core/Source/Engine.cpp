@@ -58,6 +58,10 @@ namespace YAEngine
 
     m_Render.Init(m_Window.Get(), renderSpecs);
 
+#ifdef YA_EDITOR
+    m_Render.InitShaderHotReload(&m_ThreadPool);
+#endif
+
     SceneSnapshot emptySnapshot;
     auto frame = MakeFrameContext(emptySnapshot);
     m_Render.Draw(frame);

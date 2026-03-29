@@ -30,6 +30,11 @@ namespace YAEngine
     m_PendingViewportHeight = h;
   }
 
+  void Render::InitShaderHotReload(ThreadPool* threadPool)
+  {
+    m_ShaderHotReload.Init(&m_PSOCache, m_Backend.GetContext().device, threadPool);
+  }
+
   void Render::ResizeViewport()
   {
     auto& ctx = m_Backend.GetContext();

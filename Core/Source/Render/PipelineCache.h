@@ -72,6 +72,10 @@ namespace YAEngine
 
     void Destroy();
 
+#ifdef YA_EDITOR
+    void RecreatePipelinesForShader(VkDevice device, const std::string& shaderFile);
+#endif
+
   private:
 
     VulkanPipeline& GetOrCreate(
@@ -92,6 +96,30 @@ namespace YAEngine
 
     std::vector<VulkanPipeline*> m_GraphicsPipelines;
     std::vector<VulkanComputePipeline*> m_ComputePipelines;
+
+#ifdef YA_EDITOR
+    struct GraphicsEntry
+    {
+      VulkanPipeline* pipeline;
+      PipelineCreateInfo info;
+      VkRenderPass renderPass;
+      VkPipelineCache vkCache;
+    };
+
+    struct ComputeEntry
+    {
+      VulkanComputePipeline* pipeline;
+      std::string shaderFile;
+      std::vector<VkDescriptorSetLayout> sets;
+      uint32_t pushConstantSize;
+      VkPipelineCache vkCache;
+    };
+
+    std::vector<GraphicsEntry> m_GraphicsEntries;
+    std::vector<ComputeEntry> m_ComputeEntries;
+    std::unordered_map<std::string, std::vector<PipelineHandle>> m_ShaderToGraphics;
+    std::unordered_map<std::string, std::vector<PipelineHandle>> m_ShaderToCompute;
+#endif
   };
 
 }

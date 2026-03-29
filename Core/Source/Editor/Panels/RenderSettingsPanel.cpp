@@ -46,6 +46,9 @@ namespace YAEngine
     if (ImGui::CollapsingHeader(ICON_FA_WRENCH " Debug", ImGuiTreeNodeFlags_DefaultOpen))
     {
       ImGui::Checkbox("Light Gizmos", &context.render->GetGizmosEnabled());
+
+      if (ImGui::Button(ICON_FA_ROTATE " Recompile Shaders"))
+        context.render->GetShaderHotReload().RecompileAll();
     }
 
     ImGui::End();

@@ -146,7 +146,19 @@ namespace YAEngine
     auto& pipeline = GetOrCreate(device, renderPass, info, vkCache);
     uint32_t index = static_cast<uint32_t>(m_GraphicsPipelines.size());
     m_GraphicsPipelines.push_back(&pipeline);
-    return { index };
+    PipelineHandle handle { index };
+
+#ifdef YA_EDITOR
+    m_GraphicsEntries.push_back({ &pipeline, info, renderPass, vkCache });
+    if (!info.vertexShaderFile.empty())
+      m_ShaderToGraphics[info.vertexShaderFile].push_back(handle);
+    if (!info.fragmentShaderFile.empty())
+      m_ShaderToGraphics[info.fragmentShaderFile].push_back(handle);
+    if (!info.geometryShaderFile.empty())
+      m_ShaderToGraphics[info.geometryShaderFile].push_back(handle);
+#endif
+
+    return handle;
   }
 
   PipelineHandle PipelineCache::RegisterCompute(
@@ -159,7 +171,14 @@ namespace YAEngine
     auto& pipeline = GetOrCreateCompute(device, shaderFile, sets, pushConstantSize, vkCache);
     uint32_t index = static_cast<uint32_t>(m_ComputePipelines.size());
     m_ComputePipelines.push_back(&pipeline);
-    return { index };
+    PipelineHandle handle { index };
+
+#ifdef YA_EDITOR
+    m_ComputeEntries.push_back({ &pipeline, shaderFile, sets, pushConstantSize, vkCache });
+    m_ShaderToCompute[shaderFile].push_back(handle);
+#endif
+
+    return handle;
   }
 
   VulkanPipeline& PipelineCache::Get(PipelineHandle handle)
@@ -184,6 +203,48 @@ namespace YAEngine
 
     m_GraphicsPipelines.clear();
     m_ComputePipelines.clear();
+
+#ifdef YA_EDITOR
+    m_GraphicsEntries.clear();
+    m_ComputeEntries.clear();
+    m_ShaderToGraphics.clear();
+    m_ShaderToCompute.clear();
+#endif
   }
+
+#ifdef YA_EDITOR
+  void PipelineCache::RecreatePipelinesForShader(VkDevice device, const std::string& shaderFile)
+  {
+    uint32_t count = 0;
+
+    auto gIt = m_ShaderToGraphics.find(shaderFile);
+    if (gIt != m_ShaderToGraphics.end())
+    {
+      for (auto handle : gIt->second)
+      {
+        auto& entry = m_GraphicsEntries[handle.index];
+        entry.pipeline->Destroy();
+        entry.pipeline->Init(device, entry.renderPass, entry.info, entry.vkCache);
+        ++count;
+      }
+    }
+
+    auto cIt = m_ShaderToCompute.find(shaderFile);
+    if (cIt != m_ShaderToCompute.end())
+    {
+      for (auto handle : cIt->second)
+      {
+        auto& entry = m_ComputeEntries[handle.index];
+        entry.pipeline->Destroy();
+        entry.pipeline->Init(device, entry.shaderFile, entry.sets, entry.pushConstantSize, entry.vkCache);
+        ++count;
+      }
+    }
+
+    if (count > 0)
+      YA_LOG_INFO("Render", "Recreated %u pipeline(s) for shader '%s'", count, shaderFile.c_str());
+  }
+
+#endif
 
 }
