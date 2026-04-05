@@ -4,6 +4,8 @@
 
 #include <ImGui/imgui_impl_vulkan.h>
 
+#include "TileCullData.h"
+
 namespace YAEngine
 {
   void Render::CreateSceneImGuiDescriptor()
@@ -56,6 +58,19 @@ namespace YAEngine
 
     CreateSceneImGuiDescriptor();
     CreateHiZResources();
+
+    // Resize tile light buffer and update descriptor sets that reference it
+    {
+      uint32_t tileCountX = (w + TILE_SIZE - 1) / TILE_SIZE;
+      uint32_t tileCountY = (h + TILE_SIZE - 1) / TILE_SIZE;
+      m_TileLightBuffer.Resize(ctx, tileCountX, tileCountY);
+      VkDeviceSize tileBufferSize = tileCountX * tileCountY * sizeof(TileData);
+      for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+      {
+        m_DeferredLightingLightDescriptorSets[i].WriteStorageBuffer(1,
+          m_TileLightBuffer.GetBuffer(uint32_t(i)), tileBufferSize);
+      }
+    }
 
     // Recreate TAA external framebuffers
     for (auto& fb : m_TAAFramebuffers)

@@ -17,13 +17,13 @@ layout(set = 1, binding = 5) uniform sampler2D hiZTexture;
 const int MAX_ITERATIONS = 128;
 const int REFINEMENT_STEPS = 8;
 const float MAX_RAY_DISTANCE = 30.0;
-const float SELF_INTERSECT_DIST = 0.02;
+const float SELF_INTERSECT_DIST = 0.04;
 const float NORMAL_BIAS = 0.02;
 const float MAX_ROUGHNESS = 0.6;
 const float EDGE_FADE_START = 0.8;
-const float DEPTH_EPSILON = 0.9999;
+const float DEPTH_EPSILON = 1.0;
 const float SAME_SURFACE_THRESHOLD = 0.99;
-const float MAX_THICKNESS = 2.0;
+const float MAX_THICKNESS = 4.0;
 
 // --- Main ---
 void main()
@@ -245,7 +245,7 @@ void main()
   float dR = abs(hitLinearDepth - linearizeDepth(textureLod(hiZTexture, hitUV + vec2(0.0, texelSize.y), 0.0).r));
   float dL = abs(hitLinearDepth - linearizeDepth(textureLod(hiZTexture, hitUV - vec2(0.0, texelSize.y), 0.0).r));
   float maxDepthDiff = max(max(dU, dD), max(dR, dL));
-  float silhouetteFade = 1.0 - smoothstep(0.01, 0.3, maxDepthDiff);
+  float silhouetteFade = 1.0 - smoothstep(0.02, 0.6, maxDepthDiff);
 
   // Contact fade
   float hitScreenDist = hitT * rayScreenLen;

@@ -304,6 +304,27 @@ namespace YAEngine
     m_IBLDescriptorSet.WriteCombinedImageSampler(2, m_NoneTexture.GetView(), m_NoneTexture.GetSampler());
     m_IBLDescriptorSet.WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
 
+    // Deferred lighting set 2: lights SSBO (binding 0) + tile light indices SSBO (binding 1)
+    m_DeferredLightingLightDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      SetDescription dlLightDesc = {
+        .set = 2,
+        .bindings = {
+          {
+            { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          }
+        }
+      };
+      m_DeferredLightingLightDescriptorSets[i].Init(ctx, dlLightDesc);
+      m_DeferredLightingLightDescriptorSets[i].WriteStorageBuffer(0,
+        m_LightBuffer.GetBuffer(uint32_t(i)), sizeof(LightBuffer));
+      m_DeferredLightingLightDescriptorSets[i].WriteStorageBuffer(1,
+        m_TileLightBuffer.GetBuffer(uint32_t(i)),
+        m_TileLightBuffer.GetTileCountX() * m_TileLightBuffer.GetTileCountY() * sizeof(TileData));
+    }
+
     PipelineCreateInfo deferredInfo = {
       .fragmentShaderFile = "deferred_lighting.frag",
       .vertexShaderFile = "quad.vert",
@@ -312,11 +333,38 @@ namespace YAEngine
       .sets = std::vector({
         m_FrameUniformBuffer.GetLayout(),
         m_DeferredLightingDescriptorSets[0].GetLayout(),
-        m_LightBuffer.GetLayout(),
+        m_DeferredLightingLightDescriptorSets[0].GetLayout(),
         m_IBLDescriptorSet.GetLayout(),
       })
     };
     m_DeferredLightingPipeline = m_PSOCache.Register(ctx.device, deferredRP, deferredInfo, pipelineCache);
+
+    // Light cull compute pipeline — descriptor sets
+    m_LightCullInputDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      SetDescription lcDesc = {
+        .set = 1,
+        .bindings = {
+          {
+            { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+          }
+        }
+      };
+      m_LightCullInputDescriptorSets[i].Init(ctx, lcDesc);
+      m_LightCullInputDescriptorSets[i].WriteStorageBuffer(0,
+        m_LightBuffer.GetBuffer(uint32_t(i)), sizeof(LightBuffer));
+    }
+
+    m_LightCullPipeline = m_PSOCache.RegisterCompute(ctx.device, "light_cull.comp",
+      {
+        m_FrameUniformBuffer.GetLayout(),
+        m_LightCullInputDescriptorSets[0].GetLayout(),
+        m_TileLightBuffer.GetLayout(),
+      },
+      0,
+      pipelineCache);
 
     // Hi-Z compute pipeline
     SetDescription hizSetDesc = {

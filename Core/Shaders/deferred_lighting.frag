@@ -19,13 +19,19 @@ layout(std430, set = 2, binding = 0) readonly buffer LightBufferSSBO
   LightBuffer u_Lights;
 };
 
+#include "../Shared/TileCullData.h"
+layout(std430, set = 2, binding = 1) readonly buffer TileLightSSBO
+{
+  TileData u_Tiles[];
+};
+
 // IBL (set 3)
 layout(set = 3, binding = 0) uniform samplerCube irradianceCubemap;
 layout(set = 3, binding = 1) uniform samplerCube prefilterTexture;
 layout(set = 3, binding = 2) uniform sampler2D brdfTexture;
 layout(set = 3, binding = 3) uniform samplerCube skyboxCubemap;
 
-const float DEPTH_EPSILON = 0.9999;
+const float DEPTH_EPSILON = 1.0;
 const int SHADING_PBR = 0;
 const int SHADING_UNLIT = 1;
 
@@ -72,7 +78,7 @@ void main()
   if (u_Frame.ssaoEnabled == 0)
     ao = 1.0;
 
-  // PBR IBL lighting (moved from old shader.frag)
+  // PBR IBL lighting
   vec3 viewVec = normalize(u_Frame.cameraPosition - worldPos);
   float NdotV = clamp(abs(dot(normal, viewVec)), 0.01, 0.99);
   vec3 f0 = mix(vec3(0.04), albedo, metallic);
@@ -93,11 +99,11 @@ void main()
 
   vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
 
-  // Analytical lights
+  // Analytical lights — tile-culled
   vec3 Lo = vec3(0.0);
   float alpha = roughness * roughness;
 
-  // Directional light
+  // Directional light (not tile-culled — always applied)
   {
     vec3 L = normalize(-u_Lights.directional.directionIntensity.xyz);
     float intensity = u_Lights.directional.directionIntensity.w;
@@ -105,9 +111,16 @@ void main()
     Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
   }
 
-  // Point lights
-  for (int i = 0; i < u_Lights.pointLightCount; i++)
+  // Look up tile light list
+  ivec2 tileCoord = ivec2(gl_FragCoord.xy) / TILE_SIZE;
+  int tileIndex = tileCoord.y * u_Frame.tileCountX + tileCoord.x;
+  uint tilePtCount = u_Tiles[tileIndex].pointCount;
+  uint tileSpCount = u_Tiles[tileIndex].spotCount;
+
+  // Point lights (tile-culled)
+  for (uint t = 0; t < tilePtCount; t++)
   {
+    int i = int(u_Tiles[tileIndex].indices[t]);
     vec3 lightPos = u_Lights.pointLights[i].positionRadius.xyz;
     float lightRadius = u_Lights.pointLights[i].positionRadius.w;
 
@@ -123,9 +136,10 @@ void main()
     Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
   }
 
-  // Spot lights
-  for (int i = 0; i < u_Lights.spotLightCount; i++)
+  // Spot lights (tile-culled)
+  for (uint t = 0; t < tileSpCount; t++)
   {
+    int i = int(u_Tiles[tileIndex].indices[tilePtCount + t]);
     vec3 lightPos = u_Lights.spotLights[i].positionRadius.xyz;
     float lightRadius = u_Lights.spotLights[i].positionRadius.w;
 

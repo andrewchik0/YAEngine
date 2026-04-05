@@ -173,7 +173,47 @@ namespace YAEngine
       }
     });
 
-    // 5. Deferred Lighting — fullscreen IBL computation from G-buffer
+    // 5. Light Cull — tiled light culling (compute)
+    m_LightCullPassIndex = m_Graph.AddPass({
+      .name = "LightCull",
+      .inputs = {m_MainDepth},
+      .isCompute = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+
+        // Write depth texture into light cull input descriptor set
+        m_LightCullInputDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        auto& pipeline = m_PSOCache.GetCompute(m_LightCullPipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_LightCullInputDescriptorSets[currentFrame].Get()}, 1);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_TileLightBuffer.GetDescriptorSet(currentFrame)}, 2);
+
+        pipeline.Dispatch(ctx.cmd,
+          m_TileLightBuffer.GetTileCountX(),
+          m_TileLightBuffer.GetTileCountY(), 1);
+
+        // Buffer barrier: compute write -> fragment read
+        VkBufferMemoryBarrier bufferBarrier {};
+        bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        bufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferBarrier.buffer = m_TileLightBuffer.GetBuffer(currentFrame);
+        bufferBarrier.offset = 0;
+        bufferBarrier.size = VK_WHOLE_SIZE;
+        vkCmdPipelineBarrier(ctx.cmd,
+          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+          0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+      }
+    });
+
+    // 6. Deferred Lighting — fullscreen IBL + analytical lights from G-buffer
     m_DeferredLightingPassIndex = m_Graph.AddPass({
       .name = "DeferredLighting",
       .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_SSAOBlurred},
@@ -199,7 +239,7 @@ namespace YAEngine
 
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_DeferredLightingDescriptorSets[currentFrame].Get()}, 1);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_LightBuffer.GetDescriptorSet(currentFrame)}, 2);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_DeferredLightingLightDescriptorSets[currentFrame].Get()}, 2);
         pipeline.BindDescriptorSets(ctx.cmd, {m_IBLDescriptorSet.Get()}, 3);
         DrawQuad();
       }

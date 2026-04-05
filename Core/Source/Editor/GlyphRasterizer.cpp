@@ -12,7 +12,10 @@ namespace YAEngine
 
   bool GlyphRasterizer::Init(const std::string& fontPath)
   {
-    FILE* f = fopen(fontPath.c_str(), "rb");
+    FILE* f = nullptr;
+
+    fopen_s(&f, fontPath.c_str(), "rb");
+
     if (!f)
     {
       YA_LOG_ERROR("Editor", "GlyphRasterizer: failed to open font file: %s", fontPath.c_str());

@@ -10,6 +10,7 @@
 #include "SSAOKernel.h"
 
 #include "Utils/Utils.h"
+#include "TileCullData.h"
 
 #include <random>
 
@@ -48,6 +49,12 @@ namespace YAEngine
     m_DefaultMaterial.Init(ctx, m_NoneTexture);
     m_FrameUniformBuffer.Init(ctx);
     m_LightBuffer.Init(ctx);
+
+    {
+      uint32_t tileCountX = (uint32_t(width) + TILE_SIZE - 1) / TILE_SIZE;
+      uint32_t tileCountY = (uint32_t(height) + TILE_SIZE - 1) / TILE_SIZE;
+      m_TileLightBuffer.Init(ctx, tileCountX, tileCountY);
+    }
 
     // Generate SSAO noise texture (4x4 random tangent-space rotations)
     {
@@ -167,6 +174,10 @@ namespace YAEngine
       set.Destroy();
     for (auto& set : m_DeferredLightingDescriptorSets)
       set.Destroy();
+    for (auto& set : m_DeferredLightingLightDescriptorSets)
+      set.Destroy();
+    for (auto& set : m_LightCullInputDescriptorSets)
+      set.Destroy();
     m_IBLDescriptorSet.Destroy();
 
     m_SSAONoise.Destroy(ctx);
@@ -175,6 +186,7 @@ namespace YAEngine
     m_InstanceBuffer.Destroy(ctx);
     m_PSOCache.Destroy();
     m_DefaultMaterial.Destroy(ctx);
+    m_TileLightBuffer.Destroy(ctx);
     m_LightBuffer.Destroy(ctx);
     m_FrameUniformBuffer.Destroy(ctx);
 
@@ -207,6 +219,19 @@ namespace YAEngine
 
     // Recreate Hi-Z per-mip views and descriptor sets
     CreateHiZResources();
+
+    // Resize tile light buffer and update descriptor sets that reference it
+    {
+      uint32_t tileCountX = (actualExtent.width + TILE_SIZE - 1) / TILE_SIZE;
+      uint32_t tileCountY = (actualExtent.height + TILE_SIZE - 1) / TILE_SIZE;
+      m_TileLightBuffer.Resize(ctx, tileCountX, tileCountY);
+      VkDeviceSize tileBufferSize = tileCountX * tileCountY * sizeof(TileData);
+      for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+      {
+        m_DeferredLightingLightDescriptorSets[i].WriteStorageBuffer(1,
+          m_TileLightBuffer.GetBuffer(uint32_t(i)), tileBufferSize);
+      }
+    }
 
     // Recreate TAA external framebuffers
     for (auto& fb : m_TAAFramebuffers)
@@ -263,6 +288,8 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.screenWidth = int(frame.windowWidth);
     m_FrameUniformBuffer.uniforms.screenHeight = int(frame.windowHeight);
 #endif
+    m_FrameUniformBuffer.uniforms.tileCountX = (m_FrameUniformBuffer.uniforms.screenWidth + TILE_SIZE - 1) / TILE_SIZE;
+    m_FrameUniformBuffer.uniforms.tileCountY = (m_FrameUniformBuffer.uniforms.screenHeight + TILE_SIZE - 1) / TILE_SIZE;
     m_FrameUniformBuffer.uniforms.ssaoEnabled = b_SSAOEnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.ssrEnabled = b_SSREnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;

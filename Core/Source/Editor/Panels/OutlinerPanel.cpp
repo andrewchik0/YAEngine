@@ -121,6 +121,7 @@ namespace YAEngine
     if (entity == context.selectedEntity)
       flags |= ImGuiTreeNodeFlags_Selected;
 
+    ImGui::SetNextItemAllowOverlap();
     bool opened = ImGui::TreeNodeEx(
       (void*)(uint64_t)entity,
       flags,

@@ -1,0 +1,179 @@
+#include "../Shared/TileCullData.h"
+
+layout(local_size_x = TILE_SIZE, local_size_y = TILE_SIZE) in;
+
+#include "common.glsl"
+#include "utils.glsl"
+#include "../Shared/LightData.h"
+
+// Set 1: inputs
+layout(std430, set = 1, binding = 0) readonly buffer LightBufferSSBO
+{
+  LightBuffer u_Lights;
+};
+layout(set = 1, binding = 1) uniform sampler2D depthTexture;
+
+// Set 2: output
+layout(std430, set = 2, binding = 0) writeonly buffer TileLightSSBO
+{
+  TileData u_Tiles[];
+};
+
+shared uint s_minDepthBits;
+shared uint s_maxDepthBits;
+shared uint s_pointCount;
+shared uint s_spotCount;
+shared uint s_pointIndices[MAX_LIGHTS_PER_TILE / 2];
+shared uint s_spotIndices[MAX_LIGHTS_PER_TILE / 2];
+
+// Test sphere against 6 frustum planes (returns true if sphere is inside or intersects)
+bool sphereInsideFrustum(vec3 center, float radius, vec4 planes[6])
+{
+  for (int i = 0; i < 6; i++)
+  {
+    if (dot(planes[i].xyz, center) + planes[i].w < -radius)
+      return false;
+  }
+  return true;
+}
+
+void main()
+{
+  uint threadIndex = gl_LocalInvocationIndex;
+  ivec2 tileId = ivec2(gl_WorkGroupID.xy);
+  ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+
+  // Initialize shared memory
+  if (threadIndex == 0)
+  {
+    s_minDepthBits = 0xFFFFFFFFu;
+    s_maxDepthBits = 0;
+    s_pointCount = 0;
+    s_spotCount = 0;
+  }
+  barrier();
+
+  // Read depth and compute linear Z
+  float depth = 1.0;
+  if (pixelCoord.x < u_Frame.screenWidth && pixelCoord.y < u_Frame.screenHeight)
+  {
+    vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(u_Frame.screenWidth, u_Frame.screenHeight);
+    depth = texture(depthTexture, uv).r;
+  }
+  float linearZ = linearizeDepth(depth);
+
+  // Skip sky pixels for min/max (cleared depth = 1.0)
+  if (depth < 1.0)
+  {
+    atomicMin(s_minDepthBits, floatBitsToUint(linearZ));
+    atomicMax(s_maxDepthBits, floatBitsToUint(linearZ));
+  }
+  barrier();
+
+  // Build tile frustum planes in view space
+  float minZ = uintBitsToFloat(s_minDepthBits);
+  float maxZ = uintBitsToFloat(s_maxDepthBits);
+
+  // If all pixels are sky, no lights affect this tile
+  if (s_minDepthBits == 0xFFFFFFFFu)
+  {
+    if (threadIndex == 0)
+    {
+      uint tileIndex = tileId.y * u_Frame.tileCountX + tileId.x;
+      u_Tiles[tileIndex].pointCount = 0;
+      u_Tiles[tileIndex].spotCount = 0;
+    }
+    return;
+  }
+
+  // Compute tile screen bounds in NDC [-1, 1]
+  vec2 tileMin = vec2(tileId) * float(TILE_SIZE) / vec2(u_Frame.screenWidth, u_Frame.screenHeight) * 2.0 - 1.0;
+  vec2 tileMax = vec2(tileId + ivec2(1)) * float(TILE_SIZE) / vec2(u_Frame.screenWidth, u_Frame.screenHeight) * 2.0 - 1.0;
+
+  // Reconstruct 4 corner rays in view space at z=1
+  vec4 corners[4];
+  corners[0] = u_Frame.invProj * vec4(tileMin.x, tileMin.y, 0.0, 1.0);
+  corners[1] = u_Frame.invProj * vec4(tileMax.x, tileMin.y, 0.0, 1.0);
+  corners[2] = u_Frame.invProj * vec4(tileMax.x, tileMax.y, 0.0, 1.0);
+  corners[3] = u_Frame.invProj * vec4(tileMin.x, tileMax.y, 0.0, 1.0);
+  for (int i = 0; i < 4; i++)
+    corners[i] /= corners[i].w;
+
+  // Build 6 frustum planes (normals point inward)
+  vec4 planes[6];
+
+  // Left: cross(corner3, corner0) — swapped for Vulkan Y-flip
+  planes[0].xyz = normalize(cross(corners[3].xyz, corners[0].xyz));
+  planes[0].w = 0.0;
+
+  // Right: cross(corner1, corner2)
+  planes[1].xyz = normalize(cross(corners[1].xyz, corners[2].xyz));
+  planes[1].w = 0.0;
+
+  // Bottom: cross(corner0, corner1)
+  planes[2].xyz = normalize(cross(corners[0].xyz, corners[1].xyz));
+  planes[2].w = 0.0;
+
+  // Top: cross(corner2, corner3)
+  planes[3].xyz = normalize(cross(corners[2].xyz, corners[3].xyz));
+  planes[3].w = 0.0;
+
+  // Near: normal = (0,0,-1), d = minZ (looking down -Z in view space)
+  planes[4] = vec4(0.0, 0.0, -1.0, -minZ);
+
+  // Far: normal = (0,0,1), d = -maxZ
+  planes[5] = vec4(0.0, 0.0, 1.0, maxZ);
+
+  // Cull point lights
+  uint pointLightCount = uint(u_Lights.pointLightCount);
+  for (uint i = threadIndex; i < pointLightCount; i += TILE_SIZE * TILE_SIZE)
+  {
+    vec3 worldPos = u_Lights.pointLights[i].positionRadius.xyz;
+    float radius = u_Lights.pointLights[i].positionRadius.w;
+
+    vec3 viewPos = (u_Frame.view * vec4(worldPos, 1.0)).xyz;
+
+    if (sphereInsideFrustum(viewPos, radius, planes))
+    {
+      uint slot = atomicAdd(s_pointCount, 1);
+      if (slot < MAX_LIGHTS_PER_TILE / 2)
+        s_pointIndices[slot] = i;
+    }
+  }
+
+  // Cull spot lights (bounding sphere approximation)
+  uint spotLightCount = uint(u_Lights.spotLightCount);
+  for (uint i = threadIndex; i < spotLightCount; i += TILE_SIZE * TILE_SIZE)
+  {
+    vec3 worldPos = u_Lights.spotLights[i].positionRadius.xyz;
+    float radius = u_Lights.spotLights[i].positionRadius.w;
+
+    vec3 viewPos = (u_Frame.view * vec4(worldPos, 1.0)).xyz;
+
+    if (sphereInsideFrustum(viewPos, radius, planes))
+    {
+      uint slot = atomicAdd(s_spotCount, 1);
+      if (slot < MAX_LIGHTS_PER_TILE / 2)
+        s_spotIndices[slot] = i;
+    }
+  }
+
+  barrier();
+
+  // Write results to output buffer
+  if (threadIndex == 0)
+  {
+    uint tileIndex = tileId.y * u_Frame.tileCountX + tileId.x;
+    uint finalPointCount = min(s_pointCount, MAX_LIGHTS_PER_TILE / 2);
+    uint finalSpotCount = min(s_spotCount, MAX_LIGHTS_PER_TILE / 2);
+
+    u_Tiles[tileIndex].pointCount = finalPointCount;
+    u_Tiles[tileIndex].spotCount = finalSpotCount;
+
+    for (uint i = 0; i < finalPointCount; i++)
+      u_Tiles[tileIndex].indices[i] = s_pointIndices[i];
+
+    for (uint i = 0; i < finalSpotCount; i++)
+      u_Tiles[tileIndex].indices[finalPointCount + i] = s_spotIndices[i];
+  }
+}

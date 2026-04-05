@@ -10,6 +10,7 @@
 #include "VulkanStorageBuffer.h"
 #include "VulkanUniformBuffer.h"
 #include "LightStorageBuffer.h"
+#include "TileLightBuffer.h"
 
 #ifdef YA_EDITOR
 #include "Editor/GizmoRenderer.h"
@@ -117,6 +118,7 @@ namespace YAEngine
     uint32_t m_HiZPassIndex {};
     uint32_t m_SSAOBlurHPassIndex {};
     uint32_t m_SSAOBlurVPassIndex {};
+    uint32_t m_LightCullPassIndex {};
     uint32_t m_DeferredLightingPassIndex {};
     uint32_t m_SSRPassIndex {};
     uint32_t m_TAAPassIndex {};
@@ -137,6 +139,7 @@ namespace YAEngine
 
     FrameUniformBuffer m_FrameUniformBuffer {};
     LightStorageBuffer m_LightBuffer;
+    TileLightBuffer m_TileLightBuffer;
 
     std::vector<VulkanDescriptorSet> m_SwapChainDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
@@ -144,7 +147,9 @@ namespace YAEngine
     std::vector<VulkanDescriptorSet> m_SSAOPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSAOBlurHPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSAOBlurVPassDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_LightCullInputDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_DeferredLightingLightDescriptorSets;
     VulkanDescriptorSet m_IBLDescriptorSet;
 
     VulkanDescriptorSet m_InstanceDescriptorSet;
@@ -160,6 +165,7 @@ namespace YAEngine
     PipelineHandle m_SSAOBlurHPipeline {};
     PipelineHandle m_SSAOBlurVPipeline {};
     PipelineHandle m_HiZPipeline {};
+    PipelineHandle m_LightCullPipeline {};
     PipelineHandle m_DeferredLightingPipeline {};
 
     VulkanMaterial m_DefaultMaterial {};
