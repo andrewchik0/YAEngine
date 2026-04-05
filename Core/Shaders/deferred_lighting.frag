@@ -25,6 +25,9 @@ layout(std430, set = 2, binding = 1) readonly buffer TileLightSSBO
   TileData u_Tiles[];
 };
 
+// Shadows (set 2, bindings 2-3)
+#include "shadow.glsl"
+
 // IBL (set 3)
 layout(set = 3, binding = 0) uniform samplerCube irradianceCubemap;
 layout(set = 3, binding = 1) uniform samplerCube prefilterTexture;
@@ -108,6 +111,10 @@ void main()
     vec3 L = normalize(-u_Lights.directional.directionIntensity.xyz);
     float intensity = u_Lights.directional.directionIntensity.w;
     vec3 radiance = u_Lights.directional.colorPad.rgb * intensity;
+
+    float shadowFactor = calculateCSMShadow(worldPos, -viewPos.z, normal);
+    radiance *= shadowFactor;
+
     Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
   }
 

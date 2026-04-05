@@ -28,11 +28,21 @@ namespace YAEngine
     float farPlane = 1000.0f;
   };
 
+  struct DirectionalShadowData
+  {
+    glm::vec3 direction { 0.0f, -1.0f, 0.0f };
+    glm::vec3 position { 0.0f };
+    bool castShadow = false;
+    float shadowBias = 0.005f;
+    float normalBias = 0.02f;
+  };
+
   struct SceneSnapshot
   {
     std::vector<RenderObject> objects;
     uint32_t visibleCount = 0;
     CameraData camera;
     CubeMapHandle skybox;
+    DirectionalShadowData directionalShadow;
   };
 }

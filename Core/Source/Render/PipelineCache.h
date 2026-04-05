@@ -17,6 +17,7 @@ namespace YAEngine
     bool doubleSided = false;
     VkCompareOp compareOp = VK_COMPARE_OP_LESS;
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    bool depthBiasEnable = false;
     uint32_t colorAttachmentCount = 1;
     uint32_t pushConstantSize = 0;
     std::string vertexInputFormat;

@@ -259,6 +259,7 @@ public:
           .type = YAEngine::LightType::Directional,
           .color = glm::vec3(1.0f, 0.98f, 0.9f),
           .intensity = 1.5f,
+          .castShadow = true,
         });
       }
 

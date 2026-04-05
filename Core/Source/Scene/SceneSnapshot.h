@@ -109,6 +109,11 @@ namespace YAEngine
           {
             lights.directional.directionIntensity = glm::vec4(forward, light.intensity);
             lights.directional.colorPad = glm::vec4(light.color, 0.0f);
+            snapshot.directionalShadow.direction = forward;
+            snapshot.directionalShadow.position = position;
+            snapshot.directionalShadow.castShadow = light.castShadow;
+            snapshot.directionalShadow.shadowBias = light.shadowBias;
+            snapshot.directionalShadow.normalBias = light.normalBias;
             hasDirectional = true;
           }
           break;

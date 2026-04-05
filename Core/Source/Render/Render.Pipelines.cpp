@@ -52,6 +52,32 @@ namespace YAEngine
     depthInfo.doubleSided = true;
     m_DepthPipelines[3] = m_PSOCache.Register(ctx.device, depthRP, depthInfo, pipelineCache);
 
+    // Shadow pipelines (depth-only with depth bias, using shadow atlas render pass)
+    VkRenderPass shadowRP = m_ShadowManager.GetAtlas().GetRenderPass();
+    {
+      PipelineCreateInfo shadowInfo = {
+        .vertexShaderFile = "csm_shadow.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int) + sizeof(int),
+        .colorAttachmentCount = 0,
+        .vertexInputFormat = "f3f2f3f4",
+        .sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout() })
+      };
+      shadowInfo.depthBiasEnable = true;
+
+      // [0] normal, [1] doubleSided
+      m_ShadowPipelines[0] = m_PSOCache.Register(ctx.device, shadowRP, shadowInfo, pipelineCache);
+      shadowInfo.doubleSided = true;
+      m_ShadowPipelines[1] = m_PSOCache.Register(ctx.device, shadowRP, shadowInfo, pipelineCache);
+
+      // [2] instanced, [3] instanced+doubleSided
+      shadowInfo.doubleSided = false;
+      shadowInfo.vertexShaderFile = "csm_shadow_instanced.vert";
+      shadowInfo.sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout(), m_InstanceDescriptorSet.GetLayout() });
+      m_ShadowPipelines[2] = m_PSOCache.Register(ctx.device, shadowRP, shadowInfo, pipelineCache);
+      shadowInfo.doubleSided = true;
+      m_ShadowPipelines[3] = m_PSOCache.Register(ctx.device, shadowRP, shadowInfo, pipelineCache);
+    }
+
     VkRenderPass mainRP = m_Graph.GetPassRenderPass(m_GBufferPassIndex);
 
     PipelineCreateInfo forwardInfo = {
@@ -314,6 +340,8 @@ namespace YAEngine
           {
             { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 2, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
@@ -323,6 +351,11 @@ namespace YAEngine
       m_DeferredLightingLightDescriptorSets[i].WriteStorageBuffer(1,
         m_TileLightBuffer.GetBuffer(uint32_t(i)),
         m_TileLightBuffer.GetTileCountX() * m_TileLightBuffer.GetTileCountY() * sizeof(TileData));
+      m_DeferredLightingLightDescriptorSets[i].WriteUniformBuffer(2,
+        m_ShadowManager.GetShadowUBOBuffer(uint32_t(i)), sizeof(ShadowBuffer));
+      m_DeferredLightingLightDescriptorSets[i].WriteCombinedImageSampler(3,
+        m_ShadowManager.GetAtlas().GetView(), m_ShadowManager.GetAtlas().GetSampler(),
+        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
     }
 
     PipelineCreateInfo deferredInfo = {

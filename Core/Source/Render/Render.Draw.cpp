@@ -183,35 +183,38 @@ namespace YAEngine
     auto cmd = m_Backend.GetCurrentCommandBuffer();
     auto& meshManager = frame.assets.Meshes();
 
-    m_DepthDrawCommands.clear();
-
-    uint32_t visibleCount = frame.snapshot.visibleCount;
-    for (uint32_t i = 0; i < visibleCount; i++)
+    // Depth draw commands are already collected and sorted in RenderShadowMaps
+    // (called before graph execute). If they're empty, collect them here.
+    if (m_DepthDrawCommands.empty())
     {
-      auto& obj = frame.snapshot.objects[i];
-      if (obj.noShading) continue;
-
-      m_DepthDrawCommands.push_back({
-        .instanced = (obj.instanceData != nullptr),
-        .doubleSided = obj.doubleSided,
-        .noShading = false,
-        .materialIndex = 0,
-        .materialGeneration = 0,
-        .meshIndex = obj.mesh.index,
-        .meshGeneration = obj.mesh.generation,
-        .worldTransform = obj.worldTransform,
-        .instanceData = obj.instanceData,
-        .instanceOffset = obj.instanceOffset,
-      });
-    }
-
-    std::sort(m_DepthDrawCommands.begin(), m_DepthDrawCommands.end(),
-      [](const DrawCommand& a, const DrawCommand& b)
+      uint32_t visibleCount = frame.snapshot.visibleCount;
+      for (uint32_t i = 0; i < visibleCount; i++)
       {
-        uint8_t ka = a.SortKey(), kb = b.SortKey();
-        if (ka != kb) return ka < kb;
-        return a.meshIndex < b.meshIndex;
-      });
+        auto& obj = frame.snapshot.objects[i];
+        if (obj.noShading) continue;
+
+        m_DepthDrawCommands.push_back({
+          .instanced = (obj.instanceData != nullptr),
+          .doubleSided = obj.doubleSided,
+          .noShading = false,
+          .materialIndex = 0,
+          .materialGeneration = 0,
+          .meshIndex = obj.mesh.index,
+          .meshGeneration = obj.mesh.generation,
+          .worldTransform = obj.worldTransform,
+          .instanceData = obj.instanceData,
+          .instanceOffset = obj.instanceOffset,
+        });
+      }
+
+      std::sort(m_DepthDrawCommands.begin(), m_DepthDrawCommands.end(),
+        [](const DrawCommand& a, const DrawCommand& b)
+        {
+          uint8_t ka = a.SortKey(), kb = b.SortKey();
+          if (ka != kb) return ka < kb;
+          return a.meshIndex < b.meshIndex;
+        });
+    }
 
     uint8_t lastSortKey = UINT8_MAX;
     VulkanPipeline* currentPipeline = nullptr;
@@ -249,6 +252,136 @@ namespace YAEngine
       auto& vb = meshManager.GetVertexBuffer(meshHandle);
       vb.Draw(cmd, instanceCount);
     }
+  }
+
+  void Render::RenderShadowMaps(FrameContext& frame)
+  {
+    // Collect and sort depth draw commands (shared with DrawMeshesDepthOnly)
+    m_DepthDrawCommands.clear();
+    uint32_t visibleCount = frame.snapshot.visibleCount;
+    for (uint32_t i = 0; i < visibleCount; i++)
+    {
+      auto& obj = frame.snapshot.objects[i];
+      if (obj.noShading) continue;
+
+      m_DepthDrawCommands.push_back({
+        .instanced = (obj.instanceData != nullptr),
+        .doubleSided = obj.doubleSided,
+        .noShading = false,
+        .materialIndex = 0,
+        .materialGeneration = 0,
+        .meshIndex = obj.mesh.index,
+        .meshGeneration = obj.mesh.generation,
+        .worldTransform = obj.worldTransform,
+        .instanceData = obj.instanceData,
+        .instanceOffset = obj.instanceOffset,
+      });
+    }
+
+    std::sort(m_DepthDrawCommands.begin(), m_DepthDrawCommands.end(),
+      [](const DrawCommand& a, const DrawCommand& b)
+      {
+        uint8_t ka = a.SortKey(), kb = b.SortKey();
+        if (ka != kb) return ka < kb;
+        return a.meshIndex < b.meshIndex;
+      });
+
+    if (!b_ShadowsEnabled || !frame.snapshot.directionalShadow.castShadow)
+    {
+      m_ShadowManager.SetEnabled(false);
+      m_ShadowManager.SetUp(m_Backend.GetCurrentFrameIndex());
+      return;
+    }
+
+    auto& cam = frame.snapshot.camera;
+    auto& shadow = frame.snapshot.directionalShadow;
+
+    m_ShadowManager.ComputeCascades(
+      m_FrameUniformBuffer.uniforms.view,
+      m_PrevProj, // unjittered projection
+      cam.nearPlane, cam.farPlane,
+      shadow.direction,
+      shadow.shadowBias, shadow.normalBias);
+
+    auto currentFrame = m_Backend.GetCurrentFrameIndex();
+    m_ShadowManager.SetUp(currentFrame);
+
+    auto cmd = m_Backend.GetCurrentCommandBuffer();
+    auto& atlas = m_ShadowManager.GetAtlas();
+
+    // Begin shadow atlas render pass (clears entire atlas)
+    VkClearValue clearValue {};
+    clearValue.depthStencil = { 1.0f, 0 };
+
+    VkRenderPassBeginInfo rpBegin {};
+    rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpBegin.renderPass = atlas.GetRenderPass();
+    rpBegin.framebuffer = atlas.GetFramebuffer();
+    rpBegin.renderArea = { {0, 0}, atlas.GetExtent() };
+    rpBegin.clearValueCount = 1;
+    rpBegin.pClearValues = &clearValue;
+
+    vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdSetDepthBias(cmd, 1.25f, 0.0f, 1.75f);
+
+    auto& meshManager = frame.assets.Meshes();
+
+    // Upload instance data once before cascades loop
+    for (auto& dc : m_DepthDrawCommands)
+    {
+      if (dc.instanced)
+      {
+        m_InstanceBuffer.Update(dc.instanceOffset, dc.instanceData->data(),
+          uint32_t(dc.instanceData->size() * sizeof(glm::mat4)));
+      }
+    }
+
+    for (uint32_t cascade = 0; cascade < CSM_CASCADE_COUNT; cascade++)
+    {
+      auto& cv = m_ShadowManager.GetCascadeViewport(cascade);
+      vkCmdSetViewport(cmd, 0, 1, &cv.viewport);
+      vkCmdSetScissor(cmd, 0, 1, &cv.scissor);
+
+      uint8_t lastSortKey = UINT8_MAX;
+      VulkanPipeline* currentPipeline = nullptr;
+
+      for (auto& dc : m_DepthDrawCommands)
+      {
+        MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
+        uint8_t sortKey = dc.SortKey();
+
+        if (sortKey != lastSortKey)
+        {
+          currentPipeline = &m_PSOCache.Get(m_ShadowPipelines[sortKey]);
+          currentPipeline->Bind(cmd);
+          currentPipeline->BindDescriptorSets(cmd,
+            { m_ShadowManager.GetShadowCascadeUBODescriptorSet(currentFrame) }, 0);
+          lastSortKey = sortKey;
+        }
+
+        struct
+        {
+          glm::mat4 model;
+          int offset = 0;
+          int cascadeIndex = 0;
+        } data;
+        data.model = dc.worldTransform;
+        data.offset = dc.instanceOffset / sizeof(glm::mat4);
+        data.cascadeIndex = int(cascade);
+        currentPipeline->PushConstants(cmd, &data);
+
+        uint32_t instanceCount = 1;
+        if (dc.instanced)
+        {
+          instanceCount = uint32_t(dc.instanceData->size());
+          currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 1);
+        }
+
+        meshManager.GetVertexBuffer(meshHandle).Draw(cmd, instanceCount);
+      }
+    }
+
+    vkCmdEndRenderPass(cmd);
   }
 
   void Render::DrawQuad()

@@ -69,7 +69,7 @@ namespace YAEngine
     rasterizer.lineWidth = 1.0f;
     rasterizer.cullMode = info.doubleSided ? VK_CULL_MODE_NONE : VK_CULL_MODE_BACK_BIT;
     rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE;
-    rasterizer.depthBiasEnable = VK_FALSE;
+    rasterizer.depthBiasEnable = info.depthBiasEnable ? VK_TRUE : VK_FALSE;
 
     VkPipelineMultisampleStateCreateInfo multisampling{};
     multisampling.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
@@ -108,6 +108,8 @@ namespace YAEngine
       VK_DYNAMIC_STATE_SCISSOR,
       VK_DYNAMIC_STATE_LINE_WIDTH
     };
+    if (info.depthBiasEnable)
+      dynamicStates.push_back(VK_DYNAMIC_STATE_DEPTH_BIAS);
     VkPipelineDynamicStateCreateInfo dynamicState{};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());

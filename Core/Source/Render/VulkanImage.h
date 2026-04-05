@@ -28,6 +28,7 @@ namespace YAEngine
     float maxAnisotropy = 1.0f;
     float minLod = 0.0f;
     float maxLod = 0.0f;
+    VkBorderColor borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
   };
 
   class VulkanImage

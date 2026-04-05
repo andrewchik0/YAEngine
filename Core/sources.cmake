@@ -123,6 +123,10 @@ set(SOURCE_FILES
   Source/Render/VulkanComputePipeline.h
   Source/Render/PipelineCache.cpp
   Source/Render/PipelineCache.h
+  Source/Render/ShadowAtlas.cpp
+  Source/Render/ShadowAtlas.h
+  Source/Render/ShadowManager.cpp
+  Source/Render/ShadowManager.h
   Source/Utils/Topology.h
   Source/Utils/Topology.cpp
   Source/Utils/ThreadPool.h

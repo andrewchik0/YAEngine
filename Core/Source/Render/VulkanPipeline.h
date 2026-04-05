@@ -20,6 +20,7 @@ namespace YAEngine
     uint32_t colorAttachmentCount = 1;
     VkCompareOp compareOp = VK_COMPARE_OP_LESS;
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    bool depthBiasEnable = false;
 
     // "f2i3u4"
     //    |

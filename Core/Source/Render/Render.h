@@ -11,6 +11,7 @@
 #include "VulkanUniformBuffer.h"
 #include "LightStorageBuffer.h"
 #include "TileLightBuffer.h"
+#include "ShadowManager.h"
 
 #ifdef YA_EDITOR
 #include "Editor/GizmoRenderer.h"
@@ -50,6 +51,7 @@ namespace YAEngine
     bool& GetSSAOEnabled() { return b_SSAOEnabled; }
     bool& GetSSREnabled() { return b_SSREnabled; }
     bool& GetTAAEnabled() { return b_TAAEnabled; }
+    bool& GetShadowsEnabled() { return b_ShadowsEnabled; }
 
     const RenderStats& GetStats() const { return m_Stats; }
 
@@ -61,11 +63,13 @@ namespace YAEngine
     bool b_SSAOEnabled = true;
     bool b_SSREnabled = true;
     bool b_TAAEnabled = true;
+    bool b_ShadowsEnabled = true;
 
     RenderStats m_Stats {};
 
     void DrawMeshes(FrameContext& frame);
     void DrawMeshesDepthOnly(FrameContext& frame);
+    void RenderShadowMaps(FrameContext& frame);
     void SetUpCamera(FrameContext& frame);
     void InitPipelines();
 
@@ -140,6 +144,7 @@ namespace YAEngine
     FrameUniformBuffer m_FrameUniformBuffer {};
     LightStorageBuffer m_LightBuffer;
     TileLightBuffer m_TileLightBuffer;
+    ShadowManager m_ShadowManager;
 
     std::vector<VulkanDescriptorSet> m_SwapChainDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
@@ -167,6 +172,7 @@ namespace YAEngine
     PipelineHandle m_HiZPipeline {};
     PipelineHandle m_LightCullPipeline {};
     PipelineHandle m_DeferredLightingPipeline {};
+    PipelineHandle m_ShadowPipelines[4] {};
 
     VulkanMaterial m_DefaultMaterial {};
     VulkanTexture m_NoneTexture;

@@ -104,6 +104,8 @@ namespace YAEngine
       m_SSAOKernelUBO.Update(kernelData);
     }
 
+    m_ShadowManager.Init(ctx);
+
     SetupRenderGraph(width, height);
     CreateTAAFramebuffers();
     m_Backend.GetSwapChain().CreateFrameBuffers(
@@ -144,6 +146,7 @@ namespace YAEngine
     m_GizmoRenderer.Destroy(ctx);
 #endif
 
+    m_ShadowManager.Destroy(ctx);
     m_CubicResources.Destroy(ctx);
     m_NoneCubeMap.Destroy(ctx);
     m_NoneTexture.Destroy(ctx);
@@ -360,11 +363,12 @@ namespace YAEngine
 
       glm::vec3 dirLightDir(frame.lights.directional.directionIntensity);
       glm::vec3 dirCol(frame.lights.directional.colorPad);
+      glm::vec3 dirLightPos = frame.snapshot.directionalShadow.position;
       float dirIntensity = frame.lights.directional.directionIntensity.w;
       if (dirIntensity > 0.0f)
       {
-        m_GizmoRenderer.DrawSprite(glm::vec3(0, 5, 0), 0.5f, 0xf185, glm::vec4(dirCol, 0.85f));
-        m_GizmoRenderer.DrawArrow(glm::vec3(0, 5, 0), -dirLightDir, 3.0f, glm::vec4(dirCol, 0.85f));
+        m_GizmoRenderer.DrawSprite(dirLightPos, 0.5f, 0xf185, glm::vec4(dirCol, 0.85f));
+        m_GizmoRenderer.DrawArrow(dirLightPos, dirLightDir, 3.0f, glm::vec4(dirCol, 0.85f));
       }
 
       if (b_HasSelectedEntity)
@@ -379,6 +383,9 @@ namespace YAEngine
       }
     }
 #endif
+
+    // Render shadow maps before main passes
+    RenderShadowMaps(frame);
 
     // Execute all passes
     m_Graph.Execute(cmd, &frame);

@@ -82,6 +82,9 @@ namespace YAEngine
     float radius = 10.0f;
     float innerCone = glm::radians(25.0f);
     float outerCone = glm::radians(35.0f);
+    bool castShadow = false;
+    float shadowBias = 0.005f;
+    float normalBias = 0.02f;
   };
 
 #ifdef YA_EDITOR

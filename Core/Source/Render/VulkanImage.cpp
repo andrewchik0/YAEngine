@@ -63,7 +63,7 @@ namespace YAEngine
       samplerInfo.addressModeW = samplerDesc->addressMode;
       samplerInfo.anisotropyEnable = samplerDesc->anisotropyEnable ? VK_TRUE : VK_FALSE;
       samplerInfo.maxAnisotropy = samplerDesc->maxAnisotropy;
-      samplerInfo.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+      samplerInfo.borderColor = samplerDesc->borderColor;
       samplerInfo.unnormalizedCoordinates = VK_FALSE;
       samplerInfo.compareEnable = VK_FALSE;
       samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
