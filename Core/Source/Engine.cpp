@@ -139,7 +139,7 @@ namespace YAEngine
       m_LayerManager.CallLateUpdate(frameDt);
       m_InputSystem.EndFrame();
 
-      BuildSceneSnapshot(m_Snapshot, m_LightData, m_Scene, m_AssetManager.Meshes());
+      BuildSceneSnapshot(m_Snapshot, m_LightData, m_Scene, m_AssetManager.Meshes(), m_AssetManager.Materials());
 
       // Frustum cull: compute viewProj from camera data, partition visible objects to front
       auto& cam = m_Snapshot.camera;

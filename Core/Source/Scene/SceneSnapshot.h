@@ -4,10 +4,11 @@
 #include "LightData.h"
 #include "Scene/Scene.h"
 #include "Assets/MeshManager.h"
+#include "Assets/MaterialManager.h"
 
 namespace YAEngine
 {
-  inline void BuildSceneSnapshot(SceneSnapshot& snapshot, LightBuffer& lights, Scene& scene, MeshManager& meshManager)
+  inline void BuildSceneSnapshot(SceneSnapshot& snapshot, LightBuffer& lights, Scene& scene, MeshManager& meshManager, MaterialManager& materialManager)
   {
     snapshot.objects.clear();
     snapshot.skybox = scene.GetSkybox();
@@ -44,14 +45,16 @@ namespace YAEngine
         reg.emplace_or_replace<BoundsDirty>(entity);
       }
 
+      auto& mat = materialManager.Get(material.asset);
+
       RenderObject obj {
         .mesh = mesh.asset,
         .material = material.asset,
         .worldTransform = wt.world,
         .instanceData = meshManager.GetInstanceData(mesh.asset),
         .instanceOffset = meshManager.GetInstanceOffset(mesh.asset),
-        .doubleSided = reg.all_of<DoubleSidedTag>(entity),
-        .noShading = reg.all_of<NoShadingTag>(entity),
+        .doubleSided = mat.doubleSided,
+        .noShading = (mat.shadingModel == ShadingModel::Unlit),
       };
 
       if (reg.all_of<WorldBounds>(entity))

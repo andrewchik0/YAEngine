@@ -76,6 +76,7 @@ namespace YAEngine
       mat.specular = matDesc.specular;
       mat.sg = matDesc.sg;
       mat.combinedTextures = matDesc.combinedTextures;
+      mat.doubleSided = matDesc.doubleSided;
 
       if (!matDesc.baseColorTexture.empty())
         mat.baseColorTexture = m_AssetManager->Textures().Load(matDesc.baseColorTexture, &mat.hasAlpha);

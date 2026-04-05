@@ -57,8 +57,6 @@ namespace YAEngine
     MeshHandle asset {};
   };
 
-  struct DoubleSidedTag {};
-  struct NoShadingTag {};
   struct HiddenTag {};
 
 

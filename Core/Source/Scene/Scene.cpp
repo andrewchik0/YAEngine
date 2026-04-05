@@ -187,32 +187,5 @@ namespace YAEngine
   }
 
 
-  void Scene::SetDoubleSided(Entity e)
-  {
-    if (HasComponent<MeshComponent>(e))
-      AddComponent<DoubleSidedTag>(e);
-
-    auto& hc = GetHierarchy(e);
-    Entity child = hc.firstChild;
-    while (child != entt::null)
-    {
-      SetDoubleSided(child);
-      child = GetHierarchy(child).nextSibling;
-    }
-  }
-
-  void Scene::NoShading(Entity e)
-  {
-    if (HasComponent<MeshComponent>(e))
-      AddComponent<NoShadingTag>(e);
-
-    auto& hc = GetHierarchy(e);
-    Entity child = hc.firstChild;
-    while (child != entt::null)
-    {
-      NoShading(child);
-      child = GetHierarchy(child).nextSibling;
-    }
-  }
 
 }

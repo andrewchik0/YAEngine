@@ -121,20 +121,6 @@ namespace YAEngine
         else scene.RemoveComponent<HiddenTag>(entity);
       }
 
-      bool doubleSided = scene.HasComponent<DoubleSidedTag>(entity);
-      if (ImGui::Checkbox("Double Sided", &doubleSided))
-      {
-        if (doubleSided) scene.AddComponent<DoubleSidedTag>(entity);
-        else scene.RemoveComponent<DoubleSidedTag>(entity);
-      }
-
-      bool noShading = scene.HasComponent<NoShadingTag>(entity);
-      if (ImGui::Checkbox("No Shading", &noShading))
-      {
-        if (noShading) scene.AddComponent<NoShadingTag>(entity);
-        else scene.RemoveComponent<NoShadingTag>(entity);
-      }
-
       auto* instanceData = context.assetManager->Meshes().GetInstanceData(mc.asset);
       if (instanceData != nullptr)
       {
@@ -176,6 +162,21 @@ namespace YAEngine
         });
 
         ImGui::EndCombo();
+      }
+
+      if (materials.Has(mc.asset))
+      {
+        auto& mat = materials.Get(mc.asset);
+
+        if (ImGui::Checkbox("Double Sided", &mat.doubleSided))
+          mat.MarkChanged();
+
+        bool unlit = (mat.shadingModel == ShadingModel::Unlit);
+        if (ImGui::Checkbox("Unlit", &unlit))
+        {
+          mat.shadingModel = unlit ? ShadingModel::Unlit : ShadingModel::Lit;
+          mat.MarkChanged();
+        }
       }
 
     }

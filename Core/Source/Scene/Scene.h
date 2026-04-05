@@ -97,8 +97,6 @@ namespace YAEngine
     }
 
     void MarkDirty(Entity e);
-    void SetDoubleSided(Entity e);
-    void NoShading(Entity e);
 
     void SetSkybox(CubeMapHandle handle)
     {

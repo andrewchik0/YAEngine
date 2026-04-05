@@ -28,6 +28,7 @@ namespace YAEngine
     bool sg = false;
     bool hasAlpha = false;
     bool combinedTextures = false;
+    bool doubleSided = false;
 
     std::string baseColorTexture;
     std::string metallicTexture;

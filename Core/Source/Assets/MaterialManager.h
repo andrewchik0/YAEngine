@@ -12,6 +12,12 @@ namespace YAEngine
   struct RenderContext;
   class VulkanTexture;
 
+  enum class ShadingModel : uint8_t
+  {
+    Lit,
+    Unlit
+  };
+
   struct Material
   {
     std::string name;
@@ -24,6 +30,8 @@ namespace YAEngine
     bool sg{false};
     bool hasAlpha{false};
     bool combinedTextures{false};
+    bool doubleSided{false};
+    ShadingModel shadingModel{ShadingModel::Lit};
 
     TextureHandle baseColorTexture;
     TextureHandle metallicTexture;

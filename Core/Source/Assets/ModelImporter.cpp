@@ -163,6 +163,10 @@ namespace YAEngine
     matDesc.sg = hasSG;
     matDesc.combinedTextures = combinedTextures;
 
+    int twoSided = 0;
+    material->Get(AI_MATKEY_TWOSIDED, twoSided);
+    matDesc.doubleSided = (twoSided != 0);
+
     std::string baseColorTexture = GetTexturePath(material, aiTextureType_DIFFUSE);
     std::string metallicTexture = GetTexturePath(material, aiTextureType_METALNESS);
     std::string roughnessTexture = GetTexturePath(material, aiTextureType_DIFFUSE_ROUGHNESS);

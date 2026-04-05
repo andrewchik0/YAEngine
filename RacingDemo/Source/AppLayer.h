@@ -62,7 +62,6 @@ public:
       }
 
       GetScene().GetTransform(car).position.y = -0.86f;
-      GetScene().SetDoubleSided(car);
 
       auto* controls = GetLayerManager().GetLayer<ControlsLayer>();
       if (controls)
