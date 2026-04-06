@@ -1,4 +1,5 @@
 #include "../Shared/ShadowData.h"
+#include "noise.glsl"
 
 layout(std140, set = 2, binding = 2) uniform ShadowBufferUBO { ShadowBuffer u_Shadow; };
 layout(set = 2, binding = 3) uniform sampler2DShadow shadowAtlas;
@@ -6,11 +7,6 @@ layout(set = 2, binding = 3) uniform sampler2DShadow shadowAtlas;
 const float GOLDEN_ANGLE = 2.3999632;
 const int SHADOW_SAMPLES = 16;
 const float SHADOW_FILTER_RADIUS = 3.0;
-
-float interleavedGradientNoise(vec2 pos)
-{
-  return fract(52.9829189 * fract(0.06711056 * pos.x + 0.00583715 * pos.y));
-}
 
 vec2 vogelDiskSample(int index, int count, float rotation)
 {

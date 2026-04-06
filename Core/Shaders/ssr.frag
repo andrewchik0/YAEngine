@@ -5,6 +5,7 @@ layout(location = 0) out vec4 outColor;
 #include "utils.glsl"
 #include "octahedron.glsl"
 #include "pbr.glsl"
+#include "noise.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D litColorTexture;
 layout(set = 1, binding = 1) uniform sampler2D depthTexture;
@@ -23,7 +24,7 @@ const float MAX_ROUGHNESS = 0.6;
 const float EDGE_FADE_START = 0.8;
 const float DEPTH_EPSILON = 1.0;
 const float SAME_SURFACE_THRESHOLD = 0.99;
-const float MAX_THICKNESS = 4.0;
+const float MAX_THICKNESS = 4;
 
 // --- Main ---
 void main()
@@ -77,9 +78,25 @@ void main()
   // Transform normal to view space
   vec3 viewNormal = normalize(mat3(u_Frame.view) * worldNormal);
 
-  // Reflection direction
+  // Reflection direction: stochastic GGX sampling for rough surfaces, perfect reflection for mirrors
   vec3 viewDir = normalize(viewPos);
-  vec3 reflectDir = reflect(viewDir, viewNormal);
+  vec3 reflectDir;
+  if (roughness < 0.02)
+  {
+    reflectDir = reflect(viewDir, viewNormal);
+  }
+  else
+  {
+    vec2 Xi = vec2(
+      temporalNoise(gl_FragCoord.xy, u_Frame.time * 3.17, vec2(43.0, 97.0)),
+      temporalNoise(gl_FragCoord.xy, u_Frame.time * 5.63, vec2(173.0, 59.0))
+    );
+    vec3 H = importanceSampleGGX(Xi, viewNormal, roughness);
+    reflectDir = reflect(viewDir, H);
+
+    if (dot(reflectDir, viewNormal) <= 0.0)
+      reflectDir = reflect(viewDir, viewNormal);
+  }
 
   // Backward fade for reflections pointing towards camera
   float backwardFade = 1.0 - clamp(reflectDir.z, 0.0, 1.0);
@@ -127,10 +144,7 @@ void main()
   vec2 hitUV = vec2(0.0);
   float hitT = 0.0;
   // Stochastic jitter: sub-pixel offset that varies per pixel per frame.
-  float ign = fract(52.9829189 * fract(dot(
-      gl_FragCoord.xy + fract(u_Frame.time * 7.23) * vec2(131.0, 257.0),
-      vec2(0.06711056, 0.00583715))));
-  float jitterOffset = ign / rayScreenLen;
+  float jitterOffset = temporalNoise(gl_FragCoord.xy, u_Frame.time * 7.23, vec2(131.0, 257.0)) / rayScreenLen;
 
   // Cap mip level to limit staircase size at silhouettes
   int effectiveMaxMip = min(maxMip, 4);
@@ -265,7 +279,12 @@ void main()
 
   float roughnessFade = 1.0 - smoothstep(0.0, MAX_ROUGHNESS, roughness);
 
-  vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade * silhouetteFade * contactFade, vec3(0.0), vec3(1.0));
+  // Back-face rejection: fade hits where the surface faces away from the ray
+  vec3 hitNormal = octDecode(texture(gbuffer1Texture, hitUV).rg * 2.0 - 1.0);
+  vec3 reflectDirWorld = mat3(u_Frame.invView) * reflectDir;
+  float backfaceFade = 1.0 - smoothstep(-0.17, 0.0, dot(reflectDirWorld, hitNormal));
+
+  vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade * silhouetteFade * contactFade * backfaceFade, vec3(0.0), vec3(1.0));
 
   outColor = vec4(originalColor * (1.0 - ssrMask) + reflectedColor * ssrMask, 1.0);
 }
