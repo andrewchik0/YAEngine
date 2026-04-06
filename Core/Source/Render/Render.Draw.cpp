@@ -445,32 +445,11 @@ namespace YAEngine
       drawShadowPass(int(SHADOW_SPOT_MATRIX_OFFSET + i), sv, spotPlanes, 6);
     }
 
-    // Point shadows - per-face frustum culling + face culling
-    glm::vec3 cameraPos = frame.snapshot.camera.position;
-
-    static const glm::vec3 faceDirections[6] = {
-      {  1,  0,  0 }, { -1,  0,  0 },
-      {  0,  1,  0 }, {  0, -1,  0 },
-      {  0,  0,  1 }, {  0,  0, -1 },
-    };
-
+    // Point shadows - per-face frustum culling
     for (uint32_t i = 0; i < frame.snapshot.pointShadowRequests.size(); i++)
     {
-      auto& req = frame.snapshot.pointShadowRequests[i];
-      glm::vec3 lightToCamera = cameraPos - req.position;
-      float distToLight = glm::length(lightToCamera);
-      bool cameraInsideSphere = distToLight < req.radius;
-
       for (uint32_t face = 0; face < 6; face++)
       {
-        // Face culling: skip faces pointing away from camera (only when camera is outside light sphere)
-        if (!cameraInsideSphere)
-        {
-          float faceDot = glm::dot(faceDirections[face], lightToCamera);
-          if (faceDot < 0.0f)
-            continue;
-        }
-
         FrustumPlane facePlanes[6];
         ExtractFrustumPlanes(shadowData.pointShadows[i].faceViewProj[face], facePlanes);
 
