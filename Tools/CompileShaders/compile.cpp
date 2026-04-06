@@ -308,16 +308,27 @@ static std::string PrepareSource(const std::string& source, const std::vector<st
 static int RunGlslc(const fs::path& glslc,
                     const fs::path& input,
                     const fs::path& output,
-                    const std::string& stage)
+                    const std::string& stage,
+                    bool optimize)
 {
   std::vector<std::wstring> args = {
     glslc.wstring(),
-    L"-g",
-    L"-fshader-stage=" + std::wstring(stage.begin(), stage.end()),
-    input.wstring(),
-    L"-o",
-    output.wstring()
   };
+
+  if (optimize)
+  {
+    args.push_back(L"-O");
+  }
+  else
+  {
+    args.push_back(L"-g");
+    args.push_back(L"-O0");
+  }
+
+  args.push_back(L"-fshader-stage=" + std::wstring(stage.begin(), stage.end()));
+  args.push_back(input.wstring());
+  args.push_back(L"-o");
+  args.push_back(output.wstring());
 
   std::wstring cmd;
   for (auto& a : args)
@@ -406,6 +417,7 @@ int main(int argc, char** argv)
   fs::path inputFile;
   fs::path glslc;
   bool singleMode = false;
+  bool optimize = false;
   std::vector<std::string> defines;
 
   for (int i = 1; i < argc; ++i)
@@ -414,6 +426,8 @@ int main(int argc, char** argv)
 
     if (arg == "--single")
       singleMode = true;
+    else if (arg == "--optimize")
+      optimize = true;
     else if (arg == "--source" && i + 1 < argc)
       sourceDir = argv[++i];
     else if (arg == "--input" && i + 1 < argc)
@@ -470,7 +484,7 @@ int main(int argc, char** argv)
     }
     std::wcout << std::endl;
 
-    int exitCode = RunGlslc(glslc, tempPath, outputPath, stage);
+    int exitCode = RunGlslc(glslc, tempPath, outputPath, stage, optimize);
     RemoveTempShader(tempPath);
 
     if (exitCode != 0)
@@ -516,7 +530,7 @@ int main(int argc, char** argv)
 
     std::wcout << L"Compiling " << shader.filename().wstring() << std::endl;
 
-    int exitCode = RunGlslc(glslc, tempPath, output, stage);
+    int exitCode = RunGlslc(glslc, tempPath, output, stage, optimize);
     RemoveTempShader(tempPath);
 
     if (exitCode != 0)

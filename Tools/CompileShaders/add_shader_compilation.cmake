@@ -8,11 +8,17 @@ function(add_shader_compilation TARGET_NAME SHADER_SOURCE_DIR)
   file(WRITE ${SHADER_PERMUTATIONS_FILE} "")
   set(SHADER_PERMUTATIONS_FILE ${SHADER_PERMUTATIONS_FILE} PARENT_SCOPE)
 
+  set(SHADER_OPTIMIZE_FLAG "")
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(SHADER_OPTIMIZE_FLAG "--optimize")
+  endif()
+
   add_custom_target(${TARGET_NAME}_Shaders
     COMMAND CompileShaders
     --glslc ${GLSLC_EXECUTABLE}
     --source ${SHADER_SOURCE_DIR}
     --output ${SHADER_BIN_DIR}
+    ${SHADER_OPTIMIZE_FLAG}
     DEPENDS CompileShaders
     COMMENT "Compiling shaders for ${TARGET_NAME}"
   )
@@ -34,6 +40,11 @@ function(add_shader_permutation TARGET_NAME SOURCE_DIR INPUT_FILE OUTPUT_NAME)
   # Remaining args are -D defines
   set(DEFINE_ARGS ${ARGN})
 
+  set(PERM_OPTIMIZE_FLAG "")
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set(PERM_OPTIMIZE_FLAG "--optimize")
+  endif()
+
   add_custom_command(
     OUTPUT ${OUTPUT_PATH}
     COMMAND CompileShaders
@@ -41,6 +52,7 @@ function(add_shader_permutation TARGET_NAME SOURCE_DIR INPUT_FILE OUTPUT_NAME)
       --glslc ${GLSLC_EXECUTABLE}
       --input ${INPUT_PATH}
       --output ${OUTPUT_PATH}
+      ${PERM_OPTIMIZE_FLAG}
       ${DEFINE_ARGS}
     DEPENDS CompileShaders ${INPUT_PATH}
     COMMENT "Compiling permutation ${OUTPUT_NAME}"
