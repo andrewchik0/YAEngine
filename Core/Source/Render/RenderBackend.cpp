@@ -1,5 +1,6 @@
 #include "RenderBackend.h"
 
+#include "DebugMarker.h"
 #include "Utils/Log.h"
 
 #include <fstream>
@@ -11,6 +12,7 @@ namespace YAEngine
     m_MaxFramesInFlight = specs.maxFramesInFlight;
 
     m_VulkanInstance.Init(specs);
+    DebugMarker::Init(m_VulkanInstance.Get());
     m_Surface.Init(m_VulkanInstance.Get(), window);
     m_PhysicalDevice.Init(m_VulkanInstance.Get(), m_Surface.Get());
 

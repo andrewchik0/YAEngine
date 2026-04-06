@@ -1,5 +1,6 @@
 #include "FrameUniformBuffer.h"
 
+#include "DebugMarker.h"
 #include "RenderContext.h"
 
 namespace YAEngine
@@ -31,6 +32,9 @@ namespace YAEngine
       }
       m_UniformBuffers[i].Create(ctx, sizeof(FrameUniforms));
       m_DescriptorSets[i].WriteUniformBuffer(0, m_UniformBuffers[i].Get(), sizeof(FrameUniforms));
+
+      YA_DEBUG_NAMEF(ctx.device, VK_OBJECT_TYPE_BUFFER,
+        m_UniformBuffers[i].Get(), "Frame UBO %zu", i);
     }
   }
 

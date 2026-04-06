@@ -5,6 +5,7 @@
 
 #include "Assets/AssetManager.h"
 #include "Assets/CubeMapManager.h"
+#include "DebugMarker.h"
 #include "ImageBarrier.h"
 #include "Utils/Log.h"
 #include "SSAOKernel.h"
@@ -26,6 +27,8 @@ namespace YAEngine
 
     uint32_t whitePixel = 0xFFFFFFFF;
     m_NoneTexture.Load(ctx, &whitePixel, 1, 1, 4, VK_FORMAT_R8G8B8A8_SRGB);
+    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_IMAGE,
+      m_NoneTexture.GetImage(), "None Texture");
 
     // 1x1 black cubemap placeholder for IBL descriptors before skybox is loaded
     {
@@ -73,6 +76,8 @@ namespace YAEngine
       // VulkanTexture::Load expects raw data with pixelSize per pixel
       // Use R32G32B32A32_SFLOAT for simplicity (16 bytes per pixel)
       m_SSAONoise.Load(ctx, noiseData.data(), 4, 4, 16, VK_FORMAT_R32G32B32A32_SFLOAT);
+      YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_IMAGE,
+        m_SSAONoise.GetImage(), "SSAO Noise");
     }
 
     // Generate SSAO hemisphere kernel
@@ -102,6 +107,8 @@ namespace YAEngine
 
       m_SSAOKernelUBO.Create(ctx, sizeof(SSAOKernel));
       m_SSAOKernelUBO.Update(kernelData);
+      YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_BUFFER,
+        m_SSAOKernelUBO.Get(), "SSAO Kernel UBO");
     }
 
     m_ShadowManager.Init(ctx);

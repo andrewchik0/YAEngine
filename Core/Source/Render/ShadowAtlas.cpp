@@ -1,4 +1,5 @@
 #include "ShadowAtlas.h"
+#include "DebugMarker.h"
 #include "RenderContext.h"
 #include "VulkanCommandBuffer.h"
 #include "Utils/Log.h"
@@ -85,6 +86,15 @@ namespace YAEngine
       YA_LOG_ERROR("Render", "Failed to create shadow atlas framebuffer");
       throw std::runtime_error("Failed to create shadow atlas framebuffer!");
     }
+
+    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_IMAGE,
+      m_Image.GetImage(), "ShadowAtlas");
+    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_IMAGE_VIEW,
+      m_Image.GetView(), "ShadowAtlas View");
+    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_RENDER_PASS,
+      m_RenderPass, "ShadowAtlas RenderPass");
+    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_FRAMEBUFFER,
+      m_Framebuffer, "ShadowAtlas FB");
 
     // Run an empty render pass to transition image to DEPTH_STENCIL_READ_ONLY_OPTIMAL.
     // Without this, the deferred lighting pass would sample from an UNDEFINED layout

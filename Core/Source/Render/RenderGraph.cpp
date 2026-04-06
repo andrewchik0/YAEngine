@@ -1,5 +1,6 @@
 #include "RenderGraph.h"
 
+#include "DebugMarker.h"
 #include "RenderContext.h"
 #include "ImageBarrier.h"
 #include "Utils/Log.h"
@@ -159,6 +160,11 @@ namespace YAEngine
       {
         res.image.Init(*m_Ctx, imageDesc);
       }
+
+      YA_DEBUG_NAME(m_Ctx->device, VK_OBJECT_TYPE_IMAGE,
+        res.image.GetImage(), res.desc.name.c_str());
+      YA_DEBUG_NAMEF(m_Ctx->device, VK_OBJECT_TYPE_IMAGE_VIEW,
+        res.image.GetView(), "%s View", res.desc.name.c_str());
     }
   }
 
@@ -219,6 +225,8 @@ namespace YAEngine
           YA_LOG_ERROR("Render", "Failed to create depth-only render pass: %s", pass.info.name.c_str());
           throw std::runtime_error("Failed to create depth-only render pass: " + pass.info.name);
         }
+        YA_DEBUG_NAMEF(m_Ctx->device, VK_OBJECT_TYPE_RENDER_PASS,
+          pass.renderPass, "%s RenderPass", pass.info.name.c_str());
         continue;
       }
 
@@ -332,6 +340,8 @@ namespace YAEngine
         YA_LOG_ERROR("Render", "Failed to create render pass: %s", pass.info.name.c_str());
         throw std::runtime_error("Failed to create render pass: " + pass.info.name);
       }
+      YA_DEBUG_NAMEF(m_Ctx->device, VK_OBJECT_TYPE_RENDER_PASS,
+        pass.renderPass, "%s RenderPass", pass.info.name.c_str());
     }
   }
 
@@ -374,6 +384,8 @@ namespace YAEngine
           YA_LOG_ERROR("Render", "Failed to create depth-only framebuffer: %s", pass.info.name.c_str());
           throw std::runtime_error("Failed to create depth-only framebuffer: " + pass.info.name);
         }
+        YA_DEBUG_NAMEF(m_Ctx->device, VK_OBJECT_TYPE_FRAMEBUFFER,
+          pass.framebuffer, "%s FB", pass.info.name.c_str());
         continue;
       }
 
@@ -440,6 +452,8 @@ namespace YAEngine
         YA_LOG_ERROR("Render", "Failed to create framebuffer: %s", pass.info.name.c_str());
         throw std::runtime_error("Failed to create framebuffer: " + pass.info.name);
       }
+      YA_DEBUG_NAMEF(m_Ctx->device, VK_OBJECT_TYPE_FRAMEBUFFER,
+        pass.framebuffer, "%s FB", pass.info.name.c_str());
     }
   }
 
@@ -649,6 +663,7 @@ namespace YAEngine
       // Compute pass: no render pass, just execute
       if (pass.info.isCompute)
       {
+        DebugMarker::BeginLabel(cmd, pass.info.name.c_str());
         pass.info.execute(ctx);
 
         // Update tracked layouts for storage outputs
@@ -657,12 +672,15 @@ namespace YAEngine
           m_CurrentLayouts[handle] = VK_IMAGE_LAYOUT_GENERAL;
           ResolveResource(handle).SetLayout(VK_IMAGE_LAYOUT_GENERAL);
         }
+        DebugMarker::EndLabel(cmd);
         continue;
       }
 
       // Depth-only pass
       if (pass.info.depthOnly)
       {
+        DebugMarker::BeginLabel(cmd, pass.info.name.c_str());
+
         VkFramebuffer fb = pass.overrideFramebuffer != VK_NULL_HANDLE
           ? pass.overrideFramebuffer : pass.framebuffer;
 
@@ -700,10 +718,13 @@ namespace YAEngine
           m_CurrentLayouts[pass.info.depthOutput] = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
           ResolveResource(pass.info.depthOutput).SetLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
         }
+        DebugMarker::EndLabel(cmd);
         continue;
       }
 
       // Regular graphics pass
+      DebugMarker::BeginLabel(cmd, pass.info.name.c_str());
+
       VkFramebuffer fb = pass.overrideFramebuffer != VK_NULL_HANDLE
         ? pass.overrideFramebuffer : pass.framebuffer;
 
@@ -762,6 +783,7 @@ namespace YAEngine
         m_CurrentLayouts[pass.info.depthOutput] = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
         ResolveResource(pass.info.depthOutput).SetLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
       }
+      DebugMarker::EndLabel(cmd);
     }
   }
 

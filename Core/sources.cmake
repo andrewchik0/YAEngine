@@ -109,6 +109,7 @@ set(SOURCE_FILES
   Source/Scene/SceneSnapshot.h
   Source/Render/RenderContext.h
   Source/Render/ImageBarrier.h
+  Source/Render/DebugMarker.h
   Source/Render/VulkanBuffer.cpp
   Source/Render/VulkanBuffer.h
   Source/Render/VulkanImage.cpp

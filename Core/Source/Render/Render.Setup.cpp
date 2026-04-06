@@ -3,6 +3,7 @@
 #include <imgui_impl_glfw.h>
 #include <ImGui/imgui_impl_vulkan.h>
 
+#include "DebugMarker.h"
 #include "ImageBarrier.h"
 #include "Utils/Log.h"
 
@@ -488,6 +489,11 @@ namespace YAEngine
     depthDesc.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
     m_TAADepth.Init(ctx, depthDesc);
 
+    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_IMAGE,
+      m_TAADepth.GetImage(), "TAA Depth");
+    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_IMAGE_VIEW,
+      m_TAADepth.GetView(), "TAA Depth View");
+
     VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
 
     for (uint32_t i = 0; i < 2; i++)
@@ -513,6 +519,9 @@ namespace YAEngine
         YA_LOG_ERROR("Render", "Failed to create TAA framebuffer %d", i);
         throw std::runtime_error("Failed to create TAA framebuffer!");
       }
+
+      YA_DEBUG_NAMEF(ctx.device, VK_OBJECT_TYPE_FRAMEBUFFER,
+        m_TAAFramebuffers[i], "TAA FB %u", i);
     }
   }
 

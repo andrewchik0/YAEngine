@@ -44,6 +44,8 @@ namespace YAEngine
     void BindDescriptorSets(VkCommandBuffer commandBuffer, const std::vector<VkDescriptorSet>& descriptorSets, uint32_t set);
     void PushConstants(VkCommandBuffer cmd, void* data);
 
+    VkPipeline Get() const { return m_Pipeline; }
+
     VkPipelineLayout GetLayout()
     {
       return m_PipelineLayout;

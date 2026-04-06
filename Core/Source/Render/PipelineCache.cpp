@@ -1,5 +1,6 @@
 #include "PipelineCache.h"
 
+#include "DebugMarker.h"
 #include "Utils/Log.h"
 
 namespace YAEngine
@@ -112,6 +113,8 @@ namespace YAEngine
 
     auto& pipeline = m_GraphicsCache[key];
     pipeline.Init(device, renderPass, info, vkCache);
+    YA_DEBUG_NAMEF(device, VK_OBJECT_TYPE_PIPELINE,
+      pipeline.Get(), "%s + %s", info.vertexShaderFile.c_str(), info.fragmentShaderFile.c_str());
     YA_LOG_VERBOSE("Render", "PSO Cache: created graphics pipeline (%s + %s)",
       info.vertexShaderFile.c_str(), info.fragmentShaderFile.c_str());
     return pipeline;
@@ -136,6 +139,8 @@ namespace YAEngine
 
     auto& pipeline = m_ComputeCache[key];
     pipeline.Init(device, shaderFile, sets, pushConstantSize, vkCache);
+    YA_DEBUG_NAME(device, VK_OBJECT_TYPE_PIPELINE,
+      pipeline.Get(), shaderFile.c_str());
     YA_LOG_VERBOSE("Render", "PSO Cache: created compute pipeline (%s)", shaderFile.c_str());
     return pipeline;
   }

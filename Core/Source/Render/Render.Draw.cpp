@@ -1,5 +1,6 @@
 #include "Render.h"
 
+#include "DebugMarker.h"
 #include "VulkanVertexBuffer.h"
 #include "Assets/AssetManager.h"
 #include "RenderObject.h"
@@ -348,6 +349,7 @@ namespace YAEngine
     rpBegin.clearValueCount = 1;
     rpBegin.pClearValues = &clearValue;
 
+    DebugMarker::BeginLabel(cmd, "Shadows");
     vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdSetDepthBias(cmd, 0.5f, 0.0f, 1.5f);
 
@@ -422,6 +424,7 @@ namespace YAEngine
     // CSM cascades - frustum cull with 5 planes (skip near plane to keep distant shadow casters)
     if (hasDirectionalShadow)
     {
+      DebugMarker::BeginLabel(cmd, "CSM");
       for (uint32_t cascade = 0; cascade < CSM_CASCADE_COUNT; cascade++)
       {
         FrustumPlane allPlanes[6];
@@ -433,9 +436,12 @@ namespace YAEngine
         auto sv = ShadowAtlas::GetCascadeViewport(cascade);
         drawShadowPass(int(cascade), sv, csmPlanes, 5);
       }
+      DebugMarker::EndLabel(cmd);
     }
 
     // Spot shadows - full 6-plane frustum culling
+    if (hasSpotShadows)
+      DebugMarker::BeginLabel(cmd, "Spot Shadows");
     for (uint32_t i = 0; i < frame.snapshot.spotShadowRequests.size(); i++)
     {
       FrustumPlane spotPlanes[6];
@@ -444,8 +450,12 @@ namespace YAEngine
       auto sv = ShadowAtlas::GetSpotViewport(i);
       drawShadowPass(int(SHADOW_SPOT_MATRIX_OFFSET + i), sv, spotPlanes, 6);
     }
+    if (hasSpotShadows)
+      DebugMarker::EndLabel(cmd);
 
     // Point shadows - per-face frustum culling
+    if (hasPointShadows)
+      DebugMarker::BeginLabel(cmd, "Point Shadows");
     for (uint32_t i = 0; i < frame.snapshot.pointShadowRequests.size(); i++)
     {
       for (uint32_t face = 0; face < 6; face++)
@@ -457,8 +467,11 @@ namespace YAEngine
         drawShadowPass(int(SHADOW_POINT_MATRIX_OFFSET + i * 6 + face), sv, facePlanes, 6);
       }
     }
+    if (hasPointShadows)
+      DebugMarker::EndLabel(cmd);
 
     vkCmdEndRenderPass(cmd);
+    DebugMarker::EndLabel(cmd);
   }
 
   void Render::DrawQuad()

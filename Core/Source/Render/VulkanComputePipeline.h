@@ -20,6 +20,7 @@ namespace YAEngine
     void PushConstants(VkCommandBuffer cmd, const void* data);
     void Dispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
 
+    VkPipeline Get() const { return m_Pipeline; }
     VkPipelineLayout GetLayout() const { return m_PipelineLayout; }
 
   private:

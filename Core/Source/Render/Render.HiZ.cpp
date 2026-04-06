@@ -1,5 +1,6 @@
 #include "Render.h"
 
+#include "DebugMarker.h"
 #include "Utils/Log.h"
 
 namespace YAEngine
@@ -30,6 +31,9 @@ namespace YAEngine
         YA_LOG_ERROR("Render", "Failed to create Hi-Z mip view %d", mip);
         throw std::runtime_error("Failed to create Hi-Z mip view!");
       }
+
+      YA_DEBUG_NAMEF(ctx.device, VK_OBJECT_TYPE_IMAGE_VIEW,
+        m_HiZMipViews[mip], "HiZ Mip %u", mip);
     }
 
     SetDescription hizSetDesc = {

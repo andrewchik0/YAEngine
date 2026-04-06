@@ -1,5 +1,6 @@
 #include "VulkanSwapchain.h"
 
+#include "DebugMarker.h"
 #include "VulkanPhysicalDevice.h"
 #include "Utils/Log.h"
 
@@ -128,6 +129,9 @@ namespace YAEngine
 
     for (size_t i = 0; i < m_SwapChainImages.size(); i++)
     {
+      YA_DEBUG_NAMEF(device, VK_OBJECT_TYPE_IMAGE,
+        m_SwapChainImages[i], "Swapchain Image %zu", i);
+
       VkImageViewCreateInfo createInfo{};
       createInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
       createInfo.image = m_SwapChainImages[i];
@@ -148,6 +152,9 @@ namespace YAEngine
         YA_LOG_ERROR("Render", "Failed to create swapchain image view %zu", i);
         throw std::runtime_error("failed to create image views!");
       }
+
+      YA_DEBUG_NAMEF(device, VK_OBJECT_TYPE_IMAGE_VIEW,
+        m_SwapChainImageViews[i], "Swapchain View %zu", i);
     }
   }
 
@@ -197,6 +204,11 @@ namespace YAEngine
       throw std::runtime_error("Failed to create depth image view!");
     }
 
+    YA_DEBUG_NAME(m_Device, VK_OBJECT_TYPE_IMAGE,
+      m_DepthImage, "Swapchain Depth");
+    YA_DEBUG_NAME(m_Device, VK_OBJECT_TYPE_IMAGE_VIEW,
+      m_DepthImageView, "Swapchain Depth View");
+
     for (size_t i = 0; i < m_SwapChainImageViews.size(); i++)
     {
       VkImageView attachments[] = {
@@ -218,6 +230,9 @@ namespace YAEngine
         YA_LOG_ERROR("Render", "Failed to create swapchain framebuffer %zu", i);
         throw std::runtime_error("failed to create framebuffer!");
       }
+
+      YA_DEBUG_NAMEF(m_Device, VK_OBJECT_TYPE_FRAMEBUFFER,
+        m_SwapChainFrameBuffers[i], "Swapchain FB %zu", i);
     }
   }
 
