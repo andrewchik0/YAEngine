@@ -67,7 +67,7 @@ namespace YAEngine
     float len = glm::length(projected);
     if (len < 1e-4f)
     {
-      // Camera looking along the axis — pick an arbitrary perpendicular
+      // Camera looking along the axis - pick an arbitrary perpendicular
       glm::vec3 up = (std::abs(axisDir.y) < 0.9f) ? glm::vec3(0, 1, 0) : glm::vec3(1, 0, 0);
       return glm::normalize(glm::cross(axisDir, up));
     }
@@ -89,7 +89,7 @@ namespace YAEngine
     auto& input = GetInput();
     auto& gizmo = m_Context.render->GetGizmoRenderer();
 
-    // Gizmo mode switching (1/2/3) — blocked during drag
+    // Gizmo mode switching (1/2/3) - blocked during drag
     if (m_Context.viewportHovered && !m_DragActive)
     {
       if (input.IsKeyPressed(Key::D1)) m_Context.render->GetGizmoMode() = GizmoMode::Translate;

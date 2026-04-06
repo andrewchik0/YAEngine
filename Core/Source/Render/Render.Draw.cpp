@@ -3,6 +3,7 @@
 #include "VulkanVertexBuffer.h"
 #include "Assets/AssetManager.h"
 #include "RenderObject.h"
+#include "FrustumCull.h"
 
 #include "Utils/Utils.h"
 
@@ -363,9 +364,9 @@ namespace YAEngine
     }
 
     // Helper lambda: draw all shadow commands with given shadowMatrixIndex
-    // lightPos + lightRadius used for sphere culling (spot/point); lightRadius < 0 disables culling (CSM)
+    // frustumPlanes + planeCount for frustum culling; nullptr disables frustum culling
     auto drawShadowPass = [&](int shadowMatrixIndex, const ShadowViewport& sv,
-      const glm::vec3& lightPos = glm::vec3(0.0f), float lightRadius = -1.0f)
+      const FrustumPlane* frustumPlanes = nullptr, int planeCount = 6)
     {
       vkCmdSetViewport(cmd, 0, 1, &sv.viewport);
       vkCmdSetScissor(cmd, 0, 1, &sv.scissor);
@@ -375,12 +376,10 @@ namespace YAEngine
 
       for (auto& dc : m_ShadowDrawCommands)
       {
-        // Sphere culling for local lights
-        if (lightRadius >= 0.0f)
+        bool hasBounds = dc.boundsMin.x <= dc.boundsMax.x;
+        if (hasBounds && frustumPlanes)
         {
-          glm::vec3 center = (dc.boundsMin + dc.boundsMax) * 0.5f;
-          float objRadius = glm::length(dc.boundsMax - dc.boundsMin) * 0.5f;
-          if (glm::length(center - lightPos) > lightRadius + objRadius)
+          if (!IsAABBVisible(dc.boundsMin, dc.boundsMax, frustumPlanes, planeCount))
             continue;
         }
 
@@ -418,32 +417,65 @@ namespace YAEngine
       }
     };
 
-    // CSM cascades (matrix indices 0..3)
+    auto& shadowData = m_ShadowManager.GetShadowData();
+
+    // CSM cascades - frustum cull with 5 planes (skip near plane to keep distant shadow casters)
     if (hasDirectionalShadow)
     {
       for (uint32_t cascade = 0; cascade < CSM_CASCADE_COUNT; cascade++)
       {
+        FrustumPlane allPlanes[6];
+        ExtractFrustumPlanes(shadowData.cascades[cascade].viewProj, allPlanes);
+
+        // Skip near plane (index 4): left, right, bottom, top, far
+        FrustumPlane csmPlanes[5] = { allPlanes[0], allPlanes[1], allPlanes[2], allPlanes[3], allPlanes[5] };
+
         auto sv = ShadowAtlas::GetCascadeViewport(cascade);
-        drawShadowPass(int(cascade), sv);
+        drawShadowPass(int(cascade), sv, csmPlanes, 5);
       }
     }
 
-    // Spot shadows (with sphere culling)
+    // Spot shadows - full 6-plane frustum culling
     for (uint32_t i = 0; i < frame.snapshot.spotShadowRequests.size(); i++)
     {
-      auto& req = frame.snapshot.spotShadowRequests[i];
+      FrustumPlane spotPlanes[6];
+      ExtractFrustumPlanes(shadowData.spotShadows[i].viewProj, spotPlanes);
+
       auto sv = ShadowAtlas::GetSpotViewport(i);
-      drawShadowPass(int(SHADOW_SPOT_MATRIX_OFFSET + i), sv, req.position, req.radius);
+      drawShadowPass(int(SHADOW_SPOT_MATRIX_OFFSET + i), sv, spotPlanes, 6);
     }
 
-    // Point shadows (with sphere culling)
+    // Point shadows - per-face frustum culling + face culling
+    glm::vec3 cameraPos = frame.snapshot.camera.position;
+
+    static const glm::vec3 faceDirections[6] = {
+      {  1,  0,  0 }, { -1,  0,  0 },
+      {  0,  1,  0 }, {  0, -1,  0 },
+      {  0,  0,  1 }, {  0,  0, -1 },
+    };
+
     for (uint32_t i = 0; i < frame.snapshot.pointShadowRequests.size(); i++)
     {
       auto& req = frame.snapshot.pointShadowRequests[i];
+      glm::vec3 lightToCamera = cameraPos - req.position;
+      float distToLight = glm::length(lightToCamera);
+      bool cameraInsideSphere = distToLight < req.radius;
+
       for (uint32_t face = 0; face < 6; face++)
       {
+        // Face culling: skip faces pointing away from camera (only when camera is outside light sphere)
+        if (!cameraInsideSphere)
+        {
+          float faceDot = glm::dot(faceDirections[face], lightToCamera);
+          if (faceDot < 0.0f)
+            continue;
+        }
+
+        FrustumPlane facePlanes[6];
+        ExtractFrustumPlanes(shadowData.pointShadows[i].faceViewProj[face], facePlanes);
+
         auto sv = ShadowAtlas::GetPointFaceViewport(i, face);
-        drawShadowPass(int(SHADOW_POINT_MATRIX_OFFSET + i * 6 + face), sv, req.position, req.radius);
+        drawShadowPass(int(SHADOW_POINT_MATRIX_OFFSET + i * 6 + face), sv, facePlanes, 6);
       }
     }
 

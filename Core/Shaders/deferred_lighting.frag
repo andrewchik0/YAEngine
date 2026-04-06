@@ -42,7 +42,7 @@ void main()
 {
   float depth = texture(depthTexture, uv).r;
 
-  // Sky pixels — sample skybox cubemap
+  // Sky pixels - sample skybox cubemap
   if (depth >= DEPTH_EPSILON)
   {
     vec2 ndc = uv * 2.0 - 1.0;
@@ -65,7 +65,7 @@ void main()
   float roughness = gb1.b;
   int shadingModel = int(gb1.a * 3.0 + 0.5);
 
-  // Unlit — output albedo directly
+  // Unlit - output albedo directly
   if (shadingModel == SHADING_UNLIT)
   {
     outColor = vec4(albedo, 1.0);
@@ -102,11 +102,11 @@ void main()
 
   vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
 
-  // Analytical lights — tile-culled
+  // Analytical lights - tile-culled
   vec3 Lo = vec3(0.0);
   float alpha = roughness * roughness;
 
-  // Directional light (not tile-culled — always applied)
+  // Directional light (not tile-culled - always applied)
   {
     vec3 L = normalize(-u_Lights.directional.directionIntensity.xyz);
     float intensity = u_Lights.directional.directionIntensity.w;

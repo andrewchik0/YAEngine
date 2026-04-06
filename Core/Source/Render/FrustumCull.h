@@ -59,9 +59,9 @@ namespace YAEngine
     }
   }
 
-  inline bool IsAABBVisible(const glm::vec3& bmin, const glm::vec3& bmax, const FrustumPlane planes[6])
+  inline bool IsAABBVisible(const glm::vec3& bmin, const glm::vec3& bmax, const FrustumPlane* planes, int planeCount = 6)
   {
-    for (int i = 0; i < 6; i++)
+    for (int i = 0; i < planeCount; i++)
     {
       // P-vertex: the corner of the AABB farthest along the plane normal
       glm::vec3 pVertex {
@@ -88,7 +88,7 @@ namespace YAEngine
     {
       auto& obj = objects[i];
 
-      // No bounds data (sentinel) — always visible
+      // No bounds data (sentinel) - always visible
       bool hasBounds = obj.boundsMin.x <= obj.boundsMax.x;
       bool visible = !hasBounds || IsAABBVisible(obj.boundsMin, obj.boundsMax, planes);
 

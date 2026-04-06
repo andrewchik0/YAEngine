@@ -110,7 +110,7 @@ public:
       auto floor = GeneratePlane(40.0f, 10.0f);
       auto floorMesh = GetAssets().Meshes().Load(floor.vertices, floor.indices);
 
-      // Floor — light grey, slightly rough
+      // Floor - light grey, slightly rough
       {
         auto mat = GetAssets().Materials().Create();
         GetAssets().Materials().Get(mat).albedo = glm::vec3(0.7f);
@@ -121,7 +121,7 @@ public:
         GetScene().AddComponent<YAEngine::MaterialComponent>(e, mat);
       }
 
-      // Roughness/metallic gradient — 2 rows of spheres
+      // Roughness/metallic gradient - 2 rows of spheres
       for (int i = 0; i < 7; i++)
       {
         float t = i / 6.0f;
@@ -151,7 +151,7 @@ public:
         }
       }
 
-      // Emissive sphere — bright orange glow
+      // Emissive sphere - bright orange glow
       {
         auto mat = GetAssets().Materials().Create();
         GetAssets().Materials().Get(mat).albedo = glm::vec3(1.0f, 0.5f, 0.1f);
@@ -165,7 +165,7 @@ public:
         GetScene().GetTransform(e).scale = glm::vec3(1.5f);
       }
 
-      // Emissive sphere — blue
+      // Emissive sphere - blue
       {
         auto mat = GetAssets().Materials().Create();
         GetAssets().Materials().Get(mat).albedo = glm::vec3(0.1f, 0.3f, 1.0f);
@@ -178,7 +178,7 @@ public:
         GetScene().GetTransform(e).position = glm::vec3(6.0f, 1.0f, 4.0f);
       }
 
-      // Mirror box — perfect reflector
+      // Mirror box - perfect reflector
       {
         auto mat = GetAssets().Materials().Create();
         GetAssets().Materials().Get(mat).albedo = glm::vec3(0.95f);
@@ -214,7 +214,7 @@ public:
         GetScene().GetTransform(e).position = glm::vec3(3.0f, 2.0f, 8.0f);
       }
 
-      // Point light — warm white, above center (shadow-casting)
+      // Point light - warm white, above center (shadow-casting)
       {
         auto e = GetScene().CreateEntity("PointLight_Center");
         GetScene().GetTransform(e).position = glm::vec3(0.0f, 6.0f, 2.0f);
@@ -227,7 +227,7 @@ public:
         });
       }
 
-      // Point light — red, left side
+      // Point light - red, left side
       {
         auto e = GetScene().CreateEntity("PointLight_Red");
         GetScene().GetTransform(e).position = glm::vec3(-8.0f, 3.0f, 8.0f);
@@ -239,7 +239,7 @@ public:
         });
       }
 
-      // Point light — blue, right side
+      // Point light - blue, right side
       {
         auto e = GetScene().CreateEntity("PointLight_Blue");
         GetScene().GetTransform(e).position = glm::vec3(8.0f, 3.0f, 8.0f);
@@ -251,7 +251,7 @@ public:
         });
       }
 
-      // Directional light — sun
+      // Directional light - sun
       {
         auto e = GetScene().CreateEntity("DirectionalLight_Sun");
         GetScene().GetTransform(e).rotation = glm::quat(glm::vec3(
@@ -264,7 +264,7 @@ public:
         });
       }
 
-      // Spot light — aimed at the boxes (shadow-casting)
+      // Spot light - aimed at the boxes (shadow-casting)
       {
         auto e = GetScene().CreateEntity("SpotLight_Boxes");
         GetScene().GetTransform(e).position = glm::vec3(0.0f, 10.0f, 8.0f);
@@ -308,7 +308,7 @@ public:
         GetScene().GetTransform(e).scale = glm::vec3(2.0f);
       }
 
-      // Plastic spheres — saturated colors
+      // Plastic spheres - saturated colors
       glm::vec3 plasticColors[] = {
         {0.1f, 0.8f, 0.2f}, // green
         {0.8f, 0.8f, 0.05f}, // yellow

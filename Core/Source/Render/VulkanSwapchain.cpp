@@ -247,7 +247,7 @@ namespace YAEngine
     VkSwapchainKHR oldSwapchain = m_SwapChain;
     m_SwapChain = VK_NULL_HANDLE;
 
-    // Destroy views, framebuffers, depth image — but not the old swapchain
+    // Destroy views, framebuffers, depth image - but not the old swapchain
     vkDestroyImageView(m_Device, m_DepthImageView, nullptr);
     vmaDestroyImage(m_Allocator, m_DepthImage, m_DepthImageAllocation);
     for (auto framebuffer : m_SwapChainFrameBuffers)

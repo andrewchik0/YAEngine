@@ -82,13 +82,13 @@ namespace YAEngine
     RenderBackend m_Backend;
     RenderGraph m_Graph;
 
-    // Render graph resource handles — G-buffer
+    // Render graph resource handles - G-buffer
     RGHandle m_GBuffer0 {};       // R8G8B8A8_UNORM: albedo.rgb + metallic
     RGHandle m_GBuffer1 {};       // A2B10G10R10_UNORM: octNormal.xy + roughness + shadingModel
     RGHandle m_MainDepth {};
     RGHandle m_MainVelocity {};
 
-    // Render graph resource handles — lighting & post
+    // Render graph resource handles - lighting & post
     RGHandle m_LitColor {};       // R16G16B16A16_SFLOAT: deferred lighting output
     RGHandle m_SSRColor {};
     RGHandle m_HiZResource {};

@@ -111,7 +111,7 @@ namespace YAEngine
     forwardInfo.vertexShaderFile = "mesh.vert";
     m_ForwardPipelines[4] = m_PSOCache.Register(ctx.device, mainRP, forwardInfo, pipelineCache);
 
-    // Swapchain descriptor sets (set 1 — set 0 is FrameUniformBuffer)
+    // Swapchain descriptor sets (set 1 - set 0 is FrameUniformBuffer)
     SetDescription desc = {
       .set = 1,
       .bindings = {
@@ -129,7 +129,7 @@ namespace YAEngine
       m_SwapChainDescriptorSets[i].Init(ctx, desc);
     }
 
-    // TAA descriptor sets (set 1 — set 0 is FrameUniformBuffer)
+    // TAA descriptor sets (set 1 - set 0 is FrameUniformBuffer)
     SetDescription taaDesc = {
       .set = 1,
       .bindings = {
@@ -146,7 +146,7 @@ namespace YAEngine
       m_TAADescriptorSets[i].Init(ctx, taaDesc);
     }
 
-    // Quad pipeline — tone mapping pass
+    // Quad pipeline - tone mapping pass
 #ifdef YA_EDITOR
     VkRenderPass quadRP = m_Graph.GetPassRenderPass(m_SceneComposePassIndex);
 #else
@@ -172,7 +172,7 @@ namespace YAEngine
     }
 #endif
 
-    // TAA pipeline — use TAA render pass (compatible format)
+    // TAA pipeline - use TAA render pass (compatible format)
     VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
     PipelineCreateInfo taaInfo = {
       .fragmentShaderFile = "taa.frag",
@@ -372,7 +372,7 @@ namespace YAEngine
     };
     m_DeferredLightingPipeline = m_PSOCache.Register(ctx.device, deferredRP, deferredInfo, pipelineCache);
 
-    // Light cull compute pipeline — descriptor sets
+    // Light cull compute pipeline - descriptor sets
     m_LightCullInputDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
     for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
     {

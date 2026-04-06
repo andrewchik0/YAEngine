@@ -102,7 +102,7 @@ void main()
   // Build 6 frustum planes (normals point inward)
   vec4 planes[6];
 
-  // Left: cross(corner3, corner0) — swapped for Vulkan Y-flip
+  // Left: cross(corner3, corner0) - swapped for Vulkan Y-flip
   planes[0].xyz = normalize(cross(corners[3].xyz, corners[0].xyz));
   planes[0].w = 0.0;
 

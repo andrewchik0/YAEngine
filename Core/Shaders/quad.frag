@@ -13,7 +13,7 @@ layout(set = 1, binding = 3) uniform sampler2D gbuffer1Texture;
 
 void main()
 {
-  // Debug views — raw G-buffer, no tone mapping
+  // Debug views - raw G-buffer, no tone mapping
   switch (u_Frame.currentTexture)
   {
   case 1: // Albedo

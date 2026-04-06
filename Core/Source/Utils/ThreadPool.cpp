@@ -13,8 +13,8 @@ namespace YAEngine
 
     m_Workers.reserve(threadCount);
     for (uint32_t i = 0; i < threadCount; ++i)
-      // &ThreadPool::WorkerLoop — pointer to member function
-      // this — the object instance to call it on
+      // &ThreadPool::WorkerLoop - pointer to member function
+      // this - the object instance to call it on
       // std::thread will call this->WorkerLoop() on a new thread
       m_Workers.emplace_back(&ThreadPool::WorkerLoop, this);
 
@@ -43,7 +43,7 @@ namespace YAEngine
         std::unique_lock lock(m_Mutex);
         // wait() atomically releases the lock and sleeps until notify is called.
         // On wake, it re-acquires the lock and checks the predicate.
-        // If predicate returns false — goes back to sleep (spurious wakeup protection).
+        // If predicate returns false - goes back to sleep (spurious wakeup protection).
         m_Condition.wait(lock, [this] { return m_Stopping || !m_Tasks.empty(); });
 
         // On shutdown: finish remaining tasks before exiting, but once

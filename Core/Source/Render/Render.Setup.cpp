@@ -74,7 +74,7 @@ namespace YAEngine
       .mipLevels = hizMipCount
     });
 
-    // 1. Depth prepass — fills depth buffer first (wins on overdraw)
+    // 1. Depth prepass - fills depth buffer first (wins on overdraw)
     m_DepthPrepassIndex = m_Graph.AddPass({
       .name = "DepthPrepass",
       .depthOutput = m_MainDepth,
@@ -86,7 +86,7 @@ namespace YAEngine
       }
     });
 
-    // 2. G-buffer pass — writes geometry/material data only, no lighting
+    // 2. G-buffer pass - writes geometry/material data only, no lighting
     m_GBufferPassIndex = m_Graph.AddPass({
       .name = "GBufferPass",
       .inputs = {},
@@ -173,7 +173,7 @@ namespace YAEngine
       }
     });
 
-    // 5. Light Cull — tiled light culling (compute)
+    // 5. Light Cull - tiled light culling (compute)
     m_LightCullPassIndex = m_Graph.AddPass({
       .name = "LightCull",
       .inputs = {m_MainDepth},
@@ -213,7 +213,7 @@ namespace YAEngine
       }
     });
 
-    // 6. Deferred Lighting — fullscreen IBL + analytical lights from G-buffer
+    // 6. Deferred Lighting - fullscreen IBL + analytical lights from G-buffer
     m_DeferredLightingPassIndex = m_Graph.AddPass({
       .name = "DeferredLighting",
       .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_SSAOBlurred},
@@ -298,7 +298,7 @@ namespace YAEngine
       }
     });
 
-    // 7. SSR — Hi-Z accelerated screen-space reflections
+    // 7. SSR - Hi-Z accelerated screen-space reflections
     m_SSRPassIndex = m_Graph.AddPass({
       .name = "SSRPass",
       .inputs = {m_LitColor, m_MainDepth, m_GBuffer1, m_GBuffer0, m_SSAOBlurred, m_HiZResource},
@@ -361,7 +361,7 @@ namespace YAEngine
     });
 
 #ifdef YA_EDITOR
-    // Scene compose pass — tone mapping to offscreen texture for editor viewport
+    // Scene compose pass - tone mapping to offscreen texture for editor viewport
     m_SceneColor = m_Graph.CreateResource({
       .name = "sceneColor",
       .format = VK_FORMAT_R8G8B8A8_UNORM,
@@ -396,7 +396,7 @@ namespace YAEngine
       }
     });
 
-    // Gizmo pass — editor gizmos rendered on top of scene (depth cleared so gizmos only test against each other)
+    // Gizmo pass - editor gizmos rendered on top of scene (depth cleared so gizmos only test against each other)
     m_GizmoPassIndex = m_Graph.AddPass({
       .name = "GizmoPass",
       .colorOutputs = {m_SceneColor},
@@ -410,7 +410,7 @@ namespace YAEngine
       }
     });
 
-    // Swapchain pass — editor mode: ImGui only (scene displayed via viewport panel)
+    // Swapchain pass - editor mode: ImGui only (scene displayed via viewport panel)
     m_SwapchainPassIndex = m_Graph.AddPass({
       .name = "SwapchainPass",
       .inputs = {m_SceneColor},
@@ -430,7 +430,7 @@ namespace YAEngine
       }
     });
 #else
-    // Swapchain pass — production mode: tone mapping + ImGui overlay
+    // Swapchain pass - production mode: tone mapping + ImGui overlay
     m_SwapchainPassIndex = m_Graph.AddPass({
       .name = "SwapchainPass",
       .inputs = {m_TAAHistory0, m_SSAOBlurred, m_GBuffer0, m_GBuffer1},

@@ -105,7 +105,7 @@ namespace YAEngine
         return;
     }
 
-    // All done — collect results
+    // All done - collect results
     bool allSuccess = true;
     std::vector<std::string> successOutputs;
 
@@ -135,7 +135,7 @@ namespace YAEngine
       return;
     }
 
-    // Called from Update() on the main thread — safe to wait and recreate directly
+    // Called from Update() on the main thread - safe to wait and recreate directly
     vkDeviceWaitIdle(m_Device);
     uint32_t total = 0;
     for (auto& spvName : successOutputs)

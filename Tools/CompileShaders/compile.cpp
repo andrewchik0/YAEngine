@@ -253,7 +253,7 @@ bool ParseShaderFromFile(const fs::path& filePath, std::set<std::string>& includ
         }
         continue;
       }
-      // #include <...> — pass through as-is
+      // #include <...> - pass through as-is
     }
 
     out += line;

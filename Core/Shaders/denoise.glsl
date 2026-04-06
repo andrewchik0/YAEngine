@@ -47,7 +47,7 @@ vec3 inverseTonemapYCoCg(vec3 c) {
 }
 
 // based on https://www.shadertoy.com/view/4dSBDt
-// color: raw YCoCg (not tonemapped) — tonemap is applied internally
+// color: raw YCoCg (not tonemapped) - tonemap is applied internally
 void getVarianceClippingBounds(vec3 color, sampler2D colorSampler, ivec2 screenSpaceUV, float colorBoxSigma, out vec3 colorMin, out vec3 colorMax) {
   vec3 tm = tonemapYCoCg(color);
   vec3 colorAvg = tm;

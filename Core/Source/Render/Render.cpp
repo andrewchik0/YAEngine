@@ -69,7 +69,7 @@ namespace YAEngine
         v = glm::vec4(glm::normalize(glm::vec2(v.x, v.y)), 0.0f, 0.0f);
       }
 
-      // Convert to half-float manually via uint16 — use R16G16B16A16_SFLOAT
+      // Convert to half-float manually via uint16 - use R16G16B16A16_SFLOAT
       // VulkanTexture::Load expects raw data with pixelSize per pixel
       // Use R32G32B32A32_SFLOAT for simplicity (16 bytes per pixel)
       m_SSAONoise.Load(ctx, noiseData.data(), 4, 4, 16, VK_FORMAT_R32G32B32A32_SFLOAT);
@@ -92,7 +92,7 @@ namespace YAEngine
         sample = glm::normalize(sample);
         sample *= dist(rng);
 
-        // Accelerating interpolation — bias samples closer to origin
+        // Accelerating interpolation - bias samples closer to origin
         float scale = float(i) / float(SSAO_KERNEL_SIZE);
         scale = 0.1f + scale * scale * 0.9f;
         sample *= scale;
@@ -255,7 +255,7 @@ namespace YAEngine
   void Render::Draw(FrameContext& frame)
   {
 #ifdef YA_EDITOR
-    // Handle deferred viewport resize BEFORE acquiring the frame —
+    // Handle deferred viewport resize BEFORE acquiring the frame -
     // no command buffer is recording at this point, safe to wait for GPU and recreate resources
     if (m_PendingViewportWidth != m_ViewportWidth || m_PendingViewportHeight != m_ViewportHeight)
     {

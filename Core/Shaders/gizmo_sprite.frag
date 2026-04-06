@@ -16,14 +16,14 @@ float SampleBlurred(vec2 uv, float radius)
   const float PI = 3.14159265;
   float alpha = texture(u_GlyphTexture, uv).r;
 
-  // Inner ring — 4 samples at half radius
+  // Inner ring - 4 samples at half radius
   for (int i = 0; i < 4; i++)
   {
     float angle = float(i) * PI * 0.5;
     alpha += texture(u_GlyphTexture, uv + vec2(cos(angle), sin(angle)) * radius * 0.5).r;
   }
 
-  // Outer ring — 8 samples at full radius
+  // Outer ring - 8 samples at full radius
   for (int i = 0; i < 8; i++)
   {
     float angle = float(i) * PI * 0.25;

@@ -24,7 +24,7 @@ namespace YAEngine
         YA_LOG_ERROR("Render", "Vulkan %u.%u found, but 1.3+ required", major, minor);
         throw std::runtime_error("Vulkan 1.3+ required");
       }
-      YA_LOG_INFO("Render", "Vulkan %u.%u — %s", major, minor, props.deviceName);
+      YA_LOG_INFO("Render", "Vulkan %u.%u - %s", major, minor, props.deviceName);
     }
 
     m_Device.Init(m_VulkanInstance, m_PhysicalDevice, m_Surface.Get());
