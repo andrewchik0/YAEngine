@@ -29,6 +29,8 @@ namespace YAEngine
     float minLod = 0.0f;
     float maxLod = 0.0f;
     VkBorderColor borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+    bool compareEnable = false;
+    VkCompareOp compareOp = VK_COMPARE_OP_ALWAYS;
   };
 
   class VulkanImage

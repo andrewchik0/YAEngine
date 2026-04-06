@@ -206,6 +206,7 @@ namespace YAEngine
 
     std::vector<DrawCommand> m_DrawCommands;
     std::vector<DrawCommand> m_DepthDrawCommands;
+    std::vector<DrawCommand> m_ShadowDrawCommands;
 
     VulkanPipeline& GetForwardPipeline(const DrawCommand& dc);
     VulkanPipeline& GetDepthPipeline(const DrawCommand& dc);

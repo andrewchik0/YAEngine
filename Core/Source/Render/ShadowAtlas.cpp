@@ -16,10 +16,12 @@ namespace YAEngine
     imageDesc.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
 
     SamplerDesc samplerDesc;
-    samplerDesc.magFilter = VK_FILTER_NEAREST;
-    samplerDesc.minFilter = VK_FILTER_NEAREST;
+    samplerDesc.magFilter = VK_FILTER_LINEAR;
+    samplerDesc.minFilter = VK_FILTER_LINEAR;
     samplerDesc.addressMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_BORDER;
     samplerDesc.borderColor = VK_BORDER_COLOR_FLOAT_OPAQUE_WHITE;
+    samplerDesc.compareEnable = true;
+    samplerDesc.compareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
 
     m_Image.Init(ctx, imageDesc, &samplerDesc);
 

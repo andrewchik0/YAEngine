@@ -183,38 +183,34 @@ namespace YAEngine
     auto cmd = m_Backend.GetCurrentCommandBuffer();
     auto& meshManager = frame.assets.Meshes();
 
-    // Depth draw commands are already collected and sorted in RenderShadowMaps
-    // (called before graph execute). If they're empty, collect them here.
-    if (m_DepthDrawCommands.empty())
+    m_DepthDrawCommands.clear();
+    uint32_t visibleCount = frame.snapshot.visibleCount;
+    for (uint32_t i = 0; i < visibleCount; i++)
     {
-      uint32_t visibleCount = frame.snapshot.visibleCount;
-      for (uint32_t i = 0; i < visibleCount; i++)
-      {
-        auto& obj = frame.snapshot.objects[i];
-        if (obj.noShading) continue;
+      auto& obj = frame.snapshot.objects[i];
+      if (obj.noShading) continue;
 
-        m_DepthDrawCommands.push_back({
-          .instanced = (obj.instanceData != nullptr),
-          .doubleSided = obj.doubleSided,
-          .noShading = false,
-          .materialIndex = 0,
-          .materialGeneration = 0,
-          .meshIndex = obj.mesh.index,
-          .meshGeneration = obj.mesh.generation,
-          .worldTransform = obj.worldTransform,
-          .instanceData = obj.instanceData,
-          .instanceOffset = obj.instanceOffset,
-        });
-      }
-
-      std::sort(m_DepthDrawCommands.begin(), m_DepthDrawCommands.end(),
-        [](const DrawCommand& a, const DrawCommand& b)
-        {
-          uint8_t ka = a.SortKey(), kb = b.SortKey();
-          if (ka != kb) return ka < kb;
-          return a.meshIndex < b.meshIndex;
-        });
+      m_DepthDrawCommands.push_back({
+        .instanced = (obj.instanceData != nullptr),
+        .doubleSided = obj.doubleSided,
+        .noShading = false,
+        .materialIndex = 0,
+        .materialGeneration = 0,
+        .meshIndex = obj.mesh.index,
+        .meshGeneration = obj.mesh.generation,
+        .worldTransform = obj.worldTransform,
+        .instanceData = obj.instanceData,
+        .instanceOffset = obj.instanceOffset,
+      });
     }
+
+    std::sort(m_DepthDrawCommands.begin(), m_DepthDrawCommands.end(),
+      [](const DrawCommand& a, const DrawCommand& b)
+      {
+        uint8_t ka = a.SortKey(), kb = b.SortKey();
+        if (ka != kb) return ka < kb;
+        return a.meshIndex < b.meshIndex;
+      });
 
     uint8_t lastSortKey = UINT8_MAX;
     VulkanPipeline* currentPipeline = nullptr;
@@ -256,15 +252,16 @@ namespace YAEngine
 
   void Render::RenderShadowMaps(FrameContext& frame)
   {
-    // Collect and sort depth draw commands (shared with DrawMeshesDepthOnly)
-    m_DepthDrawCommands.clear();
-    uint32_t visibleCount = frame.snapshot.visibleCount;
-    for (uint32_t i = 0; i < visibleCount; i++)
+    // Collect shadow draw commands from ALL objects (not just camera-visible).
+    // Objects outside the camera frustum can still cast shadows into the view.
+    m_ShadowDrawCommands.clear();
+    uint32_t totalCount = uint32_t(frame.snapshot.objects.size());
+    for (uint32_t i = 0; i < totalCount; i++)
     {
       auto& obj = frame.snapshot.objects[i];
       if (obj.noShading) continue;
 
-      m_DepthDrawCommands.push_back({
+      m_ShadowDrawCommands.push_back({
         .instanced = (obj.instanceData != nullptr),
         .doubleSided = obj.doubleSided,
         .noShading = false,
@@ -278,7 +275,7 @@ namespace YAEngine
       });
     }
 
-    std::sort(m_DepthDrawCommands.begin(), m_DepthDrawCommands.end(),
+    std::sort(m_ShadowDrawCommands.begin(), m_ShadowDrawCommands.end(),
       [](const DrawCommand& a, const DrawCommand& b)
       {
         uint8_t ka = a.SortKey(), kb = b.SortKey();
@@ -300,8 +297,7 @@ namespace YAEngine
       m_FrameUniformBuffer.uniforms.view,
       m_PrevProj, // unjittered projection
       cam.nearPlane, cam.farPlane,
-      shadow.direction,
-      shadow.shadowBias, shadow.normalBias);
+      shadow.direction);
 
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     m_ShadowManager.SetUp(currentFrame);
@@ -322,12 +318,12 @@ namespace YAEngine
     rpBegin.pClearValues = &clearValue;
 
     vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
-    vkCmdSetDepthBias(cmd, 1.25f, 0.0f, 1.75f);
+    vkCmdSetDepthBias(cmd, 0.5f, 0.0f, 1.5f);
 
     auto& meshManager = frame.assets.Meshes();
 
     // Upload instance data once before cascades loop
-    for (auto& dc : m_DepthDrawCommands)
+    for (auto& dc : m_ShadowDrawCommands)
     {
       if (dc.instanced)
       {
@@ -345,7 +341,7 @@ namespace YAEngine
       uint8_t lastSortKey = UINT8_MAX;
       VulkanPipeline* currentPipeline = nullptr;
 
-      for (auto& dc : m_DepthDrawCommands)
+      for (auto& dc : m_ShadowDrawCommands)
       {
         MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
         uint8_t sortKey = dc.SortKey();

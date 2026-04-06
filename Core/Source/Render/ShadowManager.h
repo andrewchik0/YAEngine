@@ -27,8 +27,7 @@ namespace YAEngine
       const glm::mat4& cameraView,
       const glm::mat4& cameraProj,
       float nearPlane, float farPlane,
-      const glm::vec3& lightDirection,
-      float shadowBias, float normalBias);
+      const glm::vec3& lightDirection);
 
     void SetUp(uint32_t frameIndex);
 
@@ -50,7 +49,7 @@ namespace YAEngine
   private:
 
     void ComputeCascadeSplits(float nearPlane, float farPlane);
-    void FitCascadeToFrustum(uint32_t cascadeIndex,
+    float FitCascadeToFrustum(uint32_t cascadeIndex,
       const glm::mat4& invViewProj,
       float nearSplit, float farSplit,
       const glm::vec3& lightDir);

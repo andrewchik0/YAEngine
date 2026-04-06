@@ -1,7 +1,23 @@
 #include "../Shared/ShadowData.h"
 
 layout(std140, set = 2, binding = 2) uniform ShadowBufferUBO { ShadowBuffer u_Shadow; };
-layout(set = 2, binding = 3) uniform sampler2D shadowAtlas;
+layout(set = 2, binding = 3) uniform sampler2DShadow shadowAtlas;
+
+const float GOLDEN_ANGLE = 2.3999632;
+const int SHADOW_SAMPLES = 16;
+const float SHADOW_FILTER_RADIUS = 3.0;
+
+float interleavedGradientNoise(vec2 pos)
+{
+  return fract(52.9829189 * fract(0.06711056 * pos.x + 0.00583715 * pos.y));
+}
+
+vec2 vogelDiskSample(int index, int count, float rotation)
+{
+  float r = sqrt((float(index) + 0.5) / float(count));
+  float theta = float(index) * GOLDEN_ANGLE + rotation;
+  return vec2(cos(theta), sin(theta)) * r;
+}
 
 int selectCascade(float viewDepth)
 {
@@ -15,36 +31,33 @@ int selectCascade(float viewDepth)
 
 float sampleShadowPCF(vec3 worldPos, int cascadeIndex)
 {
-  vec4 cascade = u_Shadow.cascades[cascadeIndex].splitDepthAndBias;
   vec4 viewport = u_Shadow.cascades[cascadeIndex].atlasViewport;
-  float bias = cascade.y;
 
   vec4 clipPos = u_Shadow.cascades[cascadeIndex].viewProj * vec4(worldPos, 1.0);
   vec3 ndc = clipPos.xyz / clipPos.w;
 
-  // NDC to UV [0,1]
   vec2 uv = ndc.xy * 0.5 + 0.5;
 
-  // Check if in shadow map bounds
   if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0)
     return 1.0;
 
-  // Map to atlas coordinates
-  vec2 atlasUV = viewport.xy + uv * viewport.zw;
-  float compareDepth = ndc.z - bias;
-
-  // PCF 3x3
+  // Map to atlas coordinates with 1-texel border clamp to prevent bleeding
   vec2 texelSize = u_Shadow.atlasSize.zw;
+  vec2 atlasUV = viewport.xy + uv * viewport.zw;
+  vec2 atlasMin = viewport.xy + texelSize;
+  vec2 atlasMax = viewport.xy + viewport.zw - texelSize;
+
+  float rotation = interleavedGradientNoise(gl_FragCoord.xy) * 6.2831853;
+  vec2 filterRadius = SHADOW_FILTER_RADIUS * texelSize;
+
   float shadow = 0.0;
-  for (int x = -1; x <= 1; x++)
+  for (int i = 0; i < SHADOW_SAMPLES; i++)
   {
-    for (int y = -1; y <= 1; y++)
-    {
-      float depth = texture(shadowAtlas, atlasUV + vec2(x, y) * texelSize).r;
-      shadow += (compareDepth > depth) ? 0.0 : 1.0;
-    }
+    vec2 offset = vogelDiskSample(i, SHADOW_SAMPLES, rotation);
+    vec2 sampleUV = clamp(atlasUV + offset * filterRadius, atlasMin, atlasMax);
+    shadow += texture(shadowAtlas, vec3(sampleUV, ndc.z));
   }
-  return shadow / 9.0;
+  return shadow / float(SHADOW_SAMPLES);
 }
 
 float calculateCSMShadow(vec3 worldPos, float viewDepth, vec3 normal)
@@ -54,13 +67,12 @@ float calculateCSMShadow(vec3 worldPos, float viewDepth, vec3 normal)
 
   int cascade = selectCascade(viewDepth);
 
-  // Normal bias: offset along normal to reduce shadow acne on slopes
   float normalBias = u_Shadow.cascades[cascade].splitDepthAndBias.z;
   vec3 biasedPos = worldPos + normal * normalBias;
 
   float shadow = sampleShadowPCF(biasedPos, cascade);
 
-  // Cascade blending: smooth transition at cascade boundaries
+  // Cascade blending
   float splitDist = u_Shadow.cascades[cascade].splitDepthAndBias.x;
   float prevSplit = (cascade > 0) ? u_Shadow.cascades[cascade - 1].splitDepthAndBias.x : 0.0;
   float cascadeRange = splitDist - prevSplit;

@@ -112,8 +112,6 @@ namespace YAEngine
             snapshot.directionalShadow.direction = forward;
             snapshot.directionalShadow.position = position;
             snapshot.directionalShadow.castShadow = light.castShadow;
-            snapshot.directionalShadow.shadowBias = light.shadowBias;
-            snapshot.directionalShadow.normalBias = light.normalBias;
             hasDirectional = true;
           }
           break;

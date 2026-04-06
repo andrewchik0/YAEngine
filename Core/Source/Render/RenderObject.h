@@ -33,8 +33,6 @@ namespace YAEngine
     glm::vec3 direction { 0.0f, -1.0f, 0.0f };
     glm::vec3 position { 0.0f };
     bool castShadow = false;
-    float shadowBias = 0.005f;
-    float normalBias = 0.02f;
   };
 
   struct SceneSnapshot

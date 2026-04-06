@@ -65,8 +65,8 @@ namespace YAEngine
       samplerInfo.maxAnisotropy = samplerDesc->maxAnisotropy;
       samplerInfo.borderColor = samplerDesc->borderColor;
       samplerInfo.unnormalizedCoordinates = VK_FALSE;
-      samplerInfo.compareEnable = VK_FALSE;
-      samplerInfo.compareOp = VK_COMPARE_OP_ALWAYS;
+      samplerInfo.compareEnable = samplerDesc->compareEnable ? VK_TRUE : VK_FALSE;
+      samplerInfo.compareOp = samplerDesc->compareOp;
       samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
       samplerInfo.mipLodBias = 0.0f;
       samplerInfo.minLod = samplerDesc->minLod;

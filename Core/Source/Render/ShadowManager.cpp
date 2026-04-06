@@ -141,7 +141,7 @@ namespace YAEngine
     }
   }
 
-  void ShadowManager::FitCascadeToFrustum(
+  float ShadowManager::FitCascadeToFrustum(
     uint32_t cascadeIndex,
     const glm::mat4& invViewProj,
     float nearSplit, float farSplit,
@@ -215,14 +215,15 @@ namespace YAEngine
     lightVP = lightProj * lightView;
 
     m_ShadowData.cascades[cascadeIndex].viewProj = lightVP;
+
+    return 2.0f * radius / float(CASCADE_TILE_SIZE);
   }
 
   void ShadowManager::ComputeCascades(
     const glm::mat4& cameraView,
     const glm::mat4& cameraProj,
     float nearPlane, float farPlane,
-    const glm::vec3& lightDirection,
-    float shadowBias, float normalBias)
+    const glm::vec3& lightDirection)
   {
     m_ShadowData.shadowsEnabled = 1;
 
@@ -236,13 +237,13 @@ namespace YAEngine
       float nearSplit = (m_CascadeSplits[i] - nearPlane) / (farPlane - nearPlane);
       float farSplit = (m_CascadeSplits[i + 1] - nearPlane) / (farPlane - nearPlane);
 
-      FitCascadeToFrustum(i, invViewProj, nearSplit, farSplit, glm::normalize(lightDirection));
+      float texelWorldSize = FitCascadeToFrustum(i, invViewProj, nearSplit, farSplit, glm::normalize(lightDirection));
 
-      // Store split depth in view space (positive, for comparison in shader)
+      // Normal bias = 1.5 texels in world space, scales automatically per cascade
       m_ShadowData.cascades[i].splitDepthAndBias = glm::vec4(
         m_CascadeSplits[i + 1],
-        shadowBias,
-        normalBias,
+        0.0f,
+        texelWorldSize * 1.5f,
         0.0f);
     }
   }
