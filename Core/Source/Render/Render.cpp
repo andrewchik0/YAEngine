@@ -304,6 +304,7 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.ssrEnabled = b_SSREnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.hizMipCount = static_cast<int>(m_Graph.GetResourceDesc(m_HiZResource).mipLevels);
+    m_FrameUniformBuffer.uniforms.frameIndex = static_cast<int>(m_GlobalFrameIndex);
 
     // Configure render graph for this frame (TAA ping-pong + swapchain)
     auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;

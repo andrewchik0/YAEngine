@@ -31,7 +31,7 @@ struct FrameUniforms
   float jitterX;
   float jitterY;
   int hizMipCount;
-  float _pad0;
+  int frameIndex;
   int tileCountX;
   int tileCountY;
   mat4 invView;

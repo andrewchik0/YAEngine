@@ -80,18 +80,17 @@ void main()
 
   // Reflection direction: stochastic GGX sampling for rough surfaces, perfect reflection for mirrors
   vec3 viewDir = normalize(viewPos);
-  vec3 reflectDir;
-  if (roughness < 0.02)
+  vec3 reflectDir = reflect(viewDir, viewNormal);
+
+  // Stochastic GGX sampling (disabled - TAA can't converge without dedicated reflection denoiser)
+  if (roughness >= 0.02)
   {
-    reflectDir = reflect(viewDir, viewNormal);
-  }
-  else
-  {
-    vec2 Xi = vec2(
-      temporalNoise(gl_FragCoord.xy, u_Frame.time * 3.17, vec2(43.0, 97.0)),
-      temporalNoise(gl_FragCoord.xy, u_Frame.time * 5.63, vec2(173.0, 59.0))
+    vec2 spatialNoise = vec2(
+      interleavedGradientNoise(gl_FragCoord.xy),
+      interleavedGradientNoise(gl_FragCoord.xy + vec2(97.0, 53.0))
     );
-    vec3 H = importanceSampleGGX(Xi, viewNormal, roughness);
+    vec2 Xi = fract(hammersley(uint(u_Frame.frameIndex) % 64u, 64u) + spatialNoise);
+    vec3 H = importanceSampleGGX(Xi, viewNormal, min(roughness, 0.15));
     reflectDir = reflect(viewDir, H);
 
     if (dot(reflectDir, viewNormal) <= 0.0)
