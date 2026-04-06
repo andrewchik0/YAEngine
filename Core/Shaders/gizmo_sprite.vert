@@ -36,6 +36,7 @@ void main()
   vec3 worldPos = pc.positionAndScale.xyz + (right * corner.x + up * corner.y) * size;
 
   gl_Position = u_Frame.proj * u_Frame.view * vec4(worldPos, 1.0);
+  gl_Position.xy += vec2(u_Frame.jitterX, u_Frame.jitterY) * gl_Position.w;
   outUV = uvs[gl_VertexIndex];
   outColor = pc.color;
 }

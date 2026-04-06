@@ -13,5 +13,6 @@ void main()
 {
   vec4 worldPos = pc.world * vec4(inPosition, 1.0);
   gl_Position = u_Frame.proj * u_Frame.view * worldPos;
+  gl_Position.xy += vec2(u_Frame.jitterX, u_Frame.jitterY) * gl_Position.w;
   outColor = pc.color;
 }
