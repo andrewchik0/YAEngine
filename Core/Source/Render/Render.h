@@ -194,6 +194,8 @@ namespace YAEngine
       uint32_t meshIndex;
       uint32_t meshGeneration;
       glm::mat4 worldTransform;
+      glm::vec3 boundsMin { std::numeric_limits<float>::max() };
+      glm::vec3 boundsMax { std::numeric_limits<float>::lowest() };
       std::vector<glm::mat4>* instanceData;
       uint32_t instanceOffset;
 

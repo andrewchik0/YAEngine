@@ -214,7 +214,7 @@ public:
         GetScene().GetTransform(e).position = glm::vec3(3.0f, 2.0f, 8.0f);
       }
 
-      // Point light — warm white, above center
+      // Point light — warm white, above center (shadow-casting)
       {
         auto e = GetScene().CreateEntity("PointLight_Center");
         GetScene().GetTransform(e).position = glm::vec3(0.0f, 6.0f, 2.0f);
@@ -223,6 +223,7 @@ public:
           .color = glm::vec3(1.0f, 0.95f, 0.8f),
           .intensity = 5.0f,
           .radius = 25.0f,
+          .castShadow = true,
         });
       }
 
@@ -259,6 +260,23 @@ public:
           .type = YAEngine::LightType::Directional,
           .color = glm::vec3(1.0f, 0.98f, 0.9f),
           .intensity = 1.5f,
+          .castShadow = true,
+        });
+      }
+
+      // Spot light — aimed at the boxes (shadow-casting)
+      {
+        auto e = GetScene().CreateEntity("SpotLight_Boxes");
+        GetScene().GetTransform(e).position = glm::vec3(0.0f, 10.0f, 8.0f);
+        GetScene().GetTransform(e).rotation = glm::quat(glm::vec3(
+          glm::radians(-80.0f), 0.0f, 0.0f));
+        GetScene().AddComponent<YAEngine::LightComponent>(e, YAEngine::LightComponent {
+          .type = YAEngine::LightType::Spot,
+          .color = glm::vec3(1.0f, 0.9f, 0.7f),
+          .intensity = 8.0f,
+          .radius = 20.0f,
+          .innerCone = glm::radians(20.0f),
+          .outerCone = glm::radians(30.0f),
           .castShadow = true,
         });
       }

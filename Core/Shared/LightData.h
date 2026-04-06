@@ -12,6 +12,7 @@ struct PointLight
 {
   vec4 positionRadius;    // xyz = position, w = radius
   vec4 colorIntensity;    // xyz = color, w = intensity
+  vec4 shadowPad;         // x = shadowIndex (as float, -1 = no shadow), yzw = padding
 };
 
 struct SpotLight
@@ -19,7 +20,7 @@ struct SpotLight
   vec4 positionRadius;    // xyz = position, w = radius
   vec4 directionInnerCone; // xyz = direction, w = cos(innerCone)
   vec4 colorOuterCone;    // xyz = color, w = cos(outerCone)
-  vec4 intensityPad;      // x = intensity, yzw = padding
+  vec4 intensityShadow;   // x = intensity, y = shadowIndex (as float, -1 = no shadow), zw = padding
 };
 
 struct DirectionalLight

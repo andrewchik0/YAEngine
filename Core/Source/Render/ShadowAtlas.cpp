@@ -114,6 +114,49 @@ namespace YAEngine
     YA_LOG_INFO("Render", "Shadow atlas created (%dx%d, D32_SFLOAT)", SHADOW_ATLAS_SIZE, SHADOW_ATLAS_SIZE);
   }
 
+  ShadowViewport ShadowAtlas::MakeViewport(uint32_t x, uint32_t y, uint32_t size)
+  {
+    float atlasF = float(SHADOW_ATLAS_SIZE);
+    return {
+      .viewport = {
+        .x = float(x), .y = float(y),
+        .width = float(size), .height = float(size),
+        .minDepth = 0.0f, .maxDepth = 1.0f
+      },
+      .scissor = {
+        .offset = { int32_t(x), int32_t(y) },
+        .extent = { size, size }
+      },
+      .atlasUV = glm::vec4(
+        float(x) / atlasF, float(y) / atlasF,
+        float(size) / atlasF, float(size) / atlasF)
+    };
+  }
+
+  ShadowViewport ShadowAtlas::GetCascadeViewport(uint32_t cascadeIndex)
+  {
+    uint32_t col = cascadeIndex % 2;
+    uint32_t row = cascadeIndex / 2;
+    return MakeViewport(col * SHADOW_CASCADE_SIZE, row * SHADOW_CASCADE_SIZE, SHADOW_CASCADE_SIZE);
+  }
+
+  ShadowViewport ShadowAtlas::GetSpotViewport(uint32_t spotIndex)
+  {
+    // Top-right quadrant: 4x2 grid of 1024x1024 tiles starting at (4096, 0)
+    uint32_t col = spotIndex % 4;
+    uint32_t row = spotIndex / 4;
+    return MakeViewport(4096 + col * SHADOW_SPOT_SIZE, row * SHADOW_SPOT_SIZE, SHADOW_SPOT_SIZE);
+  }
+
+  ShadowViewport ShadowAtlas::GetPointFaceViewport(uint32_t pointIndex, uint32_t faceIndex)
+  {
+    // Bottom region: 8x3 grid of 512x512 tiles starting at (0, 4096)
+    uint32_t linearIndex = pointIndex * 6 + faceIndex;
+    uint32_t col = linearIndex % 8;
+    uint32_t row = linearIndex / 8;
+    return MakeViewport(col * SHADOW_POINT_FACE_SIZE, 4096 + row * SHADOW_POINT_FACE_SIZE, SHADOW_POINT_FACE_SIZE);
+  }
+
   void ShadowAtlas::Destroy(const RenderContext& ctx)
   {
     if (m_Framebuffer)

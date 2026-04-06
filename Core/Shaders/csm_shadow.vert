@@ -17,8 +17,20 @@ layout(push_constant) uniform PushConstants
 {
   mat4 world;
   int offset;
-  int cascadeIndex;
+  int shadowMatrixIndex;
 } pc;
+
+mat4 getShadowViewProj(int index)
+{
+  if (index < SHADOW_SPOT_MATRIX_OFFSET)
+    return u_Shadow.cascades[index].viewProj;
+
+  if (index < SHADOW_POINT_MATRIX_OFFSET)
+    return u_Shadow.spotShadows[index - SHADOW_SPOT_MATRIX_OFFSET].viewProj;
+
+  int pointLocal = index - SHADOW_POINT_MATRIX_OFFSET;
+  return u_Shadow.pointShadows[pointLocal / 6].faceViewProj[pointLocal % 6];
+}
 
 void main()
 {
@@ -29,5 +41,5 @@ void main()
 #endif
 
   vec4 worldPos = worldMatrix * vec4(inPosition, 1.0);
-  gl_Position = u_Shadow.cascades[pc.cascadeIndex].viewProj * worldPos;
+  gl_Position = getShadowViewProj(pc.shadowMatrixIndex) * worldPos;
 }

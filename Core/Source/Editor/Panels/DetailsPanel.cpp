@@ -215,6 +215,8 @@ namespace YAEngine
         ImGui::SliderAngle("Inner Cone", &light.innerCone, 0.0f, 90.0f);
         ImGui::SliderAngle("Outer Cone", &light.outerCone, 0.0f, 90.0f);
       }
+
+      ImGui::Checkbox("Cast Shadow", &light.castShadow);
     }
 
     return false;

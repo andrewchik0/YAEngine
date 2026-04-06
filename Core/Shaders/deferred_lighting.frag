@@ -140,6 +140,10 @@ void main()
     att = att * att;
     vec3 radiance = u_Lights.pointLights[i].colorIntensity.rgb * u_Lights.pointLights[i].colorIntensity.w * att;
 
+    int pointShadowIdx = floatBitsToInt(u_Lights.pointLights[i].shadowPad.x);
+    if (pointShadowIdx >= 0)
+      radiance *= calculatePointShadow(worldPos, normal, lightPos, pointShadowIdx);
+
     Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
   }
 
@@ -163,7 +167,11 @@ void main()
 
     float att = 1.0 - (dist * dist) / (lightRadius * lightRadius);
     att = att * att;
-    vec3 radiance = u_Lights.spotLights[i].colorOuterCone.rgb * u_Lights.spotLights[i].intensityPad.x * att * spotFactor;
+    vec3 radiance = u_Lights.spotLights[i].colorOuterCone.rgb * u_Lights.spotLights[i].intensityShadow.x * att * spotFactor;
+
+    int spotShadowIdx = floatBitsToInt(u_Lights.spotLights[i].intensityShadow.y);
+    if (spotShadowIdx >= 0)
+      radiance *= calculateSpotShadow(worldPos, normal, spotShadowIdx);
 
     Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
   }

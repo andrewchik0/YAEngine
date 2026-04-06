@@ -35,6 +35,22 @@ namespace YAEngine
     bool castShadow = false;
   };
 
+  struct SpotShadowRequest
+  {
+    glm::vec3 position { 0.0f };
+    glm::vec3 direction { 0.0f, 0.0f, -1.0f };
+    float outerCone = 0.0f;
+    float radius = 0.0f;
+    uint32_t lightIndex = 0;
+  };
+
+  struct PointShadowRequest
+  {
+    glm::vec3 position { 0.0f };
+    float radius = 0.0f;
+    uint32_t lightIndex = 0;
+  };
+
   struct SceneSnapshot
   {
     std::vector<RenderObject> objects;
@@ -42,5 +58,7 @@ namespace YAEngine
     CameraData camera;
     CubeMapHandle skybox;
     DirectionalShadowData directionalShadow;
+    std::vector<SpotShadowRequest> spotShadowRequests;
+    std::vector<PointShadowRequest> pointShadowRequests;
   };
 }

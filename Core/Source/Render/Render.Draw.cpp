@@ -270,6 +270,8 @@ namespace YAEngine
         .meshIndex = obj.mesh.index,
         .meshGeneration = obj.mesh.generation,
         .worldTransform = obj.worldTransform,
+        .boundsMin = obj.boundsMin,
+        .boundsMax = obj.boundsMax,
         .instanceData = obj.instanceData,
         .instanceOffset = obj.instanceOffset,
       });
@@ -283,21 +285,49 @@ namespace YAEngine
         return a.meshIndex < b.meshIndex;
       });
 
-    if (!b_ShadowsEnabled || !frame.snapshot.directionalShadow.castShadow)
+    bool hasDirectionalShadow = b_ShadowsEnabled && frame.snapshot.directionalShadow.castShadow;
+    bool hasSpotShadows = b_ShadowsEnabled && !frame.snapshot.spotShadowRequests.empty();
+    bool hasPointShadows = b_ShadowsEnabled && !frame.snapshot.pointShadowRequests.empty();
+
+    if (!hasDirectionalShadow && !hasSpotShadows && !hasPointShadows)
     {
       m_ShadowManager.SetEnabled(false);
+      m_ShadowManager.SetSpotShadowCount(0);
+      m_ShadowManager.SetPointShadowCount(0);
       m_ShadowManager.SetUp(m_Backend.GetCurrentFrameIndex());
       return;
     }
 
-    auto& cam = frame.snapshot.camera;
-    auto& shadow = frame.snapshot.directionalShadow;
+    // Compute shadow matrices
+    if (hasDirectionalShadow)
+    {
+      auto& cam = frame.snapshot.camera;
+      auto& shadow = frame.snapshot.directionalShadow;
+      m_ShadowManager.SetEnabled(true);
+      m_ShadowManager.ComputeCascades(
+        m_FrameUniformBuffer.uniforms.view,
+        m_PrevProj,
+        cam.nearPlane, cam.farPlane,
+        shadow.direction);
+    }
+    else
+    {
+      m_ShadowManager.SetEnabled(false);
+    }
 
-    m_ShadowManager.ComputeCascades(
-      m_FrameUniformBuffer.uniforms.view,
-      m_PrevProj, // unjittered projection
-      cam.nearPlane, cam.farPlane,
-      shadow.direction);
+    m_ShadowManager.SetSpotShadowCount(int(frame.snapshot.spotShadowRequests.size()));
+    for (uint32_t i = 0; i < frame.snapshot.spotShadowRequests.size(); i++)
+    {
+      auto& req = frame.snapshot.spotShadowRequests[i];
+      m_ShadowManager.ComputeSpotShadow(i, req.position, req.direction, req.outerCone, req.radius);
+    }
+
+    m_ShadowManager.SetPointShadowCount(int(frame.snapshot.pointShadowRequests.size()));
+    for (uint32_t i = 0; i < frame.snapshot.pointShadowRequests.size(); i++)
+    {
+      auto& req = frame.snapshot.pointShadowRequests[i];
+      m_ShadowManager.ComputePointShadow(i, req.position, req.radius);
+    }
 
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     m_ShadowManager.SetUp(currentFrame);
@@ -322,7 +352,7 @@ namespace YAEngine
 
     auto& meshManager = frame.assets.Meshes();
 
-    // Upload instance data once before cascades loop
+    // Upload instance data once before all shadow passes
     for (auto& dc : m_ShadowDrawCommands)
     {
       if (dc.instanced)
@@ -332,17 +362,28 @@ namespace YAEngine
       }
     }
 
-    for (uint32_t cascade = 0; cascade < CSM_CASCADE_COUNT; cascade++)
+    // Helper lambda: draw all shadow commands with given shadowMatrixIndex
+    // lightPos + lightRadius used for sphere culling (spot/point); lightRadius < 0 disables culling (CSM)
+    auto drawShadowPass = [&](int shadowMatrixIndex, const ShadowViewport& sv,
+      const glm::vec3& lightPos = glm::vec3(0.0f), float lightRadius = -1.0f)
     {
-      auto& cv = m_ShadowManager.GetCascadeViewport(cascade);
-      vkCmdSetViewport(cmd, 0, 1, &cv.viewport);
-      vkCmdSetScissor(cmd, 0, 1, &cv.scissor);
+      vkCmdSetViewport(cmd, 0, 1, &sv.viewport);
+      vkCmdSetScissor(cmd, 0, 1, &sv.scissor);
 
       uint8_t lastSortKey = UINT8_MAX;
       VulkanPipeline* currentPipeline = nullptr;
 
       for (auto& dc : m_ShadowDrawCommands)
       {
+        // Sphere culling for local lights
+        if (lightRadius >= 0.0f)
+        {
+          glm::vec3 center = (dc.boundsMin + dc.boundsMax) * 0.5f;
+          float objRadius = glm::length(dc.boundsMax - dc.boundsMin) * 0.5f;
+          if (glm::length(center - lightPos) > lightRadius + objRadius)
+            continue;
+        }
+
         MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
         uint8_t sortKey = dc.SortKey();
 
@@ -359,11 +400,11 @@ namespace YAEngine
         {
           glm::mat4 model;
           int offset = 0;
-          int cascadeIndex = 0;
+          int shadowMatrixIndex = 0;
         } data;
         data.model = dc.worldTransform;
         data.offset = dc.instanceOffset / sizeof(glm::mat4);
-        data.cascadeIndex = int(cascade);
+        data.shadowMatrixIndex = shadowMatrixIndex;
         currentPipeline->PushConstants(cmd, &data);
 
         uint32_t instanceCount = 1;
@@ -374,6 +415,35 @@ namespace YAEngine
         }
 
         meshManager.GetVertexBuffer(meshHandle).Draw(cmd, instanceCount);
+      }
+    };
+
+    // CSM cascades (matrix indices 0..3)
+    if (hasDirectionalShadow)
+    {
+      for (uint32_t cascade = 0; cascade < CSM_CASCADE_COUNT; cascade++)
+      {
+        auto sv = ShadowAtlas::GetCascadeViewport(cascade);
+        drawShadowPass(int(cascade), sv);
+      }
+    }
+
+    // Spot shadows (with sphere culling)
+    for (uint32_t i = 0; i < frame.snapshot.spotShadowRequests.size(); i++)
+    {
+      auto& req = frame.snapshot.spotShadowRequests[i];
+      auto sv = ShadowAtlas::GetSpotViewport(i);
+      drawShadowPass(int(SHADOW_SPOT_MATRIX_OFFSET + i), sv, req.position, req.radius);
+    }
+
+    // Point shadows (with sphere culling)
+    for (uint32_t i = 0; i < frame.snapshot.pointShadowRequests.size(); i++)
+    {
+      auto& req = frame.snapshot.pointShadowRequests[i];
+      for (uint32_t face = 0; face < 6; face++)
+      {
+        auto sv = ShadowAtlas::GetPointFaceViewport(i, face);
+        drawShadowPass(int(SHADOW_POINT_MATRIX_OFFSET + i * 6 + face), sv, req.position, req.radius);
       }
     }
 

@@ -2,6 +2,7 @@
 
 #include "Render/RenderObject.h"
 #include "LightData.h"
+#include "ShadowData.h"
 #include "Scene/Scene.h"
 #include "Assets/MeshManager.h"
 #include "Assets/MaterialManager.h"
@@ -11,6 +12,8 @@ namespace YAEngine
   inline void BuildSceneSnapshot(SceneSnapshot& snapshot, LightBuffer& lights, Scene& scene, MeshManager& meshManager, MaterialManager& materialManager)
   {
     snapshot.objects.clear();
+    snapshot.spotShadowRequests.clear();
+    snapshot.pointShadowRequests.clear();
     snapshot.skybox = scene.GetSkybox();
 
     // Extract camera
@@ -88,19 +91,44 @@ namespace YAEngine
         case LightType::Point:
         {
           if (lights.pointLightCount >= MAX_POINT_LIGHTS) break;
+          uint32_t lightIdx = uint32_t(lights.pointLightCount);
           auto& pl = lights.pointLights[lights.pointLightCount++];
           pl.positionRadius = glm::vec4(position, light.radius);
           pl.colorIntensity = glm::vec4(light.color, light.intensity);
+          pl.shadowPad = glm::vec4(glm::intBitsToFloat(-1), 0.0f, 0.0f, 0.0f);
+
+          if (light.castShadow && snapshot.pointShadowRequests.size() < MAX_SHADOW_POINTS)
+          {
+            pl.shadowPad.x = glm::intBitsToFloat(int(snapshot.pointShadowRequests.size()));
+            snapshot.pointShadowRequests.push_back({
+              .position = position,
+              .radius = light.radius,
+              .lightIndex = lightIdx,
+            });
+          }
           break;
         }
         case LightType::Spot:
         {
           if (lights.spotLightCount >= MAX_SPOT_LIGHTS) break;
+          uint32_t lightIdx = uint32_t(lights.spotLightCount);
           auto& sl = lights.spotLights[lights.spotLightCount++];
           sl.positionRadius = glm::vec4(position, light.radius);
           sl.directionInnerCone = glm::vec4(forward, std::cos(light.innerCone));
           sl.colorOuterCone = glm::vec4(light.color, std::cos(light.outerCone));
-          sl.intensityPad = glm::vec4(light.intensity, 0.0f, 0.0f, 0.0f);
+          sl.intensityShadow = glm::vec4(light.intensity, glm::intBitsToFloat(-1), 0.0f, 0.0f);
+
+          if (light.castShadow && snapshot.spotShadowRequests.size() < MAX_SHADOW_SPOTS)
+          {
+            sl.intensityShadow.y = glm::intBitsToFloat(int(snapshot.spotShadowRequests.size()));
+            snapshot.spotShadowRequests.push_back({
+              .position = position,
+              .direction = forward,
+              .outerCone = light.outerCone,
+              .radius = light.radius,
+              .lightIndex = lightIdx,
+            });
+          }
           break;
         }
         case LightType::Directional:

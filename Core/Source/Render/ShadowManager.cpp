@@ -68,43 +68,20 @@ namespace YAEngine
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
     }
 
-    // Initialize cascade viewports (fixed layout: 2x2 grid in top-left quadrant)
-    for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
-    {
-      uint32_t col = i % 2;
-      uint32_t row = i / 2;
-      float x = float(col * CASCADE_TILE_SIZE);
-      float y = float(row * CASCADE_TILE_SIZE);
-
-      m_CascadeViewports[i].viewport = {
-        .x = x, .y = y,
-        .width = float(CASCADE_TILE_SIZE),
-        .height = float(CASCADE_TILE_SIZE),
-        .minDepth = 0.0f, .maxDepth = 1.0f
-      };
-      m_CascadeViewports[i].scissor = {
-        .offset = { int32_t(x), int32_t(y) },
-        .extent = { CASCADE_TILE_SIZE, CASCADE_TILE_SIZE }
-      };
-    }
-
     // Initialize ShadowBuffer defaults
     m_ShadowData.atlasSize = glm::vec4(
       float(SHADOW_ATLAS_SIZE), float(SHADOW_ATLAS_SIZE),
       1.0f / float(SHADOW_ATLAS_SIZE), 1.0f / float(SHADOW_ATLAS_SIZE));
     m_ShadowData.shadowsEnabled = 0;
     m_ShadowData.cascadeCount = CSM_CASCADE_COUNT;
+    m_ShadowData.spotShadowCount = 0;
+    m_ShadowData.pointShadowCount = 0;
 
-    // Set atlas viewport UVs for each cascade (normalized)
+    // Set atlas viewport UVs for each cascade (from ShadowAtlas layout)
     for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
     {
-      uint32_t col = i % 2;
-      uint32_t row = i / 2;
-      m_ShadowData.cascades[i].atlasViewport = glm::vec4(
-        float(col * CASCADE_TILE_SIZE) / float(SHADOW_ATLAS_SIZE),
-        float(row * CASCADE_TILE_SIZE) / float(SHADOW_ATLAS_SIZE),
-        float(CASCADE_TILE_SIZE) / float(SHADOW_ATLAS_SIZE),
-        float(CASCADE_TILE_SIZE) / float(SHADOW_ATLAS_SIZE));
+      auto sv = ShadowAtlas::GetCascadeViewport(i);
+      m_ShadowData.cascades[i].atlasViewport = sv.atlasUV;
     }
 
     YA_LOG_INFO("Render", "ShadowManager initialized (%d cascades, %dx%d tiles)",
@@ -245,6 +222,67 @@ namespace YAEngine
         0.0f,
         texelWorldSize * 1.5f,
         0.0f);
+    }
+  }
+
+  void ShadowManager::ComputeSpotShadow(
+    uint32_t spotIndex,
+    const glm::vec3& position,
+    const glm::vec3& direction,
+    float outerCone, float radius)
+  {
+    auto sv = ShadowAtlas::GetSpotViewport(spotIndex);
+
+    glm::vec3 up = std::abs(glm::dot(direction, glm::vec3(0, 1, 0))) > 0.99f
+      ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
+    glm::mat4 view = glm::lookAt(position, position + direction, up);
+
+    float fov = outerCone * 2.0f;
+    glm::mat4 proj = glm::perspective(fov, 1.0f, SHADOW_NEAR_PLANE, radius);
+    proj[1][1] *= -1.0f;
+
+    glm::mat4 viewProj = proj * view;
+
+    auto& spot = m_ShadowData.spotShadows[spotIndex];
+    spot.viewProj = viewProj;
+    spot.atlasViewport = sv.atlasUV;
+
+    float texelWorldSize = 2.0f * std::tan(outerCone) * radius / float(SHADOW_SPOT_SIZE);
+    spot.biasData = glm::vec4(0.0f, texelWorldSize * 1.5f, 0.0f, 0.0f);
+  }
+
+  void ShadowManager::ComputePointShadow(
+    uint32_t pointIndex,
+    const glm::vec3& position, float radius)
+  {
+    static const glm::vec3 faceDirections[6] = {
+      {  1,  0,  0 }, { -1,  0,  0 },
+      {  0,  1,  0 }, {  0, -1,  0 },
+      {  0,  0,  1 }, {  0,  0, -1 },
+    };
+    static const glm::vec3 faceUps[6] = {
+      { 0, -1,  0 }, { 0, -1,  0 },
+      { 0,  0,  1 }, { 0,  0, -1 },
+      { 0, -1,  0 }, { 0, -1,  0 },
+    };
+
+    // Slightly wider than 90 degrees to create overlap at cube face seams
+    glm::mat4 proj = glm::perspective(glm::radians(95.0f), 1.0f, SHADOW_NEAR_PLANE, radius);
+    proj[1][1] *= -1.0f;
+
+    auto& point = m_ShadowData.pointShadows[pointIndex];
+    point.positionFarPlane = glm::vec4(position, radius);
+
+    float texelWorldSize = 2.0f * radius / float(SHADOW_POINT_FACE_SIZE);
+    point.biasData = glm::vec4(0.0f, texelWorldSize * 1.5f, 0.0f, 0.0f);
+
+    for (uint32_t f = 0; f < 6; f++)
+    {
+      glm::mat4 view = glm::lookAt(position, position + faceDirections[f], faceUps[f]);
+      point.faceViewProj[f] = proj * view;
+
+      auto sv = ShadowAtlas::GetPointFaceViewport(pointIndex, f);
+      point.faceAtlasViewport[f] = sv.atlasUV;
     }
   }
 

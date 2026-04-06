@@ -10,12 +10,6 @@ namespace YAEngine
   struct RenderContext;
   struct SceneSnapshot;
 
-  struct CascadeViewport
-  {
-    VkViewport viewport;
-    VkRect2D scissor;
-  };
-
   class ShadowManager
   {
   public:
@@ -29,11 +23,18 @@ namespace YAEngine
       float nearPlane, float farPlane,
       const glm::vec3& lightDirection);
 
+    void ComputeSpotShadow(uint32_t spotIndex,
+      const glm::vec3& position,
+      const glm::vec3& direction,
+      float outerCone, float radius);
+
+    void ComputePointShadow(uint32_t pointIndex,
+      const glm::vec3& position, float radius);
+
     void SetUp(uint32_t frameIndex);
 
     const ShadowAtlas& GetAtlas() const { return m_Atlas; }
     const ShadowBuffer& GetShadowData() const { return m_ShadowData; }
-    const CascadeViewport& GetCascadeViewport(uint32_t cascadeIndex) const { return m_CascadeViewports[cascadeIndex]; }
 
     VkDescriptorSetLayout GetShadowCascadeUBOLayout() const { return m_CascadeDescriptorSets[0].GetLayout(); }
     VkDescriptorSet GetShadowCascadeUBODescriptorSet(uint32_t frameIndex) const { return m_CascadeDescriptorSets[frameIndex].Get(); }
@@ -45,6 +46,8 @@ namespace YAEngine
 
     bool IsEnabled() const { return m_ShadowData.shadowsEnabled != 0; }
     void SetEnabled(bool enabled) { m_ShadowData.shadowsEnabled = enabled ? 1 : 0; }
+    void SetSpotShadowCount(int count) { m_ShadowData.spotShadowCount = count; }
+    void SetPointShadowCount(int count) { m_ShadowData.pointShadowCount = count; }
 
   private:
 
@@ -56,10 +59,10 @@ namespace YAEngine
 
     static constexpr float SPLIT_LAMBDA = 0.75f;
     static constexpr uint32_t CASCADE_TILE_SIZE = SHADOW_CASCADE_SIZE;
+    static constexpr float SHADOW_NEAR_PLANE = 0.01f;
 
     ShadowAtlas m_Atlas;
     ShadowBuffer m_ShadowData {};
-    CascadeViewport m_CascadeViewports[CSM_CASCADE_COUNT] {};
     float m_CascadeSplits[CSM_CASCADE_COUNT + 1] {};
 
     // Per-frame UBO for shadow cascade data (used in shadow vertex shader set 0)

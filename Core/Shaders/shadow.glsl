@@ -88,3 +88,80 @@ float calculateCSMShadow(vec3 worldPos, float viewDepth, vec3 normal)
 
   return shadow;
 }
+
+const int SPOT_SHADOW_SAMPLES = 8;
+const float SPOT_SHADOW_FILTER_RADIUS = 2.0;
+const int POINT_SHADOW_SAMPLES = 8;
+const float POINT_SHADOW_FILTER_RADIUS = 2.0;
+
+float sampleShadowAtlasPCF(vec3 worldPos, mat4 lightViewProj, vec4 viewport, int numSamples, float filterRadius, bool clampEdges)
+{
+  vec4 clipPos = lightViewProj * vec4(worldPos, 1.0);
+  vec3 ndc = clipPos.xyz / clipPos.w;
+
+  vec2 uv = ndc.xy * 0.5 + 0.5;
+
+  if (!clampEdges && (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0))
+    return 1.0;
+
+  if (ndc.z < 0.0 || ndc.z > 1.0)
+    return 1.0;
+
+  uv = clamp(uv, vec2(0.0), vec2(1.0));
+
+  vec2 texelSize = u_Shadow.atlasSize.zw;
+  vec2 atlasUV = viewport.xy + uv * viewport.zw;
+  vec2 atlasMin = viewport.xy + texelSize;
+  vec2 atlasMax = viewport.xy + viewport.zw - texelSize;
+
+  float rotation = interleavedGradientNoise(gl_FragCoord.xy) * 6.2831853;
+  vec2 filterRad = filterRadius * texelSize;
+
+  float shadow = 0.0;
+  for (int i = 0; i < numSamples; i++)
+  {
+    vec2 offset = vogelDiskSample(i, numSamples, rotation);
+    vec2 sampleUV = clamp(atlasUV + offset * filterRad, atlasMin, atlasMax);
+    shadow += texture(shadowAtlas, vec3(sampleUV, ndc.z));
+  }
+  return shadow / float(numSamples);
+}
+
+float calculateSpotShadow(vec3 worldPos, vec3 normal, int spotIndex)
+{
+  float normalBias = u_Shadow.spotShadows[spotIndex].biasData.y;
+  vec3 biasedPos = worldPos + normal * normalBias;
+
+  return sampleShadowAtlasPCF(
+    biasedPos,
+    u_Shadow.spotShadows[spotIndex].viewProj,
+    u_Shadow.spotShadows[spotIndex].atlasViewport,
+    SPOT_SHADOW_SAMPLES,
+    SPOT_SHADOW_FILTER_RADIUS,
+    false);
+}
+
+float calculatePointShadow(vec3 worldPos, vec3 normal, vec3 lightPos, int pointIndex)
+{
+  vec3 dir = worldPos - lightPos;
+  vec3 absDir = abs(dir);
+
+  int face;
+  if (absDir.x > absDir.y && absDir.x > absDir.z)
+    face = dir.x > 0.0 ? 0 : 1;
+  else if (absDir.y > absDir.z)
+    face = dir.y > 0.0 ? 2 : 3;
+  else
+    face = dir.z > 0.0 ? 4 : 5;
+
+  float normalBias = u_Shadow.pointShadows[pointIndex].biasData.y;
+  vec3 biasedPos = worldPos + normal * normalBias;
+
+  return sampleShadowAtlasPCF(
+    biasedPos,
+    u_Shadow.pointShadows[pointIndex].faceViewProj[face],
+    u_Shadow.pointShadows[pointIndex].faceAtlasViewport[face],
+    POINT_SHADOW_SAMPLES,
+    POINT_SHADOW_FILTER_RADIUS,
+    true);
+}
