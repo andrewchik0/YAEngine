@@ -40,15 +40,12 @@ namespace YAEngine
     VkPipelineVertexInputStateCreateInfo vertexInputInfo{};
     vertexInputInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
 
-    VkVertexInputBindingDescription bindingDescription{};
-    bindingDescription.binding = 0;
-    bindingDescription.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+    std::vector<VkVertexInputBindingDescription> bindingDescriptions;
+    auto attributeDescriptions = GetVertexInputAttributeDescriptions(info.vertexInputFormat, bindingDescriptions);
 
-    auto attributeDescriptions = GetVertexInputAttributeDescriptions(info.vertexInputFormat, &bindingDescription.stride);
-
-    vertexInputInfo.vertexBindingDescriptionCount = !!attributeDescriptions.size();
+    vertexInputInfo.vertexBindingDescriptionCount = static_cast<uint32_t>(bindingDescriptions.size());
     vertexInputInfo.vertexAttributeDescriptionCount = static_cast<uint32_t>(attributeDescriptions.size());
-    vertexInputInfo.pVertexBindingDescriptions = attributeDescriptions.size() ? &bindingDescription : nullptr;
+    vertexInputInfo.pVertexBindingDescriptions = bindingDescriptions.data();
     vertexInputInfo.pVertexAttributeDescriptions = attributeDescriptions.data();
 
     VkPipelineInputAssemblyStateCreateInfo inputAssembly{};
@@ -207,13 +204,12 @@ namespace YAEngine
   }
 
   std::vector<VkVertexInputAttributeDescription> VulkanPipeline::GetVertexInputAttributeDescriptions(
-    std::string_view vertexInput, uint32_t* vertexSize)
+    std::string_view vertexInput,
+    std::vector<VkVertexInputBindingDescription>& bindings)
   {
-    std::vector<VkVertexInputAttributeDescription> attributeDescriptions{};
+    std::vector<VkVertexInputAttributeDescription> attributeDescriptions;
     uint32_t location = 0;
-    uint32_t offset = 0;
 
-    *vertexSize = 0;
     auto parseComponent = [](char type, char count) -> VkFormat {
       switch (type)
       {
@@ -258,42 +254,69 @@ namespace YAEngine
       throw std::runtime_error("invalid vertex input type");
     };
 
-    for (size_t i = 0; i + 1 < vertexInput.size(); i += 2) {
-      char type = vertexInput[i];
-      char count = vertexInput[i + 1];
-
-
-      *vertexSize += static_cast<uint32_t>(count - '0') * sizeof(float);
-
-      VkVertexInputAttributeDescription attr{};
-      attr.binding = 0;
-      attr.location = location++;
-      attr.format = parseComponent(type, count);
-      attr.offset = offset;
-
-      switch (attr.format) {
+    auto getFormatSize = [](VkFormat format) -> uint32_t {
+      switch (format)
+      {
       case VK_FORMAT_R32_SFLOAT:
       case VK_FORMAT_R32_UINT:
       case VK_FORMAT_R32_SINT:
-          offset += 4; break;
+        return 4;
       case VK_FORMAT_R32G32_SFLOAT:
       case VK_FORMAT_R32G32_UINT:
       case VK_FORMAT_R32G32_SINT:
-          offset += 8; break;
+        return 8;
       case VK_FORMAT_R32G32B32_SFLOAT:
       case VK_FORMAT_R32G32B32_UINT:
       case VK_FORMAT_R32G32B32_SINT:
-          offset += 12; break;
+        return 12;
       case VK_FORMAT_R32G32B32A32_SFLOAT:
       case VK_FORMAT_R32G32B32A32_UINT:
       case VK_FORMAT_R32G32B32A32_SINT:
-          offset += 16; break;
+        return 16;
       default:
-          YA_LOG_ERROR("Render", "Unsupported vertex attribute format");
-          throw std::runtime_error("unsupported format");
+        return 0;
+      }
+    };
+
+    // Split by '|' into per-binding segments
+    uint32_t bindingIndex = 0;
+    size_t segStart = 0;
+    while (segStart <= vertexInput.size())
+    {
+      size_t segEnd = vertexInput.find('|', segStart);
+      if (segEnd == std::string_view::npos)
+        segEnd = vertexInput.size();
+
+      auto segment = vertexInput.substr(segStart, segEnd - segStart);
+
+      if (!segment.empty())
+      {
+        uint32_t offset = 0;
+        for (size_t i = 0; i + 1 < segment.size(); i += 2)
+        {
+          VkFormat format = parseComponent(segment[i], segment[i + 1]);
+          uint32_t size = getFormatSize(format);
+
+          VkVertexInputAttributeDescription attr {};
+          attr.binding = bindingIndex;
+          attr.location = location++;
+          attr.format = format;
+          attr.offset = offset;
+          offset += size;
+
+          attributeDescriptions.push_back(attr);
+        }
+
+        VkVertexInputBindingDescription binding {};
+        binding.binding = bindingIndex;
+        binding.stride = offset;
+        binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        bindings.push_back(binding);
+
+        bindingIndex++;
       }
 
-      attributeDescriptions.push_back(attr);
+      segStart = segEnd + 1;
     }
 
     return attributeDescriptions;

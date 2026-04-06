@@ -246,7 +246,7 @@ namespace YAEngine
       }
 
       auto& vb = meshManager.GetVertexBuffer(meshHandle);
-      vb.Draw(cmd, instanceCount);
+      vb.DrawPositionOnly(cmd, instanceCount);
     }
   }
 
@@ -414,7 +414,7 @@ namespace YAEngine
           currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 1);
         }
 
-        meshManager.GetVertexBuffer(meshHandle).Draw(cmd, instanceCount);
+        meshManager.GetVertexBuffer(meshHandle).DrawPositionOnly(cmd, instanceCount);
       }
     };
 

@@ -40,7 +40,7 @@ add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   mesh.vert mesh_instanced_depth.vert.spv -DINSTANCED -DDEPTH_ONLY)
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
-  csm_shadow.vert csm_shadow_instanced.vert.spv -DINSTANCED)
+  shadow.vert shadow_instanced.vert.spv -DINSTANCED)
 target_compile_definitions(Core PRIVATE
   WORKING_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )

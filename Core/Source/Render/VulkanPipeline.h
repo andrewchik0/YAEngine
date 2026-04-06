@@ -54,7 +54,9 @@ namespace YAEngine
     VkPipelineLayout m_PipelineLayout {};
     uint32_t m_PushConstantSize = 0;
 
-    std::vector<VkVertexInputAttributeDescription> GetVertexInputAttributeDescriptions(std::string_view vertexInput, uint32_t* vertexSize);
+    std::vector<VkVertexInputAttributeDescription> GetVertexInputAttributeDescriptions(
+      std::string_view vertexInput,
+      std::vector<VkVertexInputBindingDescription>& bindings);
 
     VkDevice m_Device {};
   };

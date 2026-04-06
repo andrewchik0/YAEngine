@@ -35,7 +35,7 @@ namespace YAEngine
       .vertexShaderFile = "mesh_depth.vert",
       .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
       .colorAttachmentCount = 0,
-      .vertexInputFormat = "f3f2f3f4",
+      .vertexInputFormat = "f3",
       .sets = std::vector({ m_FrameUniformBuffer.GetLayout() })
     };
 
@@ -56,10 +56,10 @@ namespace YAEngine
     VkRenderPass shadowRP = m_ShadowManager.GetAtlas().GetRenderPass();
     {
       PipelineCreateInfo shadowInfo = {
-        .vertexShaderFile = "csm_shadow.vert",
+        .vertexShaderFile = "shadow.vert",
         .pushConstantSize = sizeof(glm::mat4) + sizeof(int) + sizeof(int),
         .colorAttachmentCount = 0,
-        .vertexInputFormat = "f3f2f3f4",
+        .vertexInputFormat = "f3",
         .sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout() })
       };
       shadowInfo.depthBiasEnable = true;
@@ -71,7 +71,7 @@ namespace YAEngine
 
       // [2] instanced, [3] instanced+doubleSided
       shadowInfo.doubleSided = false;
-      shadowInfo.vertexShaderFile = "csm_shadow_instanced.vert";
+      shadowInfo.vertexShaderFile = "shadow_instanced.vert";
       shadowInfo.sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout(), m_InstanceDescriptorSet.GetLayout() });
       m_ShadowPipelines[2] = m_PSOCache.Register(ctx.device, shadowRP, shadowInfo, pipelineCache);
       shadowInfo.doubleSided = true;
@@ -87,7 +87,7 @@ namespace YAEngine
       .depthWrite = false,
       .colorAttachmentCount = 3,
       .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
-      .vertexInputFormat = "f3f2f3f4",
+      .vertexInputFormat = "f3|f2f3f4",
       .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
     };
 

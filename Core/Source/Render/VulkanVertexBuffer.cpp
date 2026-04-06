@@ -6,8 +6,34 @@ namespace YAEngine
 {
   void VulkanVertexBuffer::Create(const RenderContext& ctx, const void* inputData, size_t vertexCount, uint32_t vertexSize, const std::vector<uint32_t>& indices)
   {
-    VkDeviceSize vertexSize_ = vertexCount * vertexSize;
-    m_VerticesBuffer = VulkanBuffer::CreateStaged(ctx, inputData, vertexSize_, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    VkDeviceSize totalSize = vertexCount * vertexSize;
+
+    // Reorganize Vertex data from AoS to SoA: [positions] [attribs]
+    if (vertexSize == sizeof(Vertex))
+    {
+      VkDeviceSize posSize = vertexCount * sizeof(glm::vec3);
+      VkDeviceSize attribSize = vertexCount * sizeof(VertexAttribs);
+      m_AttribOffset = posSize;
+
+      std::vector<uint8_t> soaData(posSize + attribSize);
+
+      auto* src = static_cast<const Vertex*>(inputData);
+      auto* dstPos = reinterpret_cast<glm::vec3*>(soaData.data());
+      auto* dstAttrib = reinterpret_cast<VertexAttribs*>(soaData.data() + posSize);
+
+      for (size_t i = 0; i < vertexCount; i++)
+      {
+        dstPos[i] = src[i].position;
+        dstAttrib[i] = { src[i].tex, src[i].normal, src[i].tangent };
+      }
+
+      m_VerticesBuffer = VulkanBuffer::CreateStaged(ctx, soaData.data(), totalSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    }
+    else
+    {
+      m_AttribOffset = 0;
+      m_VerticesBuffer = VulkanBuffer::CreateStaged(ctx, inputData, totalSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    }
 
     m_IndicesCount = indices.size();
     VkDeviceSize indicesSize = indices.size() * sizeof(uint32_t);
@@ -22,10 +48,32 @@ namespace YAEngine
 
   void VulkanVertexBuffer::Draw(VkCommandBuffer cmd, uint32_t instanceCount)
   {
-    VkBuffer buf = m_VerticesBuffer.Get();
-    VkDeviceSize offsets[] = { 0 };
     vkCmdBindIndexBuffer(cmd, m_IndicesBuffer.Get(), 0, VK_INDEX_TYPE_UINT32);
-    vkCmdBindVertexBuffers(cmd, 0, 1, &buf, offsets);
+
+    if (m_AttribOffset > 0)
+    {
+      VkBuffer bufs[] = { m_VerticesBuffer.Get(), m_VerticesBuffer.Get() };
+      VkDeviceSize offsets[] = { 0, m_AttribOffset };
+      vkCmdBindVertexBuffers(cmd, 0, 2, bufs, offsets);
+    }
+    else
+    {
+      VkBuffer buf = m_VerticesBuffer.Get();
+      VkDeviceSize offset = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &offset);
+    }
+
+    vkCmdDrawIndexed(cmd, static_cast<uint32_t>(m_IndicesCount), instanceCount, 0, 0, 0);
+  }
+
+  void VulkanVertexBuffer::DrawPositionOnly(VkCommandBuffer cmd, uint32_t instanceCount)
+  {
+    vkCmdBindIndexBuffer(cmd, m_IndicesBuffer.Get(), 0, VK_INDEX_TYPE_UINT32);
+
+    VkBuffer buf = m_VerticesBuffer.Get();
+    VkDeviceSize offset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &offset);
+
     vkCmdDrawIndexed(cmd, static_cast<uint32_t>(m_IndicesCount), instanceCount, 0, 0, 0);
   }
 }
