@@ -4,6 +4,7 @@
 #include <ImGui/imgui_impl_vulkan.h>
 
 #include "DebugMarker.h"
+#include "ExposureData.h"
 #include "ImageBarrier.h"
 #include "Utils/Log.h"
 
@@ -361,6 +362,112 @@ namespace YAEngine
       }
     });
 
+    // Auto Exposure - histogram build (compute)
+    m_HistogramPassIndex = m_Graph.AddPass({
+      .name = "HistogramBuild",
+      .inputs = {m_TAAHistory0},
+      .isCompute = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_AutoExposureEnabled || m_GlobalFrameIndex < 4) return;
+
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+
+        // Clear histogram buffer
+        vkCmdFillBuffer(ctx.cmd, m_HistogramBuffer.Get(), 0,
+          HISTOGRAM_BIN_COUNT * sizeof(uint32_t), 0);
+
+        VkBufferMemoryBarrier clearBarrier {};
+        clearBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        clearBarrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        clearBarrier.dstAccessMask = VK_ACCESS_SHADER_WRITE_BIT | VK_ACCESS_SHADER_READ_BIT;
+        clearBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        clearBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        clearBarrier.buffer = m_HistogramBuffer.Get();
+        clearBarrier.offset = 0;
+        clearBarrier.size = VK_WHOLE_SIZE;
+        vkCmdPipelineBarrier(ctx.cmd,
+          VK_PIPELINE_STAGE_TRANSFER_BIT,
+          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          0, 0, nullptr, 1, &clearBarrier, 0, nullptr);
+
+        // Write HDR texture into descriptor (input[0] set via SetPassInput for ping-pong)
+        auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
+        auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
+        m_HistogramPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
+          historyCurrent.GetView(), historyCurrent.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        auto& pipeline = m_PSOCache.GetCompute(m_ExposureHistogramPipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_HistogramPassDescriptorSets[currentFrame].Get()}, 1);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_HistogramOutputDescriptorSet.Get()}, 2);
+
+        uint32_t groupsX = (m_FrameUniformBuffer.uniforms.screenWidth + 15) / 16;
+        uint32_t groupsY = (m_FrameUniformBuffer.uniforms.screenHeight + 15) / 16;
+        pipeline.Dispatch(ctx.cmd, groupsX, groupsY, 1);
+
+        // Barrier: histogram compute write -> compute read
+        VkBufferMemoryBarrier histBarrier {};
+        histBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        histBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        histBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        histBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        histBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        histBarrier.buffer = m_HistogramBuffer.Get();
+        histBarrier.offset = 0;
+        histBarrier.size = VK_WHOLE_SIZE;
+        vkCmdPipelineBarrier(ctx.cmd,
+          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          0, 0, nullptr, 1, &histBarrier, 0, nullptr);
+      }
+    });
+
+    // Auto Exposure - adapt (compute)
+    m_ExposureAdaptPassIndex = m_Graph.AddPass({
+      .name = "ExposureAdapt",
+      .isCompute = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_AutoExposureEnabled || m_GlobalFrameIndex < 4)
+        {
+          float unity = 1.0f;
+          m_ExposureBuffer.Update(0, &unity, sizeof(float));
+          return;
+        }
+
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+
+        ExposureAdaptPushConstants pc;
+        pc.lowPercentile = m_LowPercentile;
+        pc.highPercentile = m_HighPercentile;
+        pc.adaptSpeedUp = m_AdaptSpeedUp;
+        pc.adaptSpeedDown = m_AdaptSpeedDown;
+        pc.deltaTime = std::min(m_DeltaTime, 0.1f);
+
+        auto& pipeline = m_PSOCache.GetCompute(m_ExposureAdaptPipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureAdaptDescriptorSets[currentFrame].Get()}, 1);
+        pipeline.PushConstants(ctx.cmd, &pc);
+        pipeline.Dispatch(ctx.cmd, 1, 1, 1);
+
+        // Barrier: exposure compute write -> fragment read
+        VkBufferMemoryBarrier expBarrier {};
+        expBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        expBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        expBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        expBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        expBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        expBarrier.buffer = m_ExposureBuffer.Get();
+        expBarrier.offset = 0;
+        expBarrier.size = VK_WHOLE_SIZE;
+        vkCmdPipelineBarrier(ctx.cmd,
+          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+          0, 0, nullptr, 1, &expBarrier, 0, nullptr);
+      }
+    });
+
 #ifdef YA_EDITOR
     // Scene compose pass - tone mapping to offscreen texture for editor viewport
     m_SceneColor = m_Graph.CreateResource({
@@ -393,6 +500,7 @@ namespace YAEngine
           gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
         DrawQuad();
       }
     });
@@ -461,6 +569,7 @@ namespace YAEngine
           gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
         DrawQuad();
 
         ImGui_ImplVulkan_NewFrame();

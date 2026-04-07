@@ -1,4 +1,5 @@
 #include "Render.h"
+#include "ExposureData.h"
 
 namespace YAEngine
 {
@@ -153,6 +154,16 @@ namespace YAEngine
     VkRenderPass quadRP = m_Graph.GetPassRenderPass(m_SwapchainPassIndex);
 #endif
 
+    // Create exposure read layout helper for tonemap pipeline
+    SetDescription expReadLayoutDesc = {
+      .set = 2,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+      }
+    };
+    VulkanDescriptorSet expReadLayoutHelper;
+    expReadLayoutHelper.Init(ctx, expReadLayoutDesc);
+
     PipelineCreateInfo quadInfo = {
       .fragmentShaderFile = "tonemap.frag",
       .vertexShaderFile = "fullscreen.vert",
@@ -161,9 +172,11 @@ namespace YAEngine
       .sets = std::vector({
         m_FrameUniformBuffer.GetLayout(),
         m_SwapChainDescriptorSets[0].GetLayout(),
+        expReadLayoutHelper.GetLayout(),
       })
     };
     m_QuadPipeline = m_PSOCache.Register(ctx.device, quadRP, quadInfo, pipelineCache);
+    expReadLayoutHelper.Destroy();
 
 #ifdef YA_EDITOR
     {
@@ -414,5 +427,80 @@ namespace YAEngine
       sizeof(int) * 3,
       pipelineCache);
     hizLayoutHelper.Destroy();
+
+    // Auto Exposure - buffers
+    m_HistogramBuffer.Create(ctx, HISTOGRAM_BIN_COUNT * sizeof(uint32_t));
+    m_ExposureBuffer.Create(ctx, sizeof(float));
+    float initialExposure = 0.1f;
+    m_ExposureBuffer.Update(0, &initialExposure, sizeof(float));
+
+    // Histogram pass descriptor sets (set 1: HDR sampler, set 2: histogram SSBO)
+    SetDescription histInputDesc = {
+      .set = 1,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+      }
+    };
+    SetDescription histOutputDesc = {
+      .set = 2,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT },
+      }
+    };
+    m_HistogramPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      m_HistogramPassDescriptorSets[i].Init(ctx, histInputDesc);
+    }
+    m_HistogramOutputDescriptorSet.Init(ctx, histOutputDesc);
+    m_HistogramOutputDescriptorSet.WriteStorageBuffer(0, m_HistogramBuffer.Get(), HISTOGRAM_BIN_COUNT * sizeof(uint32_t));
+
+    m_ExposureHistogramPipeline = m_PSOCache.RegisterCompute(ctx.device, "exposure_histogram.comp",
+      {
+        m_FrameUniformBuffer.GetLayout(),
+        m_HistogramPassDescriptorSets[0].GetLayout(),
+        m_HistogramOutputDescriptorSet.GetLayout(),
+      },
+      0,
+      pipelineCache);
+
+    // Exposure adapt descriptor sets (set 1: histogram SSBO + exposure SSBO)
+    SetDescription adaptDesc = {
+      .set = 1,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT },
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT },
+      }
+    };
+    m_ExposureAdaptDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      m_ExposureAdaptDescriptorSets[i].Init(ctx, adaptDesc);
+      m_ExposureAdaptDescriptorSets[i].WriteStorageBuffer(0, m_HistogramBuffer.Get(), HISTOGRAM_BIN_COUNT * sizeof(uint32_t));
+      m_ExposureAdaptDescriptorSets[i].WriteStorageBuffer(1, m_ExposureBuffer.Get(), sizeof(float));
+    }
+
+    m_ExposureAdaptPipeline = m_PSOCache.RegisterCompute(ctx.device, "exposure_adapt.comp",
+      {
+        m_FrameUniformBuffer.GetLayout(),
+        m_ExposureAdaptDescriptorSets[0].GetLayout(),
+      },
+      sizeof(ExposureAdaptPushConstants),
+      pipelineCache);
+
+    // Exposure read descriptor sets for tonemap pass (set 2: exposure SSBO)
+    SetDescription expReadDesc = {
+      .set = 2,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+      }
+    };
+    m_ExposureReadDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      m_ExposureReadDescriptorSets[i].Init(ctx, expReadDesc);
+      m_ExposureReadDescriptorSets[i].WriteStorageBuffer(0, m_ExposureBuffer.Get(), sizeof(float));
+    }
+
   }
 }

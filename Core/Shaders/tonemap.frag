@@ -9,6 +9,11 @@ layout(set = 1, binding = 1) uniform sampler2D ssaoTexture;
 layout(set = 1, binding = 2) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 3) uniform sampler2D gbuffer1Texture;
 
+layout(std430, set = 2, binding = 0) readonly buffer ExposureSSBO
+{
+  float autoExposure;
+};
+
 #include "tonemap.glsl"
 
 void main()
@@ -41,8 +46,9 @@ void main()
   case 6: // SSR only (base zeroed in ssr.frag, HDR needs tone mapping)
     {
       vec3 color = texture(frame, uv).rgb;
-      color = color * u_Frame.exposure;
-      color = acesFilm(color);
+      float ssrExposure = autoExposure * u_Frame.exposure;
+      color = color * ssrExposure;
+      color = applyTonemap(color);
       color = pow(color, vec3(1.0 / u_Frame.gamma));
       outColor = vec4(color, 1.0);
     }
@@ -52,8 +58,9 @@ void main()
   // Default: tone-mapped final image
   vec3 color = texture(frame, uv).rgb;
 
-  color = color * u_Frame.exposure;
-  color = acesFilm(color);
+  float finalExposure = autoExposure * u_Frame.exposure;
+  color = color * finalExposure;
+  color = applyTonemap(color);
   color = pow(color, vec3(1.0 / u_Frame.gamma));
 
   outColor = vec4(color, 1.0);

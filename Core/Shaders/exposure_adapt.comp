@@ -1,0 +1,85 @@
+#include "../Shared/ExposureData.h"
+
+layout(local_size_x = HISTOGRAM_BIN_COUNT) in;
+
+#include "common.glsl"
+
+layout(std430, set = 1, binding = 0) readonly buffer HistogramSSBO
+{
+  uint histogram[HISTOGRAM_BIN_COUNT];
+};
+
+layout(std430, set = 1, binding = 1) buffer ExposureSSBO
+{
+  float currentExposure;
+};
+
+layout(push_constant) uniform PushConstants
+{
+  ExposureAdaptPushConstants pc;
+};
+
+shared uint s_bins[HISTOGRAM_BIN_COUNT];
+
+void main()
+{
+  uint threadIndex = gl_LocalInvocationIndex;
+
+  s_bins[threadIndex] = histogram[threadIndex];
+  barrier();
+
+  if (threadIndex != 0)
+    return;
+
+  // Count total pixels
+  uint totalPixels = 0;
+  for (int i = 0; i < HISTOGRAM_BIN_COUNT; i++)
+    totalPixels += s_bins[i];
+
+  if (totalPixels == 0)
+    return;
+
+  // Find percentile boundaries
+  uint lowCount = uint(float(totalPixels) * pc.lowPercentile);
+  uint highCount = uint(float(totalPixels) * pc.highPercentile);
+
+  // Weighted average of log luminance within percentile range
+  uint accumulated = 0;
+  float weightedSum = 0.0;
+  float weightTotal = 0.0;
+
+  for (int i = 0; i < HISTOGRAM_BIN_COUNT; i++)
+  {
+    uint prevAccumulated = accumulated;
+    accumulated += s_bins[i];
+
+    // Skip bins outside percentile range
+    if (accumulated <= lowCount || prevAccumulated >= highCount)
+      continue;
+
+    // Partial bin contribution at boundaries
+    uint lo = max(prevAccumulated, lowCount);
+    uint hi = min(accumulated, highCount);
+    float count = float(hi - lo);
+
+    float binCenter = (float(i) + 0.5) / float(HISTOGRAM_BIN_COUNT);
+    float logLum = float(HISTOGRAM_MIN_LOG_LUM) + binCenter * (float(HISTOGRAM_MAX_LOG_LUM) - float(HISTOGRAM_MIN_LOG_LUM));
+
+    weightedSum += logLum * count;
+    weightTotal += count;
+  }
+
+  if (weightTotal < 1.0)
+    return;
+
+  float avgLogLum = weightedSum / weightTotal;
+  float avgLum = exp2(avgLogLum);
+  float targetExposure = 0.18 / max(avgLum, 0.001);
+
+  // Adaptive speed: faster brightening, slower darkening
+  float speed = (targetExposure > currentExposure) ? pc.adaptSpeedUp : pc.adaptSpeedDown;
+  float adaptFactor = 1.0 - exp(-speed * pc.deltaTime);
+
+  float newExposure = mix(currentExposure, targetExposure, adaptFactor);
+  currentExposure = clamp(newExposure, 0.02, 20.0);
+}

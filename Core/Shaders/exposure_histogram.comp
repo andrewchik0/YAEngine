@@ -1,0 +1,54 @@
+#include "../Shared/ExposureData.h"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+#include "common.glsl"
+
+layout(set = 1, binding = 0) uniform sampler2D hdrTexture;
+
+layout(std430, set = 2, binding = 0) buffer HistogramSSBO
+{
+  uint histogram[HISTOGRAM_BIN_COUNT];
+};
+
+shared uint s_localHistogram[HISTOGRAM_BIN_COUNT];
+
+void main()
+{
+  uint threadIndex = gl_LocalInvocationIndex;
+
+  // Clear shared histogram
+  for (uint i = threadIndex; i < HISTOGRAM_BIN_COUNT; i += 256)
+    s_localHistogram[i] = 0;
+  barrier();
+
+  ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
+  if (pixelCoord.x < u_Frame.screenWidth && pixelCoord.y < u_Frame.screenHeight)
+  {
+    vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(u_Frame.screenWidth, u_Frame.screenHeight);
+    vec3 color = texture(hdrTexture, uv).rgb;
+
+    float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));
+
+    if (lum > 1e-5)
+    {
+      float logLum = log2(lum);
+      float t = (logLum - float(HISTOGRAM_MIN_LOG_LUM)) / (float(HISTOGRAM_MAX_LOG_LUM) - float(HISTOGRAM_MIN_LOG_LUM));
+      t = clamp(t, 0.0, 1.0);
+      uint bin = min(uint(t * float(HISTOGRAM_BIN_COUNT - 1)), uint(HISTOGRAM_BIN_COUNT - 1));
+      atomicAdd(s_localHistogram[bin], 1);
+    }
+    else
+    {
+      atomicAdd(s_localHistogram[0], 1);
+    }
+  }
+  barrier();
+
+  // Merge shared histogram into global
+  for (uint i = threadIndex; i < HISTOGRAM_BIN_COUNT; i += 256)
+  {
+    if (s_localHistogram[i] > 0)
+      atomicAdd(histogram[i], s_localHistogram[i]);
+  }
+}

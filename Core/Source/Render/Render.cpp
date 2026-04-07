@@ -188,12 +188,21 @@ namespace YAEngine
       set.Destroy();
     for (auto& set : m_LightCullInputDescriptorSets)
       set.Destroy();
+    for (auto& set : m_HistogramPassDescriptorSets)
+      set.Destroy();
+    m_HistogramOutputDescriptorSet.Destroy();
+    for (auto& set : m_ExposureAdaptDescriptorSets)
+      set.Destroy();
+    for (auto& set : m_ExposureReadDescriptorSets)
+      set.Destroy();
     m_IBLDescriptorSet.Destroy();
 
     m_SSAONoise.Destroy(ctx);
     m_SSAOKernelUBO.Destroy(ctx);
     m_InstanceDescriptorSet.Destroy();
     m_InstanceBuffer.Destroy(ctx);
+    m_HistogramBuffer.Destroy(ctx);
+    m_ExposureBuffer.Destroy(ctx);
     m_PSOCache.Destroy();
     m_DefaultMaterial.Destroy(ctx);
     m_TileLightBuffer.Destroy(ctx);
@@ -287,7 +296,11 @@ namespace YAEngine
     auto cmd = m_Backend.GetCurrentCommandBuffer();
 
     SetUpCamera(frame);
-    m_FrameUniformBuffer.uniforms.time = (float)frame.time;
+    float currentTime = (float)frame.time;
+    float deltaTime = currentTime - m_LastFrameTime;
+    m_LastFrameTime = currentTime;
+    m_DeltaTime = deltaTime;
+    m_FrameUniformBuffer.uniforms.time = currentTime;
     m_FrameUniformBuffer.uniforms.gamma = m_Gamma;
     m_FrameUniformBuffer.uniforms.exposure = m_Exposure;
     m_FrameUniformBuffer.uniforms.currentTexture = m_CurrentTexture;
@@ -305,6 +318,7 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.hizMipCount = static_cast<int>(m_Graph.GetResourceDesc(m_HiZResource).mipLevels);
     m_FrameUniformBuffer.uniforms.frameIndex = static_cast<int>(m_GlobalFrameIndex);
+    m_FrameUniformBuffer.uniforms.tonemapMode = m_TonemapMode;
 
     // Configure render graph for this frame (TAA ping-pong + swapchain)
     auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
@@ -313,6 +327,8 @@ namespace YAEngine
     m_Graph.SetPassInput(m_TAAPassIndex, 1, historyRead);
     m_Graph.SetPassColorOutput(m_TAAPassIndex, 0, historyWrite);
     m_Graph.SetPassFramebuffer(m_TAAPassIndex, m_TAAFramebuffers[m_TAAIndex]);
+
+    m_Graph.SetPassInput(m_HistogramPassIndex, 0, historyWrite);
 
 #ifdef YA_EDITOR
     m_Graph.SetPassInput(m_SceneComposePassIndex, 0, historyWrite);

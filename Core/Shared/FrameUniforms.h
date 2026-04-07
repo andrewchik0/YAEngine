@@ -1,3 +1,6 @@
+#define TONEMAP_ACES 0
+#define TONEMAP_AGX  1
+
 #ifdef __cplusplus
 #pragma once
 #define vec2 glm::vec2
@@ -35,6 +38,7 @@ struct FrameUniforms
   int tileCountX;
   int tileCountY;
   mat4 invView;
+  int tonemapMode;
 };
 
 #ifdef __cplusplus

@@ -28,6 +28,9 @@ namespace YAEngine
       ImGui::DragFloat("Gamma", &context.render->GetGamma(), 0.01f, 0.0f, 10.0f);
       ImGui::DragFloat("Exposure", &context.render->GetExposure(), 0.01f, 0.0f, 10.0f);
 
+      const char* tonemappers[] = { "ACES", "AgX" }; // indices match TONEMAP_ACES, TONEMAP_AGX
+      ImGui::Combo("Tonemapper", &context.render->GetTonemapMode(), tonemappers, IM_ARRAYSIZE(tonemappers));
+
       int debugViewIndex = context.render->GetDebugView();
       const char* debugViews[] = {
         "Off", "Albedo", "Metallic", "Roughness", "Normals", "SSAO", "SSR"
@@ -41,6 +44,16 @@ namespace YAEngine
       ImGui::Checkbox("SSAO", &context.render->GetSSAOEnabled());
       ImGui::Checkbox("SSR", &context.render->GetSSREnabled());
       ImGui::Checkbox("TAA", &context.render->GetTAAEnabled());
+
+      ImGui::Separator();
+      ImGui::Checkbox("Auto Exposure", &context.render->GetAutoExposureEnabled());
+      if (context.render->GetAutoExposureEnabled())
+      {
+        ImGui::DragFloat("Speed Up", &context.render->GetAdaptSpeedUp(), 0.1f, 0.1f, 10.0f);
+        ImGui::DragFloat("Speed Down", &context.render->GetAdaptSpeedDown(), 0.1f, 0.1f, 10.0f);
+        ImGui::DragFloat("Low Percentile", &context.render->GetLowPercentile(), 0.01f, 0.01f, 0.5f);
+        ImGui::DragFloat("High Percentile", &context.render->GetHighPercentile(), 0.01f, 0.5f, 0.99f);
+      }
     }
 
     if (ImGui::CollapsingHeader(ICON_FA_WRENCH " Debug", ImGuiTreeNodeFlags_DefaultOpen))

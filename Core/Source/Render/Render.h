@@ -52,6 +52,12 @@ namespace YAEngine
     bool& GetSSREnabled() { return b_SSREnabled; }
     bool& GetTAAEnabled() { return b_TAAEnabled; }
     bool& GetShadowsEnabled() { return b_ShadowsEnabled; }
+    int& GetTonemapMode() { return m_TonemapMode; }
+    bool& GetAutoExposureEnabled() { return b_AutoExposureEnabled; }
+    float& GetAdaptSpeedUp() { return m_AdaptSpeedUp; }
+    float& GetAdaptSpeedDown() { return m_AdaptSpeedDown; }
+    float& GetLowPercentile() { return m_LowPercentile; }
+    float& GetHighPercentile() { return m_HighPercentile; }
 
     const RenderStats& GetStats() const { return m_Stats; }
 
@@ -64,6 +70,14 @@ namespace YAEngine
     bool b_SSREnabled = true;
     bool b_TAAEnabled = true;
     bool b_ShadowsEnabled = true;
+    int m_TonemapMode = TONEMAP_AGX;
+    bool b_AutoExposureEnabled = true;
+    float m_AdaptSpeedUp = 2.0f;
+    float m_AdaptSpeedDown = 1.0f;
+    float m_LowPercentile = 0.1f;
+    float m_HighPercentile = 0.98f;
+    float m_LastFrameTime = 0.0f;
+    float m_DeltaTime = 0.0f;
 
     RenderStats m_Stats {};
 
@@ -126,6 +140,8 @@ namespace YAEngine
     uint32_t m_DeferredLightingPassIndex {};
     uint32_t m_SSRPassIndex {};
     uint32_t m_TAAPassIndex {};
+    uint32_t m_HistogramPassIndex {};
+    uint32_t m_ExposureAdaptPassIndex {};
     uint32_t m_SwapchainPassIndex {};
 
     // TAA external framebuffers (ping-pong)
@@ -172,6 +188,8 @@ namespace YAEngine
     PipelineHandle m_HiZPipeline {};
     PipelineHandle m_LightCullPipeline {};
     PipelineHandle m_DeferredLightingPipeline {};
+    PipelineHandle m_ExposureHistogramPipeline {};
+    PipelineHandle m_ExposureAdaptPipeline {};
     PipelineHandle m_ShadowPipelines[4] {};
 
     VulkanMaterial m_DefaultMaterial {};
@@ -183,6 +201,14 @@ namespace YAEngine
 
     std::vector<VkImageView> m_HiZMipViews;
     std::vector<VulkanDescriptorSet> m_HiZDescriptorSets;
+
+    // Auto exposure
+    VulkanStorageBuffer m_HistogramBuffer;
+    VulkanStorageBuffer m_ExposureBuffer;
+    std::vector<VulkanDescriptorSet> m_HistogramPassDescriptorSets;
+    VulkanDescriptorSet m_HistogramOutputDescriptorSet;
+    std::vector<VulkanDescriptorSet> m_ExposureAdaptDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_ExposureReadDescriptorSets;
 
     struct DrawCommand
     {
