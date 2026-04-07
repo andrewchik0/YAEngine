@@ -9,7 +9,7 @@ layout(set = 1, binding = 1) uniform sampler2D ssaoTexture;
 layout(set = 1, binding = 2) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 3) uniform sampler2D gbuffer1Texture;
 
-#include "post.glsl"
+#include "tonemap.glsl"
 
 void main()
 {

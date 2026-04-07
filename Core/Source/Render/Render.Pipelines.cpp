@@ -81,7 +81,7 @@ namespace YAEngine
     VkRenderPass mainRP = m_Graph.GetPassRenderPass(m_GBufferPassIndex);
 
     PipelineCreateInfo forwardInfo = {
-      .fragmentShaderFile = "shader.frag",
+      .fragmentShaderFile = "gbuffer.frag",
       .vertexShaderFile = "mesh.vert",
       .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
       .depthWrite = false,
@@ -107,7 +107,7 @@ namespace YAEngine
     // [4] noShading
     forwardInfo.sets.pop_back();
     forwardInfo.doubleSided = true;
-    forwardInfo.fragmentShaderFile = "no_shading.frag";
+    forwardInfo.fragmentShaderFile = "gbuffer_unlit.frag";
     forwardInfo.vertexShaderFile = "mesh.vert";
     m_ForwardPipelines[4] = m_PSOCache.Register(ctx.device, mainRP, forwardInfo, pipelineCache);
 
@@ -154,8 +154,8 @@ namespace YAEngine
 #endif
 
     PipelineCreateInfo quadInfo = {
-      .fragmentShaderFile = "quad.frag",
-      .vertexShaderFile = "quad.vert",
+      .fragmentShaderFile = "tonemap.frag",
+      .vertexShaderFile = "fullscreen.vert",
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({
@@ -176,7 +176,7 @@ namespace YAEngine
     VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
     PipelineCreateInfo taaInfo = {
       .fragmentShaderFile = "taa.frag",
-      .vertexShaderFile = "quad.vert",
+      .vertexShaderFile = "fullscreen.vert",
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_TAADescriptorSets[0].GetLayout() })
@@ -208,7 +208,7 @@ namespace YAEngine
     }
     PipelineCreateInfo ssaoInfo = {
       .fragmentShaderFile = "ssao.frag",
-      .vertexShaderFile = "quad.vert",
+      .vertexShaderFile = "fullscreen.vert",
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({
@@ -243,7 +243,7 @@ namespace YAEngine
 
     PipelineCreateInfo ssaoBlurInfo = {
       .fragmentShaderFile = "ssao_blur.frag",
-      .vertexShaderFile = "quad.vert",
+      .vertexShaderFile = "fullscreen.vert",
       .pushConstantSize = sizeof(int),
       .depthTesting = false,
       .vertexInputFormat = "",
@@ -282,7 +282,7 @@ namespace YAEngine
     }
     PipelineCreateInfo ssrPipelineDesc = {
       .fragmentShaderFile = "ssr.frag",
-      .vertexShaderFile = "quad.vert",
+      .vertexShaderFile = "fullscreen.vert",
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({
@@ -360,7 +360,7 @@ namespace YAEngine
 
     PipelineCreateInfo deferredInfo = {
       .fragmentShaderFile = "deferred_lighting.frag",
-      .vertexShaderFile = "quad.vert",
+      .vertexShaderFile = "fullscreen.vert",
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({

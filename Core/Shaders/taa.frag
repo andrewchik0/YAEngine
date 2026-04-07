@@ -7,7 +7,7 @@ layout(set = 1, binding = 0) uniform sampler2D frame;
 layout(set = 1, binding = 1) uniform sampler2D history;
 layout(set = 1, binding = 2) uniform sampler2D velocityTexture;
 
-#include "denoise.glsl"
+#include "variance_clipping.glsl"
 
 void main()
 {
