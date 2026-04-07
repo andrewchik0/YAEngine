@@ -12,6 +12,7 @@ set(SOURCE_FILES
   Source/Render/Render.Pipelines.cpp
   Source/Render/Render.Draw.cpp
   Source/Render/Render.HiZ.cpp
+  Source/Render/Render.Bloom.cpp
   Source/Render/VulkanInstance.cpp
   Source/Render/VulkanInstance.h
   Source/Render/VulkanDebugExtension.cpp

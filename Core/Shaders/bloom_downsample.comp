@@ -1,0 +1,112 @@
+#include "../Shared/BloomData.h"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(push_constant) uniform PushConstants
+{
+  BloomPushConstants pc;
+};
+
+layout(set = 0, binding = 0) uniform sampler2D srcTexture;
+layout(set = 0, binding = 1, rgba16f) uniform writeonly image2D dstImage;
+
+// Karis average weight to suppress fireflies on first downsample
+float karisWeight(vec3 c)
+{
+  float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  return 1.0 / (1.0 + luma);
+}
+
+// Soft threshold: smoothly ramps from 0 at (threshold - knee) to full at (threshold + knee)
+vec3 softThreshold(vec3 c, float threshold, float knee)
+{
+  float luma = dot(c, vec3(0.2126, 0.7152, 0.0722));
+  float soft = luma - threshold + knee;
+  soft = clamp(soft / (2.0 * knee + 0.00001), 0.0, 1.0);
+  soft = soft * soft;
+  float contribution = max(soft, luma - threshold) / max(luma, 0.00001);
+  return c * max(contribution, 0.0);
+}
+
+void main()
+{
+  ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+  if (pos.x >= pc.srcWidth / 2 || pos.y >= pc.srcHeight / 2) return;
+
+  vec2 srcTexelSize = 1.0 / vec2(pc.srcWidth, pc.srcHeight);
+  vec2 uv = (vec2(pos) * 2.0 + 1.0) * srcTexelSize;
+
+  // For mip 0: source is SSR color (single mip, LOD = 0)
+  // For mip N: source is bloom image, read from mip N-1
+  float srcLod = max(float(pc.mipLevel) - 1.0, 0.0);
+
+  // 13-tap downsample filter (Jimenez 2014)
+  //   a - b - c
+  //   - j - k -
+  //   d - e - f
+  //   - l - m -
+  //   g - h - i
+  vec3 a = textureLod(srcTexture, uv + vec2(-2.0, -2.0) * srcTexelSize, srcLod).rgb;
+  vec3 b = textureLod(srcTexture, uv + vec2( 0.0, -2.0) * srcTexelSize, srcLod).rgb;
+  vec3 c = textureLod(srcTexture, uv + vec2( 2.0, -2.0) * srcTexelSize, srcLod).rgb;
+  vec3 d = textureLod(srcTexture, uv + vec2(-2.0,  0.0) * srcTexelSize, srcLod).rgb;
+  vec3 e = textureLod(srcTexture, uv, srcLod).rgb;
+  vec3 f = textureLod(srcTexture, uv + vec2( 2.0,  0.0) * srcTexelSize, srcLod).rgb;
+  vec3 g = textureLod(srcTexture, uv + vec2(-2.0,  2.0) * srcTexelSize, srcLod).rgb;
+  vec3 h = textureLod(srcTexture, uv + vec2( 0.0,  2.0) * srcTexelSize, srcLod).rgb;
+  vec3 i = textureLod(srcTexture, uv + vec2( 2.0,  2.0) * srcTexelSize, srcLod).rgb;
+  vec3 j = textureLod(srcTexture, uv + vec2(-1.0, -1.0) * srcTexelSize, srcLod).rgb;
+  vec3 k = textureLod(srcTexture, uv + vec2( 1.0, -1.0) * srcTexelSize, srcLod).rgb;
+  vec3 l = textureLod(srcTexture, uv + vec2(-1.0,  1.0) * srcTexelSize, srcLod).rgb;
+  vec3 m = textureLod(srcTexture, uv + vec2( 1.0,  1.0) * srcTexelSize, srcLod).rgb;
+
+  vec3 result;
+
+  if (pc.mipLevel == 0)
+  {
+    // Soft threshold: only bloom bright pixels
+    a = softThreshold(a, pc.threshold, pc.softKnee);
+    b = softThreshold(b, pc.threshold, pc.softKnee);
+    c = softThreshold(c, pc.threshold, pc.softKnee);
+    d = softThreshold(d, pc.threshold, pc.softKnee);
+    e = softThreshold(e, pc.threshold, pc.softKnee);
+    f = softThreshold(f, pc.threshold, pc.softKnee);
+    g = softThreshold(g, pc.threshold, pc.softKnee);
+    h = softThreshold(h, pc.threshold, pc.softKnee);
+    i = softThreshold(i, pc.threshold, pc.softKnee);
+    j = softThreshold(j, pc.threshold, pc.softKnee);
+    k = softThreshold(k, pc.threshold, pc.softKnee);
+    l = softThreshold(l, pc.threshold, pc.softKnee);
+    m = softThreshold(m, pc.threshold, pc.softKnee);
+
+    // Karis average to prevent fireflies
+    // 5 box groups with partial Karis weighting
+    vec3 g0 = (a + b + d + e) * 0.25;
+    vec3 g1 = (b + c + e + f) * 0.25;
+    vec3 g2 = (d + e + g + h) * 0.25;
+    vec3 g3 = (e + f + h + i) * 0.25;
+    vec3 g4 = (j + k + l + m) * 0.25;
+
+    float w0 = karisWeight(g0);
+    float w1 = karisWeight(g1);
+    float w2 = karisWeight(g2);
+    float w3 = karisWeight(g3);
+    float w4 = karisWeight(g4);
+
+    result = (g0 * w0 + g1 * w1 + g2 * w2 + g3 * w3 + g4 * w4)
+           / (w0 + w1 + w2 + w3 + w4);
+  }
+  else
+  {
+    // Standard 13-tap weighted downsample
+    // Center cross: weight 0.5 (j + k + l + m)
+    // Corner boxes: weight 0.125 each (a+b+d+e, b+c+e+f, d+e+g+h, e+f+h+i)
+    result  = (j + k + l + m) * 0.125;                         // 0.5 / 4
+    result += (a + b + d + e) * 0.03125;                       // 0.125 / 4
+    result += (b + c + e + f) * 0.03125;
+    result += (d + e + g + h) * 0.03125;
+    result += (e + f + h + i) * 0.03125;
+  }
+
+  imageStore(dstImage, pos, vec4(max(result, vec3(0.0)), 1.0));
+}

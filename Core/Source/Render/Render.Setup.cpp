@@ -3,6 +3,7 @@
 #include <imgui_impl_glfw.h>
 #include <ImGui/imgui_impl_vulkan.h>
 
+#include "BloomData.h"
 #include "DebugMarker.h"
 #include "ExposureData.h"
 #include "ImageBarrier.h"
@@ -336,6 +337,116 @@ namespace YAEngine
       }
     });
 
+    // 8. Bloom - downsample/upsample chain (compute)
+    m_BloomPassIndex = m_Graph.AddPass({
+      .name = "BloomPass",
+      .inputs = {m_SSRColor},
+      .isCompute = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_BloomEnabled) return;
+
+        uint32_t baseW = m_Graph.GetExtent().width;
+        uint32_t baseH = m_Graph.GetExtent().height;
+        uint32_t mipCount = BLOOM_MIP_COUNT;
+
+        // Transition bloom image to GENERAL for compute
+        TransitionImageLayout(ctx.cmd, m_BloomImage.GetImage(),
+          VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
+          VK_IMAGE_ASPECT_COLOR_BIT, 0, mipCount);
+
+        // --- Downsample chain ---
+        auto& downPipeline = m_PSOCache.GetCompute(m_BloomDownsamplePipeline);
+        downPipeline.Bind(ctx.cmd);
+
+        for (uint32_t mip = 0; mip < mipCount; mip++)
+        {
+          uint32_t srcW = (mip == 0) ? baseW : std::max(1u, baseW / 2 >> (mip - 1));
+          uint32_t srcH = (mip == 0) ? baseH : std::max(1u, baseH / 2 >> (mip - 1));
+          uint32_t dstW = std::max(1u, baseW / 2 >> mip);
+          uint32_t dstH = std::max(1u, baseH / 2 >> mip);
+
+          BloomPushConstants pc;
+          pc.srcWidth = static_cast<int>(srcW);
+          pc.srcHeight = static_cast<int>(srcH);
+          pc.mipLevel = static_cast<int>(mip);
+          pc.filterRadius = 0.0f;
+          pc.threshold = m_BloomThreshold;
+          pc.softKnee = m_BloomSoftKnee;
+
+          downPipeline.BindDescriptorSets(ctx.cmd, {m_BloomDownsampleDescriptorSets[mip].Get()}, 0);
+          downPipeline.PushConstants(ctx.cmd, &pc);
+          downPipeline.Dispatch(ctx.cmd, (dstW + 15) / 16, (dstH + 15) / 16, 1);
+
+          // Barrier between mips
+          VkImageMemoryBarrier imgBarrier{};
+          imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+          imgBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+          imgBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+          imgBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+          imgBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+          imgBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          imgBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          imgBarrier.image = m_BloomImage.GetImage();
+          imgBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+          imgBarrier.subresourceRange.baseMipLevel = mip;
+          imgBarrier.subresourceRange.levelCount = 1;
+          imgBarrier.subresourceRange.baseArrayLayer = 0;
+          imgBarrier.subresourceRange.layerCount = 1;
+          vkCmdPipelineBarrier(ctx.cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &imgBarrier);
+        }
+
+        // --- Upsample chain ---
+        auto& upPipeline = m_PSOCache.GetCompute(m_BloomUpsamplePipeline);
+        upPipeline.Bind(ctx.cmd);
+
+        for (uint32_t i = 0; i < mipCount - 1; i++)
+        {
+          uint32_t dstMip = mipCount - 2 - i;
+          uint32_t dstW = std::max(1u, baseW / 2 >> dstMip);
+          uint32_t dstH = std::max(1u, baseH / 2 >> dstMip);
+
+          BloomPushConstants pc;
+          pc.srcWidth = static_cast<int>(dstW);
+          pc.srcHeight = static_cast<int>(dstH);
+          pc.mipLevel = static_cast<int>(dstMip);
+          pc.filterRadius = 1.0f / float(dstW);
+
+          upPipeline.BindDescriptorSets(ctx.cmd, {m_BloomUpsampleDescriptorSets[i].Get()}, 0);
+          upPipeline.PushConstants(ctx.cmd, &pc);
+          upPipeline.Dispatch(ctx.cmd, (dstW + 15) / 16, (dstH + 15) / 16, 1);
+
+          // Barrier for next upsample step
+          VkImageMemoryBarrier imgBarrier{};
+          imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+          imgBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+          imgBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+          imgBarrier.oldLayout = VK_IMAGE_LAYOUT_GENERAL;
+          imgBarrier.newLayout = VK_IMAGE_LAYOUT_GENERAL;
+          imgBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          imgBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+          imgBarrier.image = m_BloomImage.GetImage();
+          imgBarrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+          imgBarrier.subresourceRange.baseMipLevel = dstMip;
+          imgBarrier.subresourceRange.levelCount = 1;
+          imgBarrier.subresourceRange.baseArrayLayer = 0;
+          imgBarrier.subresourceRange.layerCount = 1;
+          vkCmdPipelineBarrier(ctx.cmd,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+            0, 0, nullptr, 0, nullptr, 1, &imgBarrier);
+        }
+
+        // Final transition: bloom mip 0 -> SHADER_READ_ONLY for tonemap
+        TransitionImageLayout(ctx.cmd, m_BloomImage.GetImage(),
+          VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+          VK_IMAGE_ASPECT_COLOR_BIT, 0, mipCount);
+        m_BloomImage.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      }
+    });
+
     m_TAAPassIndex = m_Graph.AddPass({
       .name = "TAAPass",
       .inputs = {m_SSRColor, m_TAAHistory1, m_MainVelocity},
@@ -501,6 +612,7 @@ namespace YAEngine
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_BloomReadDescriptorSet.Get()}, 3);
         DrawQuad();
       }
     });
@@ -570,6 +682,7 @@ namespace YAEngine
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_BloomReadDescriptorSet.Get()}, 3);
         DrawQuad();
 
         ImGui_ImplVulkan_NewFrame();

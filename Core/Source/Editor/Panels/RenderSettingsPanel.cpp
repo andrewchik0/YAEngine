@@ -45,6 +45,14 @@ namespace YAEngine
       ImGui::Checkbox("SSR", &context.render->GetSSREnabled());
       ImGui::Checkbox("TAA", &context.render->GetTAAEnabled());
 
+      ImGui::Checkbox("Bloom", &context.render->GetBloomEnabled());
+      if (context.render->GetBloomEnabled())
+      {
+        ImGui::DragFloat("Bloom Intensity", &context.render->GetBloomIntensity(), 0.001f, 0.0f, 1.0f);
+        ImGui::DragFloat("Bloom Threshold", &context.render->GetBloomThreshold(), 0.01f, 0.0f, 5.0f);
+        ImGui::DragFloat("Bloom Soft Knee", &context.render->GetBloomSoftKnee(), 0.01f, 0.0f, 1.0f);
+      }
+
       ImGui::Separator();
       ImGui::Checkbox("Auto Exposure", &context.render->GetAutoExposureEnabled());
       if (context.render->GetAutoExposureEnabled())

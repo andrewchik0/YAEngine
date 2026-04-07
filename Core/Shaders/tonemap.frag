@@ -14,6 +14,8 @@ layout(std430, set = 2, binding = 0) readonly buffer ExposureSSBO
   float autoExposure;
 };
 
+layout(set = 3, binding = 0) uniform sampler2D bloomTexture;
+
 #include "tonemap.glsl"
 
 void main()
@@ -57,6 +59,9 @@ void main()
 
   // Default: tone-mapped final image
   vec3 color = texture(frame, uv).rgb;
+
+  // Add bloom before tone mapping
+  color += u_Frame.bloomIntensity * texture(bloomTexture, uv).rgb;
 
   float finalExposure = autoExposure * u_Frame.exposure;
   color = color * finalExposure;

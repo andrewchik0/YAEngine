@@ -51,6 +51,7 @@ namespace YAEngine
     uint32_t hizMipCount = static_cast<uint32_t>(std::floor(std::log2(std::max(w, h)))) + 1;
     m_Graph.SetResourceMipLevels(m_HiZResource, hizMipCount);
 
+    DestroyBloomResources();
     DestroyHiZResources();
     DestroySceneImGuiDescriptor();
 
@@ -58,6 +59,7 @@ namespace YAEngine
 
     CreateSceneImGuiDescriptor();
     CreateHiZResources();
+    CreateBloomResources();
 
     // Resize tile light buffer and update descriptor sets that reference it
     {

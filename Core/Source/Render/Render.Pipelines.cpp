@@ -1,4 +1,5 @@
 #include "Render.h"
+#include "BloomData.h"
 #include "ExposureData.h"
 
 namespace YAEngine
@@ -154,7 +155,7 @@ namespace YAEngine
     VkRenderPass quadRP = m_Graph.GetPassRenderPass(m_SwapchainPassIndex);
 #endif
 
-    // Create exposure read layout helper for tonemap pipeline
+    // Create layout helpers for tonemap pipeline (set 2: exposure, set 3: bloom)
     SetDescription expReadLayoutDesc = {
       .set = 2,
       .bindings = {
@@ -163,6 +164,15 @@ namespace YAEngine
     };
     VulkanDescriptorSet expReadLayoutHelper;
     expReadLayoutHelper.Init(ctx, expReadLayoutDesc);
+
+    SetDescription bloomReadLayoutDesc = {
+      .set = 3,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+      }
+    };
+    VulkanDescriptorSet bloomReadLayoutHelper;
+    bloomReadLayoutHelper.Init(ctx, bloomReadLayoutDesc);
 
     PipelineCreateInfo quadInfo = {
       .fragmentShaderFile = "tonemap.frag",
@@ -173,10 +183,12 @@ namespace YAEngine
         m_FrameUniformBuffer.GetLayout(),
         m_SwapChainDescriptorSets[0].GetLayout(),
         expReadLayoutHelper.GetLayout(),
+        bloomReadLayoutHelper.GetLayout(),
       })
     };
     m_QuadPipeline = m_PSOCache.Register(ctx.device, quadRP, quadInfo, pipelineCache);
     expReadLayoutHelper.Destroy();
+    bloomReadLayoutHelper.Destroy();
 
 #ifdef YA_EDITOR
     {
@@ -487,6 +499,26 @@ namespace YAEngine
       },
       sizeof(ExposureAdaptPushConstants),
       pipelineCache);
+
+    // Bloom compute pipelines
+    SetDescription bloomPipelineSetDesc = {
+      .set = 0,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+        { 1, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT }
+      }
+    };
+    VulkanDescriptorSet bloomPipelineLayoutHelper;
+    bloomPipelineLayoutHelper.Init(ctx, bloomPipelineSetDesc);
+    m_BloomDownsamplePipeline = m_PSOCache.RegisterCompute(ctx.device, "bloom_downsample.comp",
+      { bloomPipelineLayoutHelper.GetLayout() },
+      sizeof(BloomPushConstants),
+      pipelineCache);
+    m_BloomUpsamplePipeline = m_PSOCache.RegisterCompute(ctx.device, "bloom_upsample.comp",
+      { bloomPipelineLayoutHelper.GetLayout() },
+      sizeof(BloomPushConstants),
+      pipelineCache);
+    bloomPipelineLayoutHelper.Destroy();
 
     // Exposure read descriptor sets for tonemap pass (set 2: exposure SSBO)
     SetDescription expReadDesc = {

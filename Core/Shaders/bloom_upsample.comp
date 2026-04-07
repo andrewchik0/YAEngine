@@ -1,0 +1,41 @@
+#include "../Shared/BloomData.h"
+
+layout(local_size_x = 16, local_size_y = 16) in;
+
+layout(push_constant) uniform PushConstants
+{
+  BloomPushConstants pc;
+};
+
+layout(set = 0, binding = 0) uniform sampler2D srcTexture;
+layout(set = 0, binding = 1, rgba16f) uniform image2D dstImage;
+
+void main()
+{
+  ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
+  if (pos.x >= pc.srcWidth || pos.y >= pc.srcHeight) return;
+
+  // 3x3 tent filter on the smaller (source) mip
+  vec2 srcTexelSize = vec2(pc.filterRadius);
+  vec2 uv = (vec2(pos) + 0.5) / vec2(pc.srcWidth, pc.srcHeight);
+
+  // Source mip is one level above destination (mipLevel is dst mip)
+  float srcLod = float(pc.mipLevel + 1);
+
+  // 9-tap tent filter: 1-2-1 / 2-4-2 / 1-2-1 (sum = 16)
+  vec3 s = vec3(0.0);
+  s += textureLod(srcTexture, uv + vec2(-1.0, -1.0) * srcTexelSize, srcLod).rgb * 1.0;
+  s += textureLod(srcTexture, uv + vec2( 0.0, -1.0) * srcTexelSize, srcLod).rgb * 2.0;
+  s += textureLod(srcTexture, uv + vec2( 1.0, -1.0) * srcTexelSize, srcLod).rgb * 1.0;
+  s += textureLod(srcTexture, uv + vec2(-1.0,  0.0) * srcTexelSize, srcLod).rgb * 2.0;
+  s += textureLod(srcTexture, uv, srcLod).rgb * 4.0;
+  s += textureLod(srcTexture, uv + vec2( 1.0,  0.0) * srcTexelSize, srcLod).rgb * 2.0;
+  s += textureLod(srcTexture, uv + vec2(-1.0,  1.0) * srcTexelSize, srcLod).rgb * 1.0;
+  s += textureLod(srcTexture, uv + vec2( 0.0,  1.0) * srcTexelSize, srcLod).rgb * 2.0;
+  s += textureLod(srcTexture, uv + vec2( 1.0,  1.0) * srcTexelSize, srcLod).rgb * 1.0;
+  s /= 16.0;
+
+  // Additive blend with existing content in destination mip
+  vec3 existing = imageLoad(dstImage, pos).rgb;
+  imageStore(dstImage, pos, vec4(existing + s, 1.0));
+}

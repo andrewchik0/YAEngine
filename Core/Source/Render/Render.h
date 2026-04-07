@@ -58,6 +58,10 @@ namespace YAEngine
     float& GetAdaptSpeedDown() { return m_AdaptSpeedDown; }
     float& GetLowPercentile() { return m_LowPercentile; }
     float& GetHighPercentile() { return m_HighPercentile; }
+    bool& GetBloomEnabled() { return b_BloomEnabled; }
+    float& GetBloomIntensity() { return m_BloomIntensity; }
+    float& GetBloomThreshold() { return m_BloomThreshold; }
+    float& GetBloomSoftKnee() { return m_BloomSoftKnee; }
 
     const RenderStats& GetStats() const { return m_Stats; }
 
@@ -76,6 +80,10 @@ namespace YAEngine
     float m_AdaptSpeedDown = 1.0f;
     float m_LowPercentile = 0.1f;
     float m_HighPercentile = 0.98f;
+    bool b_BloomEnabled = true;
+    float m_BloomIntensity = 0.04f;
+    float m_BloomThreshold = 1.0f;
+    float m_BloomSoftKnee = 0.5f;
     float m_LastFrameTime = 0.0f;
     float m_DeltaTime = 0.0f;
 
@@ -92,6 +100,8 @@ namespace YAEngine
     void ClearHistoryBuffers();
     void CreateHiZResources();
     void DestroyHiZResources();
+    void CreateBloomResources();
+    void DestroyBloomResources();
 
     RenderBackend m_Backend;
     RenderGraph m_Graph;
@@ -139,6 +149,7 @@ namespace YAEngine
     uint32_t m_LightCullPassIndex {};
     uint32_t m_DeferredLightingPassIndex {};
     uint32_t m_SSRPassIndex {};
+    uint32_t m_BloomPassIndex {};
     uint32_t m_TAAPassIndex {};
     uint32_t m_HistogramPassIndex {};
     uint32_t m_ExposureAdaptPassIndex {};
@@ -188,6 +199,8 @@ namespace YAEngine
     PipelineHandle m_HiZPipeline {};
     PipelineHandle m_LightCullPipeline {};
     PipelineHandle m_DeferredLightingPipeline {};
+    PipelineHandle m_BloomDownsamplePipeline {};
+    PipelineHandle m_BloomUpsamplePipeline {};
     PipelineHandle m_ExposureHistogramPipeline {};
     PipelineHandle m_ExposureAdaptPipeline {};
     PipelineHandle m_ShadowPipelines[4] {};
@@ -201,6 +214,13 @@ namespace YAEngine
 
     std::vector<VkImageView> m_HiZMipViews;
     std::vector<VulkanDescriptorSet> m_HiZDescriptorSets;
+
+    // Bloom
+    VulkanImage m_BloomImage;
+    std::vector<VkImageView> m_BloomMipViews;
+    std::vector<VulkanDescriptorSet> m_BloomDownsampleDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_BloomUpsampleDescriptorSets;
+    VulkanDescriptorSet m_BloomReadDescriptorSet;
 
     // Auto exposure
     VulkanStorageBuffer m_HistogramBuffer;

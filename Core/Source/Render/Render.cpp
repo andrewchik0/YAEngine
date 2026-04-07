@@ -120,6 +120,7 @@ namespace YAEngine
     ClearHistoryBuffers();
     InitPipelines();
     CreateHiZResources();
+    CreateBloomResources();
 
     m_Backend.InitImGui(window, m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
 
@@ -158,6 +159,7 @@ namespace YAEngine
     m_NoneCubeMap.Destroy(ctx);
     m_NoneTexture.Destroy(ctx);
 
+    DestroyBloomResources();
     DestroyHiZResources();
 
     for (auto& fb : m_TAAFramebuffers)
@@ -231,6 +233,7 @@ namespace YAEngine
     // Wait for all GPU work to complete before destroying resources
     vkDeviceWaitIdle(ctx.device);
 
+    DestroyBloomResources();
     DestroyHiZResources();
 
     // Resize graph (recreates managed resources and non-external framebuffers)
@@ -238,6 +241,7 @@ namespace YAEngine
 
     // Recreate Hi-Z per-mip views and descriptor sets
     CreateHiZResources();
+    CreateBloomResources();
 
     // Resize tile light buffer and update descriptor sets that reference it
     {
@@ -319,6 +323,7 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.hizMipCount = static_cast<int>(m_Graph.GetResourceDesc(m_HiZResource).mipLevels);
     m_FrameUniformBuffer.uniforms.frameIndex = static_cast<int>(m_GlobalFrameIndex);
     m_FrameUniformBuffer.uniforms.tonemapMode = m_TonemapMode;
+    m_FrameUniformBuffer.uniforms.bloomIntensity = b_BloomEnabled ? m_BloomIntensity : 0.0f;
 
     // Configure render graph for this frame (TAA ping-pong + swapchain)
     auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;

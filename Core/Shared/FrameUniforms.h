@@ -39,6 +39,7 @@ struct FrameUniforms
   int tileCountY;
   mat4 invView;
   int tonemapMode;
+  float bloomIntensity;
 };
 
 #ifdef __cplusplus
