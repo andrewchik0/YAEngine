@@ -15,6 +15,9 @@ namespace YAEngine
     auto model = std::make_unique<Model>();
     model->rootEntity = m_Builder.Build(desc);
 
+    m_Scene->AddComponent<ModelSourceComponent>(model->rootEntity,
+      ModelSourceComponent { .path = path, .combinedTextures = combinedTextures });
+
     return Store(std::move(model));
   }
 

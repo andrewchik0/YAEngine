@@ -4,6 +4,7 @@
 #include "Editor/EditorContext.h"
 #include "Editor/IEditorPanel.h"
 #include "Editor/Utils/EditorTextureCache.h"
+#include "Scene/ComponentRegistry.h"
 #include "Utils/Ray.h"
 
 namespace YAEngine
@@ -24,8 +25,15 @@ namespace YAEngine
   private:
 
     void BuildDefaultLayout(uint32_t dockspaceId);
+    void SaveScene();
+    void SaveSceneAs();
+    void OpenScene();
+    void LoadSceneDeferred(const std::string& path);
+    void EnsureBasePath(const std::string& scenePath);
 
     EditorContext m_Context;
+    std::string m_CurrentScenePath;
+    std::string m_PendingScenePath;
     EditorTextureCache m_TextureCache;
     std::vector<std::unique_ptr<IEditorPanel>> m_Panels;
     bool b_LayoutBuilt = false;

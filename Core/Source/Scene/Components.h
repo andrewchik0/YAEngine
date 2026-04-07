@@ -85,6 +85,12 @@ namespace YAEngine
     bool castShadow = false;
   };
 
+  struct ModelSourceComponent
+  {
+    std::string path;
+    bool combinedTextures = false;
+  };
+
 #ifdef YA_EDITOR
   struct EditorOnlyTag {};
 #endif

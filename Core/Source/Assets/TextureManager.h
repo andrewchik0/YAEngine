@@ -34,6 +34,22 @@ namespace YAEngine
       return Get(handle).m_VulkanTexture;
     }
 
+    struct PathInfo
+    {
+      std::string path;
+      bool linear = false;
+    };
+
+    PathInfo GetPath(TextureHandle handle) const
+    {
+      for (auto& [key, cached] : m_Cache)
+      {
+        if (cached == handle)
+          return { key.path, key.linear };
+      }
+      return {};
+    }
+
   private:
     const RenderContext* m_Ctx = nullptr;
 

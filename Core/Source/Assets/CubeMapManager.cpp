@@ -30,11 +30,8 @@ namespace YAEngine
       m_Cache[canonical] = handle;
       return handle;
     }
-    else
-    {
-      YA_LOG_ERROR("Assets", "Failed to load cubemap: %s", path.c_str());
-      throw std::runtime_error("Texture file does not exist!");
-    }
+    YA_LOG_ERROR("Assets", "Failed to load cubemap: %s", path.c_str());
+    return {};
   }
 
   void CubeMapManager::Destroy(CubeMapHandle handle)

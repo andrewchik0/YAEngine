@@ -7,6 +7,7 @@
 #include "MeshManager.h"
 #include "ModelManager.h"
 #include "TextureManager.h"
+#include "Utils/PrimitiveMeshFactory.h"
 
 namespace YAEngine
 {
@@ -36,6 +37,12 @@ namespace YAEngine
     MaterialManager& Materials() { return GetManager<MaterialManager>(); }
     ModelManager& Models() { return GetManager<ModelManager>(); }
     CubeMapManager& CubeMaps() { return GetManager<CubeMapManager>(); }
+    PrimitiveMeshFactory& Primitives() { return m_PrimitiveFactory; }
+
+    void SetBasePath(const std::string& basePath) { m_BasePath = basePath; }
+    const std::string& GetBasePath() const { return m_BasePath; }
+    std::string ResolvePath(const std::string& relativePath) const;
+    std::string MakeRelative(const std::string& absolutePath) const;
 
     void DestroyAll();
 
@@ -52,5 +59,7 @@ namespace YAEngine
 
     std::unordered_map<std::type_index, std::unique_ptr<IAssetManager>> m_Registry;
     std::vector<IAssetManager*> m_DestroyOrder;
+    PrimitiveMeshFactory m_PrimitiveFactory;
+    std::string m_BasePath;
   };
 }

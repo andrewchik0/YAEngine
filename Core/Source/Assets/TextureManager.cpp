@@ -41,7 +41,7 @@ namespace YAEngine
     else
     {
       YA_LOG_ERROR("Assets", "Failed to load texture: %s", path.c_str());
-      throw std::runtime_error("Texture file does not exist!");
+      return {};
     }
   }
 

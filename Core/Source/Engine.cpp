@@ -4,6 +4,7 @@
 #include "Scene/SceneSnapshot.h"
 #include "Scene/TransformSystem.h"
 #include "Scene/BoundsUpdateSystem.h"
+#include "Scene/CoreComponentSerializers.h"
 
 #include <imgui.h>
 
@@ -46,6 +47,7 @@ namespace YAEngine
     m_Registry.Register<AssetManager>(&m_AssetManager);
     m_Registry.Register<Scene>(&m_Scene);
     m_Registry.Register<SystemScheduler>(&m_Scheduler);
+    m_Registry.Register<ComponentRegistry>(&m_ComponentRegistry);
     m_Registry.Register<LayerManager>(&m_LayerManager);
     m_LayerManager.SetRegistry(m_Registry);
 
@@ -81,6 +83,7 @@ namespace YAEngine
     m_LayerManager.CallOnAttach();
     m_AssetManager.Init(m_Scene, [this](uint32_t size) { return m_Render.AllocateInstanceData(size); });
     m_AssetManager.SetRenderContext(m_Render.GetContext(), m_Render.GetNoneTexture(), m_Render.GetCubicResources());
+    RegisterCoreComponentSerializers(m_ComponentRegistry, m_AssetManager);
     m_Render.Resize();
     {
       SceneSnapshot emptySnapshot;

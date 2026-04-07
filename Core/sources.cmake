@@ -134,6 +134,14 @@ set(SOURCE_FILES
   Source/Utils/ThreadPool.h
   Source/Utils/ThreadPool.cpp
   Source/Utils/MainThreadDispatcher.h
+  Source/Utils/PrimitiveMeshFactory.h
+  Source/Utils/PrimitiveMeshFactory.cpp
+  Source/Scene/ComponentRegistry.h
+  Source/Scene/CoreComponentSerializers.h
+  Source/Scene/CoreComponentSerializers.cpp
+  Source/Scene/SceneSerializer.h
+  Source/Scene/SceneSerializer.cpp
+  Source/Scene/YamlUtils.h
 )
 
 if(YA_EDITOR)

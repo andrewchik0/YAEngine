@@ -15,6 +15,13 @@
 #include "Editor/Panels/MaterialInspectorPanel.h"
 #include "Editor/EditorCameraLayer.h"
 #include "Editor/Utils/FileDialog.h"
+#include <filesystem>
+
+#include "Assets/AssetManager.h"
+#include "Render/Render.h"
+#include "Scene/SceneSerializer.h"
+#include "Scene/ComponentRegistry.h"
+#include "Utils/ServiceRegistry.h"
 #include "Utils/Ray.h"
 
 #include <glm/gtc/matrix_transform.hpp>
@@ -41,6 +48,7 @@ namespace YAEngine
     m_Context.assetManager = &GetAssets();
     m_Context.render = &GetRender();
     m_Context.timer = &GetTimer();
+    m_Context.componentRegistry = &m_Registry->Get<ComponentRegistry>();
 
     m_TextureCache.Init(m_Context.assetManager);
     m_Context.textureCache = &m_TextureCache;
@@ -76,6 +84,12 @@ namespace YAEngine
 
   void EditorLayer::Update(double deltaTime)
   {
+    if (!m_PendingScenePath.empty())
+    {
+      LoadSceneDeferred(m_PendingScenePath);
+      m_PendingScenePath.clear();
+    }
+
     uint32_t w = m_Context.viewportWidth;
     uint32_t h = m_Context.viewportHeight;
     if (w > 0 && h > 0 && (w != m_LastViewportWidth || h != m_LastViewportHeight))
@@ -336,8 +350,32 @@ namespace YAEngine
       b_LayoutBuilt = true;
     }
 
+    // Keyboard shortcuts
+    if (ImGui::IsKeyDown(ImGuiMod_Ctrl))
+    {
+      if (ImGui::IsKeyPressed(ImGuiKey_S, false))
+      {
+        if (ImGui::IsKeyDown(ImGuiMod_Shift))
+          SaveSceneAs();
+        else
+          SaveScene();
+      }
+      if (ImGui::IsKeyPressed(ImGuiKey_O, false))
+        OpenScene();
+    }
+
     if (ImGui::BeginMainMenuBar())
     {
+      if (ImGui::BeginMenu("File"))
+      {
+        if (ImGui::MenuItem("Open Scene...", "Ctrl+O"))
+          OpenScene();
+        if (ImGui::MenuItem("Save Scene", "Ctrl+S"))
+          SaveScene();
+        if (ImGui::MenuItem("Save Scene As...", "Ctrl+Shift+S"))
+          SaveSceneAs();
+        ImGui::EndMenu();
+      }
       if (ImGui::BeginMenu("View"))
       {
         for (auto& panel : m_Panels)
@@ -397,6 +435,93 @@ namespace YAEngine
     m_Panels.clear();
     m_TextureCache.Destroy();
     FileDialog::Shutdown();
+  }
+
+  static constexpr nfdu8filteritem_t s_SceneFilters[] = { { "Scene", "scene" } };
+
+  // Walk up from startDir until we find a directory containing "Assets/"
+  static std::string FindProjectRoot(const std::filesystem::path& startDir)
+  {
+    auto dir = std::filesystem::weakly_canonical(startDir);
+    while (dir.has_parent_path() && dir != dir.parent_path())
+    {
+      if (std::filesystem::exists(dir / "Assets"))
+        return dir.string();
+      dir = dir.parent_path();
+    }
+    return startDir.string();
+  }
+
+  void EditorLayer::EnsureBasePath(const std::string& scenePath)
+  {
+    if (!GetAssets().GetBasePath().empty())
+      return;
+    auto sceneDir = std::filesystem::path(scenePath).parent_path();
+    GetAssets().SetBasePath(FindProjectRoot(sceneDir));
+  }
+
+  void EditorLayer::SaveScene()
+  {
+    if (m_CurrentScenePath.empty())
+    {
+      SaveSceneAs();
+      return;
+    }
+    EnsureBasePath(m_CurrentScenePath);
+    SceneSerializer::Save(m_CurrentScenePath, GetScene(), GetAssets(),
+      *m_Context.componentRegistry, GetRender());
+  }
+
+  void EditorLayer::SaveSceneAs()
+  {
+    auto path = FileDialog::SaveFile(s_SceneFilters, 1, "scene.scene");
+    if (path.empty())
+      return;
+    m_CurrentScenePath = path;
+    EnsureBasePath(m_CurrentScenePath);
+    SceneSerializer::Save(m_CurrentScenePath, GetScene(), GetAssets(),
+      *m_Context.componentRegistry, GetRender());
+  }
+
+  void EditorLayer::OpenScene()
+  {
+    auto path = FileDialog::OpenFile(s_SceneFilters, 1);
+    if (path.empty())
+      return;
+
+    m_PendingScenePath = path;
+  }
+
+  void EditorLayer::LoadSceneDeferred(const std::string& path)
+  {
+    m_Context.ClearSelection();
+    m_Context.ClearMaterialSelection();
+
+    GetRender().WaitIdle();
+    m_TextureCache.Destroy();
+    GetAssets().DestroyAll();
+    GetScene().ClearScene();
+    GetRender().ResetBoundState();
+
+    GetAssets().Init(GetScene(), [this](uint32_t size) { return GetRender().AllocateInstanceData(size); });
+    GetAssets().SetRenderContext(GetRender().GetContext(), GetRender().GetNoneTexture(), GetRender().GetCubicResources());
+
+    auto sceneDir = std::filesystem::path(path).parent_path();
+    auto basePath = FindProjectRoot(sceneDir);
+
+    SceneSerializer::Load(path, GetScene(), GetAssets(),
+      *m_Context.componentRegistry, GetRender(), basePath);
+
+    // Recreate editor camera (destroyed by ClearScene)
+    auto* editorCam = GetLayerManager().GetLayer<EditorCameraLayer>();
+    if (editorCam)
+      editorCam->OnSceneReady();
+
+    // Force camera resize on next frame
+    m_LastViewportWidth = 0;
+    m_LastViewportHeight = 0;
+
+    m_CurrentScenePath = path;
   }
 
   void EditorLayer::BuildDefaultLayout(ImGuiID dockspaceId)

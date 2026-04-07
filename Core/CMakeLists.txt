@@ -18,6 +18,7 @@ target_link_libraries(Core PUBLIC
   imgui
   glfw
   assimp
+  yaml-cpp::yaml-cpp
 )
 find_package(Vulkan REQUIRED)
 target_link_libraries(Core PUBLIC Vulkan::Vulkan EnTT::EnTT)

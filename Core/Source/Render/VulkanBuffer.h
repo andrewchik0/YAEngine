@@ -47,6 +47,11 @@ namespace YAEngine
       return offset;
     }
 
+    void ResetAllocator()
+    {
+      m_FilledData = 0;
+    }
+
   private:
 
     VkBuffer m_Buffer {};

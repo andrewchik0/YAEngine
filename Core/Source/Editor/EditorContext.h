@@ -9,6 +9,7 @@ namespace YAEngine
   class Render;
   class Timer;
   class EditorTextureCache;
+  class ComponentRegistry;
 
   struct EditorContext
   {
@@ -18,6 +19,7 @@ namespace YAEngine
     AssetManager* assetManager = nullptr;
     Render* render = nullptr;
     Timer* timer = nullptr;
+    ComponentRegistry* componentRegistry = nullptr;
     EditorTextureCache* textureCache = nullptr;
     bool selectionChangedFlag = false;
     bool viewportHovered = false;

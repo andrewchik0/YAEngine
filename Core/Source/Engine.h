@@ -11,6 +11,7 @@
 #include "Render/RenderObject.h"
 #include "Scene/Scene.h"
 #include "Scene/SystemScheduler.h"
+#include "Scene/ComponentRegistry.h"
 #include "Utils/Timer.h"
 #include "Utils/ThreadPool.h"
 #include "Utils/MainThreadDispatcher.h"
@@ -64,6 +65,7 @@ namespace YAEngine
     SystemScheduler& GetScheduler() { return m_Scheduler; }
     ThreadPool& GetThreadPool() { return m_ThreadPool; }
     MainThreadDispatcher& GetDispatcher() { return m_Dispatcher; }
+    ComponentRegistry& GetComponentRegistry() { return m_ComponentRegistry; }
 
   private:
     FrameContext MakeFrameContext(SceneSnapshot& snapshot);
@@ -79,6 +81,7 @@ namespace YAEngine
     AssetManager m_AssetManager;
     Scene m_Scene;
     SystemScheduler m_Scheduler;
+    ComponentRegistry m_ComponentRegistry;
     LayerManager m_LayerManager;
 
     SceneSnapshot m_Snapshot;

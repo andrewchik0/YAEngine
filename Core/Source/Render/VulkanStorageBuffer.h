@@ -27,6 +27,11 @@ namespace YAEngine
       return m_Buffer.Allocate(size);
     }
 
+    void ResetAllocator()
+    {
+      m_Buffer.ResetAllocator();
+    }
+
   private:
 
     VulkanBuffer m_Buffer;

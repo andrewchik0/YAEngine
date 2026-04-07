@@ -34,6 +34,15 @@ namespace YAEngine
     void Destroy();
     void Resize();
     void WaitIdle();
+    void ResetBoundState()
+    {
+      m_BoundSkybox = {};
+      m_IBLDescriptorSet.WriteCombinedImageSampler(0, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+      m_IBLDescriptorSet.WriteCombinedImageSampler(1, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+      m_IBLDescriptorSet.WriteCombinedImageSampler(2, m_NoneTexture.GetView(), m_NoneTexture.GetSampler());
+      m_IBLDescriptorSet.WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+      m_InstanceBuffer.ResetAllocator();
+    }
 
     void Draw(FrameContext& frame);
 

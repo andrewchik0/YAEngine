@@ -37,6 +37,16 @@ namespace YAEngine
       return Get(handle).m_CubeTexture;
     }
 
+    std::string GetPath(CubeMapHandle handle) const
+    {
+      for (auto& [path, cached] : m_Cache)
+      {
+        if (cached == handle)
+          return path;
+      }
+      return {};
+    }
+
   private:
     const RenderContext* m_Ctx = nullptr;
     CubicTextureResources* m_CubicRes = nullptr;

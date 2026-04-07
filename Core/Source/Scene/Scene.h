@@ -108,6 +108,13 @@ namespace YAEngine
       return m_Skybox;
     }
 
+    void ClearScene()
+    {
+      m_Registry.clear();
+      m_ActiveCamera = entt::null;
+      m_Skybox = {};
+    }
+
     entt::registry& GetRegistry() { return m_Registry; }
 
   private:
