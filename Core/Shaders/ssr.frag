@@ -11,8 +11,7 @@ layout(set = 1, binding = 0) uniform sampler2D litColorTexture;
 layout(set = 1, binding = 1) uniform sampler2D depthTexture;
 layout(set = 1, binding = 2) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 3) uniform sampler2D gbuffer0Texture;
-layout(set = 1, binding = 4) uniform sampler2D ssaoTexture;
-layout(set = 1, binding = 5) uniform sampler2D hiZTexture;
+layout(set = 1, binding = 4) uniform sampler2D hiZTexture;
 
 // --- Configuration ---
 const int MAX_ITERATIONS = 128;
@@ -39,10 +38,6 @@ void main()
   float metallic = gb0.a;
   vec3 albedo = gb0.rgb;
   vec3 originalColor = texture(litColorTexture, uv).rgb;
-  float ao = texture(ssaoTexture, uv).r;
-
-  if (u_Frame.ssaoEnabled == 0)
-    ao = 1.0;
 
   // SSR debug mode: zero out base color to show only reflections
   if (u_Frame.currentTexture == 6)
@@ -62,9 +57,6 @@ void main()
   }
 
   worldNormal = normalize(worldNormal);
-
-  // Apply AO to geometry only
-  originalColor *= ao;
 
   if (u_Frame.ssrEnabled == 0 || roughness > MAX_ROUGHNESS)
   {

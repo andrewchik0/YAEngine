@@ -91,6 +91,25 @@ namespace YAEngine
     bool combinedTextures = false;
   };
 
+  enum class ProbeShape : uint8_t
+  {
+    Sphere,
+    Box
+  };
+
+  struct LightProbeComponent
+  {
+    ProbeShape shape = ProbeShape::Sphere;
+    glm::vec3 extents { 5.0f };
+    float fadeDistance = 1.0f;
+    int priority = 0;
+    uint32_t resolution = 128;
+    bool baked = false;
+    uint32_t atlasSlot = 0;
+    std::string bakedIrradiancePath;
+    std::string bakedPrefilterPath;
+  };
+
 #ifdef YA_EDITOR
   struct EditorOnlyTag {};
 #endif

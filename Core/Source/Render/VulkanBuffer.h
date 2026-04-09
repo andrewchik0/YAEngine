@@ -22,6 +22,10 @@ namespace YAEngine
       VkDeviceSize size,
       VkBufferUsageFlags usage);
 
+    static VulkanBuffer CreateReadback(
+      const RenderContext& ctx,
+      VkDeviceSize size);
+
     void Destroy(const RenderContext& ctx);
 
     VkBuffer Get() const
@@ -38,6 +42,8 @@ namespace YAEngine
     {
       std::memcpy(static_cast<uint8_t*>(m_MappedData) + offset, data, size);
     }
+
+    void* GetMapped() const { return m_MappedData; }
 
     uint32_t Allocate(uint32_t size)
     {

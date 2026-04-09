@@ -10,10 +10,12 @@
 
 namespace YAEngine
 {
-  void Render::DrawMeshes(FrameContext& frame)
+  void Render::DrawMeshes(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame,
+    VkDescriptorSet frameUBOOverride)
   {
-    auto currentFrame = m_Backend.GetCurrentFrameIndex();
-    auto cmd = m_Backend.GetCurrentCommandBuffer();
+    auto currentFrame = frameIndex;
+    VkDescriptorSet frameUBO = frameUBOOverride != VK_NULL_HANDLE
+      ? frameUBOOverride : m_FrameUniformBuffer.GetDescriptorSet(currentFrame);
     auto& meshManager = frame.assets.Meshes();
     auto& materialManager = frame.assets.Materials();
     auto& cubeMapManager = frame.assets.CubeMaps();
@@ -79,7 +81,7 @@ namespace YAEngine
       {
         currentPipeline = &GetForwardPipeline(dc);
         currentPipeline->Bind(cmd);
-        currentPipeline->BindDescriptorSets(cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        currentPipeline->BindDescriptorSets(cmd, {frameUBO}, 0);
         lastSortKey = sortKey;
         lastMaterialIndex = UINT32_MAX;
         lastMaterialGen = UINT32_MAX;
@@ -179,10 +181,12 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.fov = cam.fov;
   }
 
-  void Render::DrawMeshesDepthOnly(FrameContext& frame)
+  void Render::DrawMeshesDepthOnly(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame,
+    VkDescriptorSet frameUBOOverride)
   {
-    auto currentFrame = m_Backend.GetCurrentFrameIndex();
-    auto cmd = m_Backend.GetCurrentCommandBuffer();
+    auto currentFrame = frameIndex;
+    VkDescriptorSet frameUBO = frameUBOOverride != VK_NULL_HANDLE
+      ? frameUBOOverride : m_FrameUniformBuffer.GetDescriptorSet(currentFrame);
     auto& meshManager = frame.assets.Meshes();
 
     m_DepthDrawCommands.clear();
@@ -226,7 +230,7 @@ namespace YAEngine
       {
         currentPipeline = &GetDepthPipeline(dc);
         currentPipeline->Bind(cmd);
-        currentPipeline->BindDescriptorSets(cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        currentPipeline->BindDescriptorSets(cmd, {frameUBO}, 0);
         lastSortKey = sortKey;
       }
 
@@ -474,8 +478,8 @@ namespace YAEngine
     DebugMarker::EndLabel(cmd);
   }
 
-  void Render::DrawQuad()
+  void Render::DrawQuad(VkCommandBuffer cmd)
   {
-    vkCmdDraw(m_Backend.GetCurrentCommandBuffer(), 3, 1, 0, 0);
+    vkCmdDraw(cmd, 3, 1, 0, 0);
   }
 }

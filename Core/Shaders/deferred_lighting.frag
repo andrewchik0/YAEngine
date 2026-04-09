@@ -28,15 +28,74 @@ layout(std430, set = 2, binding = 1) readonly buffer TileLightSSBO
 // Shadows (set 2, bindings 2-3)
 #include "shadow.glsl"
 
-// IBL (set 3)
-layout(set = 3, binding = 0) uniform samplerCube irradianceCubemap;
-layout(set = 3, binding = 1) uniform samplerCube prefilterTexture;
+// IBL (set 3) - cubemap arrays for probe system
+layout(set = 3, binding = 0) uniform samplerCubeArray irradianceArray;
+layout(set = 3, binding = 1) uniform samplerCubeArray prefilterArray;
 layout(set = 3, binding = 2) uniform sampler2D brdfTexture;
 layout(set = 3, binding = 3) uniform samplerCube skyboxCubemap;
+
+// Light probes (set 3, binding 4)
+#include "../Shared/LightProbeData.h"
+layout(std430, set = 3, binding = 4) readonly buffer LightProbeSSBO
+{
+  LightProbeBuffer u_Probes;
+};
 
 const float DEPTH_EPSILON = 1.0;
 const int SHADING_PBR = 0;
 const int SHADING_UNLIT = 1;
+const float MAX_REFLECTION_LOD = 7.0; // log2(128) for probe prefilter
+
+float evaluateProbeWeight(vec3 worldPos, LightProbeInfo probe)
+{
+  vec3 probePos = probe.positionShape.xyz;
+  float shape = probe.positionShape.w;
+  vec3 extents = probe.extentsFade.xyz;
+  float fade = probe.extentsFade.w;
+
+  if (shape < 0.5) // sphere
+  {
+    float radius = extents.x;
+    float dist = length(worldPos - probePos);
+    if (dist > radius) return 0.0;
+    float innerRadius = max(0.0, radius - fade);
+    if (dist <= innerRadius) return 1.0;
+    return 1.0 - (dist - innerRadius) / fade;
+  }
+  else // box
+  {
+    vec3 localPos = abs(worldPos - probePos);
+    vec3 outerDist = localPos - extents;
+    if (outerDist.x > 0.0 || outerDist.y > 0.0 || outerDist.z > 0.0)
+      return 0.0;
+    vec3 innerExtents = max(vec3(0.0), extents - vec3(fade));
+    vec3 innerDist = localPos - innerExtents;
+    vec3 fadeFactors = vec3(1.0);
+    for (int i = 0; i < 3; i++)
+    {
+      if (innerDist[i] > 0.0 && fade > 0.0)
+        fadeFactors[i] = 1.0 - innerDist[i] / fade;
+    }
+    return fadeFactors.x * fadeFactors.y * fadeFactors.z;
+  }
+}
+
+vec3 sampleProbeIBL(vec3 normal, vec3 R, float roughness, float NdotV,
+  vec3 f0, vec3 albedo, float metallic, int arrayIndex, float ao)
+{
+  vec3 kD = 1.0 - fresnelSchlickRoughness(NdotV, f0, roughness);
+  kD *= (1.0 - metallic);
+
+  vec3 irradiance = texture(irradianceArray, vec4(normal, float(arrayIndex))).rgb;
+  vec3 diffuse = irradiance * albedo;
+
+  vec3 prefilteredColor = textureLod(prefilterArray, vec4(R, float(arrayIndex)), roughness * MAX_REFLECTION_LOD).rgb;
+  vec2 brdf = texture(brdfTexture, vec2(NdotV, clamp(roughness, 0.01, 0.99))).rg;
+  vec3 F = fresnelSchlickRoughness(NdotV, f0, roughness);
+  vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
+
+  return kD * diffuse * ao + specular * (1.0 - clamp(roughness, 0.0, 0.8));
+}
 
 void main()
 {
@@ -81,26 +140,74 @@ void main()
   if (u_Frame.ssaoEnabled == 0)
     ao = 1.0;
 
-  // PBR IBL lighting
+  // PBR IBL lighting with light probe support
   vec3 viewVec = normalize(u_Frame.cameraPosition - worldPos);
   float NdotV = clamp(abs(dot(normal, viewVec)), 0.01, 0.99);
   vec3 f0 = mix(vec3(0.04), albedo, metallic);
-
-  vec3 F = fresnelSchlickRoughness(NdotV, f0, roughness);
-
-  vec3 kD = 1.0 - F;
-  kD *= (1.0 - metallic);
-
-  vec3 irradiance = texture(irradianceCubemap, normal).rgb;
-  vec3 diffuse = irradiance * albedo;
-
   vec3 R = reflect(-viewVec, normal);
-  const float MAX_REFLECTION_LOD = 9.0;
-  vec3 prefilteredColor = textureLod(prefilterTexture, R, roughness * MAX_REFLECTION_LOD).rgb;
-  vec2 brdf = texture(brdfTexture, vec2(NdotV, clamp(roughness, 0.01, 0.99))).rg;
-  vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
-  vec3 ambient = kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
+  // Probe selection: find best and second-best probe
+  vec3 ambient;
+  if (u_Probes.probeCount > 0)
+  {
+    int bestIdx = -1;
+    float bestWeight = 0.0;
+    int bestPriority = -999999;
+    int secondIdx = -1;
+    float secondWeight = 0.0;
+    int secondPriority = -999999;
+
+    for (int i = 0; i < min(u_Probes.probeCount, MAX_LIGHT_PROBES); i++)
+    {
+      float w = evaluateProbeWeight(worldPos, u_Probes.probes[i]);
+      if (w <= 0.0) continue;
+
+      int pri = u_Probes.probes[i].priority;
+      if (pri > bestPriority || (pri == bestPriority && w > bestWeight))
+      {
+        secondIdx = bestIdx;
+        secondWeight = bestWeight;
+        secondPriority = bestPriority;
+        bestIdx = i;
+        bestWeight = w;
+        bestPriority = pri;
+      }
+      else if (pri > secondPriority || (pri == secondPriority && w > secondWeight))
+      {
+        secondIdx = i;
+        secondWeight = w;
+        secondPriority = pri;
+      }
+    }
+
+    if (bestIdx >= 0)
+    {
+      vec3 primaryIBL = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic,
+        u_Probes.probes[bestIdx].arrayIndex, ao);
+
+      if (bestWeight >= 1.0)
+      {
+        ambient = primaryIBL;
+      }
+      else
+      {
+        // Blend with secondary probe or skybox fallback (index 0)
+        int fallbackIndex = (secondIdx >= 0) ? u_Probes.probes[secondIdx].arrayIndex : 0;
+        vec3 fallbackIBL = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, fallbackIndex, ao);
+        ambient = mix(fallbackIBL, primaryIBL, bestWeight);
+      }
+    }
+    else
+    {
+      // No probe covers this pixel - use skybox (index 0)
+      ambient = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, 0, ao);
+    }
+  }
+  else
+  {
+    // No probes at all - use skybox (index 0)
+    ambient = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, 0, ao);
+  }
 
   // Analytical lights - tile-culled
   vec3 Lo = vec3(0.0);
@@ -176,7 +283,7 @@ void main()
     Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
   }
 
-  vec3 resultColor = max(ambient * ao + Lo, vec3(0.0));
+  vec3 resultColor = max(ambient + Lo, vec3(0.0));
 
   outColor = vec4(resultColor, 1.0);
 }

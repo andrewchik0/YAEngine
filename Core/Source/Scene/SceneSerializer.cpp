@@ -5,7 +5,9 @@
 #include "ComponentRegistry.h"
 #include "YamlUtils.h"
 #include "Assets/AssetManager.h"
+#include "Assets/CubeMapFile.h"
 #include "Render/Render.h"
+#include "Render/LightProbeAtlas.h"
 #include "Utils/Log.h"
 
 #include <fstream>
@@ -279,6 +281,53 @@ namespace YAEngine
         scene.SetParent(entity, it->second);
       else
         YA_LOG_WARN("Scene", "Parent '%s' not found", parentName.c_str());
+    }
+
+    // Pass 4: Load baked light probe data from .yacm files
+    {
+      auto& ctx = render.GetContext();
+      uint32_t nextSlot = 1;
+      auto probeView = scene.GetView<LightProbeComponent>();
+      for (auto entity : probeView)
+      {
+        auto& lp = scene.GetComponent<LightProbeComponent>(entity);
+        if (lp.bakedIrradiancePath.empty() || lp.bakedPrefilterPath.empty())
+          continue;
+
+        std::string irrAbsPath = assets.ResolvePath(lp.bakedIrradiancePath);
+        std::string pfAbsPath = assets.ResolvePath(lp.bakedPrefilterPath);
+
+        CubeMapFileData irrData, pfData;
+        if (!CubeMapFile::Load(irrAbsPath, irrData))
+        {
+          YA_LOG_WARN("Scene", "Failed to load probe irradiance: %s", irrAbsPath.c_str());
+          continue;
+        }
+        if (!CubeMapFile::Load(pfAbsPath, pfData))
+        {
+          YA_LOG_WARN("Scene", "Failed to load probe prefilter: %s", pfAbsPath.c_str());
+          continue;
+        }
+
+        uint32_t slot = nextSlot++;
+        if (slot >= render.GetProbeAtlas().GetMaxSlots())
+        {
+          YA_LOG_WARN("Scene", "No atlas slots left for probe '%s'",
+            scene.GetName(entity).c_str());
+          break;
+        }
+
+        render.GetProbeAtlas().UploadSlotFromData(ctx, slot,
+          irrData.pixels.data(), irrData.width,
+          pfData.pixels.data(), pfData.width, pfData.mipLevels,
+          pfData.bytesPerPixel);
+
+        lp.atlasSlot = slot;
+        lp.baked = true;
+
+        YA_LOG_INFO("Scene", "Loaded probe '%s' -> atlas slot %u",
+          scene.GetName(entity).c_str(), slot);
+      }
     }
 
     YA_LOG_INFO("Scene", "Scene loaded: %s (%zu entities)", path.c_str(), nameMap.size());

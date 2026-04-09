@@ -12,7 +12,7 @@ vec2 SampleSphericalMap(vec3 v)
 {
   vec2 uv;
   uv.x = atan(v.z, v.x);
-  uv.y = asin(clamp(v.y, -1.0, 1.0));
+  uv.y = asin(clamp(-v.y, -1.0, 1.0));
   uv *= invAtan;
   uv += 0.5;
   return uv;

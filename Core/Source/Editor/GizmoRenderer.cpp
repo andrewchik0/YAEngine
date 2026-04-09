@@ -92,6 +92,7 @@ namespace YAEngine
 
     // Wire meshes
     m_SphereMesh = UploadTopology(ctx, Topology::WireSphere());
+    m_BoxMesh = UploadTopology(ctx, Topology::WireBox());
     m_ConeMesh = UploadTopology(ctx, Topology::WireCone());
     m_ArrowMesh = UploadTopology(ctx, Topology::Arrow());
 
@@ -114,6 +115,21 @@ namespace YAEngine
       .sets = std::vector({ frameLayout })
     };
     m_WirePipeline = psoCache.Register(ctx.device, renderPass, wireInfo, ctx.pipelineCache);
+
+    // Wire depth-tested pipeline (LINE_LIST, depth test on, depth write off)
+    PipelineCreateInfo wireDepthInfo = {
+      .fragmentShaderFile = "gizmo.frag",
+      .vertexShaderFile = "gizmo.vert",
+      .pushConstantSize = uint32_t(sizeof(GizmoPushConstants)),
+      .depthTesting = true,
+      .depthWrite = false,
+      .blending = true,
+      .doubleSided = true,
+      .topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+      .vertexInputFormat = "f3",
+      .sets = std::vector({ frameLayout })
+    };
+    m_WireDepthPipeline = psoCache.Register(ctx.device, renderPass, wireDepthInfo, ctx.pipelineCache);
 
     // Solid pipeline (TRIANGLE_LIST)
     PipelineCreateInfo solidInfo = {
@@ -168,6 +184,8 @@ namespace YAEngine
   {
     m_SphereMesh.vertexBuffer.Destroy(ctx);
     m_SphereMesh.indexBuffer.Destroy(ctx);
+    m_BoxMesh.vertexBuffer.Destroy(ctx);
+    m_BoxMesh.indexBuffer.Destroy(ctx);
     m_ConeMesh.vertexBuffer.Destroy(ctx);
     m_ConeMesh.indexBuffer.Destroy(ctx);
     m_ArrowMesh.vertexBuffer.Destroy(ctx);
@@ -199,6 +217,27 @@ namespace YAEngine
     glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
                          * glm::scale(glm::mat4(1.0f), glm::vec3(radius));
     m_Requests.push_back({ GizmoShape::Sphere, GizmoRenderMode::Wire, transform, color });
+  }
+
+  void GizmoRenderer::DrawWireBox(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color)
+  {
+    glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
+                         * glm::scale(glm::mat4(1.0f), extents);
+    m_Requests.push_back({ GizmoShape::Box, GizmoRenderMode::Wire, transform, color });
+  }
+
+  void GizmoRenderer::DrawWireSphereDepthTested(const glm::vec3& center, float radius, const glm::vec4& color)
+  {
+    glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
+                         * glm::scale(glm::mat4(1.0f), glm::vec3(radius));
+    m_Requests.push_back({ GizmoShape::Sphere, GizmoRenderMode::WireDepthTested, transform, color });
+  }
+
+  void GizmoRenderer::DrawWireBoxDepthTested(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color)
+  {
+    glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
+                         * glm::scale(glm::mat4(1.0f), extents);
+    m_Requests.push_back({ GizmoShape::Box, GizmoRenderMode::WireDepthTested, transform, color });
   }
 
   void GizmoRenderer::DrawWireCone(const glm::vec3& origin, const glm::vec3& direction, float height, float angle, const glm::vec4& color)
@@ -391,7 +430,45 @@ namespace YAEngine
     }
   }
 
-  void GizmoRenderer::Flush(VkCommandBuffer cmd, VkDescriptorSet frameDescriptor)
+  void GizmoRenderer::FlushDepthTested(VkCommandBuffer cmd, VkDescriptorSet frameDescriptor)
+  {
+    bool bound = false;
+    for (auto& req : m_Requests)
+    {
+      if (req.mode != GizmoRenderMode::WireDepthTested) continue;
+
+      if (!bound)
+      {
+        auto& pipeline = m_PSOCache->Get(m_WireDepthPipeline);
+        pipeline.Bind(cmd);
+        vkCmdSetLineWidth(cmd, 2.0f);
+        pipeline.BindDescriptorSets(cmd, { frameDescriptor }, 0);
+        bound = true;
+      }
+
+      GizmoMesh* mesh = nullptr;
+      switch (req.shape)
+      {
+        case GizmoShape::Sphere: mesh = &m_SphereMesh; break;
+        case GizmoShape::Box:    mesh = &m_BoxMesh; break;
+        case GizmoShape::Cone:   mesh = &m_ConeMesh; break;
+        case GizmoShape::Arrow:  mesh = &m_ArrowMesh; break;
+        default: continue;
+      }
+
+      auto& pipeline = m_PSOCache->Get(m_WireDepthPipeline);
+      GizmoPushConstants pc { req.transform, req.color };
+      pipeline.PushConstants(cmd, &pc);
+
+      VkBuffer vb = mesh->vertexBuffer.Get();
+      VkDeviceSize offset = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &offset);
+      vkCmdBindIndexBuffer(cmd, mesh->indexBuffer.Get(), 0, VK_INDEX_TYPE_UINT32);
+      vkCmdDrawIndexed(cmd, mesh->indexCount, 1, 0, 0, 0);
+    }
+  }
+
+  void GizmoRenderer::FlushOverlay(VkCommandBuffer cmd, VkDescriptorSet frameDescriptor)
   {
     // Phase 1: Solid requests
     bool solidBound = false;
@@ -427,7 +504,7 @@ namespace YAEngine
       vkCmdDrawIndexed(cmd, mesh->indexCount, 1, 0, 0, 0);
     }
 
-    // Phase 2: Wire requests
+    // Phase 2: Wire requests (overlay, no depth test)
     bool wireBound = false;
     for (auto& req : m_Requests)
     {
@@ -446,6 +523,7 @@ namespace YAEngine
       switch (req.shape)
       {
         case GizmoShape::Sphere: mesh = &m_SphereMesh; break;
+        case GizmoShape::Box:    mesh = &m_BoxMesh; break;
         case GizmoShape::Cone:   mesh = &m_ConeMesh; break;
         case GizmoShape::Arrow:  mesh = &m_ArrowMesh; break;
         default: continue;

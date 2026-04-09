@@ -284,7 +284,7 @@ namespace YAEngine
     VkRenderPass ssaoBlurVRP = m_Graph.GetPassRenderPass(m_SSAOBlurVPassIndex);
     m_SSAOBlurVPipeline = m_PSOCache.Register(ctx.device, ssaoBlurVRP, ssaoBlurInfo, pipelineCache);
 
-    // SSR descriptor sets and pipeline (6 bindings: litColor, depth, gbuffer1, gbuffer0, ssao, hiZ)
+    // SSR descriptor sets and pipeline (5 bindings: litColor, depth, gbuffer1, gbuffer0, hiZ)
     VkRenderPass ssrRP = m_Graph.GetPassRenderPass(m_SSRPassIndex);
 
     m_SSRPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
@@ -299,7 +299,6 @@ namespace YAEngine
             { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-            { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
@@ -337,7 +336,7 @@ namespace YAEngine
       m_DeferredLightingDescriptorSets[i].Init(ctx, dlDesc);
     }
 
-    // IBL descriptor set (irradiance, prefilter, BRDF LUT, skybox cubemap)
+    // IBL descriptor set (irradiance array, prefilter array, BRDF LUT, skybox cubemap, probe SSBO)
     SetDescription iblDesc = {
       .set = 3,
       .bindings = {
@@ -346,14 +345,31 @@ namespace YAEngine
           { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
-    m_IBLDescriptorSet.Init(ctx, iblDesc);
-    m_IBLDescriptorSet.WriteCombinedImageSampler(0, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
-    m_IBLDescriptorSet.WriteCombinedImageSampler(1, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
-    m_IBLDescriptorSet.WriteCombinedImageSampler(2, m_NoneTexture.GetView(), m_NoneTexture.GetSampler());
-    m_IBLDescriptorSet.WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+    m_IBLDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    VkDescriptorSetLayout iblLayout = VK_NULL_HANDLE;
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      if (i == 0)
+      {
+        m_IBLDescriptorSets[i].Init(ctx, iblDesc);
+        iblLayout = m_IBLDescriptorSets[i].GetLayout();
+      }
+      else
+      {
+        m_IBLDescriptorSets[i].Init(ctx, iblLayout);
+      }
+      m_IBLDescriptorSets[i].WriteCombinedImageSampler(0,
+        m_ProbeAtlas.GetIrradianceView(), m_ProbeAtlas.GetIrradianceSampler());
+      m_IBLDescriptorSets[i].WriteCombinedImageSampler(1,
+        m_ProbeAtlas.GetPrefilterView(), m_ProbeAtlas.GetPrefilterSampler());
+      m_IBLDescriptorSets[i].WriteCombinedImageSampler(2, m_NoneTexture.GetView(), m_NoneTexture.GetSampler());
+      m_IBLDescriptorSets[i].WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+      m_IBLDescriptorSets[i].WriteStorageBuffer(4, m_ProbeBuffer.GetBuffer(uint32_t(i)), sizeof(LightProbeBuffer));
+    }
 
     // Deferred lighting set 2: lights SSBO (binding 0) + tile light indices SSBO (binding 1)
     m_DeferredLightingLightDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
@@ -392,7 +408,7 @@ namespace YAEngine
         m_FrameUniformBuffer.GetLayout(),
         m_DeferredLightingDescriptorSets[0].GetLayout(),
         m_DeferredLightingLightDescriptorSets[0].GetLayout(),
-        m_IBLDescriptorSet.GetLayout(),
+        m_IBLDescriptorSets[0].GetLayout(),
       })
     };
     m_DeferredLightingPipeline = m_PSOCache.Register(ctx.device, deferredRP, deferredInfo, pipelineCache);

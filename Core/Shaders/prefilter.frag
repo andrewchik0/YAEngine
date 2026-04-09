@@ -30,7 +30,7 @@ void main()
     float NdotL = max(dot(N, L), 0.0);
     if (NdotL > 0.0)
     {
-      prefilteredColor += texture(uCubemap, vec3(L.x, -L.y, L.z)).rgb * NdotL;
+      prefilteredColor += texture(uCubemap, L).rgb * NdotL;
       totalWeight += NdotL;
     }
   }

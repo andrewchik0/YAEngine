@@ -72,6 +72,29 @@ namespace YAEngine
 
     snapshot.visibleCount = uint32_t(snapshot.objects.size());
 
+    // Extract light probes
+    snapshot.probeBuffer.probeCount = 0;
+    auto probeView = scene.GetView<LightProbeComponent, WorldTransform>();
+    for (auto entity : probeView)
+    {
+      if (snapshot.probeBuffer.probeCount >= MAX_LIGHT_PROBES) break;
+
+      auto& probe = probeView.get<LightProbeComponent>(entity);
+      if (!probe.baked || probe.atlasSlot == 0) continue;
+
+      auto& wt = probeView.get<WorldTransform>(entity);
+      glm::vec3 position = glm::vec3(wt.world[3]);
+
+      auto& info = snapshot.probeBuffer.probes[snapshot.probeBuffer.probeCount];
+      info.positionShape = glm::vec4(position, probe.shape == ProbeShape::Box ? 1.0f : 0.0f);
+      info.extentsFade = glm::vec4(probe.extents, probe.fadeDistance);
+      info.arrayIndex = probe.atlasSlot;
+      info.priority = probe.priority;
+      info._pad0 = 0;
+      info._pad1 = 0;
+      snapshot.probeBuffer.probeCount++;
+    }
+
     // Extract lights
     lights.pointLightCount = 0;
     lights.spotLightCount = 0;

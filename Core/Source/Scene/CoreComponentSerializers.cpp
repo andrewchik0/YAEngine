@@ -239,6 +239,43 @@ namespace YAEngine
       }
     );
 
+    // LightProbeComponent
+    registry.Register<LightProbeComponent>("lightProbe",
+      [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
+        auto& lp = reg.get<LightProbeComponent>(e);
+        YAML::Node n;
+        n["shape"] = (lp.shape == ProbeShape::Box) ? "box" : "sphere";
+        n["extents"] = SerializeVec3(lp.extents);
+        n["fadeDistance"] = lp.fadeDistance;
+        n["priority"] = lp.priority;
+        n["resolution"] = lp.resolution;
+        if (lp.baked && !lp.bakedIrradiancePath.empty())
+        {
+          n["bakedIrradiance"] = lp.bakedIrradiancePath;
+          n["bakedPrefilter"] = lp.bakedPrefilterPath;
+        }
+        return n;
+      },
+      [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
+        LightProbeComponent lp;
+        if (n["shape"])
+        {
+          auto s = n["shape"].as<std::string>();
+          lp.shape = (s == "box") ? ProbeShape::Box : ProbeShape::Sphere;
+        }
+        if (n["extents"]) lp.extents = DeserializeVec3(n["extents"]);
+        if (n["fadeDistance"]) lp.fadeDistance = n["fadeDistance"].as<float>();
+        if (n["priority"]) lp.priority = n["priority"].as<int>();
+        if (n["resolution"]) lp.resolution = n["resolution"].as<uint32_t>();
+        if (n["bakedIrradiance"])
+          lp.bakedIrradiancePath = n["bakedIrradiance"].as<std::string>();
+        if (n["bakedPrefilter"])
+          lp.bakedPrefilterPath = n["bakedPrefilter"].as<std::string>();
+        lp.baked = false;
+        reg.emplace_or_replace<LightProbeComponent>(e, lp);
+      }
+    );
+
     // HiddenTag
     registry.Register<HiddenTag>("hidden",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {

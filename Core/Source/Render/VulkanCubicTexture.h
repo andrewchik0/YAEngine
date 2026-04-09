@@ -1,6 +1,7 @@
 #pragma once
 
 #include "VulkanTexture.h"
+#include "VulkanImage.h"
 
 namespace YAEngine
 {
@@ -67,13 +68,13 @@ namespace YAEngine
     VkImage GetImage() { return m_CubemapImage; }
     VkSampler GetSampler() { return m_CubeMapSampler; }
 
-    VkImageView GetIrradianceView() { return m_IrradianceImageView; }
-    VkImage GetIrradianceImage() { return m_IrradianceImage; }
-    VkSampler GetIrradianceSampler() { return m_IrradianceSampler; }
+    VkImageView GetIrradianceView() { return m_Irradiance.GetView(); }
+    VkImage GetIrradianceImage() { return m_Irradiance.GetImage(); }
+    VkSampler GetIrradianceSampler() { return m_Irradiance.GetSampler(); }
 
-    VkImageView GetPrefilterView() { return m_PrefilterImageView; }
-    VkImage GetPrefilterImage() { return m_PrefilterImage; }
-    VkSampler GetPrefilterSampler() { return m_PrefilterSampler; }
+    VkImageView GetPrefilterView() { return m_Prefilter.GetView(); }
+    VkImage GetPrefilterImage() { return m_Prefilter.GetImage(); }
+    VkSampler GetPrefilterSampler() { return m_Prefilter.GetSampler(); }
 
     static void DrawCube(VkCommandBuffer cmd, const CubicTextureResources& res);
 
@@ -88,21 +89,7 @@ namespace YAEngine
     VkImageView m_FaceViews[6] {};
     VkFramebuffer m_FrameBuffers[6] {};
 
-    VkImage m_IrradianceImage {};
-    VkImageView m_IrradianceImageView {};
-    VmaAllocation m_IrradianceImageAllocation {};
-    VkSampler m_IrradianceSampler {};
-    VkImageView m_IrradianceFaceViews[6] {};
-    VkFramebuffer m_IrradianceFrameBuffers[6] {};
-
-    VkImage m_PrefilterImage {};
-    VkImageView m_PrefilterImageView {};
-    VmaAllocation m_PrefilterImageAllocation {};
-    VkSampler m_PrefilterSampler {};
-    VkImageView m_PrefilterFaceViews[6 * CUBEMAP_MAX_MIP_LEVELS] {};
-    VkFramebuffer m_PrefilterFrameBuffers[6 * CUBEMAP_MAX_MIP_LEVELS] {};
-
-    void ComputeIrradiance(const RenderContext& ctx, CubicTextureResources& res);
-    void ComputePrefilter(const RenderContext& ctx, CubicTextureResources& res);
+    VulkanImage m_Irradiance;
+    VulkanImage m_Prefilter;
   };
 }

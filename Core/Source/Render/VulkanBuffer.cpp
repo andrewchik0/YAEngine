@@ -96,6 +96,34 @@ namespace YAEngine
     return result;
   }
 
+  VulkanBuffer VulkanBuffer::CreateReadback(
+    const RenderContext& ctx,
+    VkDeviceSize size)
+  {
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+    bufferInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_TO_CPU;
+    allocInfo.flags = VMA_ALLOCATION_CREATE_MAPPED_BIT;
+    allocInfo.requiredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT;
+
+    VulkanBuffer result;
+    result.m_Size = size;
+
+    if (vmaCreateBuffer(ctx.allocator, &bufferInfo, &allocInfo, &result.m_Buffer, &result.m_Allocation, nullptr) != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to create readback buffer");
+      throw std::runtime_error("Failed to create readback buffer");
+    }
+
+    vmaMapMemory(ctx.allocator, result.m_Allocation, &result.m_MappedData);
+    return result;
+  }
+
   void VulkanBuffer::Destroy(const RenderContext& ctx)
   {
     if (m_Allocation)

@@ -4,6 +4,22 @@
 
 namespace YAEngine
 {
+  TopologyData Topology::WireBox()
+  {
+    // Unit box from -1 to +1, LINE_LIST topology (12 edges = 24 indices)
+    TopologyData data;
+    data.positions = {
+      {-1, -1, -1}, {+1, -1, -1}, {+1, +1, -1}, {-1, +1, -1},
+      {-1, -1, +1}, {+1, -1, +1}, {+1, +1, +1}, {-1, +1, +1},
+    };
+    data.indices = {
+      0,1, 1,2, 2,3, 3,0,
+      4,5, 5,6, 6,7, 7,4,
+      0,4, 1,5, 2,6, 3,7,
+    };
+    return data;
+  }
+
   TopologyData Topology::WireSphere(uint32_t segments)
   {
     TopologyData data;

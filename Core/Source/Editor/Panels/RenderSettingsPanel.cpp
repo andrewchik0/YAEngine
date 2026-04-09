@@ -67,6 +67,7 @@ namespace YAEngine
     if (ImGui::CollapsingHeader(ICON_FA_WRENCH " Debug", ImGuiTreeNodeFlags_DefaultOpen))
     {
       ImGui::Checkbox("Gizmos", &context.render->GetGizmosEnabled());
+      ImGui::Checkbox("Probe Volumes", &context.render->GetProbeVolumesVisible());
 
       if (ImGui::Button(ICON_FA_ROTATE " Recompile Shaders"))
         context.render->GetShaderHotReload().RecompileAll();

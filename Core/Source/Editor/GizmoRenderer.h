@@ -17,6 +17,7 @@ namespace YAEngine
   enum class GizmoShape : uint8_t
   {
     Sphere,
+    Box,
     Cone,
     Arrow,
     SolidArrow,
@@ -27,6 +28,7 @@ namespace YAEngine
   enum class GizmoRenderMode : uint8_t
   {
     Wire,
+    WireDepthTested,
     Solid
   };
 
@@ -40,6 +42,9 @@ namespace YAEngine
     void Destroy(const RenderContext& ctx);
 
     void DrawWireSphere(const glm::vec3& center, float radius, const glm::vec4& color);
+    void DrawWireBox(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color);
+    void DrawWireSphereDepthTested(const glm::vec3& center, float radius, const glm::vec4& color);
+    void DrawWireBoxDepthTested(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color);
     void DrawWireCone(const glm::vec3& origin, const glm::vec3& direction, float height, float angle, const glm::vec4& color);
     void DrawArrow(const glm::vec3& origin, const glm::vec3& direction, float length, const glm::vec4& color);
 
@@ -60,7 +65,8 @@ namespace YAEngine
     void SetDraggedAxis(GizmoAxis axis) { m_DraggedAxis = axis; }
 
     void Clear();
-    void Flush(VkCommandBuffer cmd, VkDescriptorSet frameDescriptor);
+    void FlushDepthTested(VkCommandBuffer cmd, VkDescriptorSet frameDescriptor);
+    void FlushOverlay(VkCommandBuffer cmd, VkDescriptorSet frameDescriptor);
 
   private:
     struct GizmoDrawRequest
@@ -100,6 +106,7 @@ namespace YAEngine
 
     // Wire meshes
     GizmoMesh m_SphereMesh;
+    GizmoMesh m_BoxMesh;
     GizmoMesh m_ConeMesh;
     GizmoMesh m_ArrowMesh;
 
@@ -109,6 +116,7 @@ namespace YAEngine
     GizmoMesh m_SolidRingMesh;
 
     PipelineHandle m_WirePipeline;
+    PipelineHandle m_WireDepthPipeline;
     PipelineHandle m_SolidPipeline;
     PipelineHandle m_SpritePipeline;
     PipelineCache* m_PSOCache = nullptr;

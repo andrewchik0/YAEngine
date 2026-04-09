@@ -42,6 +42,14 @@ set(SOURCE_FILES
   Source/Render/FrameUniformBuffer.cpp
   Source/Render/LightStorageBuffer.h
   Source/Render/LightStorageBuffer.cpp
+  Source/Render/LightProbeStorageBuffer.h
+  Source/Render/LightProbeStorageBuffer.cpp
+  Source/Render/LightProbeAtlas.h
+  Source/Render/LightProbeAtlas.cpp
+  Source/Render/LightProbeBaker.h
+  Source/Render/LightProbeBaker.cpp
+  Source/Render/OffscreenRenderer.h
+  Source/Render/OffscreenRenderer.cpp
   Source/Render/TileLightBuffer.h
   Source/Render/TileLightBuffer.cpp
   Source/Render/VulkanDescriptorSet.cpp
@@ -97,8 +105,12 @@ set(SOURCE_FILES
   Vendor/ImGui/imgui_impl_vulkan.cpp
   Source/Render/VulkanCubicTexture.cpp
   Source/Render/VulkanCubicTexture.h
+  Source/Render/CubemapConvolution.h
+  Source/Render/CubemapConvolution.cpp
   Source/Assets/CubeMapManager.cpp
   Source/Assets/CubeMapManager.h
+  Source/Assets/CubeMapFile.cpp
+  Source/Assets/CubeMapFile.h
   Source/Render/SkyBox.cpp
   Source/Render/SkyBox.h
   Source/Utils/Utils.h

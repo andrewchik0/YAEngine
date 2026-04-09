@@ -5,6 +5,8 @@
 
 #include "Assets/AssetManager.h"
 #include "Assets/CubeMapManager.h"
+#include "Scene/Scene.h"
+#include "Scene/SceneSnapshot.h"
 #include "DebugMarker.h"
 #include "ImageBarrier.h"
 #include "Utils/Log.h"
@@ -112,6 +114,8 @@ namespace YAEngine
     }
 
     m_ShadowManager.Init(ctx);
+    m_ProbeAtlas.Init(ctx);
+    m_ProbeBuffer.Init(ctx);
 
     SetupRenderGraph(width, height);
     CreateTAAFramebuffers();
@@ -125,6 +129,7 @@ namespace YAEngine
     m_Backend.InitImGui(window, m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
 
 #ifdef YA_EDITOR
+    m_ProbeBaker.Init(*this, 128);
     CreateSceneImGuiDescriptor();
     m_ViewportWidth = width;
     m_ViewportHeight = height;
@@ -150,11 +155,14 @@ namespace YAEngine
 
 #ifdef YA_EDITOR
     m_ShaderHotReload.Destroy();
+    m_ProbeBaker.Destroy();
     DestroySceneImGuiDescriptor();
     m_GizmoRenderer.Destroy(ctx);
 #endif
 
     m_ShadowManager.Destroy(ctx);
+    m_ProbeAtlas.Destroy(ctx);
+    m_ProbeBuffer.Destroy(ctx);
     m_CubicResources.Destroy(ctx);
     m_NoneCubeMap.Destroy(ctx);
     m_NoneTexture.Destroy(ctx);
@@ -197,7 +205,8 @@ namespace YAEngine
       set.Destroy();
     for (auto& set : m_ExposureReadDescriptorSets)
       set.Destroy();
-    m_IBLDescriptorSet.Destroy();
+    for (auto& set : m_IBLDescriptorSets)
+      set.Destroy();
 
     m_SSAONoise.Destroy(ctx);
     m_SSAOKernelUBO.Destroy(ctx);
@@ -286,6 +295,13 @@ namespace YAEngine
     }
 
     m_ShaderHotReload.Update(frame.time);
+
+    if (m_PendingInvalidateSlot > 0)
+    {
+      vkDeviceWaitIdle(m_Backend.GetContext().device);
+      m_ProbeAtlas.InvalidateSlotPreview(m_Backend.GetContext(), m_PendingInvalidateSlot);
+      m_PendingInvalidateSlot = 0;
+    }
 #endif
 
     auto imageIndex = m_Backend.BeginFrame();
@@ -352,21 +368,26 @@ namespace YAEngine
     m_FrameUniformBuffer.SetUp(currentFrame);
     m_LightBuffer.SetUp(currentFrame, frame.lights);
 
-    // Update IBL descriptor set when skybox changes
+    // Update IBL when skybox changes: upload to atlas slot 0 + update display cubemap
     auto skybox = frame.snapshot.skybox;
     if (skybox && skybox != m_BoundSkybox)
     {
       auto& cubeMap = frame.assets.CubeMaps().GetVulkanCubicTexture(skybox);
-      m_IBLDescriptorSet.WriteCombinedImageSampler(0,
-        cubeMap.GetIrradianceView(), cubeMap.GetIrradianceSampler());
-      m_IBLDescriptorSet.WriteCombinedImageSampler(1,
-        cubeMap.GetPrefilterView(), cubeMap.GetPrefilterSampler());
-      m_IBLDescriptorSet.WriteCombinedImageSampler(2,
-        frame.cubicResources.brdfLut.GetView(), frame.cubicResources.brdfLut.GetSampler());
-      m_IBLDescriptorSet.WriteCombinedImageSampler(3,
-        cubeMap.GetView(), cubeMap.GetSampler());
+      m_ProbeAtlas.UploadSkybox(m_Backend.GetContext(), cubeMap);
+      for (auto& set : m_IBLDescriptorSets)
+      {
+        set.WriteCombinedImageSampler(2,
+          frame.cubicResources.brdfLut.GetView(), frame.cubicResources.brdfLut.GetSampler());
+        set.WriteCombinedImageSampler(3,
+          cubeMap.GetView(), cubeMap.GetSampler());
+      }
       m_BoundSkybox = skybox;
     }
+
+    // Upload probe SSBO
+    m_ProbeBuffer.SetUp(currentFrame, frame.snapshot.probeBuffer);
+    m_IBLDescriptorSets[currentFrame].WriteStorageBuffer(4,
+      m_ProbeBuffer.GetBuffer(currentFrame), sizeof(LightProbeBuffer));
 
 #ifdef YA_EDITOR
     m_GizmoRenderer.Clear();
@@ -400,6 +421,24 @@ namespace YAEngine
         m_GizmoRenderer.DrawArrow(dirLightPos, dirLightDir, 3.0f, glm::vec4(dirCol, 0.85f));
       }
 
+      // Light probe influence volumes
+      if (b_ProbeVolumesVisible)
+      {
+        for (int i = 0; i < frame.snapshot.probeBuffer.probeCount; i++)
+        {
+          auto& probe = frame.snapshot.probeBuffer.probes[i];
+          glm::vec3 pos(probe.positionShape);
+          float shape = probe.positionShape.w;
+          glm::vec3 extents(probe.extentsFade);
+          glm::vec4 col(0.2f, 0.7f, 0.9f, 0.5f);
+
+          if (shape < 0.5f)
+            m_GizmoRenderer.DrawWireSphereDepthTested(pos, extents.x, col);
+          else
+            m_GizmoRenderer.DrawWireBoxDepthTested(pos, extents, col);
+        }
+      }
+
       if (b_HasSelectedEntity)
       {
         glm::vec3 camPos = frame.snapshot.camera.position;
@@ -426,4 +465,101 @@ namespace YAEngine
     m_TAAIndex = (m_TAAIndex + 1) % 2;
     m_GlobalFrameIndex++;
   }
+
+#ifdef YA_EDITOR
+  void Render::BakeProbe(entt::entity entity, Scene& scene, AssetManager& assets)
+  {
+    if (!scene.HasComponent<LightProbeComponent>(entity))
+      return;
+
+    vkDeviceWaitIdle(m_Backend.GetContext().device);
+
+    auto& ctx = m_Backend.GetContext();
+    auto& lp = scene.GetComponent<LightProbeComponent>(entity);
+    auto& wt = scene.GetWorldTransform(entity);
+    glm::vec3 position = glm::vec3(wt.world[3]);
+    std::string entityName = scene.GetName(entity);
+
+    // Find next free atlas slot (1..MAX_LIGHT_PROBES, slot 0 = skybox)
+    uint32_t atlasSlot = lp.atlasSlot;
+    if (atlasSlot == 0)
+    {
+      std::set<uint32_t> usedSlots;
+      auto probeView = scene.GetView<LightProbeComponent>();
+      for (auto e : probeView)
+      {
+        auto& probe = probeView.get<LightProbeComponent>(e);
+        if (probe.baked && probe.atlasSlot > 0)
+          usedSlots.insert(probe.atlasSlot);
+      }
+
+      for (uint32_t s = 1; s <= MAX_LIGHT_PROBES; s++)
+      {
+        if (!usedSlots.contains(s))
+        {
+          atlasSlot = s;
+          break;
+        }
+      }
+
+      if (atlasSlot == 0)
+      {
+        YA_LOG_ERROR("Render", "No free atlas slots for probe bake");
+        return;
+      }
+    }
+
+    // Compute save paths
+    std::string basePath = assets.GetBasePath();
+    std::string probeDir = basePath + "/Assets/Probes";
+    std::filesystem::create_directories(probeDir);
+
+    std::string irrPath = probeDir + "/" + entityName + "_irr.yacm";
+    std::string pfPath = probeDir + "/" + entityName + "_pf.yacm";
+
+    // Build temporary scene snapshot + light buffer
+    SceneSnapshot snapshot;
+    LightBuffer lights {};
+    BuildSceneSnapshot(snapshot, lights, scene, assets.Meshes(), assets.Materials());
+
+    FrameContext frame {
+      .snapshot = snapshot,
+      .lights = lights,
+      .assets = assets,
+      .cubicResources = m_CubicResources,
+      .time = 0.0,
+      .windowWidth = lp.resolution,
+      .windowHeight = lp.resolution,
+    };
+
+    // Defer preview invalidation - can't destroy ImGui descriptor sets during
+    // the SwapchainPass because ImGui's draw list may still reference them
+    m_PendingInvalidateSlot = atlasSlot;
+
+    // Upload light data to LightStorageBuffer so OffscreenRenderer can use it
+    m_LightBuffer.SetUp(0, lights);
+
+    // Zero out probe SSBO so offscreen renderer uses skybox IBL only (no self-illumination)
+    LightProbeBuffer emptyProbes {};
+    emptyProbes.probeCount = 0;
+    m_ProbeBuffer.SetUp(0, emptyProbes);
+
+    // Upload shadow data (shadowsEnabled=0 since we don't render shadow maps for probes)
+    m_ShadowManager.SetEnabled(false);
+    m_ShadowManager.SetSpotShadowCount(0);
+    m_ShadowManager.SetPointShadowCount(0);
+    m_ShadowManager.SetUp(0);
+
+    m_ProbeBaker.Bake(m_CubicResources, frame, m_ProbeAtlas,
+      position, lp.resolution, atlasSlot, irrPath, pfPath);
+
+    // Update component
+    lp.baked = true;
+    lp.atlasSlot = atlasSlot;
+    lp.bakedIrradiancePath = assets.MakeRelative(irrPath);
+    lp.bakedPrefilterPath = assets.MakeRelative(pfPath);
+
+    YA_LOG_INFO("Render", "Probe '%s' baked -> slot %u", entityName.c_str(), atlasSlot);
+  }
+#endif
 }

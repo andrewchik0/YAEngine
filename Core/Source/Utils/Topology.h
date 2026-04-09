@@ -13,6 +13,7 @@ namespace YAEngine
   class Topology
   {
   public:
+    static TopologyData WireBox();
     static TopologyData WireSphere(uint32_t segments = 32);
     static TopologyData WireCone(uint32_t segments = 32);
     static TopologyData Arrow(uint32_t coneSegments = 16);

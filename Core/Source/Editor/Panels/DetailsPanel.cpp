@@ -7,6 +7,7 @@
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
 #include "Assets/AssetManager.h"
+#include "Render/Render.h"
 
 namespace YAEngine
 {
@@ -222,6 +223,127 @@ namespace YAEngine
     return false;
   }
 
+  static bool DrawLightProbe(EditorContext& context, LightProbeComponent& lp)
+  {
+    ImGui::PushID("LightProbe");
+    bool open = ImGui::CollapsingHeader(ICON_FA_GLOBE " Light Probe", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    if (ImGui::Button(ICON_FA_XMARK "##RemoveProbe", ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight())))
+    {
+      ImGui::PopStyleColor(3);
+      ImGui::PopID();
+      return true;
+    }
+    ImGui::PopStyleColor(3);
+
+    if (open)
+    {
+      const char* shapeNames[] = { "Sphere", "Box" };
+      int currentShape = static_cast<int>(lp.shape);
+      if (ImGui::Combo("Shape", &currentShape, shapeNames, IM_ARRAYSIZE(shapeNames)))
+        lp.shape = static_cast<ProbeShape>(currentShape);
+
+      if (lp.shape == ProbeShape::Sphere)
+      {
+        ImGui::DragFloat("Radius", &lp.extents.x, 0.1f, 0.1f, 1000.0f);
+        lp.extents.y = lp.extents.x;
+        lp.extents.z = lp.extents.x;
+      }
+      else
+      {
+        ImGui::DragFloat3("Extents", &lp.extents.x, 0.1f, 0.1f, 1000.0f);
+      }
+
+      ImGui::DragFloat("Fade Distance", &lp.fadeDistance, 0.1f, 0.0f, 100.0f);
+      ImGui::DragInt("Priority", &lp.priority, 1, -100, 100);
+
+      int res = static_cast<int>(lp.resolution);
+      const char* resOptions[] = { "64", "128", "256", "512" };
+      int resValues[] = { 64, 128, 256, 512 };
+      int resIdx = 1;
+      for (int i = 0; i < 4; i++)
+        if (resValues[i] == res) resIdx = i;
+
+      if (ImGui::Combo("Resolution", &resIdx, resOptions, IM_ARRAYSIZE(resOptions)))
+        lp.resolution = static_cast<uint32_t>(resValues[resIdx]);
+
+      if (lp.baked)
+      {
+        ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.3f, 1.0f), "Baked (slot %u)", lp.atlasSlot);
+        if (!lp.bakedIrradiancePath.empty())
+          ImGui::TextDisabled("%s", lp.bakedIrradiancePath.c_str());
+
+        static bool s_ProbePreviewOpen = false;
+        static uint32_t s_ProbePreviewSlot = 0;
+
+        if (ImGui::Button(ICON_FA_EYE " Preview"))
+        {
+          s_ProbePreviewOpen = true;
+          s_ProbePreviewSlot = lp.atlasSlot;
+        }
+
+        if (s_ProbePreviewOpen && s_ProbePreviewSlot == lp.atlasSlot)
+        {
+          ImGui::SetNextWindowSize(ImVec2(440, 380), ImGuiCond_FirstUseEver);
+          if (ImGui::Begin("Probe Preview", &s_ProbePreviewOpen))
+          {
+            auto& atlas = context.render->GetProbeAtlas();
+            auto& ctx = context.render->GetContext();
+            const char* faceLabels[] = { "+X", "-X", "+Y", "-Y", "+Z", "-Z" };
+            float imageSize = 128.0f;
+
+            ImGui::SeparatorText("Prefilter");
+            for (uint32_t row = 0; row < 2; row++)
+            {
+              for (uint32_t col = 0; col < 3; col++)
+              {
+                uint32_t face = row * 3 + col;
+                VkDescriptorSet ds = atlas.GetPrefilterFacePreview(ctx, lp.atlasSlot, face);
+                if (col > 0) ImGui::SameLine();
+                ImGui::BeginGroup();
+                ImGui::Image((ImTextureID)ds, ImVec2(imageSize, imageSize));
+                ImGui::TextDisabled("%s", faceLabels[face]);
+                ImGui::EndGroup();
+              }
+            }
+
+            ImGui::SeparatorText("Irradiance");
+            for (uint32_t row = 0; row < 2; row++)
+            {
+              for (uint32_t col = 0; col < 3; col++)
+              {
+                uint32_t face = row * 3 + col;
+                VkDescriptorSet ds = atlas.GetIrradianceFacePreview(ctx, lp.atlasSlot, face);
+                if (col > 0) ImGui::SameLine();
+                ImGui::BeginGroup();
+                ImGui::Image((ImTextureID)ds, ImVec2(imageSize, imageSize));
+                ImGui::TextDisabled("%s", faceLabels[face]);
+                ImGui::EndGroup();
+              }
+            }
+          }
+          ImGui::End();
+        }
+      }
+      else
+      {
+        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.3f, 1.0f), "Not baked");
+      }
+
+      if (ImGui::Button(ICON_FA_CIRCLE_PLAY " Bake", ImVec2(-1, 0)))
+      {
+        context.render->BakeProbe(context.selectedEntity, *context.scene, *context.assetManager);
+      }
+    }
+
+    ImGui::PopID();
+    return false;
+  }
+
   static void DrawCamera(CameraComponent& cc)
   {
     if (ImGui::CollapsingHeader(ICON_FA_VIDEO " Camera", ImGuiTreeNodeFlags_DefaultOpen))
@@ -274,6 +396,12 @@ namespace YAEngine
         scene.RemoveComponent<LightComponent>(entity);
     }
 
+    if (scene.HasComponent<LightProbeComponent>(entity))
+    {
+      if (DrawLightProbe(context, scene.GetComponent<LightProbeComponent>(entity)))
+        scene.RemoveComponent<LightProbeComponent>(entity);
+    }
+
     if (scene.HasComponent<CameraComponent>(entity))
       DrawCamera(scene.GetComponent<CameraComponent>(entity));
 
@@ -289,6 +417,12 @@ namespace YAEngine
       {
         if (ImGui::MenuItem(ICON_FA_LIGHTBULB " Light"))
           scene.AddComponent<LightComponent>(entity);
+      }
+
+      if (!scene.HasComponent<LightProbeComponent>(entity))
+      {
+        if (ImGui::MenuItem(ICON_FA_GLOBE " Light Probe"))
+          scene.AddComponent<LightProbeComponent>(entity);
       }
 
       ImGui::EndPopup();

@@ -85,7 +85,7 @@ namespace YAEngine
       .depthOnly = true,
       .execute = [this](const RGExecuteContext& ctx) {
         auto* frame = static_cast<FrameContext*>(ctx.userData);
-        DrawMeshesDepthOnly(*frame);
+        DrawMeshesDepthOnly(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame);
       }
     });
 
@@ -99,7 +99,7 @@ namespace YAEngine
       .clearDepth = false,
       .execute = [this](const RGExecuteContext& ctx) {
         auto* frame = static_cast<FrameContext*>(ctx.userData);
-        DrawMeshes(*frame);
+        DrawMeshes(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame);
       }
     });
 
@@ -122,7 +122,7 @@ namespace YAEngine
           gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SSAOPassDescriptorSets[currentFrame].Get()}, 1);
-        DrawQuad();
+        DrawQuad(ctx.cmd);
       }
     });
 
@@ -147,7 +147,7 @@ namespace YAEngine
         pipeline.BindDescriptorSets(ctx.cmd, {m_SSAOBlurHPassDescriptorSets[currentFrame].Get()}, 1);
         int direction = 0;
         pipeline.PushConstants(ctx.cmd, &direction);
-        DrawQuad();
+        DrawQuad(ctx.cmd);
       }
     });
 
@@ -172,7 +172,7 @@ namespace YAEngine
         pipeline.BindDescriptorSets(ctx.cmd, {m_SSAOBlurVPassDescriptorSets[currentFrame].Get()}, 1);
         int direction = 1;
         pipeline.PushConstants(ctx.cmd, &direction);
-        DrawQuad();
+        DrawQuad(ctx.cmd);
       }
     });
 
@@ -243,8 +243,8 @@ namespace YAEngine
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_DeferredLightingDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_DeferredLightingLightDescriptorSets[currentFrame].Get()}, 2);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_IBLDescriptorSet.Get()}, 3);
-        DrawQuad();
+        pipeline.BindDescriptorSets(ctx.cmd, {m_IBLDescriptorSets[currentFrame].Get()}, 3);
+        DrawQuad(ctx.cmd);
       }
     });
 
@@ -304,7 +304,7 @@ namespace YAEngine
     // 7. SSR - Hi-Z accelerated screen-space reflections
     m_SSRPassIndex = m_Graph.AddPass({
       .name = "SSRPass",
-      .inputs = {m_LitColor, m_MainDepth, m_GBuffer1, m_GBuffer0, m_SSAOBlurred, m_HiZResource},
+      .inputs = {m_LitColor, m_MainDepth, m_GBuffer1, m_GBuffer0, m_HiZResource},
       .colorOutputs = {m_SSRColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
@@ -313,7 +313,6 @@ namespace YAEngine
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
-        auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
         auto& hiZ = m_Graph.GetResource(m_HiZResource);
 
         auto& pipeline = m_PSOCache.Get(m_SSRPipeline);
@@ -327,13 +326,11 @@ namespace YAEngine
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
           gbuffer0.GetView(), gbuffer0.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
-          ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(5,
           hiZ.GetView(), hiZ.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SSRPassDescriptorSets[currentFrame].Get()}, 1);
-        DrawQuad();
+        DrawQuad(ctx.cmd);
       }
     });
 
@@ -469,7 +466,7 @@ namespace YAEngine
           velocity.GetView(), velocity.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_TAADescriptorSets[currentFrame].Get()}, 1);
-        DrawQuad();
+        DrawQuad(ctx.cmd);
       }
     });
 
@@ -613,11 +610,25 @@ namespace YAEngine
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
         pipeline.BindDescriptorSets(ctx.cmd, {m_BloomReadDescriptorSet.Get()}, 3);
-        DrawQuad();
+        DrawQuad(ctx.cmd);
       }
     });
 
-    // Gizmo pass - editor gizmos rendered on top of scene (depth cleared so gizmos only test against each other)
+    // Gizmo scene pass - depth-tested gizmos (probe volumes) rendered against scene depth
+    m_GizmoScenePassIndex = m_Graph.AddPass({
+      .name = "GizmoScenePass",
+      .colorOutputs = {m_SceneColor},
+      .depthOutput = m_MainDepth,
+      .clearColor = false,
+      .clearDepth = false,
+      .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_GizmosEnabled) return;
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        m_GizmoRenderer.FlushDepthTested(ctx.cmd, m_FrameUniformBuffer.GetDescriptorSet(currentFrame));
+      }
+    });
+
+    // Gizmo overlay pass - manipulators rendered on top (depth cleared so gizmos only test against each other)
     m_GizmoPassIndex = m_Graph.AddPass({
       .name = "GizmoPass",
       .colorOutputs = {m_SceneColor},
@@ -627,7 +638,7 @@ namespace YAEngine
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_GizmosEnabled) return;
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
-        m_GizmoRenderer.Flush(ctx.cmd, m_FrameUniformBuffer.GetDescriptorSet(currentFrame));
+        m_GizmoRenderer.FlushOverlay(ctx.cmd, m_FrameUniformBuffer.GetDescriptorSet(currentFrame));
       }
     });
 
@@ -683,7 +694,7 @@ namespace YAEngine
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
         pipeline.BindDescriptorSets(ctx.cmd, {m_BloomReadDescriptorSet.Get()}, 3);
-        DrawQuad();
+        DrawQuad(ctx.cmd);
 
         ImGui_ImplVulkan_NewFrame();
         ImGui_ImplGlfw_NewFrame();

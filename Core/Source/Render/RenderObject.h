@@ -2,6 +2,7 @@
 
 #include "Pch.h"
 #include "Assets/Handle.h"
+#include "LightProbeData.h"
 
 namespace YAEngine
 {
@@ -60,5 +61,6 @@ namespace YAEngine
     DirectionalShadowData directionalShadow;
     std::vector<SpotShadowRequest> spotShadowRequests;
     std::vector<PointShadowRequest> pointShadowRequests;
+    LightProbeBuffer probeBuffer {};
   };
 }

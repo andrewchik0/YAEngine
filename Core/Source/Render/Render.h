@@ -12,10 +12,15 @@
 #include "LightStorageBuffer.h"
 #include "TileLightBuffer.h"
 #include "ShadowManager.h"
+#include "LightProbeAtlas.h"
+#include "LightProbeStorageBuffer.h"
 
 #ifdef YA_EDITOR
+#include <entt/fwd.hpp>
 #include "Editor/GizmoRenderer.h"
 #include "Editor/ShaderHotReload.h"
+#include "OffscreenRenderer.h"
+#include "LightProbeBaker.h"
 #endif
 
 namespace YAEngine
@@ -37,16 +42,25 @@ namespace YAEngine
     void ResetBoundState()
     {
       m_BoundSkybox = {};
-      m_IBLDescriptorSet.WriteCombinedImageSampler(0, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
-      m_IBLDescriptorSet.WriteCombinedImageSampler(1, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
-      m_IBLDescriptorSet.WriteCombinedImageSampler(2, m_NoneTexture.GetView(), m_NoneTexture.GetSampler());
-      m_IBLDescriptorSet.WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+      for (auto& set : m_IBLDescriptorSets)
+      {
+        set.WriteCombinedImageSampler(0,
+          m_ProbeAtlas.GetIrradianceView(), m_ProbeAtlas.GetIrradianceSampler());
+        set.WriteCombinedImageSampler(1,
+          m_ProbeAtlas.GetPrefilterView(), m_ProbeAtlas.GetPrefilterSampler());
+        set.WriteCombinedImageSampler(2, m_NoneTexture.GetView(), m_NoneTexture.GetSampler());
+        set.WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+      }
       m_InstanceBuffer.ResetAllocator();
     }
 
     void Draw(FrameContext& frame);
 
-    void DrawQuad();
+    void DrawQuad(VkCommandBuffer cmd);
+    void DrawMeshes(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame,
+      VkDescriptorSet frameUBOOverride = VK_NULL_HANDLE);
+    void DrawMeshesDepthOnly(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame,
+      VkDescriptorSet frameUBOOverride = VK_NULL_HANDLE);
 
     uint32_t AllocateInstanceData(uint32_t size)
     {
@@ -98,8 +112,6 @@ namespace YAEngine
 
     RenderStats m_Stats {};
 
-    void DrawMeshes(FrameContext& frame);
-    void DrawMeshesDepthOnly(FrameContext& frame);
     void RenderShadowMaps(FrameContext& frame);
     void SetUpCamera(FrameContext& frame);
     void InitPipelines();
@@ -134,6 +146,7 @@ namespace YAEngine
 #ifdef YA_EDITOR
     RGHandle m_SceneColor {};
     uint32_t m_SceneComposePassIndex {};
+    uint32_t m_GizmoScenePassIndex {};
     uint32_t m_GizmoPassIndex {};
     VkDescriptorSet m_SceneImGuiDescriptor {};
     uint32_t m_ViewportWidth = 0;
@@ -143,9 +156,11 @@ namespace YAEngine
     void ResizeViewport();
     GizmoRenderer m_GizmoRenderer;
     bool b_GizmosEnabled = true;
+    bool b_ProbeVolumesVisible = true;
     bool b_HasSelectedEntity = false;
     glm::vec3 m_SelectedEntityPosition { 0.0f };
     GizmoMode m_GizmoMode = GizmoMode::Translate;
+    uint32_t m_PendingInvalidateSlot = 0;
 #endif
 
     // Pass indices
@@ -181,6 +196,8 @@ namespace YAEngine
     LightStorageBuffer m_LightBuffer;
     TileLightBuffer m_TileLightBuffer;
     ShadowManager m_ShadowManager;
+    LightProbeAtlas m_ProbeAtlas;
+    LightProbeStorageBuffer m_ProbeBuffer;
 
     std::vector<VulkanDescriptorSet> m_SwapChainDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
@@ -191,7 +208,7 @@ namespace YAEngine
     std::vector<VulkanDescriptorSet> m_LightCullInputDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingLightDescriptorSets;
-    VulkanDescriptorSet m_IBLDescriptorSet;
+    std::vector<VulkanDescriptorSet> m_IBLDescriptorSets;
 
     VulkanDescriptorSet m_InstanceDescriptorSet;
     VulkanStorageBuffer m_InstanceBuffer;
@@ -282,17 +299,24 @@ namespace YAEngine
     uint32_t GetViewportWidth() const { return m_ViewportWidth; }
     uint32_t GetViewportHeight() const { return m_ViewportHeight; }
     bool& GetGizmosEnabled() { return b_GizmosEnabled; }
+    bool& GetProbeVolumesVisible() { return b_ProbeVolumesVisible; }
     GizmoRenderer& GetGizmoRenderer() { return m_GizmoRenderer; }
     void SetSelectedEntityPosition(const glm::vec3& pos) { b_HasSelectedEntity = true; m_SelectedEntityPosition = pos; }
     void ClearSelectedEntity() { b_HasSelectedEntity = false; }
     GizmoMode& GetGizmoMode() { return m_GizmoMode; }
     ShaderHotReload& GetShaderHotReload() { return m_ShaderHotReload; }
     void InitShaderHotReload(ThreadPool* threadPool);
+    void BakeProbe(entt::entity entity, class Scene& scene, class AssetManager& assets);
 #endif
+
+    LightProbeAtlas& GetProbeAtlas() { return m_ProbeAtlas; }
 
   private:
 #ifdef YA_EDITOR
     ShaderHotReload m_ShaderHotReload;
+    LightProbeBaker m_ProbeBaker;
 #endif
+
+    friend class OffscreenRenderer;
   };
 }
