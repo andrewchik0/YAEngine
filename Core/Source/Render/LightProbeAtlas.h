@@ -8,9 +8,9 @@ namespace YAEngine
   struct RenderContext;
   class VulkanCubicTexture;
 
-  static constexpr uint32_t PROBE_IRRADIANCE_SIZE = 32;
-  static constexpr uint32_t PROBE_PREFILTER_SIZE = 128;
-  static constexpr uint32_t PROBE_PREFILTER_MIP_LEVELS = 8; // log2(128) + 1
+  static constexpr uint32_t PROBE_IRRADIANCE_SIZE = 64;
+  static constexpr uint32_t PROBE_PREFILTER_SIZE = 256;
+  static constexpr uint32_t PROBE_PREFILTER_MIP_LEVELS = 9; // log2(256) + 1
 
   class LightProbeAtlas
   {

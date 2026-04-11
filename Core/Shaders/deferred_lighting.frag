@@ -44,7 +44,7 @@ layout(std430, set = 3, binding = 4) readonly buffer LightProbeSSBO
 const float DEPTH_EPSILON = 1.0;
 const int SHADING_PBR = 0;
 const int SHADING_UNLIT = 1;
-const float MAX_REFLECTION_LOD = 7.0; // log2(128) for probe prefilter
+const float MAX_REFLECTION_LOD = 8.0; // log2(256) for probe prefilter
 
 float evaluateProbeWeight(vec3 worldPos, LightProbeInfo probe)
 {
@@ -222,7 +222,7 @@ void main()
     float shadowFactor = calculateCSMShadow(worldPos, -viewPos.z, normal);
     radiance *= shadowFactor;
 
-    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
+    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV);
   }
 
   // Look up tile light list
@@ -251,7 +251,7 @@ void main()
     if (pointShadowIdx >= 0)
       radiance *= calculatePointShadow(worldPos, normal, lightPos, pointShadowIdx);
 
-    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
+    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV);
   }
 
   // Spot lights (tile-culled)
@@ -280,7 +280,7 @@ void main()
     if (spotShadowIdx >= 0)
       radiance *= calculateSpotShadow(worldPos, normal, spotShadowIdx);
 
-    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, alpha, f0, NdotV);
+    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV);
   }
 
   vec3 resultColor = max(ambient + Lo, vec3(0.0));

@@ -194,27 +194,48 @@ namespace YAEngine
     assert(slotIndex < m_MaxSlots);
     uint32_t baseLayer = slotIndex * 6;
 
-    // Upload irradiance
+    // Upload irradiance via staging image (handles size mismatch with atlas)
     {
+      VulkanImage temp;
+      temp.Init(ctx, {
+        .width = irrWidth, .height = irrWidth,
+        .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .arrayLayers = 6,
+        .flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+        .viewType = VK_IMAGE_VIEW_TYPE_CUBE,
+      });
+
       size_t totalSize = CubeMapFile::GetTotalSize(irrWidth, irrWidth, 6, 1, bytesPerPixel);
       auto staging = VulkanBuffer::CreateStaged(ctx, irradianceData, totalSize,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 
       VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
 
-      TransitionImageLayout(cmd, m_Irradiance.GetImage(),
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, baseLayer, 6);
+      TransitionImageLayout(cmd, temp.GetImage(),
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
 
       for (uint32_t face = 0; face < 6; face++)
       {
         VkBufferImageCopy region {};
         region.bufferOffset = CubeMapFile::GetMipOffset(face, 0, irrWidth, irrWidth, 1, bytesPerPixel);
-        region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, baseLayer + face, 1 };
+        region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, face, 1 };
         region.imageExtent = { irrWidth, irrWidth, 1 };
-        vkCmdCopyBufferToImage(cmd, staging.Get(), m_Irradiance.GetImage(),
+        vkCmdCopyBufferToImage(cmd, staging.Get(), temp.GetImage(),
           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
       }
+
+      TransitionImageLayout(cmd, temp.GetImage(),
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
+
+      TransitionImageLayout(cmd, m_Irradiance.GetImage(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, baseLayer, 6);
+
+      CopyCubeFaces(cmd, temp.GetImage(), m_Irradiance.GetImage(),
+        slotIndex, irrWidth, PROBE_IRRADIANCE_SIZE, 1);
 
       TransitionImageLayout(cmd, m_Irradiance.GetImage(),
         VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
@@ -222,20 +243,33 @@ namespace YAEngine
 
       ctx.commandBuffer->EndSingleTimeCommands(cmd);
       staging.Destroy(ctx);
+      temp.Destroy(ctx);
     }
 
-    // Upload prefilter
+    // Upload prefilter via staging image (handles size mismatch with atlas)
     {
       uint32_t copyMips = std::min(pfMipLevels, PROBE_PREFILTER_MIP_LEVELS);
+
+      VulkanImage temp;
+      temp.Init(ctx, {
+        .width = pfWidth, .height = pfWidth,
+        .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+        .mipLevels = copyMips,
+        .arrayLayers = 6,
+        .flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+        .viewType = VK_IMAGE_VIEW_TYPE_CUBE,
+      });
+
       size_t totalSize = CubeMapFile::GetTotalSize(pfWidth, pfWidth, 6, copyMips, bytesPerPixel);
       auto staging = VulkanBuffer::CreateStaged(ctx, prefilterData, totalSize,
         VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
 
       VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
 
-      TransitionImageLayout(cmd, m_Prefilter.GetImage(),
-        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
-        VK_IMAGE_ASPECT_COLOR_BIT, 0, PROBE_PREFILTER_MIP_LEVELS, baseLayer, 6);
+      TransitionImageLayout(cmd, temp.GetImage(),
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, copyMips, 0, 6);
 
       for (uint32_t face = 0; face < 6; face++)
       {
@@ -244,10 +278,47 @@ namespace YAEngine
           uint32_t mipSize = std::max(1u, pfWidth >> mip);
           VkBufferImageCopy region {};
           region.bufferOffset = CubeMapFile::GetMipOffset(face, mip, pfWidth, pfWidth, copyMips, bytesPerPixel);
-          region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip, baseLayer + face, 1 };
+          region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip, face, 1 };
           region.imageExtent = { mipSize, mipSize, 1 };
-          vkCmdCopyBufferToImage(cmd, staging.Get(), m_Prefilter.GetImage(),
+          vkCmdCopyBufferToImage(cmd, staging.Get(), temp.GetImage(),
             VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
+        }
+      }
+
+      TransitionImageLayout(cmd, temp.GetImage(),
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, copyMips, 0, 6);
+
+      TransitionImageLayout(cmd, m_Prefilter.GetImage(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, PROBE_PREFILTER_MIP_LEVELS, baseLayer, 6);
+
+      CopyCubeFaces(cmd, temp.GetImage(), m_Prefilter.GetImage(),
+        slotIndex, pfWidth, PROBE_PREFILTER_SIZE, copyMips);
+
+      // Fill remaining atlas mips by reusing the last source mip
+      if (copyMips < PROBE_PREFILTER_MIP_LEVELS)
+      {
+        uint32_t lastMip = copyMips - 1;
+        uint32_t lastSrcSize = std::max(1u, pfWidth >> lastMip);
+
+        for (uint32_t mip = copyMips; mip < PROBE_PREFILTER_MIP_LEVELS; mip++)
+        {
+          uint32_t dstMipSize = std::max(1u, PROBE_PREFILTER_SIZE >> mip);
+
+          for (uint32_t face = 0; face < 6; face++)
+          {
+            VkImageBlit blit {};
+            blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, lastMip, face, 1 };
+            blit.srcOffsets[1] = { int32_t(lastSrcSize), int32_t(lastSrcSize), 1 };
+            blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip, baseLayer + face, 1 };
+            blit.dstOffsets[1] = { int32_t(dstMipSize), int32_t(dstMipSize), 1 };
+
+            vkCmdBlitImage(cmd,
+              temp.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+              m_Prefilter.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              1, &blit, VK_FILTER_LINEAR);
+          }
         }
       }
 
@@ -257,6 +328,7 @@ namespace YAEngine
 
       ctx.commandBuffer->EndSingleTimeCommands(cmd);
       staging.Destroy(ctx);
+      temp.Destroy(ctx);
     }
 
     YA_LOG_INFO("Render", "Uploaded probe data to atlas slot %u from disk", slotIndex);

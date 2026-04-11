@@ -19,7 +19,8 @@ void main() {
   float gamma = u_Frame.gamma;
 
   float hasAlbedoTexture = float(u_Material.textureMask & 1);
-  vec4 albedo = mix(vec4(u_Material.albedo, 1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
+  vec4 albedoTex = mix(vec4(1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
+  vec4 albedo = vec4(u_Material.albedo, 1.0) * albedoTex;
 
   albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
 
@@ -29,13 +30,13 @@ void main() {
 
   float hasMetallicTexture = float((u_Material.textureMask >> 1) & 1);
   vec4 metallicSample = texture(metallicTexture, inTexCoord);
-  float metallic = mix(u_Material.metallic, metallicSample.b, hasMetallicTexture);
+  float metallic = u_Material.metallic * mix(1.0, metallicSample.b, hasMetallicTexture);
 
   float combinedTextures = float((u_Material.textureMask >> 8) & 1);
 
   float hasRoughnessTexture = float((u_Material.textureMask >> 2) & 1);
-  float roughness = mix(
-    mix(u_Material.roughness, texture(roughnessTexture, inTexCoord).r, hasRoughnessTexture),
+  float roughness = u_Material.roughness * mix(
+    mix(1.0, texture(roughnessTexture, inTexCoord).r, hasRoughnessTexture),
     metallicSample.g,
     combinedTextures
   );

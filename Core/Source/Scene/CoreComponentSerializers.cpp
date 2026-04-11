@@ -176,6 +176,10 @@ namespace YAEngine
           n["emissivity"] = SerializeVec3(mat.emissivity);
         if (mat.specular != 0.5f)
           n["specular"] = mat.specular;
+        if (mat.roughnessFactor != 1.0f)
+          n["roughnessFactor"] = mat.roughnessFactor;
+        if (mat.metallicFactor != 1.0f)
+          n["metallicFactor"] = mat.metallicFactor;
         if (mat.doubleSided)
           n["doubleSided"] = true;
         if (mat.shadingModel != ShadingModel::Lit)
@@ -202,6 +206,8 @@ namespace YAEngine
         if (n["metallic"]) mat.metallic = n["metallic"].as<float>();
         if (n["emissivity"]) mat.emissivity = DeserializeVec3(n["emissivity"]);
         if (n["specular"]) mat.specular = n["specular"].as<float>();
+        if (n["roughnessFactor"]) mat.roughnessFactor = n["roughnessFactor"].as<float>();
+        if (n["metallicFactor"]) mat.metallicFactor = n["metallicFactor"].as<float>();
         if (n["doubleSided"]) mat.doubleSided = n["doubleSided"].as<bool>();
         if (n["shadingModel"])
         {

@@ -344,6 +344,43 @@ namespace YAEngine
     return false;
   }
 
+  static void SetCombinedTexturesRecursive(Scene& scene, AssetManager& assets, Entity entity, bool value)
+  {
+    if (scene.HasComponent<MaterialComponent>(entity))
+    {
+      auto& mc = scene.GetComponent<MaterialComponent>(entity);
+      if (assets.Materials().Has(mc.asset))
+      {
+        auto& mat = assets.Materials().Get(mc.asset);
+        mat.combinedTextures = value;
+        mat.MarkChanged();
+      }
+    }
+
+    auto& hc = scene.GetComponent<HierarchyComponent>(entity);
+    Entity child = hc.firstChild;
+    while (child != entt::null)
+    {
+      SetCombinedTexturesRecursive(scene, assets, child, value);
+      child = scene.GetComponent<HierarchyComponent>(child).nextSibling;
+    }
+  }
+
+  static void DrawModel(EditorContext& context, ModelSourceComponent& model)
+  {
+    if (ImGui::CollapsingHeader(ICON_FA_FILE_IMPORT " Model", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+      auto relativePath = context.assetManager->MakeRelative(model.path);
+      ImGui::Text("Path: %s", relativePath.c_str());
+
+      if (ImGui::Checkbox("Combined Textures", &model.combinedTextures))
+      {
+        SetCombinedTexturesRecursive(*context.scene, *context.assetManager,
+          context.selectedEntity, model.combinedTextures);
+      }
+    }
+  }
+
   static void DrawCamera(CameraComponent& cc)
   {
     if (ImGui::CollapsingHeader(ICON_FA_VIDEO " Camera", ImGuiTreeNodeFlags_DefaultOpen))
@@ -401,6 +438,9 @@ namespace YAEngine
       if (DrawLightProbe(context, scene.GetComponent<LightProbeComponent>(entity)))
         scene.RemoveComponent<LightProbeComponent>(entity);
     }
+
+    if (scene.HasComponent<ModelSourceComponent>(entity))
+      DrawModel(context, scene.GetComponent<ModelSourceComponent>(entity));
 
     if (scene.HasComponent<CameraComponent>(entity))
       DrawCamera(scene.GetComponent<CameraComponent>(entity));

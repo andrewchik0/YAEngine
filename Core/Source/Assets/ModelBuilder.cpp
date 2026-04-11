@@ -73,6 +73,9 @@ namespace YAEngine
       mat.albedo = matDesc.albedo;
       mat.emissivity = matDesc.emissivity;
       mat.roughness = matDesc.roughness;
+      mat.metallic = matDesc.metallic;
+      mat.roughnessFactor = matDesc.roughnessFactor;
+      mat.metallicFactor = matDesc.metallicFactor;
       mat.specular = matDesc.specular;
       mat.sg = matDesc.sg;
       mat.combinedTextures = matDesc.combinedTextures;

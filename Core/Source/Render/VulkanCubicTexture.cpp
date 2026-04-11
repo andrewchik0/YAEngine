@@ -349,7 +349,7 @@ namespace YAEngine
     imageInfo.imageType = VK_IMAGE_TYPE_2D;
     imageInfo.extent = { CUBEMAP_SIZE, CUBEMAP_SIZE, 1 };
     imageInfo.samples = VK_SAMPLE_COUNT_1_BIT;
-    imageInfo.mipLevels = 1;
+    imageInfo.mipLevels = CUBEMAP_MAX_MIP_LEVELS;
     imageInfo.arrayLayers = 6;
     imageInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     imageInfo.usage =
@@ -370,7 +370,7 @@ namespace YAEngine
     viewInfo.format = VK_FORMAT_R16G16B16A16_SFLOAT;
     viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
     viewInfo.subresourceRange.baseMipLevel = 0;
-    viewInfo.subresourceRange.levelCount = 1;
+    viewInfo.subresourceRange.levelCount = CUBEMAP_MAX_MIP_LEVELS;
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 6;
 
@@ -464,10 +464,41 @@ namespace YAEngine
       ctx.commandBuffer->EndSingleTimeCommands(cmd);
     }
 
+    // Generate mip chain from rendered mip 0
     cmd = ctx.commandBuffer->BeginSingleTimeCommands();
+
     TransitionImageLayout(cmd, m_CubemapImage,
-      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
       VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
+
+    for (uint32_t mip = 1; mip < CUBEMAP_MAX_MIP_LEVELS; mip++)
+    {
+      uint32_t srcSize = std::max(1u, CUBEMAP_SIZE >> (mip - 1));
+      uint32_t dstSize = std::max(1u, CUBEMAP_SIZE >> mip);
+
+      TransitionImageLayout(cmd, m_CubemapImage,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6);
+
+      VkImageBlit blit {};
+      blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 0, 6 };
+      blit.srcOffsets[1] = { int32_t(srcSize), int32_t(srcSize), 1 };
+      blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 6 };
+      blit.dstOffsets[1] = { int32_t(dstSize), int32_t(dstSize), 1 };
+
+      vkCmdBlitImage(cmd,
+        m_CubemapImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        m_CubemapImage, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &blit, VK_FILTER_LINEAR);
+
+      TransitionImageLayout(cmd, m_CubemapImage,
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6);
+    }
+
+    TransitionImageLayout(cmd, m_CubemapImage,
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VK_IMAGE_ASPECT_COLOR_BIT, 0, CUBEMAP_MAX_MIP_LEVELS, 0, 6);
 
     VkSamplerCreateInfo samplerInfo{};
     samplerInfo.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
@@ -485,7 +516,7 @@ namespace YAEngine
     samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
     samplerInfo.mipLodBias = 0.0f;
     samplerInfo.minLod = 0.0f;
-    samplerInfo.maxLod = 1.0f;
+    samplerInfo.maxLod = float(CUBEMAP_MAX_MIP_LEVELS);
 
     if (vkCreateSampler(ctx.device, &samplerInfo, nullptr, &m_CubeMapSampler) != VK_SUCCESS)
     {
@@ -495,7 +526,7 @@ namespace YAEngine
 
     ctx.commandBuffer->EndSingleTimeCommands(cmd);
 
-    m_Irradiance = ConvolveIrradiance(ctx, res, GetView(), GetSampler(), 32);
+    m_Irradiance = ConvolveIrradiance(ctx, res, GetView(), GetSampler(), PROBE_IRRADIANCE_SIZE);
     m_Prefilter = ConvolvePrefilter(ctx, res, GetView(), GetSampler(), CUBEMAP_SIZE, PROBE_PREFILTER_MIP_LEVELS);
   }
 

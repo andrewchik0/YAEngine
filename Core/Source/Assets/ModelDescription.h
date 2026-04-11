@@ -24,6 +24,8 @@ namespace YAEngine
     glm::vec3 emissivity {};
     float roughness = -1.0f;
     float metallic = -1.0f;
+    float roughnessFactor = 1.0f;
+    float metallicFactor = 1.0f;
     float specular = 0.0f;
     bool sg = false;
     bool hasAlpha = false;

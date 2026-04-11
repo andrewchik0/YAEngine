@@ -6,3 +6,5 @@ CLAUDE.md
 .claude
 .idea/vcs.xml
 docs/
+imgui.ini
+pipeline_cache.bin

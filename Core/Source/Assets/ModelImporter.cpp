@@ -17,7 +17,7 @@ namespace YAEngine
     const aiScene* scene =
       importer.ReadFile(path,
                         aiProcess_Triangulate | aiProcess_GenUVCoords | aiProcess_FlipUVs |
-                        aiProcess_GenNormals);
+                        aiProcess_GenNormals | aiProcess_CalcTangentSpace);
 
     ModelDescription desc;
 
@@ -158,7 +158,10 @@ namespace YAEngine
 
     matDesc.albedo = glm::vec3(diffuse.r, diffuse.g, diffuse.b);
     matDesc.emissivity = glm::vec3(emissive.r, emissive.g, emissive.b);
-    matDesc.roughness = roughness;
+    matDesc.roughness = (roughness >= 0.0f) ? roughness : 1.0f;
+    matDesc.metallic = (metallic >= 0.0f) ? metallic : 0.0f;
+    matDesc.roughnessFactor = (roughness >= 0.0f) ? roughness : 1.0f;
+    matDesc.metallicFactor = (metallic >= 0.0f) ? metallic : 1.0f;
     matDesc.specular = specular.r;
     matDesc.sg = hasSG;
     matDesc.combinedTextures = combinedTextures;

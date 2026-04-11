@@ -131,8 +131,8 @@ namespace YAEngine
 
     uniforms.albedo = material.albedo;
     uniforms.specular = material.specular;
-    uniforms.metallic = material.metallic;
-    uniforms.roughness = material.roughness;
+    uniforms.metallic = (textureMask & (1 << 1)) ? material.metallicFactor : material.metallic;
+    uniforms.roughness = ((textureMask & (1 << 2)) || material.combinedTextures) ? material.roughnessFactor : material.roughness;
     uniforms.emissivity = material.emissivity;
     uniforms.textureMask = textureMask;
     uniforms.sg = material.sg;
