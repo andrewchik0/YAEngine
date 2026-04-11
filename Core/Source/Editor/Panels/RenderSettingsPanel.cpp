@@ -4,7 +4,10 @@
 
 #include "Editor/EditorContext.h"
 #include "Editor/Utils/EditorIcons.h"
+#include "Editor/Utils/FileDialog.h"
 #include "Render/Render.h"
+#include "Assets/AssetManager.h"
+#include "Scene/Scene.h"
 
 namespace YAEngine
 {
@@ -21,6 +24,46 @@ namespace YAEngine
       ImGui::TextDisabled("Render not available");
       ImGui::End();
       return;
+    }
+
+    if (ImGui::CollapsingHeader(ICON_FA_CLOUD_SUN " Environment", ImGuiTreeNodeFlags_DefaultOpen))
+    {
+      auto& scene = *context.scene;
+      auto& assets = *context.assetManager;
+
+      CubeMapHandle currentSkybox = scene.GetSkybox();
+      std::string skyboxPath = assets.CubeMaps().GetPath(currentSkybox);
+
+      if (!skyboxPath.empty())
+      {
+        std::string relativePath = assets.MakeRelative(skyboxPath);
+        ImGui::Text("Skybox: %s", relativePath.c_str());
+      }
+      else
+      {
+        ImGui::TextDisabled("No skybox");
+      }
+
+      if (ImGui::Button(ICON_FA_FOLDER_OPEN " Load Skybox..."))
+      {
+        nfdu8filteritem_t filters[] = {
+          { "HDR Images", "hdr" },
+        };
+        std::string path = FileDialog::OpenFile(filters, 1);
+        if (!path.empty())
+        {
+          auto handle = assets.CubeMaps().Load(path);
+          if (handle)
+            scene.SetSkybox(handle);
+        }
+      }
+
+      if (currentSkybox)
+      {
+        ImGui::SameLine();
+        if (ImGui::Button(ICON_FA_XMARK " Clear"))
+          scene.SetSkybox({});
+      }
     }
 
     if (ImGui::CollapsingHeader(ICON_FA_DISPLAY " Display", ImGuiTreeNodeFlags_DefaultOpen))

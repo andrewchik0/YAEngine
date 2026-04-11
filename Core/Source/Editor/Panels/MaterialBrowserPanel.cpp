@@ -6,6 +6,8 @@
 #include "Editor/Utils/EditorIcons.h"
 #include "Assets/AssetManager.h"
 #include "Editor/Utils/EditorTextureCache.h"
+#include "Scene/Scene.h"
+#include "Scene/Components.h"
 
 namespace YAEngine
 {
@@ -23,6 +25,13 @@ namespace YAEngine
     std::transform(lowerSub.begin(), lowerSub.end(), lowerSub.begin(), toLower);
 
     return lowerStr.find(lowerSub) != std::string::npos;
+  }
+
+  void MaterialBrowserPanel::BeginRename(MaterialHandle handle, const std::string& currentName)
+  {
+    m_RenamingMaterial = handle;
+    snprintf(m_RenameBuffer, sizeof(m_RenameBuffer), "%s", currentName.c_str());
+    b_RenameNeedsFocus = true;
   }
 
   void MaterialBrowserPanel::OnRender(EditorContext& context)
@@ -95,20 +104,93 @@ namespace YAEngine
       }
 
       bool isSelected = (context.selectedMaterial == handle);
-      if (ImGui::Selectable(mat.name.c_str(), isSelected))
-        context.SelectMaterial(handle);
+      bool isRenaming = (m_RenamingMaterial == handle);
 
-      if (ImGui::BeginPopupContextItem())
+      if (isRenaming)
       {
-        if (ImGui::MenuItem(ICON_FA_CLONE " Duplicate"))
+        if (b_RenameNeedsFocus)
+          ImGui::SetKeyboardFocusHere();
+
+        ImGui::SetNextItemWidth(-1);
+        if (ImGui::InputText("##matRename", m_RenameBuffer, sizeof(m_RenameBuffer),
+          ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll))
         {
-          MaterialHandle newHandle = materials.Duplicate(handle);
-          context.SelectMaterial(newHandle);
+          if (m_RenameBuffer[0] != '\0')
+            mat.name = m_RenameBuffer;
+          m_RenamingMaterial = MaterialHandle::Invalid();
+          b_RenameNeedsFocus = false;
         }
-        ImGui::EndPopup();
+        else if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+        {
+          m_RenamingMaterial = MaterialHandle::Invalid();
+          b_RenameNeedsFocus = false;
+        }
+        else if (b_RenameNeedsFocus)
+        {
+          if (ImGui::IsItemActive())
+            b_RenameNeedsFocus = false;
+        }
+        else if (!ImGui::IsItemActive() && !ImGui::IsItemFocused())
+        {
+          if (m_RenameBuffer[0] != '\0')
+            mat.name = m_RenameBuffer;
+          m_RenamingMaterial = MaterialHandle::Invalid();
+        }
+      }
+      else
+      {
+        if (ImGui::Selectable(mat.name.c_str(), isSelected))
+          context.SelectMaterial(handle);
+
+        if (ImGui::BeginPopupContextItem())
+        {
+          if (ImGui::MenuItem(ICON_FA_PEN " Rename"))
+            BeginRename(handle, mat.name);
+
+          if (ImGui::MenuItem(ICON_FA_CLONE " Duplicate"))
+          {
+            MaterialHandle newHandle = materials.Duplicate(handle);
+            context.SelectMaterial(newHandle);
+          }
+
+          if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete"))
+          {
+            m_PendingDelete = handle;
+          }
+
+          ImGui::EndPopup();
+        }
       }
 
       ImGui::PopID();
+    }
+
+    if (m_PendingDelete != MaterialHandle::Invalid())
+    {
+      if (context.selectedMaterial == m_PendingDelete)
+        context.ClearMaterialSelection();
+
+      auto view = context.scene->GetView<MaterialComponent>();
+      for (auto entity : view)
+      {
+        auto& mc = context.scene->GetComponent<MaterialComponent>(entity);
+        if (mc.asset == m_PendingDelete)
+          context.scene->RemoveComponent<MaterialComponent>(entity);
+      }
+
+      materials.Destroy(m_PendingDelete);
+      m_PendingDelete = MaterialHandle::Invalid();
+    }
+
+    if (ImGui::BeginPopupContextWindow("##MatBrowserCtx", ImGuiPopupFlags_NoOpenOverItems | ImGuiPopupFlags_MouseButtonRight))
+    {
+      if (ImGui::MenuItem(ICON_FA_CIRCLE_PLUS " Create New"))
+      {
+        MaterialHandle h = materials.Create();
+        context.SelectMaterial(h);
+        BeginRename(h, materials.Get(h).name);
+      }
+      ImGui::EndPopup();
     }
 
     if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsAnyItemHovered())

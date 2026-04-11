@@ -330,6 +330,7 @@ namespace YAEngine
       }
     }
 
+    scene.SetScenePath(path);
     YA_LOG_INFO("Scene", "Scene loaded: %s (%zu entities)", path.c_str(), nameMap.size());
   }
 }

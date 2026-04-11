@@ -6,6 +6,8 @@
 #include "Editor/Utils/EditorIcons.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
+#include "Assets/AssetManager.h"
+#include "Editor/Utils/FileDialog.h"
 
 namespace YAEngine
 {
@@ -45,6 +47,31 @@ namespace YAEngine
     return false;
   }
 
+  static MaterialHandle FindOrCreateDefaultMaterial(AssetManager& assets)
+  {
+    MaterialHandle found = MaterialHandle::Invalid();
+    assets.Materials().ForEachWithHandle([&](MaterialHandle handle, Material& mat)
+    {
+      if (!found && mat.name == "Default")
+        found = handle;
+    });
+    if (found)
+      return found;
+
+    auto handle = assets.Materials().Create();
+    assets.Materials().Get(handle).name = "Default";
+    return handle;
+  }
+
+  void OutlinerPanel::BeginRename(EditorContext& context, Entity entity)
+  {
+    m_RenamingEntity = entity;
+    auto& scene = *context.scene;
+    std::string name = scene.HasComponent<Name>(entity) ? scene.GetName(entity) : "";
+    snprintf(m_RenameBuffer, sizeof(m_RenameBuffer), "%s", name.c_str());
+    b_RenameNeedsFocus = true;
+  }
+
   void OutlinerPanel::DrawCreateMenu(EditorContext& context)
   {
     auto& scene = *context.scene;
@@ -55,6 +82,7 @@ namespace YAEngine
       {
         Entity e = scene.CreateEntity("Entity");
         context.SelectEntity(e);
+        BeginRename(context, e);
       }
 
       ImGui::Separator();
@@ -64,6 +92,7 @@ namespace YAEngine
         Entity e = scene.CreateEntity("PointLight");
         scene.AddComponent<LightComponent>(e, LightType::Point);
         context.SelectEntity(e);
+        BeginRename(context, e);
       }
 
       if (ImGui::MenuItem(ICON_FA_LIGHTBULB " Spot Light"))
@@ -71,6 +100,7 @@ namespace YAEngine
         Entity e = scene.CreateEntity("SpotLight");
         scene.AddComponent<LightComponent>(e, LightType::Spot);
         context.SelectEntity(e);
+        BeginRename(context, e);
       }
 
       if (ImGui::MenuItem(ICON_FA_SUN " Directional Light"))
@@ -78,6 +108,54 @@ namespace YAEngine
         Entity e = scene.CreateEntity("DirectionalLight");
         scene.AddComponent<LightComponent>(e, LightType::Directional);
         context.SelectEntity(e);
+        BeginRename(context, e);
+      }
+
+      ImGui::Separator();
+
+      if (ImGui::BeginMenu(ICON_FA_SHAPES " Primitives"))
+      {
+        struct PrimitiveEntry { const char* icon; const char* label; const char* name; PrimitiveType type; };
+        PrimitiveEntry primitives[] = {
+          { ICON_FA_CUBE,   " Cube",   "Cube",   PrimitiveType::Box },
+          { ICON_FA_CIRCLE, " Sphere", "Sphere", PrimitiveType::Sphere },
+          { ICON_FA_SQUARE, " Plane",  "Plane",  PrimitiveType::Plane },
+        };
+
+        for (auto& [pIcon, pLabel, pName, pType] : primitives)
+        {
+          char menuLabel[64];
+          snprintf(menuLabel, sizeof(menuLabel), "%s%s", pIcon, pLabel);
+          if (ImGui::MenuItem(menuLabel))
+          {
+            Entity e = scene.CreateEntity(pName);
+            scene.AddComponent<MeshComponent>(e, context.assetManager->Primitives().Create(pType));
+            scene.AddComponent<MaterialComponent>(e, FindOrCreateDefaultMaterial(*context.assetManager));
+            context.SelectEntity(e);
+            BeginRename(context, e);
+          }
+        }
+
+        ImGui::EndMenu();
+      }
+
+      ImGui::Separator();
+
+      if (ImGui::MenuItem(ICON_FA_FILE_IMPORT " Import Model..."))
+      {
+        nfdu8filteritem_t filters[] = {
+          { "3D Models", "gltf,glb,obj,fbx" },
+        };
+        std::string path = FileDialog::OpenFile(filters, 1);
+        if (!path.empty())
+        {
+          auto handle = context.assetManager->Models().Load(path);
+          if (handle)
+          {
+            auto& model = context.assetManager->Models().Get(handle);
+            context.SelectEntity(model.rootEntity);
+          }
+        }
       }
 
       ImGui::EndMenu();
@@ -106,6 +184,8 @@ namespace YAEngine
       icon = ICON_FA_DRAW_POLYGON;
     else if (scene.HasComponent<LightComponent>(entity))
       icon = ICON_FA_LIGHTBULB;
+    else if (scene.HasComponent<LightProbeComponent>(entity))
+      icon = ICON_FA_GLOBE;
 
     char label[512];
     snprintf(label, sizeof(label), "%s %s", icon, name.c_str());
@@ -121,21 +201,67 @@ namespace YAEngine
     if (entity == context.selectedEntity)
       flags |= ImGuiTreeNodeFlags_Selected;
 
+    bool isRenaming = (m_RenamingEntity == entity);
+
+    if (isRenaming)
+      flags |= ImGuiTreeNodeFlags_AllowOverlap;
+
     ImGui::SetNextItemAllowOverlap();
     bool opened = ImGui::TreeNodeEx(
       (void*)(uint64_t)entity,
       flags,
       "%s",
-      label
+      isRenaming ? icon : label
     );
 
-    if (ImGui::IsItemClicked())
-      context.SelectEntity(entity);
+    if (isRenaming)
+    {
+      ImGui::SameLine();
+      ImGui::SetNextItemWidth(ImGui::GetContentRegionAvail().x);
+      if (b_RenameNeedsFocus)
+        ImGui::SetKeyboardFocusHere();
+
+      if (ImGui::InputText("##rename", m_RenameBuffer, sizeof(m_RenameBuffer),
+        ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll))
+      {
+        if (m_RenameBuffer[0] != '\0')
+          scene.GetName(entity) = m_RenameBuffer;
+        m_RenamingEntity = entt::null;
+        b_RenameNeedsFocus = false;
+      }
+      else if (ImGui::IsKeyPressed(ImGuiKey_Escape))
+      {
+        m_RenamingEntity = entt::null;
+        b_RenameNeedsFocus = false;
+      }
+      else if (b_RenameNeedsFocus)
+      {
+        if (ImGui::IsItemActive())
+          b_RenameNeedsFocus = false;
+      }
+      else if (!ImGui::IsItemActive() && !ImGui::IsItemFocused())
+      {
+        if (m_RenameBuffer[0] != '\0')
+          scene.GetName(entity) = m_RenameBuffer;
+        m_RenamingEntity = entt::null;
+      }
+    }
+    else
+    {
+      if (ImGui::IsItemClicked())
+        context.SelectEntity(entity);
+
+      if (ImGui::IsItemHovered() && ImGui::IsMouseDoubleClicked(ImGuiMouseButton_Left))
+        BeginRename(context, entity);
+    }
 
     char popupId[64];
     snprintf(popupId, sizeof(popupId), "##entity_ctx_%u", static_cast<uint32_t>(entity));
     if (ImGui::BeginPopupContextItem(popupId))
     {
+      if (ImGui::MenuItem(ICON_FA_PEN " Rename"))
+        BeginRename(context, entity);
+
       if (scene.HasComponent<MeshComponent>(entity))
       {
         bool visible = !scene.HasComponent<HiddenTag>(entity);
@@ -144,11 +270,40 @@ namespace YAEngine
           if (visible) scene.AddComponent<HiddenTag>(entity);
           else scene.RemoveComponent<HiddenTag>(entity);
         }
-
-        ImGui::Separator();
       }
 
+      ImGui::Separator();
+
       DrawCreateMenu(context);
+
+      if (ImGui::BeginMenu(ICON_FA_CIRCLE_PLUS " Add Component"))
+      {
+        if (!scene.HasComponent<LightComponent>(entity))
+        {
+          if (ImGui::MenuItem(ICON_FA_LIGHTBULB " Point Light"))
+            scene.AddComponent<LightComponent>(entity, LightType::Point);
+
+          if (ImGui::MenuItem(ICON_FA_LIGHTBULB " Spot Light"))
+            scene.AddComponent<LightComponent>(entity, LightType::Spot);
+
+          if (ImGui::MenuItem(ICON_FA_SUN " Directional Light"))
+            scene.AddComponent<LightComponent>(entity, LightType::Directional);
+        }
+
+        if (!scene.HasComponent<LightProbeComponent>(entity))
+        {
+          if (ImGui::MenuItem(ICON_FA_GLOBE " Light Probe"))
+            scene.AddComponent<LightProbeComponent>(entity);
+        }
+
+        if (!scene.HasComponent<CameraComponent>(entity))
+        {
+          if (ImGui::MenuItem(ICON_FA_VIDEO " Camera"))
+            scene.AddComponent<CameraComponent>(entity);
+        }
+
+        ImGui::EndMenu();
+      }
 
       ImGui::Separator();
 

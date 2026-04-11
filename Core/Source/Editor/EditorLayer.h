@@ -25,6 +25,7 @@ namespace YAEngine
   private:
 
     void BuildDefaultLayout(uint32_t dockspaceId);
+    void NewScene();
     void SaveScene();
     void SaveSceneAs();
     void OpenScene();
@@ -34,6 +35,7 @@ namespace YAEngine
     EditorContext m_Context;
     std::string m_CurrentScenePath;
     std::string m_PendingScenePath;
+    bool b_PendingNewScene = false;
     EditorTextureCache m_TextureCache;
     std::vector<std::unique_ptr<IEditorPanel>> m_Panels;
     bool b_LayoutBuilt = false;

@@ -53,6 +53,9 @@ namespace YAEngine
     m_TextureCache.Init(m_Context.assetManager);
     m_Context.textureCache = &m_TextureCache;
 
+    if (m_CurrentScenePath.empty())
+      m_CurrentScenePath = GetScene().GetScenePath();
+
     for (auto& panel : m_Panels)
       panel->OnSceneReady(m_Context);
   }
@@ -84,7 +87,12 @@ namespace YAEngine
 
   void EditorLayer::Update(double deltaTime)
   {
-    if (!m_PendingScenePath.empty())
+    if (b_PendingNewScene)
+    {
+      b_PendingNewScene = false;
+      NewScene();
+    }
+    else if (!m_PendingScenePath.empty())
     {
       LoadSceneDeferred(m_PendingScenePath);
       m_PendingScenePath.clear();
@@ -353,6 +361,8 @@ namespace YAEngine
     // Keyboard shortcuts
     if (ImGui::IsKeyDown(ImGuiMod_Ctrl))
     {
+      if (ImGui::IsKeyPressed(ImGuiKey_N, false))
+        b_PendingNewScene = true;
       if (ImGui::IsKeyPressed(ImGuiKey_S, false))
       {
         if (ImGui::IsKeyDown(ImGuiMod_Shift))
@@ -368,6 +378,9 @@ namespace YAEngine
     {
       if (ImGui::BeginMenu("File"))
       {
+        if (ImGui::MenuItem("New Scene", "Ctrl+N"))
+          b_PendingNewScene = true;
+        ImGui::Separator();
         if (ImGui::MenuItem("Open Scene...", "Ctrl+O"))
           OpenScene();
         if (ImGui::MenuItem("Save Scene", "Ctrl+S"))
@@ -458,6 +471,30 @@ namespace YAEngine
       return;
     auto sceneDir = std::filesystem::path(scenePath).parent_path();
     GetAssets().SetBasePath(FindProjectRoot(sceneDir));
+  }
+
+  void EditorLayer::NewScene()
+  {
+    m_Context.ClearSelection();
+    m_Context.ClearMaterialSelection();
+
+    GetRender().WaitIdle();
+    m_TextureCache.Destroy();
+    GetAssets().DestroyAll();
+    GetScene().ClearScene();
+    GetRender().ResetBoundState();
+
+    GetAssets().Init(GetScene(), [this](uint32_t size) { return GetRender().AllocateInstanceData(size); });
+    GetAssets().SetRenderContext(GetRender().GetContext(), GetRender().GetNoneTexture(), GetRender().GetCubicResources());
+
+    auto* editorCam = GetLayerManager().GetLayer<EditorCameraLayer>();
+    if (editorCam)
+      editorCam->OnSceneReady();
+
+    m_LastViewportWidth = 0;
+    m_LastViewportHeight = 0;
+
+    m_CurrentScenePath.clear();
   }
 
   void EditorLayer::SaveScene()

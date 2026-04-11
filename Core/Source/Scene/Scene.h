@@ -108,11 +108,15 @@ namespace YAEngine
       return m_Skybox;
     }
 
+    void SetScenePath(const std::string& path) { m_ScenePath = path; }
+    const std::string& GetScenePath() const { return m_ScenePath; }
+
     void ClearScene()
     {
       m_Registry.clear();
       m_ActiveCamera = entt::null;
       m_Skybox = {};
+      m_ScenePath.clear();
     }
 
     entt::registry& GetRegistry() { return m_Registry; }
@@ -122,6 +126,7 @@ namespace YAEngine
 
     entt::entity m_ActiveCamera = entt::null;
     CubeMapHandle m_Skybox {};
+    std::string m_ScenePath;
 
   };
 
