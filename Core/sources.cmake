@@ -148,12 +148,16 @@ set(SOURCE_FILES
   Source/Utils/MainThreadDispatcher.h
   Source/Utils/PrimitiveMeshFactory.h
   Source/Utils/PrimitiveMeshFactory.cpp
+  Source/Utils/TerrainMeshGenerator.h
+  Source/Utils/TerrainMeshGenerator.cpp
   Source/Scene/ComponentRegistry.h
   Source/Scene/CoreComponentSerializers.h
   Source/Scene/CoreComponentSerializers.cpp
   Source/Scene/SceneSerializer.h
   Source/Scene/SceneSerializer.cpp
   Source/Scene/YamlUtils.h
+  Source/Scene/TerrainSystem.h
+  Source/Scene/TerrainSystem.cpp
 )
 
 if(YA_EDITOR)

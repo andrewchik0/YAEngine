@@ -110,6 +110,21 @@ namespace YAEngine
     std::string bakedPrefilterPath;
   };
 
+  struct TerrainComponent
+  {
+    float size = 100.0f;
+    uint32_t subdivisions = 128;
+    float uvScale = 10.0f;
+    float heightScale = 10.0f;
+    float frequency = 0.02f;
+    uint32_t octaves = 4;
+    float lacunarity = 2.0f;
+    float persistence = 0.5f;
+    int32_t seed = 0;
+  };
+
+  struct TerrainDirty {};
+
 #ifdef YA_EDITOR
   struct EditorOnlyTag {};
 #endif

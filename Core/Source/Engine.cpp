@@ -4,6 +4,7 @@
 #include "Scene/SceneSnapshot.h"
 #include "Scene/TransformSystem.h"
 #include "Scene/BoundsUpdateSystem.h"
+#include "Scene/TerrainSystem.h"
 #include "Scene/CoreComponentSerializers.h"
 
 #include <imgui.h>
@@ -51,6 +52,7 @@ namespace YAEngine
     m_Registry.Register<LayerManager>(&m_LayerManager);
     m_LayerManager.SetRegistry(m_Registry);
 
+    m_Scheduler.AddSystem<TerrainSystem>(m_AssetManager);
     m_Scheduler.AddSystem<TransformSystem>();
     m_Scheduler.AddSystem<BoundsUpdateSystem>();
 

@@ -282,6 +282,39 @@ namespace YAEngine
       }
     );
 
+    // TerrainComponent
+    registry.Register<TerrainComponent>("terrain",
+      [](const entt::registry& reg, entt::entity e) -> YAML::Node {
+        auto& t = reg.get<TerrainComponent>(e);
+        YAML::Node n;
+        n["size"] = t.size;
+        n["subdivisions"] = t.subdivisions;
+        n["uvScale"] = t.uvScale;
+        n["heightScale"] = t.heightScale;
+        n["frequency"] = t.frequency;
+        n["octaves"] = t.octaves;
+        n["lacunarity"] = t.lacunarity;
+        n["persistence"] = t.persistence;
+        n["seed"] = t.seed;
+        return n;
+      },
+      [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
+        TerrainComponent t;
+        if (n["size"]) t.size = n["size"].as<float>();
+        if (n["subdivisions"]) t.subdivisions = n["subdivisions"].as<uint32_t>();
+        if (n["uvScale"]) t.uvScale = n["uvScale"].as<float>();
+        if (n["heightScale"]) t.heightScale = n["heightScale"].as<float>();
+        if (n["frequency"]) t.frequency = n["frequency"].as<float>();
+        if (n["octaves"]) t.octaves = n["octaves"].as<uint32_t>();
+        if (n["lacunarity"]) t.lacunarity = n["lacunarity"].as<float>();
+        if (n["persistence"]) t.persistence = n["persistence"].as<float>();
+        if (n["seed"]) t.seed = n["seed"].as<int32_t>();
+        reg.emplace_or_replace<TerrainComponent>(e, t);
+        if (!reg.all_of<TerrainDirty>(e))
+          reg.emplace<TerrainDirty>(e);
+      }
+    );
+
     // HiddenTag
     registry.Register<HiddenTag>("hidden",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {

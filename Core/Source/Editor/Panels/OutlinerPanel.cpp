@@ -47,22 +47,6 @@ namespace YAEngine
     return false;
   }
 
-  static MaterialHandle FindOrCreateDefaultMaterial(AssetManager& assets)
-  {
-    MaterialHandle found = MaterialHandle::Invalid();
-    assets.Materials().ForEachWithHandle([&](MaterialHandle handle, Material& mat)
-    {
-      if (!found && mat.name == "Default")
-        found = handle;
-    });
-    if (found)
-      return found;
-
-    auto handle = assets.Materials().Create();
-    assets.Materials().Get(handle).name = "Default";
-    return handle;
-  }
-
   void OutlinerPanel::BeginRename(EditorContext& context, Entity entity)
   {
     m_RenamingEntity = entity;
@@ -130,13 +114,25 @@ namespace YAEngine
           {
             Entity e = scene.CreateEntity(pName);
             scene.AddComponent<MeshComponent>(e, context.assetManager->Primitives().Create(pType));
-            scene.AddComponent<MaterialComponent>(e, FindOrCreateDefaultMaterial(*context.assetManager));
+            scene.AddComponent<MaterialComponent>(e, context.assetManager->FindOrCreateDefaultMaterial());
             context.SelectEntity(e);
             BeginRename(context, e);
           }
         }
 
         ImGui::EndMenu();
+      }
+
+      ImGui::Separator();
+
+      if (ImGui::MenuItem(ICON_FA_MOUNTAIN " Terrain"))
+      {
+        Entity e = scene.CreateEntity("Terrain");
+        scene.AddComponent<TerrainComponent>(e);
+        scene.AddComponent<MaterialComponent>(e, context.assetManager->FindOrCreateDefaultMaterial());
+        scene.GetRegistry().emplace<TerrainDirty>(e);
+        context.SelectEntity(e);
+        BeginRename(context, e);
       }
 
       ImGui::Separator();
@@ -186,6 +182,8 @@ namespace YAEngine
       icon = ICON_FA_LIGHTBULB;
     else if (scene.HasComponent<LightProbeComponent>(entity))
       icon = ICON_FA_GLOBE;
+    else if (scene.HasComponent<TerrainComponent>(entity))
+      icon = ICON_FA_MOUNTAIN;
 
     char label[512];
     snprintf(label, sizeof(label), "%s %s", icon, name.c_str());
@@ -300,6 +298,17 @@ namespace YAEngine
         {
           if (ImGui::MenuItem(ICON_FA_VIDEO " Camera"))
             scene.AddComponent<CameraComponent>(entity);
+        }
+
+        if (!scene.HasComponent<TerrainComponent>(entity))
+        {
+          if (ImGui::MenuItem(ICON_FA_MOUNTAIN " Terrain"))
+          {
+            scene.AddComponent<TerrainComponent>(entity);
+            if (!scene.HasComponent<MaterialComponent>(entity))
+              scene.AddComponent<MaterialComponent>(entity, context.assetManager->FindOrCreateDefaultMaterial());
+            scene.GetRegistry().emplace_or_replace<TerrainDirty>(entity);
+          }
         }
 
         ImGui::EndMenu();

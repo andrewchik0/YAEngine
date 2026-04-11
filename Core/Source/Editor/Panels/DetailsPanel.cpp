@@ -344,6 +344,68 @@ namespace YAEngine
     return false;
   }
 
+  static bool DrawTerrain(EditorContext& context, TerrainComponent& terrain)
+  {
+    ImGui::PushID("Terrain");
+    bool open = ImGui::CollapsingHeader(ICON_FA_MOUNTAIN " Terrain", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    if (ImGui::Button(ICON_FA_XMARK "##RemoveTerrain", ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight())))
+    {
+      ImGui::PopStyleColor(3);
+      ImGui::PopID();
+      return true;
+    }
+    ImGui::PopStyleColor(3);
+
+    if (open)
+    {
+      auto entity = context.selectedEntity;
+      auto& scene = *context.scene;
+      bool committed = false;
+
+      ImGui::DragFloat("Size", &terrain.size, 1.0f, 1.0f, 10000.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      int subs = static_cast<int>(terrain.subdivisions);
+      ImGui::DragInt("Subdivisions", &subs, 1.0f, 2, 512);
+      terrain.subdivisions = static_cast<uint32_t>(subs);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::DragFloat("UV Scale", &terrain.uvScale, 0.1f, 0.01f, 100.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::DragFloat("Height Scale", &terrain.heightScale, 0.1f, 0.0f, 1000.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::DragFloat("Frequency", &terrain.frequency, 0.001f, 0.001f, 1.0f, "%.4f");
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      int oct = static_cast<int>(terrain.octaves);
+      ImGui::SliderInt("Octaves", &oct, 1, 8);
+      terrain.octaves = static_cast<uint32_t>(oct);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::DragFloat("Lacunarity", &terrain.lacunarity, 0.01f, 1.0f, 4.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::DragFloat("Persistence", &terrain.persistence, 0.01f, 0.1f, 1.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::DragInt("Seed", &terrain.seed);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      if (committed && !scene.GetRegistry().all_of<TerrainDirty>(entity))
+        scene.GetRegistry().emplace<TerrainDirty>(entity);
+    }
+
+    ImGui::PopID();
+    return false;
+  }
+
   static void SetCombinedTexturesRecursive(Scene& scene, AssetManager& assets, Entity entity, bool value)
   {
     if (scene.HasComponent<MaterialComponent>(entity))
@@ -439,6 +501,30 @@ namespace YAEngine
         scene.RemoveComponent<LightProbeComponent>(entity);
     }
 
+    if (scene.HasComponent<TerrainComponent>(entity))
+    {
+      if (DrawTerrain(context, scene.GetComponent<TerrainComponent>(entity)))
+      {
+        scene.RemoveComponent<TerrainComponent>(entity);
+        if (scene.HasComponent<TerrainDirty>(entity))
+          scene.RemoveComponent<TerrainDirty>(entity);
+        if (scene.HasComponent<MeshComponent>(entity))
+        {
+          auto meshHandle = scene.GetComponent<MeshComponent>(entity).asset;
+          if (context.assetManager->Meshes().Has(meshHandle))
+          {
+            context.render->WaitIdle();
+            context.assetManager->Meshes().Destroy(meshHandle);
+          }
+          scene.RemoveComponent<MeshComponent>(entity);
+        }
+        if (scene.HasComponent<LocalBounds>(entity))
+          scene.RemoveComponent<LocalBounds>(entity);
+        if (scene.HasComponent<WorldBounds>(entity))
+          scene.RemoveComponent<WorldBounds>(entity);
+      }
+    }
+
     if (scene.HasComponent<ModelSourceComponent>(entity))
       DrawModel(context, scene.GetComponent<ModelSourceComponent>(entity));
 
@@ -463,6 +549,17 @@ namespace YAEngine
       {
         if (ImGui::MenuItem(ICON_FA_GLOBE " Light Probe"))
           scene.AddComponent<LightProbeComponent>(entity);
+      }
+
+      if (!scene.HasComponent<TerrainComponent>(entity))
+      {
+        if (ImGui::MenuItem(ICON_FA_MOUNTAIN " Terrain"))
+        {
+          scene.AddComponent<TerrainComponent>(entity);
+          if (!scene.HasComponent<MaterialComponent>(entity))
+            scene.AddComponent<MaterialComponent>(entity, context.assetManager->FindOrCreateDefaultMaterial());
+          scene.GetRegistry().emplace_or_replace<TerrainDirty>(entity);
+        }
       }
 
       ImGui::EndPopup();

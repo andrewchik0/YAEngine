@@ -57,6 +57,22 @@ namespace YAEngine
     return absolutePath;
   }
 
+  MaterialHandle AssetManager::FindOrCreateDefaultMaterial()
+  {
+    MaterialHandle found = MaterialHandle::Invalid();
+    Materials().ForEachWithHandle([&](MaterialHandle handle, Material& mat)
+    {
+      if (!found && mat.name == "Default")
+        found = handle;
+    });
+    if (found)
+      return found;
+
+    auto handle = Materials().Create();
+    Materials().Get(handle).name = "Default";
+    return handle;
+  }
+
   void AssetManager::DestroyAll()
   {
     for (auto it = m_DestroyOrder.rbegin(); it != m_DestroyOrder.rend(); ++it)

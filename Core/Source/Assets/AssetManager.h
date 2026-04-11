@@ -44,6 +44,8 @@ namespace YAEngine
     std::string ResolvePath(const std::string& relativePath) const;
     std::string MakeRelative(const std::string& absolutePath) const;
 
+    MaterialHandle FindOrCreateDefaultMaterial();
+
     void DestroyAll();
 
   private:
