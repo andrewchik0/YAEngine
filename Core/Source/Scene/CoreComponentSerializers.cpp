@@ -410,6 +410,46 @@ namespace YAEngine
       }
     );
 
+    // RoadComponent
+    registry.Register<RoadComponent>("road",
+      [](const entt::registry& reg, entt::entity e) -> YAML::Node {
+        auto& r = reg.get<RoadComponent>(e);
+        YAML::Node n;
+        YAML::Node pointsNode;
+        for (auto& p : r.points)
+        {
+          YAML::Node pt;
+          pt.push_back(p.x);
+          pt.push_back(p.y);
+          pt.push_back(p.z);
+          pointsNode.push_back(pt);
+        }
+        n["points"] = pointsNode;
+        n["width"] = r.width;
+        n["uvScale"] = r.uvScale;
+        n["segments"] = r.segments;
+        return n;
+      },
+      [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
+        RoadComponent r;
+        if (n["points"])
+        {
+          r.points.clear();
+          for (size_t i = 0; i < n["points"].size(); i++)
+          {
+            auto pt = n["points"][i];
+            r.points.push_back(glm::vec3(pt[0].as<float>(), pt[1].as<float>(), pt[2].as<float>()));
+          }
+        }
+        if (n["width"]) r.width = n["width"].as<float>();
+        if (n["uvScale"]) r.uvScale = n["uvScale"].as<float>();
+        if (n["segments"]) r.segments = n["segments"].as<uint32_t>();
+        reg.emplace_or_replace<RoadComponent>(e, r);
+        if (!reg.all_of<RoadDirty>(e))
+          reg.emplace<RoadDirty>(e);
+      }
+    );
+
     // HiddenTag
     registry.Register<HiddenTag>("hidden",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {

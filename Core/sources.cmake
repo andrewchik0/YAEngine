@@ -154,6 +154,9 @@ set(SOURCE_FILES
   Source/Utils/TerrainMeshGenerator.cpp
   Source/Utils/HeightmapLoader.h
   Source/Utils/HeightmapLoader.cpp
+  Source/Utils/SplinePath3D.h
+  Source/Utils/RoadMeshGenerator.h
+  Source/Utils/RoadMeshGenerator.cpp
   Source/Scene/ComponentRegistry.h
   Source/Scene/CoreComponentSerializers.h
   Source/Scene/CoreComponentSerializers.cpp
@@ -162,6 +165,8 @@ set(SOURCE_FILES
   Source/Scene/YamlUtils.h
   Source/Scene/TerrainSystem.h
   Source/Scene/TerrainSystem.cpp
+  Source/Scene/RoadSystem.h
+  Source/Scene/RoadSystem.cpp
 )
 
 if(YA_EDITOR)

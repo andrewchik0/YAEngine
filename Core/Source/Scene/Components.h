@@ -139,6 +139,16 @@ namespace YAEngine
 
   struct TerrainDirty {};
 
+  struct RoadComponent
+  {
+    std::vector<glm::vec3> points = { { 0.0f, 0.0f, 0.0f }, { 0.0f, 0.0f, 10.0f } };
+    float width = 4.0f;
+    float uvScale = 1.0f;
+    uint32_t segments = 64;
+  };
+
+  struct RoadDirty {};
+
   struct TerrainMaterialComponent
   {
     TextureHandle layer1Albedo;

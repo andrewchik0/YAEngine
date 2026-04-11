@@ -347,6 +347,112 @@ namespace YAEngine
     return false;
   }
 
+  static bool DrawRoad(EditorContext& context, RoadComponent& road)
+  {
+    ImGui::PushID("Road");
+    bool open = ImGui::CollapsingHeader(ICON_FA_ROAD " Road", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    if (ImGui::Button(ICON_FA_XMARK "##RemoveRoad", ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight())))
+    {
+      ImGui::PopStyleColor(3);
+      ImGui::PopID();
+      return true;
+    }
+    ImGui::PopStyleColor(3);
+
+    if (open)
+    {
+      auto entity = context.selectedEntity;
+      auto& scene = *context.scene;
+      bool committed = false;
+
+      ImGui::DragFloat("Width", &road.width, 0.1f, 0.1f, 100.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::DragFloat("UV Scale", &road.uvScale, 0.01f, 0.01f, 100.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      int segs = static_cast<int>(road.segments);
+      ImGui::DragInt("Segments", &segs, 1.0f, 2, 512);
+      road.segments = static_cast<uint32_t>(segs);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::Separator();
+      ImGui::Text("Control Points");
+
+      // XZ spline editor using SplinePathEditor
+      std::vector<glm::vec2> points2D;
+      points2D.reserve(road.points.size());
+
+      // Find XZ bounds for normalization
+      glm::vec2 minXZ(std::numeric_limits<float>::max());
+      glm::vec2 maxXZ(-std::numeric_limits<float>::max());
+      for (auto& p : road.points)
+      {
+        minXZ = glm::min(minXZ, glm::vec2(p.x, p.z));
+        maxXZ = glm::max(maxXZ, glm::vec2(p.x, p.z));
+      }
+      glm::vec2 range = maxXZ - minXZ;
+      float maxRange = glm::max(range.x, range.y);
+      if (maxRange < 1e-4f) maxRange = 10.0f;
+      glm::vec2 center = (minXZ + maxXZ) * 0.5f;
+      glm::vec2 normMin = center - glm::vec2(maxRange * 0.5f);
+
+      for (auto& p : road.points)
+      {
+        glm::vec2 norm = (glm::vec2(p.x, p.z) - normMin) / maxRange;
+        points2D.push_back(glm::vec2(norm.x, 1.0f - norm.y));
+      }
+
+      if (SplinePathEditor::Edit("##RoadPath", points2D))
+      {
+        for (size_t i = 0; i < points2D.size(); i++)
+        {
+          glm::vec2 world = glm::vec2(points2D[i].x, 1.0f - points2D[i].y) * maxRange + normMin;
+          road.points[i].x = world.x;
+          road.points[i].z = world.y;
+        }
+        committed = true;
+      }
+
+      // Sync point count changes from editor
+      while (road.points.size() < points2D.size())
+      {
+        glm::vec2 edPt = points2D[road.points.size()];
+        glm::vec2 world = glm::vec2(edPt.x, 1.0f - edPt.y) * maxRange + normMin;
+        road.points.push_back(glm::vec3(world.x, 0.0f, world.y));
+        committed = true;
+      }
+      while (road.points.size() > points2D.size())
+      {
+        road.points.pop_back();
+        committed = true;
+      }
+
+      ImGui::Separator();
+      ImGui::Text("Point Heights (Y)");
+      for (size_t i = 0; i < road.points.size(); i++)
+      {
+        ImGui::PushID(static_cast<int>(i));
+        char label[32];
+        snprintf(label, sizeof(label), "Point %d Y", static_cast<int>(i));
+        ImGui::DragFloat(label, &road.points[i].y, 0.1f);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::PopID();
+      }
+
+      if (committed && !scene.GetRegistry().all_of<RoadDirty>(entity))
+        scene.GetRegistry().emplace<RoadDirty>(entity);
+    }
+
+    ImGui::PopID();
+    return false;
+  }
+
   static bool DrawTerrain(EditorContext& context, TerrainComponent& terrain)
   {
     ImGui::PushID("Terrain");
@@ -628,6 +734,30 @@ namespace YAEngine
       }
     }
 
+    if (scene.HasComponent<RoadComponent>(entity))
+    {
+      if (DrawRoad(context, scene.GetComponent<RoadComponent>(entity)))
+      {
+        scene.RemoveComponent<RoadComponent>(entity);
+        if (scene.HasComponent<RoadDirty>(entity))
+          scene.RemoveComponent<RoadDirty>(entity);
+        if (scene.HasComponent<MeshComponent>(entity))
+        {
+          auto meshHandle = scene.GetComponent<MeshComponent>(entity).asset;
+          if (context.assetManager->Meshes().Has(meshHandle))
+          {
+            context.render->WaitIdle();
+            context.assetManager->Meshes().Destroy(meshHandle);
+          }
+          scene.RemoveComponent<MeshComponent>(entity);
+        }
+        if (scene.HasComponent<LocalBounds>(entity))
+          scene.RemoveComponent<LocalBounds>(entity);
+        if (scene.HasComponent<WorldBounds>(entity))
+          scene.RemoveComponent<WorldBounds>(entity);
+      }
+    }
+
     if (scene.HasComponent<TerrainMaterialComponent>(entity))
     {
       auto& tm = scene.GetComponent<TerrainMaterialComponent>(entity);
@@ -675,6 +805,17 @@ namespace YAEngine
           if (!scene.HasComponent<MaterialComponent>(entity))
             scene.AddComponent<MaterialComponent>(entity, context.assetManager->FindOrCreateDefaultMaterial());
           scene.GetRegistry().emplace_or_replace<TerrainDirty>(entity);
+        }
+      }
+
+      if (!scene.HasComponent<RoadComponent>(entity))
+      {
+        if (ImGui::MenuItem(ICON_FA_ROAD " Road"))
+        {
+          scene.AddComponent<RoadComponent>(entity);
+          if (!scene.HasComponent<MaterialComponent>(entity))
+            scene.AddComponent<MaterialComponent>(entity, context.assetManager->FindOrCreateDefaultMaterial());
+          scene.GetRegistry().emplace_or_replace<RoadDirty>(entity);
         }
       }
 
