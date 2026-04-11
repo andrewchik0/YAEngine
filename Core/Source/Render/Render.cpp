@@ -52,6 +52,7 @@ namespace YAEngine
     }
 
     m_DefaultMaterial.Init(ctx, m_NoneTexture);
+    m_TerrainMaterial.Init(ctx, m_NoneTexture);
     m_FrameUniformBuffer.Init(ctx);
     m_LightBuffer.Init(ctx);
 
@@ -216,6 +217,7 @@ namespace YAEngine
     m_ExposureBuffer.Destroy(ctx);
     m_PSOCache.Destroy();
     m_DefaultMaterial.Destroy(ctx);
+    m_TerrainMaterial.Destroy(ctx);
     m_TileLightBuffer.Destroy(ctx);
     m_LightBuffer.Destroy(ctx);
     m_FrameUniformBuffer.Destroy(ctx);

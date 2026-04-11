@@ -35,6 +35,12 @@ namespace YAEngine
   {
     if (m_BasePath.empty())
       return relativePath;
+
+    bool isAbsolute = (relativePath.size() >= 2 && relativePath[1] == ':')
+                   || (!relativePath.empty() && relativePath[0] == '/');
+    if (isAbsolute)
+      return relativePath;
+
     return m_BasePath + "/" + relativePath;
   }
 

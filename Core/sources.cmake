@@ -60,6 +60,8 @@ set(SOURCE_FILES
   Source/Render/VulkanTexture.h
   Source/Render/VulkanMaterial.cpp
   Source/Render/VulkanMaterial.h
+  Source/Render/VulkanTerrainMaterial.cpp
+  Source/Render/VulkanTerrainMaterial.h
   Source/Scene/Scene.cpp
   Source/Scene/Scene.h
   Source/Scene/TransformSystem.cpp
@@ -150,6 +152,8 @@ set(SOURCE_FILES
   Source/Utils/PrimitiveMeshFactory.cpp
   Source/Utils/TerrainMeshGenerator.h
   Source/Utils/TerrainMeshGenerator.cpp
+  Source/Utils/HeightmapLoader.h
+  Source/Utils/HeightmapLoader.cpp
   Source/Scene/ComponentRegistry.h
   Source/Scene/CoreComponentSerializers.h
   Source/Scene/CoreComponentSerializers.cpp
@@ -187,6 +191,10 @@ if(YA_EDITOR)
     Source/Editor/Utils/EditorTextureCache.cpp
     Source/Editor/Utils/FileDialog.h
     Source/Editor/Utils/FileDialog.cpp
+    Source/Editor/Utils/CurveEditor.h
+    Source/Editor/Utils/CurveEditor.cpp
+    Source/Editor/Utils/SplinePathEditor.h
+    Source/Editor/Utils/SplinePathEditor.cpp
     Source/Editor/EditorCameraLayer.h
     Source/Editor/EditorCameraLayer.cpp
     Source/Editor/GizmoRenderer.h

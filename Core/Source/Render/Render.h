@@ -6,6 +6,7 @@
 #include "RenderGraph.h"
 #include "VulkanCubicTexture.h"
 #include "VulkanMaterial.h"
+#include "VulkanTerrainMaterial.h"
 #include "PipelineCache.h"
 #include "VulkanStorageBuffer.h"
 #include "VulkanUniformBuffer.h"
@@ -214,7 +215,7 @@ namespace YAEngine
     VulkanStorageBuffer m_InstanceBuffer;
 
     PipelineCache m_PSOCache;
-    PipelineHandle m_ForwardPipelines[5] {};
+    PipelineHandle m_ForwardPipelines[6] {};
     PipelineHandle m_DepthPipelines[4] {};
     PipelineHandle m_QuadPipeline {};
     PipelineHandle m_TAAPipeline {};
@@ -232,6 +233,7 @@ namespace YAEngine
     PipelineHandle m_ShadowPipelines[4] {};
 
     VulkanMaterial m_DefaultMaterial {};
+    VulkanTerrainMaterial m_TerrainMaterial {};
     VulkanTexture m_NoneTexture;
     VulkanImage m_NoneCubeMap;
     VulkanTexture m_SSAONoise;
@@ -261,6 +263,7 @@ namespace YAEngine
       bool instanced;
       bool doubleSided;
       bool noShading;
+      bool isTerrain;
       uint32_t materialIndex;
       uint32_t materialGeneration;
       uint32_t meshIndex;
@@ -273,6 +276,7 @@ namespace YAEngine
 
       uint8_t SortKey() const
       {
+        if (isTerrain) return 5;
         if (noShading) return 4;
         return (instanced ? 2 : 0) + (doubleSided ? 1 : 0);
       }

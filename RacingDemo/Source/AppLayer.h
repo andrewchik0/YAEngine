@@ -37,7 +37,7 @@ public:
 
 #ifdef TEST
     YAEngine::SceneSerializer::Load(
-      APP_WORKING_DIR "/Assets/Scenes/test.scene",
+      APP_WORKING_DIR "/Assets/Scenes/terrain.scene",
       GetScene(), GetAssets(), registry, GetRender(),
       APP_WORKING_DIR);
 

@@ -284,18 +284,59 @@ namespace YAEngine
 
     // TerrainComponent
     registry.Register<TerrainComponent>("terrain",
-      [](const entt::registry& reg, entt::entity e) -> YAML::Node {
+      [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& t = reg.get<TerrainComponent>(e);
         YAML::Node n;
         n["size"] = t.size;
         n["subdivisions"] = t.subdivisions;
         n["uvScale"] = t.uvScale;
         n["heightScale"] = t.heightScale;
-        n["frequency"] = t.frequency;
-        n["octaves"] = t.octaves;
-        n["lacunarity"] = t.lacunarity;
-        n["persistence"] = t.persistence;
-        n["seed"] = t.seed;
+        if (t.heightmapPath.empty())
+        {
+          if (t.noiseType != TerrainNoiseType::FBm)
+          {
+            const char* name = (t.noiseType == TerrainNoiseType::Ridged) ? "ridged" : "billowy";
+            n["noiseType"] = name;
+          }
+          n["frequency"] = t.frequency;
+          n["octaves"] = t.octaves;
+          n["lacunarity"] = t.lacunarity;
+          n["persistence"] = t.persistence;
+          n["seed"] = t.seed;
+          if (t.warpStrength != 0.0f)
+            n["warpStrength"] = t.warpStrength;
+          if (t.warpFrequency != 0.008f)
+            n["warpFrequency"] = t.warpFrequency;
+        }
+        else
+        {
+          n["heightmapPath"] = assets.MakeRelative(t.heightmapPath);
+        }
+        if (!t.maskPath.empty())
+        {
+          YAML::Node pathNode;
+          for (auto& p : t.maskPath)
+          {
+            YAML::Node pt;
+            pt.push_back(p.x);
+            pt.push_back(p.y);
+            pathNode.push_back(pt);
+          }
+          n["maskPath"] = pathNode;
+          n["maskFalloffRadius"] = t.maskFalloffRadius;
+          if (!t.maskCurve.empty())
+          {
+            YAML::Node curveNode;
+            for (auto& p : t.maskCurve)
+            {
+              YAML::Node pt;
+              pt.push_back(p.x);
+              pt.push_back(p.y);
+              curveNode.push_back(pt);
+            }
+            n["maskCurve"] = curveNode;
+          }
+        }
         return n;
       },
       [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
@@ -304,14 +345,68 @@ namespace YAEngine
         if (n["subdivisions"]) t.subdivisions = n["subdivisions"].as<uint32_t>();
         if (n["uvScale"]) t.uvScale = n["uvScale"].as<float>();
         if (n["heightScale"]) t.heightScale = n["heightScale"].as<float>();
+        if (n["heightmapPath"]) t.heightmapPath = n["heightmapPath"].as<std::string>();
+        if (n["noiseType"])
+        {
+          auto nt = n["noiseType"].as<std::string>();
+          if (nt == "ridged") t.noiseType = TerrainNoiseType::Ridged;
+          else if (nt == "billowy") t.noiseType = TerrainNoiseType::Billowy;
+        }
         if (n["frequency"]) t.frequency = n["frequency"].as<float>();
         if (n["octaves"]) t.octaves = n["octaves"].as<uint32_t>();
         if (n["lacunarity"]) t.lacunarity = n["lacunarity"].as<float>();
         if (n["persistence"]) t.persistence = n["persistence"].as<float>();
         if (n["seed"]) t.seed = n["seed"].as<int32_t>();
+        if (n["warpStrength"]) t.warpStrength = n["warpStrength"].as<float>();
+        if (n["warpFrequency"]) t.warpFrequency = n["warpFrequency"].as<float>();
+        if (n["maskPath"])
+        {
+          for (size_t i = 0; i < n["maskPath"].size(); i++)
+          {
+            auto pt = n["maskPath"][i];
+            t.maskPath.push_back(glm::vec2(pt[0].as<float>(), pt[1].as<float>()));
+          }
+        }
+        if (n["maskFalloffRadius"]) t.maskFalloffRadius = n["maskFalloffRadius"].as<float>();
+        if (n["maskCurve"])
+        {
+          for (size_t i = 0; i < n["maskCurve"].size(); i++)
+          {
+            auto pt = n["maskCurve"][i];
+            t.maskCurve.push_back(glm::vec2(pt[0].as<float>(), pt[1].as<float>()));
+          }
+        }
         reg.emplace_or_replace<TerrainComponent>(e, t);
         if (!reg.all_of<TerrainDirty>(e))
           reg.emplace<TerrainDirty>(e);
+      }
+    );
+
+    // TerrainMaterialComponent
+    registry.Register<TerrainMaterialComponent>("terrainMaterial",
+      [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
+        auto& tm = reg.get<TerrainMaterialComponent>(e);
+        YAML::Node n;
+        auto& textures = assets.Textures();
+        SerializeTextureField(n, "layer1AlbedoTexture", tm.layer1Albedo, textures, assets);
+        SerializeTextureField(n, "layer1NormalTexture", tm.layer1Normal, textures, assets);
+        SerializeTextureField(n, "layer1RoughnessTexture", tm.layer1Roughness, textures, assets);
+        SerializeTextureField(n, "layer1MetallicTexture", tm.layer1Metallic, textures, assets);
+        n["slopeStart"] = tm.slopeStart;
+        n["slopeEnd"] = tm.slopeEnd;
+        n["layer1UvScale"] = tm.layer1UvScale;
+        return n;
+      },
+      [&assets](entt::registry& reg, entt::entity e, const YAML::Node& n) {
+        TerrainMaterialComponent tm;
+        tm.layer1Albedo = DeserializeTextureField(n, "layer1AlbedoTexture", assets);
+        tm.layer1Normal = DeserializeTextureField(n, "layer1NormalTexture", assets);
+        tm.layer1Roughness = DeserializeTextureField(n, "layer1RoughnessTexture", assets);
+        tm.layer1Metallic = DeserializeTextureField(n, "layer1MetallicTexture", assets);
+        if (n["slopeStart"]) tm.slopeStart = n["slopeStart"].as<float>();
+        if (n["slopeEnd"]) tm.slopeEnd = n["slopeEnd"].as<float>();
+        if (n["layer1UvScale"]) tm.layer1UvScale = n["layer1UvScale"].as<float>();
+        reg.emplace_or_replace<TerrainMaterialComponent>(e, tm);
       }
     );
 

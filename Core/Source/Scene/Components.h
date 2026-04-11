@@ -110,20 +110,45 @@ namespace YAEngine
     std::string bakedPrefilterPath;
   };
 
+  enum class TerrainNoiseType : uint8_t
+  {
+    FBm,
+    Ridged,
+    Billowy
+  };
+
   struct TerrainComponent
   {
     float size = 100.0f;
     uint32_t subdivisions = 128;
     float uvScale = 10.0f;
     float heightScale = 10.0f;
+    TerrainNoiseType noiseType = TerrainNoiseType::FBm;
     float frequency = 0.02f;
     uint32_t octaves = 4;
     float lacunarity = 2.0f;
     float persistence = 0.5f;
     int32_t seed = 0;
+    float warpStrength = 0.0f;
+    float warpFrequency = 0.008f;
+    std::string heightmapPath;
+    std::vector<glm::vec2> maskPath;
+    std::vector<glm::vec2> maskCurve;
+    float maskFalloffRadius = 0.5f;
   };
 
   struct TerrainDirty {};
+
+  struct TerrainMaterialComponent
+  {
+    TextureHandle layer1Albedo;
+    TextureHandle layer1Normal;
+    TextureHandle layer1Roughness;
+    TextureHandle layer1Metallic;
+    float slopeStart = 0.7f;
+    float slopeEnd = 0.85f;
+    float layer1UvScale = 8.0f;
+  };
 
 #ifdef YA_EDITOR
   struct EditorOnlyTag {};

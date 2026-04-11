@@ -5,6 +5,7 @@
 #include "Assets/AssetManager.h"
 #include "RenderObject.h"
 #include "FrustumCull.h"
+#include "Scene/Components.h"
 
 #include "Utils/Utils.h"
 
@@ -33,6 +34,7 @@ namespace YAEngine
         .instanced = isInstanced,
         .doubleSided = obj.doubleSided,
         .noShading = obj.noShading,
+        .isTerrain = obj.isTerrain,
         .materialIndex = obj.material.index,
         .materialGeneration = obj.material.generation,
         .meshIndex = obj.mesh.index,
@@ -56,6 +58,7 @@ namespace YAEngine
     uint32_t lastMaterialGeneration = UINT32_MAX;
     for (auto& dc : m_DrawCommands)
     {
+      if (dc.isTerrain) continue;
       if (dc.materialIndex == lastMaterialIndex && dc.materialGeneration == lastMaterialGeneration) continue;
       lastMaterialIndex = dc.materialIndex;
       lastMaterialGeneration = dc.materialGeneration;
@@ -64,6 +67,15 @@ namespace YAEngine
       auto& mat = materialManager.Get(matHandle);
       mat.cubemap = skybox;
       materialManager.GetVulkanMaterial(matHandle).Bind(frame.assets.Textures(), cubeMapManager, frame.cubicResources, mat, currentFrame, m_NoneTexture);
+    }
+
+    // Pre-bind terrain material
+    if (frame.snapshot.terrainData.layer1 != nullptr &&
+        materialManager.Has(frame.snapshot.terrainData.layer0))
+    {
+      auto& layer0 = materialManager.Get(frame.snapshot.terrainData.layer0);
+      m_TerrainMaterial.Bind(frame.assets.Textures(), layer0,
+        *frame.snapshot.terrainData.layer1, currentFrame, m_NoneTexture);
     }
 
     uint8_t lastSortKey = UINT8_MAX;
@@ -85,9 +97,14 @@ namespace YAEngine
         lastSortKey = sortKey;
         lastMaterialIndex = UINT32_MAX;
         lastMaterialGen = UINT32_MAX;
+
+        if (sortKey == 5)
+        {
+          currentPipeline->BindDescriptorSets(cmd, {m_TerrainMaterial.GetDescriptorSet(currentFrame)}, 1);
+        }
       }
 
-      if (dc.materialIndex != lastMaterialIndex || dc.materialGeneration != lastMaterialGen)
+      if (sortKey != 5 && (dc.materialIndex != lastMaterialIndex || dc.materialGeneration != lastMaterialGen))
       {
         currentPipeline->BindDescriptorSets(cmd, {materialManager.GetVulkanMaterial(matHandle).GetDescriptorSet(currentFrame)}, 1);
         lastMaterialIndex = dc.materialIndex;

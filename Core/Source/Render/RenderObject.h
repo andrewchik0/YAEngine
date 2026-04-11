@@ -17,6 +17,7 @@ namespace YAEngine
     uint32_t instanceOffset = 0;
     bool doubleSided = false;
     bool noShading = false;
+    bool isTerrain = false;
   };
 
   struct CameraData
@@ -52,6 +53,14 @@ namespace YAEngine
     uint32_t lightIndex = 0;
   };
 
+  struct TerrainMaterialComponent;
+
+  struct TerrainRenderData
+  {
+    MaterialHandle layer0;
+    const TerrainMaterialComponent* layer1 = nullptr;
+  };
+
   struct SceneSnapshot
   {
     std::vector<RenderObject> objects;
@@ -62,5 +71,6 @@ namespace YAEngine
     std::vector<SpotShadowRequest> spotShadowRequests;
     std::vector<PointShadowRequest> pointShadowRequests;
     LightProbeBuffer probeBuffer {};
+    TerrainRenderData terrainData {};
   };
 }

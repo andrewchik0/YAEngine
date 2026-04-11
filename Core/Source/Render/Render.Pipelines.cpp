@@ -113,6 +113,21 @@ namespace YAEngine
     forwardInfo.vertexShaderFile = "mesh.vert";
     m_ForwardPipelines[4] = m_PSOCache.Register(ctx.device, mainRP, forwardInfo, pipelineCache);
 
+    // [5] terrain (two-layer splatting)
+    {
+      PipelineCreateInfo terrainInfo = {
+        .fragmentShaderFile = "gbuffer_terrain.frag",
+        .vertexShaderFile = "mesh.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .depthWrite = false,
+        .colorAttachmentCount = 3,
+        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_TerrainMaterial.GetLayout() })
+      };
+      m_ForwardPipelines[5] = m_PSOCache.Register(ctx.device, mainRP, terrainInfo, pipelineCache);
+    }
+
     // Swapchain descriptor sets (set 1 - set 0 is FrameUniformBuffer)
     SetDescription desc = {
       .set = 1,

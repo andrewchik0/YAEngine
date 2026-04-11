@@ -4,6 +4,9 @@
 
 #include "Editor/EditorContext.h"
 #include "Editor/Utils/EditorIcons.h"
+#include "Editor/Utils/FileDialog.h"
+#include "Editor/Utils/CurveEditor.h"
+#include "Editor/Utils/SplinePathEditor.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
 #include "Assets/AssetManager.h"
@@ -381,22 +384,120 @@ namespace YAEngine
       ImGui::DragFloat("Height Scale", &terrain.heightScale, 0.1f, 0.0f, 1000.0f);
       committed |= ImGui::IsItemDeactivatedAfterEdit();
 
-      ImGui::DragFloat("Frequency", &terrain.frequency, 0.001f, 0.001f, 1.0f, "%.4f");
-      committed |= ImGui::IsItemDeactivatedAfterEdit();
+      ImGui::Separator();
+      ImGui::Text("Heightmap");
 
-      int oct = static_cast<int>(terrain.octaves);
-      ImGui::SliderInt("Octaves", &oct, 1, 8);
-      terrain.octaves = static_cast<uint32_t>(oct);
-      committed |= ImGui::IsItemDeactivatedAfterEdit();
+      bool hasHeightmap = !terrain.heightmapPath.empty();
+      if (hasHeightmap)
+      {
+        auto relativePath = context.assetManager->MakeRelative(terrain.heightmapPath);
+        ImGui::TextDisabled("%s", relativePath.c_str());
+        ImGui::SameLine();
+        if (ImGui::Button(ICON_FA_XMARK "##ClearHeightmap"))
+        {
+          terrain.heightmapPath.clear();
+          committed = true;
+        }
+      }
+      else
+      {
+        ImGui::TextDisabled("None");
+      }
 
-      ImGui::DragFloat("Lacunarity", &terrain.lacunarity, 0.01f, 1.0f, 4.0f);
-      committed |= ImGui::IsItemDeactivatedAfterEdit();
+      ImGui::SameLine();
+      if (ImGui::Button(ICON_FA_FOLDER_OPEN "##BrowseHeightmap"))
+      {
+        nfdu8filteritem_t filters[] = { { "Image", "png,jpg,tga,bmp" } };
+        auto path = FileDialog::OpenFile(filters, 1);
+        if (!path.empty())
+        {
+          terrain.heightmapPath = path;
+          committed = true;
+        }
+      }
 
-      ImGui::DragFloat("Persistence", &terrain.persistence, 0.01f, 0.1f, 1.0f);
-      committed |= ImGui::IsItemDeactivatedAfterEdit();
+      if (!hasHeightmap)
+      {
+        ImGui::Separator();
+        ImGui::Text("Procedural Noise");
 
-      ImGui::DragInt("Seed", &terrain.seed);
-      committed |= ImGui::IsItemDeactivatedAfterEdit();
+        const char* noiseTypes[] = { "fBm", "Ridged", "Billowy" };
+        int currentNoise = static_cast<int>(terrain.noiseType);
+        if (ImGui::Combo("Noise Type", &currentNoise, noiseTypes, IM_ARRAYSIZE(noiseTypes)))
+        {
+          terrain.noiseType = static_cast<TerrainNoiseType>(currentNoise);
+          committed = true;
+        }
+
+        ImGui::DragFloat("Frequency", &terrain.frequency, 0.001f, 0.001f, 1.0f, "%.4f");
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+        int oct = static_cast<int>(terrain.octaves);
+        ImGui::SliderInt("Octaves", &oct, 1, 8);
+        terrain.octaves = static_cast<uint32_t>(oct);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+        ImGui::DragFloat("Lacunarity", &terrain.lacunarity, 0.01f, 1.0f, 4.0f);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+        ImGui::DragFloat("Persistence", &terrain.persistence, 0.01f, 0.1f, 1.0f);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+        ImGui::DragInt("Seed", &terrain.seed);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+        ImGui::Separator();
+        ImGui::Text("Domain Warping");
+
+        ImGui::DragFloat("Warp Strength", &terrain.warpStrength, 0.5f, 0.0f, 200.0f);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+        ImGui::DragFloat("Warp Frequency", &terrain.warpFrequency, 0.001f, 0.001f, 0.1f, "%.4f");
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+        ImGui::Separator();
+        ImGui::Text("Height Mask");
+
+        if (terrain.maskPath.empty())
+        {
+          if (ImGui::Button("Add Path"))
+          {
+            terrain.maskPath = { { 0.5f, 0.0f }, { 0.5f, 1.0f } };
+            committed = true;
+          }
+        }
+        else
+        {
+          ImGui::Text("Path (top-down)");
+          if (SplinePathEditor::Edit("##MaskPath", terrain.maskPath))
+            committed = true;
+
+          ImGui::DragFloat("Falloff Radius", &terrain.maskFalloffRadius, 0.01f, 0.01f, 1.0f);
+          committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+          if (terrain.maskCurve.empty())
+          {
+            if (ImGui::Button("Add Falloff Curve"))
+            {
+              terrain.maskCurve = { { 0.0f, 0.0f }, { 1.0f, 1.0f } };
+              committed = true;
+            }
+          }
+          else
+          {
+            ImGui::Text("Falloff Curve");
+            if (CurveEditor::Edit("##MaskCurve", terrain.maskCurve))
+              committed = true;
+          }
+
+          if (ImGui::Button("Remove Path"))
+          {
+            terrain.maskPath.clear();
+            terrain.maskCurve.clear();
+            committed = true;
+          }
+        }
+      }
 
       if (committed && !scene.GetRegistry().all_of<TerrainDirty>(entity))
         scene.GetRegistry().emplace<TerrainDirty>(entity);
@@ -508,6 +609,8 @@ namespace YAEngine
         scene.RemoveComponent<TerrainComponent>(entity);
         if (scene.HasComponent<TerrainDirty>(entity))
           scene.RemoveComponent<TerrainDirty>(entity);
+        if (scene.HasComponent<TerrainMaterialComponent>(entity))
+          scene.RemoveComponent<TerrainMaterialComponent>(entity);
         if (scene.HasComponent<MeshComponent>(entity))
         {
           auto meshHandle = scene.GetComponent<MeshComponent>(entity).asset;
@@ -523,6 +626,19 @@ namespace YAEngine
         if (scene.HasComponent<WorldBounds>(entity))
           scene.RemoveComponent<WorldBounds>(entity);
       }
+    }
+
+    if (scene.HasComponent<TerrainMaterialComponent>(entity))
+    {
+      auto& tm = scene.GetComponent<TerrainMaterialComponent>(entity);
+      ImGui::PushID("TerrainMaterial");
+      if (ImGui::CollapsingHeader(ICON_FA_LAYER_GROUP " Terrain Material", ImGuiTreeNodeFlags_DefaultOpen))
+      {
+        ImGui::DragFloat("Slope Start", &tm.slopeStart, 0.01f, 0.0f, 1.0f);
+        ImGui::DragFloat("Slope End", &tm.slopeEnd, 0.01f, 0.0f, 1.0f);
+        ImGui::DragFloat("Layer 1 UV Scale", &tm.layer1UvScale, 0.1f, 0.1f, 100.0f);
+      }
+      ImGui::PopID();
     }
 
     if (scene.HasComponent<ModelSourceComponent>(entity))

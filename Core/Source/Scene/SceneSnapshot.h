@@ -4,6 +4,7 @@
 #include "LightData.h"
 #include "ShadowData.h"
 #include "Scene/Scene.h"
+#include "Scene/Components.h"
 #include "Assets/MeshManager.h"
 #include "Assets/MaterialManager.h"
 
@@ -50,6 +51,8 @@ namespace YAEngine
 
       auto& mat = materialManager.Get(material.asset);
 
+      bool hasTerrain = reg.all_of<TerrainMaterialComponent>(entity);
+
       RenderObject obj {
         .mesh = mesh.asset,
         .material = material.asset,
@@ -58,7 +61,14 @@ namespace YAEngine
         .instanceOffset = meshManager.GetInstanceOffset(mesh.asset),
         .doubleSided = mat.doubleSided,
         .noShading = (mat.shadingModel == ShadingModel::Unlit),
+        .isTerrain = hasTerrain,
       };
+
+      if (hasTerrain)
+      {
+        snapshot.terrainData.layer0 = material.asset;
+        snapshot.terrainData.layer1 = &reg.get<TerrainMaterialComponent>(entity);
+      }
 
       if (reg.all_of<WorldBounds>(entity))
       {
