@@ -181,6 +181,10 @@ namespace YAEngine
     float radius = 0.0f;
     float planeWidth = 1.0f;
     float planeHeight = 1.0f;
+    bool useRoadMask = false;
+    float roadMaskPadding = 1.0f;
+    float roadMaskOuterRadius = 20.0f;
+    float roadMaskFalloff = 0.0f;
   };
 
   struct ScatterDirty {};

@@ -2,12 +2,14 @@
 
 #include "Components.h"
 #include "Scene.h"
+#include "TerrainSystem.h"
 #include "Assets/AssetManager.h"
 #include "Assets/ModelImporter.h"
 #include "Render/Render.h"
 #include "Utils/TerrainMeshGenerator.h"
 #include "Utils/PrimitiveMeshFactory.h"
 #include "Utils/SplinePath2D.h"
+#include "Utils/SplinePath3D.h"
 #include "Utils/CatmullRomCurve.h"
 #include "Utils/Log.h"
 
@@ -30,6 +32,37 @@ namespace YAEngine
     state ^= state >> 17;
     state ^= state << 5;
     return static_cast<float>(state & 0x00FFFFFF) / static_cast<float>(0x00FFFFFF);
+  }
+
+  static float DistanceToRoadXZ(float wx, float wz, const SplinePath3D& spline, int segments = 64)
+  {
+    float minDistSq = std::numeric_limits<float>::max();
+    glm::vec2 point(wx, wz);
+
+    glm::vec3 prev3d = spline.Evaluate(0.0f);
+    glm::vec2 prev(prev3d.x, prev3d.z);
+
+    for (int i = 1; i <= segments; i++)
+    {
+      float t = static_cast<float>(i) / static_cast<float>(segments);
+      glm::vec3 curr3d = spline.Evaluate(t);
+      glm::vec2 curr(curr3d.x, curr3d.z);
+
+      glm::vec2 edge = curr - prev;
+      float edgeLenSq = glm::dot(edge, edge);
+      float proj = 0.0f;
+      if (edgeLenSq > 0.0f)
+        proj = glm::clamp(glm::dot(point - prev, edge) / edgeLenSq, 0.0f, 1.0f);
+
+      glm::vec2 closest = prev + proj * edge;
+      float distSq = glm::dot(point - closest, point - closest);
+      if (distSq < minDistSq)
+        minDistSq = distSq;
+
+      prev = curr;
+    }
+
+    return std::sqrt(minDistSq);
   }
 
   static const NodeDescription* FindMeshNode(const NodeDescription& node)
@@ -69,6 +102,14 @@ namespace YAEngine
       {
         i++;
       }
+    }
+
+    // When terrain changes, mark scatter on same entity as dirty
+    auto terrainView = registry.view<TerrainDirty, ScatterComponent>();
+    for (auto entity : terrainView)
+    {
+      if (!registry.all_of<ScatterDirty>(entity))
+        registry.emplace<ScatterDirty>(entity);
     }
 
     auto view = registry.view<ScatterComponent, ScatterDirty>();
@@ -158,10 +199,17 @@ namespace YAEngine
       auto& meshDesc = desc.meshes[*meshNode->meshIndex];
       state.mesh = m_Assets.Meshes().Load(meshDesc.vertices, meshDesc.indices);
 
-      // Bake node transform into instance matrices
+      // Center the mesh: XZ at origin, Y base at 0
+      glm::vec3 meshMin = m_Assets.Meshes().GetMinBB(state.mesh);
+      glm::vec3 meshMax = m_Assets.Meshes().GetMaxBB(state.mesh);
+      glm::vec3 meshCenter = (meshMin + meshMax) * 0.5f;
+      glm::vec3 meshOffset(-meshCenter.x, -meshMin.y, -meshCenter.z);
+
+      // Bake node transform + mesh centering into instance matrices
       nodeTransform = glm::translate(glm::mat4(1.0f), meshNode->position)
                     * glm::mat4_cast(meshNode->rotation)
-                    * glm::scale(glm::mat4(1.0f), meshNode->scale);
+                    * glm::scale(glm::mat4(1.0f), meshNode->scale)
+                    * glm::translate(glm::mat4(1.0f), meshOffset);
 
       // Load material from model
       state.material = m_Assets.Materials().Create();
@@ -227,7 +275,7 @@ namespace YAEngine
     float halfSize = terrain->size * 0.5f;
     float placementRadius = scatter.radius > 0.0f ? scatter.radius : halfSize;
 
-    // Pre-build spline/curve once for all height samples
+    // Pre-build spline/curve once for all height samples (fallback when no cached grid)
     SplinePath2D spline;
     CatmullRomCurve curve;
     const SplinePath2D* splinePtr = nullptr;
@@ -242,6 +290,30 @@ namespace YAEngine
         curvePtr = &curve;
       }
     }
+
+    // Build road spline for placement mask
+    SplinePath3D roadSpline;
+    float roadHalfWidth = 0.0f;
+    bool hasRoadMask = false;
+    if (scatter.useRoadMask)
+    {
+      auto roadView = registry.view<RoadComponent>();
+      for (auto roadEntity : roadView)
+      {
+        auto& road = registry.get<RoadComponent>(roadEntity);
+        if (road.points.size() >= 2)
+        {
+          roadSpline.points = road.points;
+          roadHalfWidth = road.width * 0.5f;
+          hasRoadMask = true;
+          break;
+        }
+      }
+    }
+
+    // Check if terrain has cached height grid
+    uint32_t terrainEntityId = static_cast<uint32_t>(terrainEntity);
+    bool useCachedHeight = m_TerrainSystem.HasCachedHeight(terrainEntityId);
 
     uint32_t rngState = HashScatterSeed(scatter.seed);
     // Warm up RNG
@@ -262,14 +334,54 @@ namespace YAEngine
       wx = glm::clamp(wx, -halfSize, halfSize);
       wz = glm::clamp(wz, -halfSize, halfSize);
 
-      float wy = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz, *terrain, splinePtr, curvePtr);
+      // Road mask filter
+      if (hasRoadMask)
+      {
+        float dist = DistanceToRoadXZ(wx, wz, roadSpline, 128);
+        float innerRadius = roadHalfWidth + scatter.roadMaskPadding;
+
+        if (dist < innerRadius)
+          continue;
+        if (dist > scatter.roadMaskOuterRadius)
+          continue;
+
+        // Falloff near outer boundary
+        if (scatter.roadMaskFalloff > 0.0f)
+        {
+          float falloffStart = scatter.roadMaskOuterRadius - scatter.roadMaskFalloff;
+          if (dist > falloffStart)
+          {
+            float falloffT = (dist - falloffStart) / scatter.roadMaskFalloff;
+            if (ScatterRandom(rngState) < falloffT)
+              continue;
+          }
+        }
+      }
+
+      // Sample height from cached grid or analytical fallback
+      float wy;
+      if (useCachedHeight)
+        wy = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx, wz);
+      else
+        wy = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz, *terrain, splinePtr, curvePtr);
 
       // Compute slope via finite differences
       float eps = terrain->size / static_cast<float>(terrain->subdivisions);
-      float hL = TerrainMeshGenerator::SampleSurfaceHeight(wx - eps, wz, *terrain, splinePtr, curvePtr);
-      float hR = TerrainMeshGenerator::SampleSurfaceHeight(wx + eps, wz, *terrain, splinePtr, curvePtr);
-      float hD = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz - eps, *terrain, splinePtr, curvePtr);
-      float hU = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz + eps, *terrain, splinePtr, curvePtr);
+      float hL, hR, hD, hU;
+      if (useCachedHeight)
+      {
+        hL = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx - eps, wz);
+        hR = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx + eps, wz);
+        hD = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx, wz - eps);
+        hU = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx, wz + eps);
+      }
+      else
+      {
+        hL = TerrainMeshGenerator::SampleSurfaceHeight(wx - eps, wz, *terrain, splinePtr, curvePtr);
+        hR = TerrainMeshGenerator::SampleSurfaceHeight(wx + eps, wz, *terrain, splinePtr, curvePtr);
+        hD = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz - eps, *terrain, splinePtr, curvePtr);
+        hU = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz + eps, *terrain, splinePtr, curvePtr);
+      }
 
       glm::vec3 normal = glm::normalize(glm::vec3(hL - hR, 2.0f * eps, hD - hU));
       float slopeY = normal.y;

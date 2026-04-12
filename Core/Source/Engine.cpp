@@ -54,9 +54,9 @@ namespace YAEngine
     m_Registry.Register<LayerManager>(&m_LayerManager);
     m_LayerManager.SetRegistry(m_Registry);
 
-    m_Scheduler.AddSystem<TerrainSystem>(m_AssetManager);
+    auto& terrainSystem = m_Scheduler.AddSystem<TerrainSystem>(m_AssetManager);
     m_Scheduler.AddSystem<RoadSystem>(m_AssetManager);
-    m_Scheduler.AddSystem<ScatterSystem>(m_AssetManager, m_Scene, m_Render);
+    m_Scheduler.AddSystem<ScatterSystem>(m_AssetManager, m_Scene, m_Render, terrainSystem);
     m_Scheduler.AddSystem<TransformSystem>();
     m_Scheduler.AddSystem<BoundsUpdateSystem>();
 

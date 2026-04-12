@@ -745,6 +745,18 @@ namespace YAEngine
       ImGui::DragFloat("Radius", &scatter.radius, 0.5f, 0.0f, 10000.0f);
       committed |= ImGui::IsItemDeactivatedAfterEdit();
 
+      if (ImGui::Checkbox("Use Road Mask", &scatter.useRoadMask))
+        committed = true;
+      if (scatter.useRoadMask)
+      {
+        ImGui::DragFloat("Road Padding", &scatter.roadMaskPadding, 0.1f, 0.0f, 50.0f);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::DragFloat("Outer Radius", &scatter.roadMaskOuterRadius, 0.5f, 0.0f, 200.0f);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::DragFloat("Falloff", &scatter.roadMaskFalloff, 0.1f, 0.0f, 50.0f);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+      }
+
       if (committed && !scene.GetRegistry().all_of<ScatterDirty>(entity))
         scene.GetRegistry().emplace<ScatterDirty>(entity);
     }

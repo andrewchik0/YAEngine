@@ -11,6 +11,47 @@ namespace YAEngine
   {
     m_PendingDestroys.clear();
     m_HeightmapCache.clear();
+    m_HeightGridCache.clear();
+  }
+
+  bool TerrainSystem::HasCachedHeight(uint32_t entityId) const
+  {
+    return m_HeightGridCache.contains(entityId);
+  }
+
+  float TerrainSystem::SampleCachedHeight(uint32_t entityId, float worldX, float worldZ) const
+  {
+    auto it = m_HeightGridCache.find(entityId);
+    if (it == m_HeightGridCache.end())
+      return 0.0f;
+
+    auto& grid = it->second;
+    float halfSize = grid.size * 0.5f;
+
+    float normX = (worldX + halfSize) / grid.size;
+    float normZ = (worldZ + halfSize) / grid.size;
+    normX = glm::clamp(normX, 0.0f, 1.0f);
+    normZ = glm::clamp(normZ, 0.0f, 1.0f);
+
+    float px = normX * static_cast<float>(grid.vertsPerSide - 1);
+    float pz = normZ * static_cast<float>(grid.vertsPerSide - 1);
+
+    uint32_t x0 = static_cast<uint32_t>(px);
+    uint32_t z0 = static_cast<uint32_t>(pz);
+    uint32_t x1 = std::min(x0 + 1, grid.vertsPerSide - 1);
+    uint32_t z1 = std::min(z0 + 1, grid.vertsPerSide - 1);
+
+    float fx = px - static_cast<float>(x0);
+    float fz = pz - static_cast<float>(z0);
+
+    float h00 = grid.heights[z0 * grid.vertsPerSide + x0];
+    float h10 = grid.heights[z0 * grid.vertsPerSide + x1];
+    float h01 = grid.heights[z1 * grid.vertsPerSide + x0];
+    float h11 = grid.heights[z1 * grid.vertsPerSide + x1];
+
+    float h0 = h00 + (h10 - h00) * fx;
+    float h1 = h01 + (h11 - h01) * fx;
+    return h0 + (h1 - h0) * fz;
   }
 
   void TerrainSystem::Update(entt::registry& registry, double dt)
@@ -76,6 +117,15 @@ namespace YAEngine
         m_HeightmapCache.erase(entityId);
         procMesh = TerrainMeshGenerator::Generate(terrain);
       }
+
+      // Cache height grid for scatter sampling
+      TerrainHeightGrid heightGrid;
+      heightGrid.vertsPerSide = terrain.subdivisions + 1;
+      heightGrid.size = terrain.size;
+      heightGrid.heights.resize(procMesh.vertices.size());
+      for (size_t i = 0; i < procMesh.vertices.size(); i++)
+        heightGrid.heights[i] = procMesh.vertices[i].position.y;
+      m_HeightGridCache[entityId] = std::move(heightGrid);
 
       auto handle = m_Assets.Meshes().Load(procMesh.vertices, procMesh.indices);
       registry.emplace_or_replace<MeshComponent>(entity, handle);

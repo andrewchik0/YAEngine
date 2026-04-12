@@ -478,6 +478,14 @@ namespace YAEngine
           n["planeWidth"] = s.planeWidth;
           n["planeHeight"] = s.planeHeight;
         }
+        if (s.useRoadMask)
+        {
+          n["useRoadMask"] = s.useRoadMask;
+          n["roadMaskPadding"] = s.roadMaskPadding;
+          n["roadMaskOuterRadius"] = s.roadMaskOuterRadius;
+          if (s.roadMaskFalloff > 0.0f)
+            n["roadMaskFalloff"] = s.roadMaskFalloff;
+        }
         return n;
       },
       [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
@@ -498,6 +506,10 @@ namespace YAEngine
         if (n["radius"]) s.radius = n["radius"].as<float>();
         if (n["planeWidth"]) s.planeWidth = n["planeWidth"].as<float>();
         if (n["planeHeight"]) s.planeHeight = n["planeHeight"].as<float>();
+        if (n["useRoadMask"]) s.useRoadMask = n["useRoadMask"].as<bool>();
+        if (n["roadMaskPadding"]) s.roadMaskPadding = n["roadMaskPadding"].as<float>();
+        if (n["roadMaskOuterRadius"]) s.roadMaskOuterRadius = n["roadMaskOuterRadius"].as<float>();
+        if (n["roadMaskFalloff"]) s.roadMaskFalloff = n["roadMaskFalloff"].as<float>();
         reg.emplace_or_replace<ScatterComponent>(e, s);
         if (!reg.all_of<ScatterDirty>(e))
           reg.emplace<ScatterDirty>(e);

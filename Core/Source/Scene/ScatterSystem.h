@@ -9,12 +9,13 @@ namespace YAEngine
   class AssetManager;
   class Render;
   class Scene;
+  class TerrainSystem;
 
   class ScatterSystem : public ISystem
   {
   public:
-    ScatterSystem(AssetManager& assets, Scene& scene, Render& render)
-      : m_Assets(assets), m_Scene(scene), m_Render(render) {}
+    ScatterSystem(AssetManager& assets, Scene& scene, Render& render, TerrainSystem& terrainSystem)
+      : m_Assets(assets), m_Scene(scene), m_Render(render), m_TerrainSystem(terrainSystem) {}
 
     void Update(entt::registry& registry, double dt) override;
     void OnSceneClear() override;
@@ -43,6 +44,7 @@ namespace YAEngine
     AssetManager& m_Assets;
     Scene& m_Scene;
     Render& m_Render;
+    TerrainSystem& m_TerrainSystem;
     std::vector<PendingDestroy> m_PendingDestroys;
     std::unordered_map<uint32_t, ScatterState> m_States;
 
