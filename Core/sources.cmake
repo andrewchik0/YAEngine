@@ -167,6 +167,8 @@ set(SOURCE_FILES
   Source/Scene/TerrainSystem.cpp
   Source/Scene/RoadSystem.h
   Source/Scene/RoadSystem.cpp
+  Source/Scene/ScatterSystem.h
+  Source/Scene/ScatterSystem.cpp
 )
 
 if(YA_EDITOR)

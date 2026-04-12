@@ -7,12 +7,13 @@ namespace YAEngine
 {
   void EditorCameraLayer::OnSceneReady()
   {
+    auto& camState = GetScene().GetEditorCameraState();
     m_Camera = GetScene().CreateEntity("EditorCamera");
     GetScene().AddComponent<CameraComponent>(m_Camera);
     GetScene().AddComponent<EditorOnlyTag>(m_Camera);
-    m_Pitch = initialPitch;
-    m_Yaw = initialYaw;
-    GetScene().GetTransform(m_Camera).position = initialPosition;
+    m_Pitch = camState.pitch;
+    m_Yaw = camState.yaw;
+    GetScene().GetTransform(m_Camera).position = camState.position;
     GetScene().SetActiveCamera(m_Camera);
 
     glm::quat qPitch = glm::angleAxis(m_Pitch, glm::vec3(1.0f, 0.0f, 0.0f));
@@ -20,6 +21,13 @@ namespace YAEngine
 
     glm::quat orientation = qYaw * qPitch;
     GetScene().GetTransform(m_Camera).rotation = glm::normalize(orientation);
+  }
+
+  glm::vec3 EditorCameraLayer::GetPosition()
+  {
+    if (m_Camera != entt::null && GetScene().HasComponent<LocalTransform>(m_Camera))
+      return GetScene().GetTransform(m_Camera).position;
+    return GetScene().GetEditorCameraState().position;
   }
 
   void EditorCameraLayer::Update(double deltaTime)

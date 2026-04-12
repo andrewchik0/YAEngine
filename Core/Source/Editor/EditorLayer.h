@@ -31,6 +31,7 @@ namespace YAEngine
     void OpenScene();
     void LoadSceneDeferred(const std::string& path);
     void EnsureBasePath(const std::string& scenePath);
+    void SyncEditorCameraState();
 
     EditorContext m_Context;
     std::string m_CurrentScenePath;

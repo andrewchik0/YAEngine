@@ -497,6 +497,18 @@ namespace YAEngine
     m_CurrentScenePath.clear();
   }
 
+  void EditorLayer::SyncEditorCameraState()
+  {
+    auto* editorCam = GetLayerManager().GetLayer<EditorCameraLayer>();
+    if (editorCam)
+    {
+      auto& camState = GetScene().GetEditorCameraState();
+      camState.position = editorCam->GetPosition();
+      camState.yaw = editorCam->GetYaw();
+      camState.pitch = editorCam->GetPitch();
+    }
+  }
+
   void EditorLayer::SaveScene()
   {
     if (m_CurrentScenePath.empty())
@@ -505,6 +517,7 @@ namespace YAEngine
       return;
     }
     EnsureBasePath(m_CurrentScenePath);
+    SyncEditorCameraState();
     SceneSerializer::Save(m_CurrentScenePath, GetScene(), GetAssets(),
       *m_Context.componentRegistry, GetRender());
   }
@@ -516,6 +529,7 @@ namespace YAEngine
       return;
     m_CurrentScenePath = path;
     EnsureBasePath(m_CurrentScenePath);
+    SyncEditorCameraState();
     SceneSerializer::Save(m_CurrentScenePath, GetScene(), GetAssets(),
       *m_Context.componentRegistry, GetRender());
   }

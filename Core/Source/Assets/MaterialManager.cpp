@@ -26,6 +26,7 @@ namespace YAEngine
     dst.specular = src.specular;
     dst.sg = src.sg;
     dst.hasAlpha = src.hasAlpha;
+    dst.alphaTest = src.alphaTest;
     dst.combinedTextures = src.combinedTextures;
     dst.baseColorTexture = src.baseColorTexture;
     dst.metallicTexture = src.metallicTexture;

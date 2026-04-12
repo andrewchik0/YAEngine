@@ -11,6 +11,7 @@ namespace YAEngine
   {
   private:
     VulkanTexture m_VulkanTexture;
+    bool m_HasAlpha = false;
 
     friend class TextureManager;
   };

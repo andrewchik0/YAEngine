@@ -31,6 +31,7 @@ namespace YAEngine
     float specular{0.5f};
     bool sg{false};
     bool hasAlpha{false};
+    bool alphaTest{false};
     bool combinedTextures{false};
     bool doubleSided{false};
     ShadingModel shadingModel{ShadingModel::Lit};

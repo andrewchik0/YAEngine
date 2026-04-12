@@ -233,7 +233,7 @@ namespace YAEngine
     VulkanStorageBuffer m_InstanceBuffer;
 
     PipelineCache m_PSOCache;
-    PipelineHandle m_ForwardPipelines[6] {};
+    PipelineHandle m_ForwardPipelines[8] {};
     PipelineHandle m_DepthPipelines[4] {};
     PipelineHandle m_QuadPipeline {};
     PipelineHandle m_TAAPipeline {};
@@ -282,6 +282,7 @@ namespace YAEngine
       bool doubleSided;
       bool noShading;
       bool isTerrain;
+      bool isAlphaTest;
       uint32_t materialIndex;
       uint32_t materialGeneration;
       uint32_t meshIndex;
@@ -294,6 +295,7 @@ namespace YAEngine
 
       uint8_t SortKey() const
       {
+        if (isAlphaTest) return instanced ? 7 : 6;
         if (isTerrain) return 5;
         if (noShading) return 4;
         return (instanced ? 2 : 0) + (doubleSided ? 1 : 0);

@@ -661,6 +661,97 @@ namespace YAEngine
     }
   }
 
+  static bool DrawScatter(EditorContext& context, ScatterComponent& scatter)
+  {
+    ImGui::PushID("Scatter");
+    bool open = ImGui::CollapsingHeader(ICON_FA_SEEDLING " Scatter", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    if (ImGui::Button(ICON_FA_XMARK "##RemoveScatter", ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight())))
+    {
+      ImGui::PopStyleColor(3);
+      ImGui::PopID();
+      return true;
+    }
+    ImGui::PopStyleColor(3);
+
+    if (open)
+    {
+      auto entity = context.selectedEntity;
+      auto& scene = *context.scene;
+      bool committed = false;
+
+      const char* meshTypes[] = { "Plane", "Model" };
+      int meshType = static_cast<int>(scatter.meshType);
+      if (ImGui::Combo("Mesh Type", &meshType, meshTypes, 2))
+      {
+        scatter.meshType = static_cast<ScatterMeshType>(meshType);
+        committed = true;
+      }
+
+      if (scatter.meshType == ScatterMeshType::Plane)
+      {
+        ImGui::DragFloat("Plane Width", &scatter.planeWidth, 0.01f, 0.01f, 10.0f);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::DragFloat("Plane Height", &scatter.planeHeight, 0.01f, 0.01f, 10.0f);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+      }
+
+      if (scatter.meshType == ScatterMeshType::Plane)
+      {
+        if (!scatter.materialPath.empty())
+        {
+          auto relativePath = context.assetManager->MakeRelative(scatter.materialPath);
+          ImGui::TextDisabled("Texture: %s", relativePath.c_str());
+        }
+        else
+        {
+          ImGui::TextDisabled("Texture: None");
+        }
+        ImGui::SameLine();
+        if (ImGui::Button(ICON_FA_FOLDER_OPEN "##BrowseScatterTexture"))
+        {
+          nfdu8filteritem_t filters[] = { { "Image", "png,jpg,jpeg,tga,bmp" } };
+          auto path = FileDialog::OpenFile(filters, 1);
+          if (!path.empty())
+          {
+            scatter.materialPath = path;
+            committed = true;
+          }
+        }
+      }
+
+      int count = static_cast<int>(scatter.count);
+      ImGui::DragInt("Count", &count, 1.0f, 0, 100000);
+      scatter.count = static_cast<uint32_t>(std::max(0, count));
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      int seed = scatter.seed;
+      ImGui::DragInt("Seed", &seed);
+      scatter.seed = seed;
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::DragFloat("Min Scale", &scatter.minScale, 0.01f, 0.01f, 10.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+      ImGui::DragFloat("Max Scale", &scatter.maxScale, 0.01f, 0.01f, 10.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+      ImGui::DragFloat("Max Slope", &scatter.maxSlope, 0.01f, 0.0f, 1.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+      ImGui::Checkbox("Random Y Rotation", &scatter.randomYRotation);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+      ImGui::DragFloat("Radius", &scatter.radius, 0.5f, 0.0f, 10000.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      if (committed && !scene.GetRegistry().all_of<ScatterDirty>(entity))
+        scene.GetRegistry().emplace<ScatterDirty>(entity);
+    }
+    ImGui::PopID();
+    return false;
+  }
+
   void DetailsPanel::OnRender(EditorContext& context)
   {
     if (!ImGui::Begin("Details"))
@@ -758,6 +849,16 @@ namespace YAEngine
       }
     }
 
+    if (scene.HasComponent<ScatterComponent>(entity))
+    {
+      if (DrawScatter(context, scene.GetComponent<ScatterComponent>(entity)))
+      {
+        scene.RemoveComponent<ScatterComponent>(entity);
+        if (scene.HasComponent<ScatterDirty>(entity))
+          scene.RemoveComponent<ScatterDirty>(entity);
+      }
+    }
+
     if (scene.HasComponent<TerrainMaterialComponent>(entity))
     {
       auto& tm = scene.GetComponent<TerrainMaterialComponent>(entity);
@@ -816,6 +917,15 @@ namespace YAEngine
           if (!scene.HasComponent<MaterialComponent>(entity))
             scene.AddComponent<MaterialComponent>(entity, context.assetManager->FindOrCreateDefaultMaterial());
           scene.GetRegistry().emplace_or_replace<RoadDirty>(entity);
+        }
+      }
+
+      if (!scene.HasComponent<ScatterComponent>(entity))
+      {
+        if (ImGui::MenuItem(ICON_FA_SEEDLING " Scatter"))
+        {
+          scene.AddComponent<ScatterComponent>(entity);
+          scene.GetRegistry().emplace_or_replace<ScatterDirty>(entity);
         }
       }
 

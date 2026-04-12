@@ -48,6 +48,13 @@ namespace YAEngine
       return Get(handle).offset;
     }
 
+    void SetInstanceData(MeshHandle handle, std::vector<glm::mat4>* data, uint32_t bufferOffset)
+    {
+      auto& m = Get(handle);
+      m.instanceData = data;
+      m.offset = bufferOffset;
+    }
+
     glm::vec3 GetMinBB(MeshHandle handle) { return Get(handle).minBB; }
     glm::vec3 GetMaxBB(MeshHandle handle) { return Get(handle).maxBB; }
   private:

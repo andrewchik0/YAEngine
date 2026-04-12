@@ -62,6 +62,7 @@ namespace YAEngine
         .doubleSided = mat.doubleSided,
         .noShading = (mat.shadingModel == ShadingModel::Unlit),
         .isTerrain = hasTerrain,
+        .isAlphaTest = mat.alphaTest,
       };
 
       if (hasTerrain)

@@ -18,6 +18,8 @@ namespace YAEngine
     auto it = m_Cache.find(key);
     if (it != m_Cache.end() && Has(it->second))
     {
+      if (hasAlpha != nullptr)
+        *hasAlpha = Get(it->second).m_HasAlpha;
       return it->second;
     }
 
@@ -26,10 +28,11 @@ namespace YAEngine
 
     if (void* data = stbi_load(path.c_str(), &width, &height, &channels, 4))
     {
+      bool alpha = CheckAlpha(data, width, height);
+      texture->m_HasAlpha = alpha;
       if (hasAlpha != nullptr)
-      {
-        *hasAlpha = CheckAlpha(data, width, height);
-      }
+        *hasAlpha = alpha;
+
       VkFormat format = linear ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_SRGB;
       texture->m_VulkanTexture.Load(*m_Ctx, data, width, height, 4, format);
       stbi_image_free(data);

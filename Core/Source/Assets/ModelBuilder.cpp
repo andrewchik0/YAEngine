@@ -1,6 +1,7 @@
 #include "ModelBuilder.h"
 
 #include "AssetManager.h"
+#include "Utils/Log.h"
 
 namespace YAEngine
 {
@@ -37,14 +38,12 @@ namespace YAEngine
   Entity ModelBuilder::BuildNode(const NodeDescription& node, Entity parent, const ModelDescription& desc)
   {
     Entity entity = m_Scene->CreateEntity(node.name);
-    auto& lt = m_Scene->GetTransform(entity);
-    auto& hc = m_Scene->GetHierarchy(entity);
 
-    hc.parent = parent;
+    m_Scene->GetHierarchy(entity).parent = parent;
     m_Scene->RemoveComponent<RootTag>(entity);
-    lt.position = node.position;
-    lt.rotation = node.rotation;
-    lt.scale = node.scale;
+    m_Scene->GetTransform(entity).position = node.position;
+    m_Scene->GetTransform(entity).rotation = node.rotation;
+    m_Scene->GetTransform(entity).scale = node.scale;
 
     m_Scene->MarkDirty(entity);
 
@@ -82,7 +81,10 @@ namespace YAEngine
       mat.doubleSided = matDesc.doubleSided;
 
       if (!matDesc.baseColorTexture.empty())
+      {
         mat.baseColorTexture = m_AssetManager->Textures().Load(matDesc.baseColorTexture, &mat.hasAlpha);
+        mat.alphaTest = mat.hasAlpha;
+      }
       if (!matDesc.metallicTexture.empty())
         mat.metallicTexture = m_AssetManager->Textures().Load(matDesc.metallicTexture, nullptr, true);
       if (!matDesc.roughnessTexture.empty())
@@ -110,9 +112,13 @@ namespace YAEngine
       nodeMaxBB = glm::max(nodeMaxBB, childBounds.max);
 
       if (prevChild == entt::null)
-        hc.firstChild = child;
+      {
+        m_Scene->GetHierarchy(entity).firstChild = child;
+      }
       else
+      {
         m_Scene->GetHierarchy(prevChild).nextSibling = child;
+      }
 
       prevChild = child;
     }

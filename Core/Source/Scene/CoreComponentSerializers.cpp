@@ -185,6 +185,9 @@ namespace YAEngine
         if (mat.shadingModel != ShadingModel::Lit)
           n["shadingModel"] = "unlit";
 
+        if (mat.alphaTest != mat.hasAlpha)
+          n["alphaTest"] = mat.alphaTest;
+
         auto& textures = assets.Textures();
         SerializeTextureField(n, "baseColorTexture", mat.baseColorTexture, textures, assets);
         SerializeTextureField(n, "metallicTexture", mat.metallicTexture, textures, assets);
@@ -216,6 +219,7 @@ namespace YAEngine
         }
 
         mat.baseColorTexture = DeserializeTextureField(n, "baseColorTexture", assets, &mat.hasAlpha);
+        mat.alphaTest = n["alphaTest"] ? n["alphaTest"].as<bool>() : mat.hasAlpha;
         mat.metallicTexture = DeserializeTextureField(n, "metallicTexture", assets);
         mat.roughnessTexture = DeserializeTextureField(n, "roughnessTexture", assets);
         mat.specularTexture = DeserializeTextureField(n, "specularTexture", assets);
@@ -447,6 +451,56 @@ namespace YAEngine
         reg.emplace_or_replace<RoadComponent>(e, r);
         if (!reg.all_of<RoadDirty>(e))
           reg.emplace<RoadDirty>(e);
+      }
+    );
+
+    // ScatterComponent
+    registry.Register<ScatterComponent>("scatter",
+      [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
+        auto& s = reg.get<ScatterComponent>(e);
+        YAML::Node n;
+        if (s.meshType != ScatterMeshType::Plane)
+          n["meshType"] = "model";
+        if (!s.modelPath.empty())
+          n["modelPath"] = assets.MakeRelative(s.modelPath);
+        if (!s.materialPath.empty())
+          n["materialPath"] = assets.MakeRelative(s.materialPath);
+        n["count"] = s.count;
+        n["seed"] = s.seed;
+        n["minScale"] = s.minScale;
+        n["maxScale"] = s.maxScale;
+        n["maxSlope"] = s.maxSlope;
+        n["randomYRotation"] = s.randomYRotation;
+        if (s.radius > 0.0f)
+          n["radius"] = s.radius;
+        if (s.meshType == ScatterMeshType::Plane)
+        {
+          n["planeWidth"] = s.planeWidth;
+          n["planeHeight"] = s.planeHeight;
+        }
+        return n;
+      },
+      [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
+        ScatterComponent s;
+        if (n["meshType"])
+        {
+          auto mt = n["meshType"].as<std::string>();
+          if (mt == "model") s.meshType = ScatterMeshType::Model;
+        }
+        if (n["modelPath"]) s.modelPath = n["modelPath"].as<std::string>();
+        if (n["materialPath"]) s.materialPath = n["materialPath"].as<std::string>();
+        if (n["count"]) s.count = n["count"].as<uint32_t>();
+        if (n["seed"]) s.seed = n["seed"].as<int32_t>();
+        if (n["minScale"]) s.minScale = n["minScale"].as<float>();
+        if (n["maxScale"]) s.maxScale = n["maxScale"].as<float>();
+        if (n["maxSlope"]) s.maxSlope = n["maxSlope"].as<float>();
+        if (n["randomYRotation"]) s.randomYRotation = n["randomYRotation"].as<bool>();
+        if (n["radius"]) s.radius = n["radius"].as<float>();
+        if (n["planeWidth"]) s.planeWidth = n["planeWidth"].as<float>();
+        if (n["planeHeight"]) s.planeHeight = n["planeHeight"].as<float>();
+        reg.emplace_or_replace<ScatterComponent>(e, s);
+        if (!reg.all_of<ScatterDirty>(e))
+          reg.emplace<ScatterDirty>(e);
       }
     );
 

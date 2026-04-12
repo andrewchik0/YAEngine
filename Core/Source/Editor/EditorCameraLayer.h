@@ -13,17 +13,16 @@ namespace YAEngine
     void OnSceneReady() override;
     void Update(double deltaTime) override;
 
+    glm::vec3 GetPosition();
+    float GetYaw() const { return m_Yaw; }
+    float GetPitch() const { return m_Pitch; }
+
   private:
 
-    Entity m_Camera {};
+    Entity m_Camera = entt::null;
 
     float m_Yaw = 0.0f;
     float m_Pitch = 0.0f;
     float m_Speed = 1.0f;
-
-  public:
-    glm::vec3 initialPosition { 0.0f, 0.0f, 3.0f };
-    float initialYaw = 0.0f;
-    float initialPitch = 0.0f;
   };
 }

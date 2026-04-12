@@ -167,6 +167,33 @@ namespace YAEngine
     return normalized;
   }
 
+  float TerrainMeshGenerator::SampleSurfaceHeight(float worldX, float worldZ, const TerrainComponent& params)
+  {
+    if (params.maskPath.empty())
+      return SampleHeight(worldX, worldZ, params) * params.heightScale;
+
+    SplinePath2D spline(params.maskPath);
+    CatmullRomCurve curve;
+    const CatmullRomCurve* curvePtr = params.maskCurve.empty() ? nullptr : &(curve = CatmullRomCurve(params.maskCurve));
+    return SampleSurfaceHeight(worldX, worldZ, params, &spline, curvePtr);
+  }
+
+  float TerrainMeshGenerator::SampleSurfaceHeight(float worldX, float worldZ, const TerrainComponent& params,
+    const SplinePath2D* spline, const CatmullRomCurve* curve)
+  {
+    float noise = SampleHeight(worldX, worldZ, params);
+
+    if (!spline)
+      return noise * params.heightScale;
+
+    float halfSize = params.size * 0.5f;
+    float normX = (worldX + halfSize) / params.size;
+    float normZ = (worldZ + halfSize) / params.size;
+
+    float mask = ComputeMask(normX, normZ, params, spline, curve);
+    return (noise * 0.5f + 0.5f) * mask * params.heightScale;
+  }
+
   ProcMesh TerrainMeshGenerator::Generate(const TerrainComponent& params)
   {
     ProcMesh mesh;

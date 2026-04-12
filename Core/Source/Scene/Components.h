@@ -160,6 +160,31 @@ namespace YAEngine
     float layer1UvScale = 8.0f;
   };
 
+  enum class ScatterMeshType : uint8_t
+  {
+    Model,
+    Plane
+  };
+
+  struct ScatterComponent
+  {
+    ScatterMeshType meshType = ScatterMeshType::Plane;
+    std::string modelPath;
+    std::string materialPath;
+    uint32_t count = 50;
+    int32_t seed = 0;
+    float minScale = 0.8f;
+    float maxScale = 1.2f;
+    float maxSlope = 0.8f;
+    bool randomYRotation = true;
+    float radius = 0.0f;
+    float planeWidth = 1.0f;
+    float planeHeight = 1.0f;
+  };
+
+  struct ScatterDirty {};
+  struct ScatterInstanceTag {};
+
 #ifdef YA_EDITOR
   struct EditorOnlyTag {};
 #endif

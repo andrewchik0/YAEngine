@@ -128,6 +128,34 @@ namespace YAEngine
       m_ForwardPipelines[5] = m_PSOCache.Register(ctx.device, mainRP, terrainInfo, pipelineCache);
     }
 
+    // [6] alpha-test non-instanced (depth write enabled - skipped in depth prepass)
+    {
+      PipelineCreateInfo alphaTestInfo = {
+        .fragmentShaderFile = "gbuffer_alphatest.frag",
+        .vertexShaderFile = "mesh.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .doubleSided = true,
+        .colorAttachmentCount = 3,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
+      };
+      m_ForwardPipelines[6] = m_PSOCache.Register(ctx.device, mainRP, alphaTestInfo, pipelineCache);
+    }
+
+    // [7] alpha-test instanced (depth write enabled - skipped in depth prepass)
+    {
+      PipelineCreateInfo alphaTestInstInfo = {
+        .fragmentShaderFile = "gbuffer_alphatest.frag",
+        .vertexShaderFile = "mesh_instanced.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .doubleSided = true,
+        .colorAttachmentCount = 3,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(), m_InstanceDescriptorSet.GetLayout() })
+      };
+      m_ForwardPipelines[7] = m_PSOCache.Register(ctx.device, mainRP, alphaTestInstInfo, pipelineCache);
+    }
+
     // Swapchain descriptor sets (set 1 - set 0 is FrameUniformBuffer)
     SetDescription desc = {
       .set = 1,

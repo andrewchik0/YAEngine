@@ -35,6 +35,7 @@ namespace YAEngine
         .doubleSided = obj.doubleSided,
         .noShading = obj.noShading,
         .isTerrain = obj.isTerrain,
+        .isAlphaTest = obj.isAlphaTest,
         .materialIndex = obj.material.index,
         .materialGeneration = obj.material.generation,
         .meshIndex = obj.mesh.index,
@@ -212,6 +213,7 @@ namespace YAEngine
     {
       auto& obj = frame.snapshot.objects[i];
       if (obj.noShading) continue;
+      if (obj.isAlphaTest) continue;
 
       m_DepthDrawCommands.push_back({
         .instanced = (obj.instanceData != nullptr),
@@ -283,6 +285,7 @@ namespace YAEngine
     {
       auto& obj = frame.snapshot.objects[i];
       if (obj.noShading) continue;
+      if (obj.isAlphaTest) continue;
 
       m_ShadowDrawCommands.push_back({
         .instanced = (obj.instanceData != nullptr),

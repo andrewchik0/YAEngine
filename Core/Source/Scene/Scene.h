@@ -11,6 +11,13 @@ namespace YAEngine
   using Entity = entt::entity;
   using Name = std::string;
 
+  struct EditorCameraState
+  {
+    glm::vec3 position { 0.0f, 0.0f, 3.0f };
+    float yaw = 0.0f;
+    float pitch = 0.0f;
+  };
+
   class Scene
   {
   public:
@@ -117,9 +124,13 @@ namespace YAEngine
       m_ActiveCamera = entt::null;
       m_Skybox = {};
       m_ScenePath.clear();
+      m_EditorCameraState = {};
     }
 
     entt::registry& GetRegistry() { return m_Registry; }
+
+    EditorCameraState& GetEditorCameraState() { return m_EditorCameraState; }
+    const EditorCameraState& GetEditorCameraState() const { return m_EditorCameraState; }
 
   private:
     entt::registry m_Registry;
@@ -127,6 +138,7 @@ namespace YAEngine
     entt::entity m_ActiveCamera = entt::null;
     CubeMapHandle m_Skybox {};
     std::string m_ScenePath;
+    EditorCameraState m_EditorCameraState;
 
   };
 

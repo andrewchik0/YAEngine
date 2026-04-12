@@ -97,6 +97,7 @@ namespace YAEngine
       changed |= ImGui::SliderFloat("Specular", &mat.specular, 0.0f, 1.0f);
       changed |= ImGui::ColorEdit3("Emissivity", &mat.emissivity.x);
       changed |= ImGui::Checkbox("Has Alpha", &mat.hasAlpha);
+      changed |= ImGui::Checkbox("Alpha Test", &mat.alphaTest);
       changed |= ImGui::Checkbox("Combined Textures", &mat.combinedTextures);
     }
 

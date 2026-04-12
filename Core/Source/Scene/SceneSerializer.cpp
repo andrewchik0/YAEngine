@@ -26,7 +26,9 @@ namespace YAEngine
   static void SerializeEntity(YAML::Node& entities, Scene& scene,
     const ComponentRegistry& registry, Entity entity)
   {
-    // Skip editor-only entities
+    // Skip runtime-generated entities
+    if (scene.HasComponent<ScatterInstanceTag>(entity))
+      return;
 #ifdef YA_EDITOR
     if (scene.HasComponent<EditorOnlyTag>(entity))
       return;
@@ -123,6 +125,17 @@ namespace YAEngine
 
     root["settings"] = settings;
 
+#ifdef YA_EDITOR
+    {
+      auto& camState = scene.GetEditorCameraState();
+      YAML::Node editorCam;
+      editorCam["position"] = SerializeVec3(camState.position);
+      editorCam["yaw"] = camState.yaw;
+      editorCam["pitch"] = camState.pitch;
+      root["editorCamera"] = editorCam;
+    }
+#endif
+
     // Entities - walk root entities first
     YAML::Node entities;
     auto view = scene.GetView<RootTag>();
@@ -165,6 +178,16 @@ namespace YAEngine
     }
 
     assets.SetBasePath(basePath);
+
+    // Editor camera state
+    if (root["editorCamera"])
+    {
+      auto ec = root["editorCamera"];
+      auto& camState = scene.GetEditorCameraState();
+      if (ec["position"]) camState.position = DeserializeVec3(ec["position"]);
+      if (ec["yaw"]) camState.yaw = ec["yaw"].as<float>();
+      if (ec["pitch"]) camState.pitch = ec["pitch"].as<float>();
+    }
 
     // Pass 1: Settings
     if (root["settings"])

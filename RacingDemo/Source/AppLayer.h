@@ -42,13 +42,10 @@ public:
       APP_WORKING_DIR);
 
 #ifdef YA_EDITOR
-    auto* editorCam = GetLayerManager().GetLayer<YAEngine::EditorCameraLayer>();
-    if (editorCam)
-    {
-      editorCam->initialPosition = glm::vec3(0.0f, 18.0f, -8.0f);
-      editorCam->initialPitch = glm::radians(-60.0f);
-      editorCam->initialYaw = glm::radians(180.0f);
-    }
+    auto& camState = GetScene().GetEditorCameraState();
+    camState.position = glm::vec3(0.0f, 18.0f, -8.0f);
+    camState.pitch = glm::radians(-60.0f);
+    camState.yaw = glm::radians(180.0f);
 #endif
 
 #else
@@ -63,6 +60,9 @@ public:
       auto view = GetScene().GetView<YAEngine::ModelSourceComponent>();
       for (auto e : view)
       {
+        if (GetScene().GetChildByName(e, "wheel-left-front") == entt::null)
+          continue;
+
         GetScene().AddComponent<VehicleComponent>(e);
 
         auto wheels = std::array<YAEngine::Entity, 4> {
@@ -74,6 +74,7 @@ public:
 
         for (int i = 0; i < 4; i++)
         {
+          if (wheels[i] == entt::null) continue;
           auto baseRot = GetScene().GetTransform(wheels[i]).rotation;
           GetScene().AddComponent<WheelComponent>(wheels[i],
             WheelComponent {

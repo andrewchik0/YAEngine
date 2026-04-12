@@ -22,6 +22,11 @@ void main() {
   vec4 albedoTex = mix(vec4(1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
   vec4 albedo = vec4(u_Material.albedo, 1.0) * albedoTex;
 
+#ifdef ALPHA_TEST
+  if (albedo.a < 0.5)
+    discard;
+#endif
+
   albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
 
   float hasNormalMap = float((u_Material.textureMask >> 5) & 1);
