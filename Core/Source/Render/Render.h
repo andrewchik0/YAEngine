@@ -89,6 +89,12 @@ namespace YAEngine
     float& GetBloomIntensity() { return m_BloomIntensity; }
     float& GetBloomThreshold() { return m_BloomThreshold; }
     float& GetBloomSoftKnee() { return m_BloomSoftKnee; }
+    bool& GetFogEnabled() { return b_FogEnabled; }
+    float& GetFogDensity() { return m_FogDensity; }
+    float& GetFogHeightFalloff() { return m_FogHeightFalloff; }
+    glm::vec3& GetFogColor() { return m_FogColor; }
+    float& GetFogMaxOpacity() { return m_FogMaxOpacity; }
+    float& GetFogStartDistance() { return m_FogStartDistance; }
 
     const RenderStats& GetStats() const { return m_Stats; }
 
@@ -114,6 +120,12 @@ namespace YAEngine
     float m_BloomIntensity = 0.04f;
     float m_BloomThreshold = 1.0f;
     float m_BloomSoftKnee = 0.5f;
+    bool b_FogEnabled = false;
+    float m_FogDensity = 0.02f;
+    float m_FogHeightFalloff = 0.1f;
+    glm::vec3 m_FogColor = glm::vec3(0.7f, 0.75f, 0.8f);
+    float m_FogMaxOpacity = 1.0f;
+    float m_FogStartDistance = 10.0f;
     float m_LastFrameTime = 0.0f;
     float m_DeltaTime = 0.0f;
 

@@ -43,6 +43,12 @@ struct FrameUniforms
   float ssaoRadius;
   float ssaoIntensity;
   float ssaoBias;
+  int fogEnabled;
+  float fogDensity;
+  float fogHeightFalloff;
+  vec3 fogColor;
+  float fogStartDistance;
+  float fogMaxOpacity;
 };
 
 #ifdef __cplusplus

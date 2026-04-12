@@ -96,6 +96,27 @@ vec3 sampleProbeIBL(vec3 normal, vec3 R, float roughness, float NdotV,
   return kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
 }
 
+float computeHeightFog(vec3 rayOrigin, vec3 rayDir, float rayLength)
+{
+  float effectiveLength = max(rayLength - u_Frame.fogStartDistance, 0.0);
+  if (effectiveLength <= 0.0) return 0.0;
+
+  float b = u_Frame.fogHeightFalloff;
+
+  float startY = rayOrigin.y + rayDir.y * u_Frame.fogStartDistance;
+
+  float dirY = rayDir.y;
+  float safeDirY = dirY >= 0.0 ? max(dirY, 0.001) : min(dirY, -0.001);
+
+  // Integral of density * exp(-heightFalloff * y) along the ray
+  float bStartY = clamp(-b * startY, -20.0, 20.0);
+  float bDirLen = clamp(-effectiveLength * safeDirY * b, -20.0, 20.0);
+  float fogInt = u_Frame.fogDensity * exp(bStartY)
+    * (1.0 - exp(bDirLen)) / (safeDirY * b);
+
+  return clamp(fogInt, 0.0, u_Frame.fogMaxOpacity);
+}
+
 void main()
 {
   float depth = texture(depthTexture, uv).r;
@@ -108,6 +129,14 @@ void main()
     vec4 viewPos = u_Frame.invProj * clipPos;
     vec3 worldDir = normalize(mat3(u_Frame.invView) * viewPos.xyz);
     vec3 skyColor = texture(skyboxCubemap, worldDir).rgb;
+
+    if (u_Frame.fogEnabled != 0)
+    {
+      // Large distance to simulate infinite fog for sky
+      float fogAmount = computeHeightFog(u_Frame.cameraPosition, worldDir, u_Frame.farPlane);
+      skyColor = mix(skyColor, u_Frame.fogColor, fogAmount);
+    }
+
     outColor = vec4(skyColor, 1.0);
     return;
   }
@@ -278,6 +307,14 @@ void main()
   }
 
   vec3 resultColor = max(ambient + Lo, vec3(0.0));
+
+  if (u_Frame.fogEnabled != 0)
+  {
+    vec3 toPixel = worldPos - u_Frame.cameraPosition;
+    float rayLength = length(toPixel);
+    float fogAmount = computeHeightFog(u_Frame.cameraPosition, toPixel / rayLength, rayLength);
+    resultColor = mix(resultColor, u_Frame.fogColor, fogAmount);
+  }
 
   outColor = vec4(resultColor, 1.0);
 }

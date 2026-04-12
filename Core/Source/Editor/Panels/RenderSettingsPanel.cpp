@@ -103,6 +103,17 @@ namespace YAEngine
       }
 
       ImGui::Separator();
+      ImGui::Checkbox("Fog", &context.render->GetFogEnabled());
+      if (context.render->GetFogEnabled())
+      {
+        ImGui::DragFloat("Fog Density", &context.render->GetFogDensity(), 0.001f, 0.0f, 1.0f);
+        ImGui::DragFloat("Fog Height Falloff", &context.render->GetFogHeightFalloff(), 0.001f, 0.001f, 1.0f);
+        ImGui::ColorEdit3("Fog Color", &context.render->GetFogColor().x);
+        ImGui::DragFloat("Fog Max Opacity", &context.render->GetFogMaxOpacity(), 0.01f, 0.0f, 1.0f);
+        ImGui::DragFloat("Fog Start Distance", &context.render->GetFogStartDistance(), 0.5f, 0.0f, 500.0f);
+      }
+
+      ImGui::Separator();
       ImGui::Checkbox("Auto Exposure", &context.render->GetAutoExposureEnabled());
       if (context.render->GetAutoExposureEnabled())
       {

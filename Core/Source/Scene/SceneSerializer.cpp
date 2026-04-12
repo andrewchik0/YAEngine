@@ -114,6 +114,12 @@ namespace YAEngine
     settings["bloomIntensity"] = render.GetBloomIntensity();
     settings["bloomThreshold"] = render.GetBloomThreshold();
     settings["bloomSoftKnee"] = render.GetBloomSoftKnee();
+    settings["fog"] = render.GetFogEnabled();
+    settings["fogDensity"] = render.GetFogDensity();
+    settings["fogHeightFalloff"] = render.GetFogHeightFalloff();
+    settings["fogColor"] = SerializeVec3(render.GetFogColor());
+    settings["fogMaxOpacity"] = render.GetFogMaxOpacity();
+    settings["fogStartDistance"] = render.GetFogStartDistance();
 
     root["settings"] = settings;
 
@@ -185,6 +191,12 @@ namespace YAEngine
       if (settings["bloomIntensity"]) render.GetBloomIntensity() = settings["bloomIntensity"].as<float>();
       if (settings["bloomThreshold"]) render.GetBloomThreshold() = settings["bloomThreshold"].as<float>();
       if (settings["bloomSoftKnee"]) render.GetBloomSoftKnee() = settings["bloomSoftKnee"].as<float>();
+      if (settings["fog"]) render.GetFogEnabled() = settings["fog"].as<bool>();
+      if (settings["fogDensity"]) render.GetFogDensity() = settings["fogDensity"].as<float>();
+      if (settings["fogHeightFalloff"]) render.GetFogHeightFalloff() = settings["fogHeightFalloff"].as<float>();
+      if (settings["fogColor"]) render.GetFogColor() = DeserializeVec3(settings["fogColor"]);
+      if (settings["fogMaxOpacity"]) render.GetFogMaxOpacity() = settings["fogMaxOpacity"].as<float>();
+      if (settings["fogStartDistance"]) render.GetFogStartDistance() = settings["fogStartDistance"].as<float>();
     }
 
     if (!root["entities"])

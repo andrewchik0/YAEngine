@@ -345,6 +345,12 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.frameIndex = static_cast<int>(m_GlobalFrameIndex);
     m_FrameUniformBuffer.uniforms.tonemapMode = m_TonemapMode;
     m_FrameUniformBuffer.uniforms.bloomIntensity = b_BloomEnabled ? m_BloomIntensity : 0.0f;
+    m_FrameUniformBuffer.uniforms.fogEnabled = b_FogEnabled ? 1 : 0;
+    m_FrameUniformBuffer.uniforms.fogDensity = m_FogDensity;
+    m_FrameUniformBuffer.uniforms.fogHeightFalloff = m_FogHeightFalloff;
+    m_FrameUniformBuffer.uniforms.fogMaxOpacity = m_FogMaxOpacity;
+    m_FrameUniformBuffer.uniforms.fogColor = m_FogColor;
+    m_FrameUniformBuffer.uniforms.fogStartDistance = m_FogStartDistance;
 
     // Configure render graph for this frame (TAA ping-pong + swapchain)
     auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
