@@ -50,5 +50,7 @@ namespace YAEngine
 
     void DestroyState(uint32_t entityId);
     void GenerateScatter(entt::registry& registry, entt::entity entity);
+    void GenerateSatelliteScatter(entt::registry& registry, entt::entity entity);
+    entt::entity FindEntityByName(entt::registry& registry, const std::string& name) const;
   };
 }

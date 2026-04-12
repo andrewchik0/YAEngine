@@ -757,6 +757,29 @@ namespace YAEngine
         committed |= ImGui::IsItemDeactivatedAfterEdit();
       }
 
+      ImGui::Separator();
+      char clusterBuf[256] = {};
+      std::memcpy(clusterBuf, scatter.clusterSource.c_str(),
+        std::min(scatter.clusterSource.size(), sizeof(clusterBuf) - 1));
+      if (ImGui::InputText("Cluster Source", clusterBuf, sizeof(clusterBuf)))
+      {
+        scatter.clusterSource = clusterBuf;
+        committed = true;
+      }
+      if (!scatter.clusterSource.empty())
+      {
+        ImGui::DragFloat("Cluster Radius", &scatter.clusterRadius, 0.1f, 0.5f, 20.0f);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+        int cMin = static_cast<int>(scatter.clusterCountMin);
+        int cMax = static_cast<int>(scatter.clusterCountMax);
+        ImGui::DragInt("Cluster Count Min", &cMin, 0.1f, 0, 10);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::DragInt("Cluster Count Max", &cMax, 0.1f, 0, 10);
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+        scatter.clusterCountMin = static_cast<uint32_t>(std::max(0, cMin));
+        scatter.clusterCountMax = static_cast<uint32_t>(std::max(static_cast<int>(scatter.clusterCountMin), cMax));
+      }
+
       if (committed && !scene.GetRegistry().all_of<ScatterDirty>(entity))
         scene.GetRegistry().emplace<ScatterDirty>(entity);
     }

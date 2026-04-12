@@ -133,10 +133,44 @@ namespace YAEngine
       }
     }
 
-    auto view = registry.view<ScatterComponent, ScatterDirty>();
-    for (auto entity : view)
+    // When a primary scatter is dirty, mark its satellites dirty too
+    {
+      auto dirtyView = registry.view<ScatterComponent, ScatterDirty>();
+      auto allScatter = registry.view<ScatterComponent>();
+      for (auto dirtyEntity : dirtyView)
+      {
+        auto& dirtyName = registry.get<Name>(dirtyEntity);
+        for (auto candidate : allScatter)
+        {
+          if (candidate == dirtyEntity) continue;
+          auto& cs = registry.get<ScatterComponent>(candidate);
+          if (cs.clusterSource == dirtyName && !registry.all_of<ScatterDirty>(candidate))
+            registry.emplace<ScatterDirty>(candidate);
+        }
+      }
+    }
+
+    // Two-pass processing: standalone first, then satellites
+    auto dirtyView = registry.view<ScatterComponent, ScatterDirty>();
+    std::vector<entt::entity> standalone;
+    std::vector<entt::entity> satellites;
+    for (auto entity : dirtyView)
+    {
+      auto& s = registry.get<ScatterComponent>(entity);
+      if (s.clusterSource.empty())
+        standalone.push_back(entity);
+      else
+        satellites.push_back(entity);
+    }
+
+    for (auto entity : standalone)
     {
       GenerateScatter(registry, entity);
+      registry.remove<ScatterDirty>(entity);
+    }
+    for (auto entity : satellites)
+    {
+      GenerateSatelliteScatter(registry, entity);
       registry.remove<ScatterDirty>(entity);
     }
   }
@@ -488,6 +522,307 @@ namespace YAEngine
 
     // Move state into map first, then set instance data from stored reference
     // to avoid dangling pointer after std::move
+    m_States[entityId] = std::move(state);
+    auto& stored = m_States[entityId];
+    m_Assets.Meshes().SetInstanceData(stored.mesh, &stored.instanceMatrices, stored.instanceOffset);
+  }
+
+  entt::entity ScatterSystem::FindEntityByName(entt::registry& registry, const std::string& name) const
+  {
+    auto view = registry.view<Name>();
+    for (auto entity : view)
+    {
+      if (registry.get<Name>(entity) == name)
+        return entity;
+    }
+    return entt::null;
+  }
+
+  void ScatterSystem::GenerateSatelliteScatter(entt::registry& registry, entt::entity entity)
+  {
+    uint32_t entityId = static_cast<uint32_t>(entity);
+    DestroyState(entityId);
+
+    auto& scatter = registry.get<ScatterComponent>(entity);
+
+    // Find source entity and its scatter state
+    entt::entity sourceEntity = FindEntityByName(registry, scatter.clusterSource);
+    if (sourceEntity == entt::null)
+    {
+      YA_LOG_ERROR("Scene", "Satellite scatter: source entity '%s' not found", scatter.clusterSource.c_str());
+      return;
+    }
+    uint32_t sourceId = static_cast<uint32_t>(sourceEntity);
+    auto sourceIt = m_States.find(sourceId);
+    if (sourceIt == m_States.end() || sourceIt->second.instanceMatrices.empty())
+    {
+      YA_LOG_ERROR("Scene", "Satellite scatter: source '%s' has no scatter instances", scatter.clusterSource.c_str());
+      return;
+    }
+    auto& sourcePositions = sourceIt->second.instanceMatrices;
+
+    // Find terrain on this entity or parent
+    const TerrainComponent* terrain = nullptr;
+    entt::entity terrainEntity = entt::null;
+    if (registry.all_of<TerrainComponent>(entity))
+    {
+      terrain = &registry.get<TerrainComponent>(entity);
+      terrainEntity = entity;
+    }
+    else if (registry.all_of<HierarchyComponent>(entity))
+    {
+      auto parent = registry.get<HierarchyComponent>(entity).parent;
+      if (parent != entt::null && registry.all_of<TerrainComponent>(parent))
+      {
+        terrain = &registry.get<TerrainComponent>(parent);
+        terrainEntity = parent;
+      }
+    }
+
+    if (!terrain)
+    {
+      YA_LOG_ERROR("Scene", "Satellite ScatterComponent requires TerrainComponent on entity or parent");
+      return;
+    }
+
+    // Create mesh + material (same logic as GenerateScatter)
+    ScatterState state;
+    glm::mat4 nodeTransform(1.0f);
+
+    if (scatter.meshType == ScatterMeshType::Model && !scatter.modelPath.empty())
+    {
+      std::string absPath = m_Assets.ResolvePath(scatter.modelPath);
+      auto desc = ModelImporter::Import(absPath, false);
+
+      const NodeDescription* meshNode = nullptr;
+      glm::mat4 accumulatedTransform(1.0f);
+      for (auto& child : desc.root.children)
+      {
+        meshNode = FindMeshNode(child, glm::mat4(1.0f), accumulatedTransform);
+        if (meshNode) break;
+      }
+
+      if (!meshNode || !meshNode->meshIndex.has_value())
+      {
+        YA_LOG_ERROR("Scene", "Scatter model has no mesh: %s", scatter.modelPath.c_str());
+        return;
+      }
+
+      auto& meshDesc = desc.meshes[*meshNode->meshIndex];
+      state.mesh = m_Assets.Meshes().Load(meshDesc.vertices, meshDesc.indices);
+
+      glm::vec3 rawMin = m_Assets.Meshes().GetMinBB(state.mesh);
+      glm::vec3 rawMax = m_Assets.Meshes().GetMaxBB(state.mesh);
+      glm::vec3 corners[8] = {
+        { rawMin.x, rawMin.y, rawMin.z }, { rawMax.x, rawMin.y, rawMin.z },
+        { rawMin.x, rawMax.y, rawMin.z }, { rawMax.x, rawMax.y, rawMin.z },
+        { rawMin.x, rawMin.y, rawMax.z }, { rawMax.x, rawMin.y, rawMax.z },
+        { rawMin.x, rawMax.y, rawMax.z }, { rawMax.x, rawMax.y, rawMax.z },
+      };
+      glm::vec3 worldMin(std::numeric_limits<float>::max());
+      glm::vec3 worldMax(std::numeric_limits<float>::lowest());
+      for (auto& c : corners)
+      {
+        glm::vec3 w = glm::vec3(accumulatedTransform * glm::vec4(c, 1.0f));
+        worldMin = glm::min(worldMin, w);
+        worldMax = glm::max(worldMax, w);
+      }
+      glm::vec3 worldCenter = (worldMin + worldMax) * 0.5f;
+      nodeTransform = glm::translate(glm::mat4(1.0f),
+                        glm::vec3(-worldCenter.x, -worldMin.y, -worldCenter.z))
+                    * accumulatedTransform;
+
+      state.material = m_Assets.Materials().Create();
+      auto& mat = m_Assets.Materials().Get(state.material);
+      mat.name = "scatter_sat_" + std::to_string(entityId);
+
+      if (meshNode->materialIndex.has_value())
+      {
+        auto& matDesc = desc.materials[*meshNode->materialIndex];
+        mat.albedo = matDesc.albedo;
+        mat.roughness = matDesc.roughness;
+        mat.metallic = matDesc.metallic;
+        mat.roughnessFactor = matDesc.roughnessFactor;
+        mat.metallicFactor = matDesc.metallicFactor;
+        mat.doubleSided = matDesc.doubleSided;
+        mat.combinedTextures = matDesc.combinedTextures;
+
+        if (!matDesc.baseColorTexture.empty())
+        {
+          mat.baseColorTexture = m_Assets.Textures().Load(matDesc.baseColorTexture, &mat.hasAlpha);
+          mat.alphaTest = mat.hasAlpha;
+        }
+        if (!matDesc.metallicTexture.empty())
+          mat.metallicTexture = m_Assets.Textures().Load(matDesc.metallicTexture, nullptr, true);
+        if (!matDesc.roughnessTexture.empty())
+          mat.roughnessTexture = m_Assets.Textures().Load(matDesc.roughnessTexture, nullptr, true);
+        if (!matDesc.normalTexture.empty())
+          mat.normalTexture = m_Assets.Textures().Load(matDesc.normalTexture, nullptr, true);
+      }
+    }
+    else
+    {
+      ProcMesh quad;
+      float hw = scatter.planeWidth * 0.5f;
+      float hh = scatter.planeHeight * 0.5f;
+      quad.vertices = {
+        { .position = { -hw, 0.0f, 0.0f }, .tex = { 0.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
+        { .position = {  hw, 0.0f, 0.0f }, .tex = { 1.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
+        { .position = {  hw, hh * 2.0f, 0.0f }, .tex = { 1.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
+        { .position = { -hw, hh * 2.0f, 0.0f }, .tex = { 0.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
+        { .position = { 0.0f, 0.0f, -hw }, .tex = { 0.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
+        { .position = { 0.0f, 0.0f,  hw }, .tex = { 1.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
+        { .position = { 0.0f, hh * 2.0f,  hw }, .tex = { 1.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
+        { .position = { 0.0f, hh * 2.0f, -hw }, .tex = { 0.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
+      };
+      quad.indices = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7 };
+      state.mesh = m_Assets.Meshes().Load(quad.vertices, quad.indices);
+
+      state.material = m_Assets.Materials().Create();
+      auto& mat = m_Assets.Materials().Get(state.material);
+      mat.name = "scatter_sat_" + std::to_string(entityId);
+      mat.doubleSided = true;
+      if (!scatter.materialPath.empty())
+      {
+        std::string absPath = m_Assets.ResolvePath(scatter.materialPath);
+        mat.baseColorTexture = m_Assets.Textures().Load(absPath, &mat.hasAlpha);
+        mat.alphaTest = mat.hasAlpha;
+      }
+    }
+
+    // Prepare terrain height sampling
+    float halfSize = terrain->size * 0.5f;
+
+    SplinePath2D spline;
+    CatmullRomCurve curve;
+    const SplinePath2D* splinePtr = nullptr;
+    const CatmullRomCurve* curvePtr = nullptr;
+    if (!terrain->maskPath.empty())
+    {
+      spline = SplinePath2D(terrain->maskPath);
+      splinePtr = &spline;
+      if (!terrain->maskCurve.empty())
+      {
+        curve = CatmullRomCurve(terrain->maskCurve);
+        curvePtr = &curve;
+      }
+    }
+
+    uint32_t terrainEntityId = static_cast<uint32_t>(terrainEntity);
+    bool useCachedHeight = m_TerrainSystem.HasCachedHeight(terrainEntityId);
+    float eps = terrain->size / static_cast<float>(terrain->subdivisions);
+
+    uint32_t rngState = HashScatterSeed(scatter.seed);
+    for (int i = 0; i < 4; i++)
+      ScatterRandom(rngState);
+
+    // Generate satellites around each source position
+    for (auto& srcMatrix : sourcePositions)
+    {
+      glm::vec3 srcPos(srcMatrix[3]);
+
+      uint32_t clusterCount = scatter.clusterCountMin +
+        static_cast<uint32_t>(ScatterRandom(rngState) *
+          (scatter.clusterCountMax - scatter.clusterCountMin + 1));
+      clusterCount = std::min(clusterCount, scatter.clusterCountMax);
+
+      for (uint32_t j = 0; j < clusterCount; j++)
+      {
+        float angle = ScatterRandom(rngState) * glm::two_pi<float>();
+        float dist = ScatterRandom(rngState) * scatter.clusterRadius;
+        float wx = srcPos.x + std::cos(angle) * dist;
+        float wz = srcPos.z + std::sin(angle) * dist;
+
+        wx = glm::clamp(wx, -halfSize, halfSize);
+        wz = glm::clamp(wz, -halfSize, halfSize);
+
+        // Sample height
+        float wy;
+        if (useCachedHeight)
+          wy = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx, wz);
+        else
+          wy = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz, *terrain, splinePtr, curvePtr);
+
+        // Slope check
+        float hL, hR, hD, hU;
+        if (useCachedHeight)
+        {
+          hL = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx - eps, wz);
+          hR = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx + eps, wz);
+          hD = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx, wz - eps);
+          hU = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx, wz + eps);
+        }
+        else
+        {
+          hL = TerrainMeshGenerator::SampleSurfaceHeight(wx - eps, wz, *terrain, splinePtr, curvePtr);
+          hR = TerrainMeshGenerator::SampleSurfaceHeight(wx + eps, wz, *terrain, splinePtr, curvePtr);
+          hD = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz - eps, *terrain, splinePtr, curvePtr);
+          hU = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz + eps, *terrain, splinePtr, curvePtr);
+        }
+
+        glm::vec3 normal = glm::normalize(glm::vec3(hL - hR, 2.0f * eps, hD - hU));
+        if (normal.y < scatter.maxSlope)
+          continue;
+
+        float yRot = 0.0f;
+        if (scatter.randomYRotation)
+          yRot = ScatterRandom(rngState) * glm::two_pi<float>();
+
+        float scale = scatter.minScale + ScatterRandom(rngState) * (scatter.maxScale - scatter.minScale);
+
+        glm::mat4 m(1.0f);
+        m = glm::translate(m, glm::vec3(wx, wy, wz));
+        m = glm::rotate(m, yRot, glm::vec3(0.0f, 1.0f, 0.0f));
+        m = glm::scale(m, glm::vec3(scale));
+        m = m * nodeTransform;
+
+        state.instanceMatrices.push_back(m);
+      }
+    }
+
+    if (state.instanceMatrices.empty())
+    {
+      m_Assets.Meshes().Destroy(state.mesh);
+      m_Assets.Materials().Destroy(state.material);
+      return;
+    }
+
+    // Compute world bounds
+    glm::vec3 boundsMin(std::numeric_limits<float>::max());
+    glm::vec3 boundsMax(std::numeric_limits<float>::lowest());
+    float meshHeight = scatter.meshType == ScatterMeshType::Plane
+      ? scatter.planeHeight * scatter.maxScale
+      : scatter.maxScale;
+    float meshRadius = scatter.meshType == ScatterMeshType::Plane
+      ? scatter.planeWidth * 0.5f * scatter.maxScale
+      : scatter.maxScale;
+
+    for (auto& m : state.instanceMatrices)
+    {
+      glm::vec3 pos(m[3]);
+      boundsMin = glm::min(boundsMin, pos - glm::vec3(meshRadius, 0.0f, meshRadius));
+      boundsMax = glm::max(boundsMax, pos + glm::vec3(meshRadius, meshHeight, meshRadius));
+    }
+
+    uint32_t dataSize = uint32_t(state.instanceMatrices.size() * sizeof(glm::mat4));
+    state.instanceOffset = m_Render.AllocateInstanceData(dataSize);
+
+    state.childEntity = m_Scene.CreateEntity("scatter_satellite");
+    m_Scene.SetParent(state.childEntity, entity);
+
+    registry.emplace_or_replace<ScatterInstanceTag>(state.childEntity);
+    registry.emplace_or_replace<MeshComponent>(state.childEntity, state.mesh);
+    registry.emplace_or_replace<MaterialComponent>(state.childEntity, state.material);
+
+    registry.emplace_or_replace<LocalBounds>(state.childEntity, LocalBounds {
+      .min = boundsMin,
+      .max = boundsMax
+    });
+    registry.emplace_or_replace<WorldBounds>(state.childEntity, WorldBounds {
+      .min = boundsMin,
+      .max = boundsMax
+    });
+
     m_States[entityId] = std::move(state);
     auto& stored = m_States[entityId];
     m_Assets.Meshes().SetInstanceData(stored.mesh, &stored.instanceMatrices, stored.instanceOffset);

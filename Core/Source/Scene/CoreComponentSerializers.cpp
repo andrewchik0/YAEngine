@@ -486,6 +486,13 @@ namespace YAEngine
           if (s.roadMaskFalloff > 0.0f)
             n["roadMaskFalloff"] = s.roadMaskFalloff;
         }
+        if (!s.clusterSource.empty())
+        {
+          n["clusterSource"] = s.clusterSource;
+          n["clusterRadius"] = s.clusterRadius;
+          n["clusterCountMin"] = s.clusterCountMin;
+          n["clusterCountMax"] = s.clusterCountMax;
+        }
         return n;
       },
       [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
@@ -510,6 +517,10 @@ namespace YAEngine
         if (n["roadMaskPadding"]) s.roadMaskPadding = n["roadMaskPadding"].as<float>();
         if (n["roadMaskOuterRadius"]) s.roadMaskOuterRadius = n["roadMaskOuterRadius"].as<float>();
         if (n["roadMaskFalloff"]) s.roadMaskFalloff = n["roadMaskFalloff"].as<float>();
+        if (n["clusterSource"]) s.clusterSource = n["clusterSource"].as<std::string>();
+        if (n["clusterRadius"]) s.clusterRadius = n["clusterRadius"].as<float>();
+        if (n["clusterCountMin"]) s.clusterCountMin = n["clusterCountMin"].as<uint32_t>();
+        if (n["clusterCountMax"]) s.clusterCountMax = n["clusterCountMax"].as<uint32_t>();
         reg.emplace_or_replace<ScatterComponent>(e, s);
         if (!reg.all_of<ScatterDirty>(e))
           reg.emplace<ScatterDirty>(e);

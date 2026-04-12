@@ -185,6 +185,10 @@ namespace YAEngine
     float roadMaskPadding = 1.0f;
     float roadMaskOuterRadius = 20.0f;
     float roadMaskFalloff = 0.0f;
+    std::string clusterSource;
+    float clusterRadius = 3.0f;
+    uint32_t clusterCountMin = 1;
+    uint32_t clusterCountMax = 3;
   };
 
   struct ScatterDirty {};
