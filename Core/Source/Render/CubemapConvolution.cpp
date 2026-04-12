@@ -151,7 +151,8 @@ namespace YAEngine
   }
 
   VulkanImage ConvolvePrefilter(const RenderContext& ctx, CubicTextureResources& cubicRes,
-    VkImageView srcView, VkSampler srcSampler, uint32_t outputSize, uint32_t mipLevels)
+    VkImageView srcView, VkSampler srcSampler, uint32_t srcResolution,
+    uint32_t outputSize, uint32_t mipLevels)
   {
     VulkanImage result;
     {
@@ -280,9 +281,10 @@ namespace YAEngine
         vkCmdSetViewport(cmd, 0, 1, &vp);
         vkCmdSetScissor(cmd, 0, 1, &sc);
 
-        struct { glm::mat4 vp; float roughness; } pc;
+        struct { glm::mat4 vp; float roughness; float srcResolution; } pc;
         pc.vp = cubicRes.projection * cubicRes.views[face];
         pc.roughness = roughness;
+        pc.srcResolution = float(srcResolution);
         vkCmdPushConstants(cmd, cubicRes.prefilterPipelineLayout,
           VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
           0, sizeof(pc), &pc);

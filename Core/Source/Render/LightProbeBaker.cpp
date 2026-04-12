@@ -33,7 +33,9 @@ namespace YAEngine
     YA_LOG_INFO("Render", "Baking light probe at (%.1f, %.1f, %.1f) res=%u slot=%u",
       position.x, position.y, position.z, resolution, atlasSlot);
 
-    // Create temporary cubemap render target
+    uint32_t srcMipLevels = Detail::MipLevels(resolution);
+
+    // Create temporary cubemap render target with mip chain for prefilter sampling
     VulkanImage cubemap;
     {
       ImageDesc desc {
@@ -42,6 +44,7 @@ namespace YAEngine
         .format = VK_FORMAT_R16G16B16A16_SFLOAT,
         .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT
                | VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .mipLevels = srcMipLevels,
         .arrayLayers = 6,
         .flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
         .viewType = VK_IMAGE_VIEW_TYPE_CUBE,
@@ -50,6 +53,7 @@ namespace YAEngine
         .magFilter = VK_FILTER_LINEAR,
         .minFilter = VK_FILTER_LINEAR,
         .addressMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
+        .maxLod = float(srcMipLevels),
       };
       cubemap.Init(*m_Ctx, desc, &sampler);
     }
@@ -105,18 +109,49 @@ namespace YAEngine
       m_Ctx->commandBuffer->EndSingleTimeCommands(cmd);
     }
 
-    // Transition cubemap to SHADER_READ_ONLY for convolution
+    // Generate mip chain from rendered mip 0
     cmd = m_Ctx->commandBuffer->BeginSingleTimeCommands();
+
     TransitionImageLayout(cmd, cubemap.GetImage(),
-      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
       VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
+
+    for (uint32_t mip = 1; mip < srcMipLevels; mip++)
+    {
+      uint32_t srcSize = std::max(1u, resolution >> (mip - 1));
+      uint32_t dstSize = std::max(1u, resolution >> mip);
+
+      TransitionImageLayout(cmd, cubemap.GetImage(),
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6);
+
+      VkImageBlit blit {};
+      blit.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip - 1, 0, 6 };
+      blit.srcOffsets[1] = { int32_t(srcSize), int32_t(srcSize), 1 };
+      blit.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 0, 6 };
+      blit.dstOffsets[1] = { int32_t(dstSize), int32_t(dstSize), 1 };
+
+      vkCmdBlitImage(cmd,
+        cubemap.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        cubemap.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        1, &blit, VK_FILTER_LINEAR);
+
+      TransitionImageLayout(cmd, cubemap.GetImage(),
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, 0, 6);
+    }
+
+    TransitionImageLayout(cmd, cubemap.GetImage(),
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+      VK_IMAGE_ASPECT_COLOR_BIT, 0, srcMipLevels, 0, 6);
+
     m_Ctx->commandBuffer->EndSingleTimeCommands(cmd);
 
     // Generate irradiance & prefilter via shared convolution utility
     VulkanImage irradianceImg = ConvolveIrradiance(*m_Ctx, cubicRes,
       cubemap.GetView(), cubemap.GetSampler(), PROBE_IRRADIANCE_SIZE);
     VulkanImage prefilterImg = ConvolvePrefilter(*m_Ctx, cubicRes,
-      cubemap.GetView(), cubemap.GetSampler(), PROBE_PREFILTER_SIZE, PROBE_PREFILTER_MIP_LEVELS);
+      cubemap.GetView(), cubemap.GetSampler(), resolution, PROBE_PREFILTER_SIZE, PROBE_PREFILTER_MIP_LEVELS);
 
     // Upload to atlas
     uint32_t baseLayer = atlasSlot * 6;

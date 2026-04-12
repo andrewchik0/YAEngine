@@ -17,5 +17,6 @@ namespace YAEngine
   // Returns a VulkanImage (cubemap, 6 layers, R16G16B16A16_SFLOAT, SHADER_READ_ONLY layout).
   // Caller owns the returned image and must call Destroy() on it.
   VulkanImage ConvolvePrefilter(const RenderContext& ctx, CubicTextureResources& cubicRes,
-    VkImageView srcView, VkSampler srcSampler, uint32_t outputSize, uint32_t mipLevels);
+    VkImageView srcView, VkSampler srcSampler, uint32_t srcResolution,
+    uint32_t outputSize, uint32_t mipLevels);
 }

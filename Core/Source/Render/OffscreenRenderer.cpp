@@ -151,7 +151,6 @@ namespace YAEngine
         m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(2,
           mainDepth.GetView(), mainDepth.GetSampler(),
           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        // binding 3 (SSAO) is pre-bound to NoneTexture in InitDescriptors
 
         pipeline.BindDescriptorSets(ctx.cmd, { m_FrameUBO.GetDescriptorSet(0) }, 0);
         pipeline.BindDescriptorSets(ctx.cmd, { m_DeferredGBufferDescriptorSet.Get() }, 1);
@@ -172,7 +171,7 @@ namespace YAEngine
 
   void OffscreenRenderer::InitDescriptors()
   {
-    // Deferred lighting set 1: GBuffer textures (4 samplers)
+    // Deferred lighting set 1: GBuffer textures (3 samplers, matching deferred_lighting.frag)
     SetDescription dlGBufferDesc = {
       .set = 1,
       .bindings = {
@@ -180,17 +179,10 @@ namespace YAEngine
           { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
     m_DeferredGBufferDescriptorSet.Init(*m_Ctx, dlGBufferDesc);
-
-    // Pre-bind SSAO slot (binding 3) to NoneTexture (white, 1x1) - ao will be 1.0
-    auto& noneTexture = m_Render->m_NoneTexture;
-    m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(3,
-      noneTexture.GetView(), noneTexture.GetSampler(),
-      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     // Light cull set 1: lights SSBO + depth sampler
     SetDescription lcDesc = {

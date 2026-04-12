@@ -57,7 +57,7 @@ namespace YAEngine
 
     InitRenderPass(ctx.device, prefilterRenderPass, "prefilter");
     InitPipeline(ctx.device, prefilterRenderPass, "prefilter.frag",
-                 sizeof(glm::mat4) + sizeof(float), VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                 sizeof(glm::mat4) + sizeof(float) * 2, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
                  prefilterDescriptorSetLayout, prefilterPipelineLayout, prefilterPipeline, "prefilter");
     CreateVertexBuffer(ctx);
 
@@ -527,7 +527,7 @@ namespace YAEngine
     ctx.commandBuffer->EndSingleTimeCommands(cmd);
 
     m_Irradiance = ConvolveIrradiance(ctx, res, GetView(), GetSampler(), PROBE_IRRADIANCE_SIZE);
-    m_Prefilter = ConvolvePrefilter(ctx, res, GetView(), GetSampler(), CUBEMAP_SIZE, PROBE_PREFILTER_MIP_LEVELS);
+    m_Prefilter = ConvolvePrefilter(ctx, res, GetView(), GetSampler(), CUBEMAP_SIZE, CUBEMAP_SIZE, PROBE_PREFILTER_MIP_LEVELS);
   }
 
   void VulkanCubicTexture::Destroy(const RenderContext& ctx)
