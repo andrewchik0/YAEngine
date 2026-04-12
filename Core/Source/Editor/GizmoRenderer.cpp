@@ -210,6 +210,11 @@ namespace YAEngine
   {
     m_Requests.clear();
     m_SpriteRequests.clear();
+    b_HasActiveGizmo = false;
+    b_IsRingGizmo = false;
+    m_AxisTransforms[0] = glm::mat4(1.0f);
+    m_AxisTransforms[1] = glm::mat4(1.0f);
+    m_AxisTransforms[2] = glm::mat4(1.0f);
   }
 
   void GizmoRenderer::DrawWireSphere(const glm::vec3& center, float radius, const glm::vec4& color)
@@ -323,8 +328,8 @@ namespace YAEngine
       m_Requests.push_back({ GizmoShape::SolidArrow, GizmoRenderMode::Solid, transform, color });
     }
 
-    m_HasActiveGizmo = true;
-    m_IsRingGizmo = false;
+    b_HasActiveGizmo = true;
+    b_IsRingGizmo = false;
   }
 
   void GizmoRenderer::DrawRotateGizmo(const glm::vec3& position, const glm::vec3& cameraPos)
@@ -358,8 +363,8 @@ namespace YAEngine
       m_Requests.push_back({ GizmoShape::SolidRing, GizmoRenderMode::Solid, transform, color });
     }
 
-    m_HasActiveGizmo = true;
-    m_IsRingGizmo = true;
+    b_HasActiveGizmo = true;
+    b_IsRingGizmo = true;
   }
 
   void GizmoRenderer::DrawScaleGizmo(const glm::vec3& position, const glm::vec3& cameraPos)
@@ -381,14 +386,14 @@ namespace YAEngine
       m_Requests.push_back({ GizmoShape::SolidScaleArrow, GizmoRenderMode::Solid, transform, color });
     }
 
-    m_HasActiveGizmo = true;
-    m_IsRingGizmo = false;
+    b_HasActiveGizmo = true;
+    b_IsRingGizmo = false;
   }
 
   void GizmoRenderer::UpdateHover(const Ray& ray)
   {
     m_HoveredAxis = GizmoAxis::None;
-    if (!m_HasActiveGizmo) return;
+    if (!b_HasActiveGizmo) return;
 
     float closestT = std::numeric_limits<float>::max();
 
@@ -401,7 +406,7 @@ namespace YAEngine
 
       std::optional<float> hit;
 
-      if (m_IsRingGizmo)
+      if (b_IsRingGizmo)
       {
         // Intersect with Y=0 plane, check radial distance matches ring [0.9, 1.0]
         if (std::abs(localDir.y) > 1e-6f)

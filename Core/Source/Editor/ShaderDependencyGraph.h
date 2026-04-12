@@ -31,7 +31,7 @@ namespace YAEngine
 
   private:
     void ScanFile(const std::filesystem::path& filePath, const std::filesystem::path& baseDir);
-    void CollectRootShaders(const std::string& changedFile, std::unordered_set<std::string>& roots) const;
+    void CollectRootShaders(const std::string& changedFile, std::unordered_set<std::string>& roots, std::unordered_set<std::string>& visited) const;
     bool IsCompilable(const std::string& filename) const;
 
     // reverse graph: included file → files that include it

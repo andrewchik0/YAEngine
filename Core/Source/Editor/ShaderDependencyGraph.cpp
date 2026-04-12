@@ -147,8 +147,12 @@ namespace YAEngine
   }
 
   void ShaderDependencyGraph::CollectRootShaders(const std::string& changedFile,
-                                                  std::unordered_set<std::string>& roots) const
+                                                  std::unordered_set<std::string>& roots,
+                                                  std::unordered_set<std::string>& visited) const
   {
+    if (!visited.insert(changedFile).second)
+      return;
+
     // If this file is itself a compilable shader, it's a root
     std::string filename = std::filesystem::path(changedFile).filename().string();
     if (IsCompilable(filename))
@@ -160,10 +164,7 @@ namespace YAEngine
       return;
 
     for (auto& parent : it->second)
-    {
-      if (!roots.contains(parent))
-        CollectRootShaders(parent, roots);
-    }
+      CollectRootShaders(parent, roots, visited);
   }
 
   std::vector<CompileTask> ShaderDependencyGraph::PollChanges()
@@ -173,7 +174,10 @@ namespace YAEngine
     for (auto& [canonical, lastTime] : m_LastWriteTime)
     {
       std::error_code ec;
-      auto currentTime = std::filesystem::last_write_time(m_FilenameToPaths[canonical], ec);
+      auto pathIt = m_FilenameToPaths.find(canonical);
+      if (pathIt == m_FilenameToPaths.end())
+        continue;
+      auto currentTime = std::filesystem::last_write_time(pathIt->second, ec);
       if (ec)
         continue;
 
@@ -189,8 +193,9 @@ namespace YAEngine
 
     // Collect all root shaders affected by any changed file
     std::unordered_set<std::string> affectedRoots;
+    std::unordered_set<std::string> visited;
     for (auto& changed : changedFiles)
-      CollectRootShaders(changed, affectedRoots);
+      CollectRootShaders(changed, affectedRoots, visited);
 
     // Generate compile tasks
     std::vector<CompileTask> tasks;

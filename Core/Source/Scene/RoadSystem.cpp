@@ -6,6 +6,11 @@
 
 namespace YAEngine
 {
+  void RoadSystem::OnSceneClear()
+  {
+    m_PendingDestroys.clear();
+  }
+
   void RoadSystem::Update(entt::registry& registry, double dt)
   {
     for (size_t i = 0; i < m_PendingDestroys.size();)

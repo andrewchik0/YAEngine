@@ -21,7 +21,7 @@ namespace YAEngine
 
     AssetManager();
 
-    void Init(Scene& scene, std::function<uint32_t(uint32_t)> allocateInstanceData);
+    void Init(Scene& scene, std::function<uint32_t(uint32_t)>&& allocateInstanceData);
     void SetRenderContext(const RenderContext& ctx, const VulkanTexture& noneTexture, CubicTextureResources& cubicResources);
 
     template<typename T>

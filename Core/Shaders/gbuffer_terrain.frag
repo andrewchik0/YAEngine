@@ -57,8 +57,9 @@ void main() {
   vec4 albedo = mix(albedo0, albedo1, blend);
   albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
 
-  vec3 n_ts = normalize(mix(n0_ts * hasL0Normal, n1_ts * hasL1Normal, blend));
   float hasAnyNormal = max(hasL0Normal, hasL1Normal);
+  // Add tangent-space up fallback when no normal maps to avoid normalizing zero vector -> NaN
+  vec3 n_ts = normalize(mix(n0_ts * hasL0Normal, n1_ts * hasL1Normal, blend) + vec3(0.0, 0.0, 1.0 - hasAnyNormal));
   vec3 normal = mix(inNormal, normalize(inTBN * n_ts), hasAnyNormal);
 
   float roughness = mix(roughness0, roughness1, blend);

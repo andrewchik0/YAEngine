@@ -9,7 +9,7 @@ namespace YAEngine
 {
   void VulkanTexture::Load(const RenderContext& ctx, void* inputData, uint32_t width, uint32_t height, uint32_t pixelSize, VkFormat imageFormat, bool repeat)
   {
-    VkDeviceSize imageSize = width * height * pixelSize;
+    VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * pixelSize;
 
     uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
 

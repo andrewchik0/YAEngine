@@ -17,6 +17,7 @@ namespace YAEngine
       : m_Assets(assets), m_Scene(scene), m_Render(render) {}
 
     void Update(entt::registry& registry, double dt) override;
+    void OnSceneClear() override;
     SystemPhase GetPhase() const override { return SystemPhase::Physics; }
     int GetPriority() const override { return 1; }
 

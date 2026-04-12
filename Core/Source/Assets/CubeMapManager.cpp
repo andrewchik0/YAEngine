@@ -1,6 +1,5 @@
 #include "CubeMapManager.h"
 
-#include <filesystem>
 #include <Stb/stb_image.h>
 
 #include "Render/RenderContext.h"

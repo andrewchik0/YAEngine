@@ -1,7 +1,5 @@
 #include "TextureManager.h"
 
-#include <filesystem>
-
 #include "Render/RenderContext.h"
 #include "Utils/Log.h"
 

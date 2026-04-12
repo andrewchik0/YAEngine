@@ -7,6 +7,12 @@
 
 namespace YAEngine
 {
+  void TerrainSystem::OnSceneClear()
+  {
+    m_PendingDestroys.clear();
+    m_HeightmapCache.clear();
+  }
+
   void TerrainSystem::Update(entt::registry& registry, double dt)
   {
     for (size_t i = 0; i < m_PendingDestroys.size();)

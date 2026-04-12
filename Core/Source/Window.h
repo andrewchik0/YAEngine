@@ -51,6 +51,8 @@ namespace YAEngine
         return;
       if (maximize)
         glfwMaximizeWindow(m_WindowHandle);
+      else
+        glfwRestoreWindow(m_WindowHandle);
     }
 
   private:

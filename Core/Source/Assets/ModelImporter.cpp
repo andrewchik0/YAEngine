@@ -111,7 +111,7 @@ namespace YAEngine
 
     for (size_t i = 0; i < mesh->mNumFaces; ++i)
     {
-      aiFace face = mesh->mFaces[i];
+      const auto& face = mesh->mFaces[i];
       meshDesc.indices.push_back(face.mIndices[0]);
       meshDesc.indices.push_back(face.mIndices[1]);
       meshDesc.indices.push_back(face.mIndices[2]);
@@ -224,7 +224,7 @@ namespace YAEngine
 
     for (unsigned int i = 0; i < mesh->mNumVertices; i++)
     {
-      aiVector3D v = mesh->mVertices[i];
+      const auto& v = mesh->mVertices[i];
 
       if (v.x < outMin.x) outMin.x = v.x;
       if (v.y < outMin.y) outMin.y = v.y;

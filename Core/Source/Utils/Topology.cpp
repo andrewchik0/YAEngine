@@ -105,6 +105,8 @@ namespace YAEngine
   TopologyData Topology::Arrow(uint32_t coneSegments)
   {
     TopologyData data;
+    data.positions.reserve(2 + coneSegments + 1);
+    data.indices.reserve(2 + coneSegments * 2);
 
     // Shaft: line from origin to (0, -1, 0)
     data.positions.push_back({0.0f, 0.0f, 0.0f});
@@ -148,6 +150,8 @@ namespace YAEngine
   TopologyData Topology::SolidArrow(float shaftRadius, float shaftLength, float tipRadius, float tipLength, uint32_t segments)
   {
     TopologyData data;
+    data.positions.reserve(segments * 4 + 1);
+    data.indices.reserve(segments * 12);
     float step = glm::two_pi<float>() / float(segments);
 
     // Shaft cylinder along -Y: top ring at y=0, bottom ring at y=-shaftLength
@@ -226,6 +230,8 @@ namespace YAEngine
   TopologyData Topology::SolidScaleArrow(float shaftRadius, float shaftLength, float cubeHalf, uint32_t segments)
   {
     TopologyData data;
+    data.positions.reserve(segments * 2 + 8);
+    data.indices.reserve(segments * 6 + 36);
     float step = glm::two_pi<float>() / float(segments);
 
     // Shaft cylinder along -Y: top ring at y=0, bottom ring at y=-shaftLength
@@ -352,6 +358,8 @@ namespace YAEngine
   TopologyData Topology::SolidCircle(float radius, uint32_t segments)
   {
     TopologyData data;
+    data.positions.reserve(segments + 1);
+    data.indices.reserve(segments * 3);
     float step = glm::two_pi<float>() / float(segments);
 
     // Center vertex

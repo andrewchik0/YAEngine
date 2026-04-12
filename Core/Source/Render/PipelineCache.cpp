@@ -107,11 +107,11 @@ namespace YAEngine
       .sets = info.sets,
     };
 
-    auto it = m_GraphicsCache.find(key);
-    if (it != m_GraphicsCache.end())
+    auto [it, inserted] = m_GraphicsCache.try_emplace(std::move(key));
+    if (!inserted)
       return it->second;
 
-    auto& pipeline = m_GraphicsCache[key];
+    auto& pipeline = it->second;
     pipeline.Init(device, renderPass, info, vkCache);
     YA_DEBUG_NAMEF(device, VK_OBJECT_TYPE_PIPELINE,
       pipeline.Get(), "%s + %s", info.vertexShaderFile.c_str(), info.fragmentShaderFile.c_str());
@@ -133,11 +133,11 @@ namespace YAEngine
       .sets = sets,
     };
 
-    auto it = m_ComputeCache.find(key);
-    if (it != m_ComputeCache.end())
+    auto [it, inserted] = m_ComputeCache.try_emplace(std::move(key));
+    if (!inserted)
       return it->second;
 
-    auto& pipeline = m_ComputeCache[key];
+    auto& pipeline = it->second;
     pipeline.Init(device, shaderFile, sets, pushConstantSize, vkCache);
     YA_DEBUG_NAME(device, VK_OBJECT_TYPE_PIPELINE,
       pipeline.Get(), shaderFile.c_str());

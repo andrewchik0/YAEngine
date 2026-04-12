@@ -72,15 +72,17 @@ namespace YAEngine
       return;
     }
 
-    if (!context.selectedMaterial || !context.assetManager ||
-        !context.assetManager->Materials().Has(context.selectedMaterial))
+    Material* matPtr = context.selectedMaterial && context.assetManager
+      ? context.assetManager->Materials().TryGet(context.selectedMaterial)
+      : nullptr;
+    if (!matPtr)
     {
       ImGui::TextDisabled("No material selected");
       ImGui::End();
       return;
     }
 
-    Material& mat = context.assetManager->Materials().Get(context.selectedMaterial);
+    Material& mat = *matPtr;
 
     bool changed = false;
 

@@ -132,7 +132,7 @@ namespace YAEngine
     GizmoAxis m_HoveredAxis = GizmoAxis::None;
     GizmoAxis m_DraggedAxis = GizmoAxis::None;
     glm::mat4 m_AxisTransforms[3] {};
-    bool m_HasActiveGizmo = false;
-    bool m_IsRingGizmo = false;
+    bool b_HasActiveGizmo = false;
+    bool b_IsRingGizmo = false;
   };
 }

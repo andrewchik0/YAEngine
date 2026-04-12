@@ -3,8 +3,6 @@
 #include "DebugMarker.h"
 #include "Utils/Log.h"
 
-#include <fstream>
-
 namespace YAEngine
 {
   void RenderBackend::Init(GLFWwindow* window, const RenderSpecs& specs)

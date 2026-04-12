@@ -23,11 +23,15 @@ namespace YAEngine
     dst.emissivity = src.emissivity;
     dst.roughness = src.roughness;
     dst.metallic = src.metallic;
+    dst.roughnessFactor = src.roughnessFactor;
+    dst.metallicFactor = src.metallicFactor;
     dst.specular = src.specular;
     dst.sg = src.sg;
     dst.hasAlpha = src.hasAlpha;
     dst.alphaTest = src.alphaTest;
     dst.combinedTextures = src.combinedTextures;
+    dst.doubleSided = src.doubleSided;
+    dst.shadingModel = src.shadingModel;
     dst.baseColorTexture = src.baseColorTexture;
     dst.metallicTexture = src.metallicTexture;
     dst.roughnessTexture = src.roughnessTexture;

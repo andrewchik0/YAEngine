@@ -1,7 +1,5 @@
 #include "DescriptorLayoutCache.h"
 
-#include <algorithm>
-
 #include "Utils/Log.h"
 
 namespace YAEngine
@@ -69,7 +67,7 @@ namespace YAEngine
       throw std::runtime_error("failed to create descriptor set layout!");
     }
 
-    m_Cache[key] = layout;
+    m_Cache.emplace(std::move(key), layout);
     return layout;
   }
 

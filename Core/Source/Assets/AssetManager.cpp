@@ -11,7 +11,7 @@ namespace YAEngine
     Register<ModelManager>();
   }
 
-  void AssetManager::Init(Scene& scene, std::function<uint32_t(uint32_t)> allocateInstanceData)
+  void AssetManager::Init(Scene& scene, std::function<uint32_t(uint32_t)>&& allocateInstanceData)
   {
     Models().SetDependencies(&scene, this, std::move(allocateInstanceData));
     m_PrimitiveFactory.SetDependencies(&Meshes());
@@ -41,7 +41,12 @@ namespace YAEngine
     if (isAbsolute)
       return relativePath;
 
-    return m_BasePath + "/" + relativePath;
+    std::string result;
+    result.reserve(m_BasePath.size() + 1 + relativePath.size());
+    result.append(m_BasePath);
+    result.push_back('/');
+    result.append(relativePath);
+    return result;
   }
 
   std::string AssetManager::MakeRelative(const std::string& absolutePath) const
@@ -49,18 +54,29 @@ namespace YAEngine
     if (m_BasePath.empty())
       return absolutePath;
 
-    std::string base = m_BasePath;
-    std::string path = absolutePath;
-    std::replace(base.begin(), base.end(), '\\', '/');
-    std::replace(path.begin(), path.end(), '\\', '/');
+    // Compare paths treating both '/' and '\\' as separators
+    auto normalize = [](char c) { return c == '\\' ? '/' : c; };
 
-    if (!base.empty() && base.back() != '/')
-      base += '/';
+    std::string_view base = m_BasePath;
+    std::string_view path = absolutePath;
 
-    if (path.starts_with(base))
-      return path.substr(base.size());
+    // Check if path starts with base (case-sensitive, slash-normalized)
+    size_t baseLen = base.size();
+    if (path.size() < baseLen)
+      return absolutePath;
 
-    return absolutePath;
+    for (size_t i = 0; i < baseLen; ++i)
+    {
+      if (normalize(path[i]) != normalize(base[i]))
+        return absolutePath;
+    }
+
+    // Skip trailing separator after base
+    size_t offset = baseLen;
+    if (offset < path.size() && (path[offset] == '/' || path[offset] == '\\'))
+      ++offset;
+
+    return std::string(path.substr(offset));
   }
 
   MaterialHandle AssetManager::FindOrCreateDefaultMaterial()

@@ -248,7 +248,7 @@ namespace YAEngine
     uniforms.invView = glm::inverse(view);
     uniforms.prevView = view;
     uniforms.prevProj = proj;
-    uniforms.nearPlane = 0.1f;
+    uniforms.nearPlane = 0.01f;
     uniforms.farPlane = 1000.0f;
     uniforms.cameraPosition = position;
     uniforms.cameraDirection = glm::normalize(-glm::vec3(glm::inverse(faceView)[2]));

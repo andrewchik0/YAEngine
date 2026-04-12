@@ -361,7 +361,11 @@ namespace YAEngine
     VmaAllocationCreateInfo allocInfo{};
     allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
 
-    vmaCreateImage(ctx.allocator, &imageInfo, &allocInfo, &m_CubemapImage, &m_CubemapImageAllocation, nullptr);
+    if (vmaCreateImage(ctx.allocator, &imageInfo, &allocInfo, &m_CubemapImage, &m_CubemapImageAllocation, nullptr) != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Vulkan", "Failed to create cubemap image");
+      throw std::runtime_error("Failed to create cubemap image");
+    }
 
     VkImageViewCreateInfo viewInfo{};
     viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
@@ -374,7 +378,11 @@ namespace YAEngine
     viewInfo.subresourceRange.baseArrayLayer = 0;
     viewInfo.subresourceRange.layerCount = 6;
 
-    vkCreateImageView(ctx.device, &viewInfo, nullptr, &m_CubemapImageView);
+    if (vkCreateImageView(ctx.device, &viewInfo, nullptr, &m_CubemapImageView) != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Vulkan", "Failed to create cubemap image view");
+      throw std::runtime_error("Failed to create cubemap image view");
+    }
 
     for (uint32_t face = 0; face < 6; face++)
     {
@@ -389,7 +397,11 @@ namespace YAEngine
       view.subresourceRange.baseArrayLayer = face;
       view.subresourceRange.layerCount = 1;
 
-      vkCreateImageView(ctx.device, &view, nullptr, &m_FaceViews[face]);
+      if (vkCreateImageView(ctx.device, &view, nullptr, &m_FaceViews[face]) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Vulkan", "Failed to create cubemap face view %u", face);
+        throw std::runtime_error("Failed to create cubemap face view");
+      }
     }
 
     for (uint32_t face = 0; face < 6; face++)
@@ -403,7 +415,11 @@ namespace YAEngine
       fb.height = CUBEMAP_SIZE;
       fb.layers = 1;
 
-      vkCreateFramebuffer(ctx.device, &fb, nullptr, &m_FrameBuffers[face]);
+      if (vkCreateFramebuffer(ctx.device, &fb, nullptr, &m_FrameBuffers[face]) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Vulkan", "Failed to create cubemap framebuffer %u", face);
+        throw std::runtime_error("Failed to create cubemap framebuffer");
+      }
     }
 
     auto cmd = ctx.commandBuffer->BeginSingleTimeCommands();

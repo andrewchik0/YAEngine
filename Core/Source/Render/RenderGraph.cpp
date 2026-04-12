@@ -5,10 +5,7 @@
 #include "ImageBarrier.h"
 #include "Utils/Log.h"
 
-#include <algorithm>
 #include <queue>
-#include <stdexcept>
-#include <unordered_map>
 
 namespace YAEngine
 {
@@ -560,7 +557,11 @@ namespace YAEngine
       auto& image = ResolveResource(handle);
       auto info = LookupBarrierInfo(layout, targetLayout);
 
-      assert(barrierCount < MAX_BARRIERS && "InsertBarriers: too many barriers");
+      if (barrierCount >= MAX_BARRIERS)
+      {
+        YA_LOG_ERROR("Render", "InsertBarriers: exceeded MAX_BARRIERS (%u)", MAX_BARRIERS);
+        return;
+      }
       auto& barrier = barriers[barrierCount];
       barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
       barrier.oldLayout = layout;
@@ -732,7 +733,9 @@ namespace YAEngine
       uint32_t attachmentCount = static_cast<uint32_t>(
         std::max(pass.info.colorOutputs.size(), static_cast<size_t>(1)) + 1);
 
-      std::vector<VkClearValue> clearValues(attachmentCount);
+      static constexpr uint32_t MAX_CLEAR_VALUES = 8;
+      assert(attachmentCount <= MAX_CLEAR_VALUES);
+      std::array<VkClearValue, MAX_CLEAR_VALUES> clearValues{};
       clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
       clearValues[1].depthStencil = {1.0f, 0};
       for (uint32_t i = 2; i < attachmentCount; i++)
@@ -747,7 +750,7 @@ namespace YAEngine
       rpInfo.renderArea.offset = {0, 0};
       rpInfo.renderArea.extent = passExtent;
       rpInfo.clearValueCount = attachmentCount;
-      rpInfo.pClearValues = clearValues.data();
+      rpInfo.pClearValues = clearValues.data();  // std::array, no heap allocation
 
       vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 

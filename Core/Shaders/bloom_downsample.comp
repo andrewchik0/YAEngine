@@ -31,7 +31,7 @@ vec3 softThreshold(vec3 c, float threshold, float knee)
 void main()
 {
   ivec2 pos = ivec2(gl_GlobalInvocationID.xy);
-  if (pos.x >= pc.srcWidth / 2 || pos.y >= pc.srcHeight / 2) return;
+  if (pos.x >= (pc.srcWidth + 1) / 2 || pos.y >= (pc.srcHeight + 1) / 2) return;
 
   vec2 srcTexelSize = 1.0 / vec2(pc.srcWidth, pc.srcHeight);
   vec2 uv = (vec2(pos) * 2.0 + 1.0) * srcTexelSize;

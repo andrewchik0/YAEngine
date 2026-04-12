@@ -16,7 +16,7 @@ namespace YAEngine
     void Destroy();
 
     void Bind(VkCommandBuffer cmd);
-    void BindDescriptorSets(VkCommandBuffer cmd, const std::vector<VkDescriptorSet>& descriptorSets, uint32_t set);
+    void BindDescriptorSets(VkCommandBuffer cmd, std::initializer_list<VkDescriptorSet> descriptorSets, uint32_t set);
     void PushConstants(VkCommandBuffer cmd, const void* data);
     void Dispatch(VkCommandBuffer cmd, uint32_t groupCountX, uint32_t groupCountY, uint32_t groupCountZ);
 

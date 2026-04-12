@@ -19,6 +19,6 @@ namespace YAEngine
     GLFWwindow* m_Window {};
     VkDevice m_Device {};
     VkDescriptorPool m_ImGuiDescriptorPool {};
-    VkPipelineCache m_PipelineCache;
+    VkPipelineCache m_PipelineCache {};
   };
 }

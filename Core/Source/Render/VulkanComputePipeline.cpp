@@ -68,12 +68,12 @@ namespace YAEngine
     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, m_Pipeline);
   }
 
-  void VulkanComputePipeline::BindDescriptorSets(VkCommandBuffer cmd, const std::vector<VkDescriptorSet>& descriptorSets, uint32_t set)
+  void VulkanComputePipeline::BindDescriptorSets(VkCommandBuffer cmd, std::initializer_list<VkDescriptorSet> descriptorSets, uint32_t set)
   {
     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
       m_PipelineLayout, set,
       static_cast<uint32_t>(descriptorSets.size()),
-      descriptorSets.data(), 0, nullptr);
+      descriptorSets.begin(), 0, nullptr);
   }
 
   void VulkanComputePipeline::PushConstants(VkCommandBuffer cmd, const void* data)

@@ -141,9 +141,9 @@ namespace YAEngine
       auto& materials = context.assetManager->Materials();
 
       const char* currentName = "None";
-      if (materials.Has(mc.asset))
+      if (auto* matPtr = materials.TryGet(mc.asset))
       {
-        auto& mat = materials.Get(mc.asset);
+        auto& mat = *matPtr;
         currentName = mat.name.c_str();
         ImGui::ColorButton("##matcolor", ImVec4(mat.albedo.x, mat.albedo.y, mat.albedo.z, 1.0f),
           ImGuiColorEditFlags_NoTooltip | ImGuiColorEditFlags_NoDragDrop, ImVec2(20, 20));
@@ -168,9 +168,9 @@ namespace YAEngine
         ImGui::EndCombo();
       }
 
-      if (materials.Has(mc.asset))
+      if (auto* matPtr2 = materials.TryGet(mc.asset))
       {
-        auto& mat = materials.Get(mc.asset);
+        auto& mat = *matPtr2;
 
         if (ImGui::Checkbox("Double Sided", &mat.doubleSided))
           mat.MarkChanged();

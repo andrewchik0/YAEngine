@@ -23,6 +23,11 @@ namespace YAEngine
       return m_Assets.Has(handle.index, handle.generation);
     }
 
+    T* TryGet(HandleType handle)
+    {
+      return m_Assets.Get(handle.index, handle.generation);
+    }
+
     template<typename Fn>
     void ForEach(Fn&& fn)
     {

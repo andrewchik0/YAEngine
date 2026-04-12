@@ -19,6 +19,7 @@
 #include <optional>
 #include <random>
 #include <set>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <thread>

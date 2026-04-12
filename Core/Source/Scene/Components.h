@@ -48,7 +48,8 @@ namespace YAEngine
 
     void Resize(float width, float height)
     {
-      aspectRatio = width / height;
+      if (height > 0.0f)
+        aspectRatio = width / height;
     }
   };
 

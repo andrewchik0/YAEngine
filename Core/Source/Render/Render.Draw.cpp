@@ -25,6 +25,7 @@ namespace YAEngine
     m_DrawCommands.clear();
 
     uint32_t visibleCount = frame.snapshot.visibleCount;
+    m_DrawCommands.reserve(visibleCount);
     for (uint32_t i = 0; i < visibleCount; i++)
     {
       auto& obj = frame.snapshot.objects[i];
@@ -208,8 +209,8 @@ namespace YAEngine
     auto& meshManager = frame.assets.Meshes();
 
     m_DepthDrawCommands.clear();
-    uint32_t visibleCount = frame.snapshot.visibleCount;
-    for (uint32_t i = 0; i < visibleCount; i++)
+    m_DepthDrawCommands.reserve(frame.snapshot.visibleCount);
+    for (uint32_t i = 0; i < frame.snapshot.visibleCount; i++)
     {
       auto& obj = frame.snapshot.objects[i];
       if (obj.noShading) continue;
@@ -281,6 +282,7 @@ namespace YAEngine
     // Objects outside the camera frustum can still cast shadows into the view.
     m_ShadowDrawCommands.clear();
     uint32_t totalCount = uint32_t(frame.snapshot.objects.size());
+    m_ShadowDrawCommands.reserve(totalCount);
     for (uint32_t i = 0; i < totalCount; i++)
     {
       auto& obj = frame.snapshot.objects[i];

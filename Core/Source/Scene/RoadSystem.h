@@ -14,6 +14,7 @@ namespace YAEngine
     explicit RoadSystem(AssetManager& assets) : m_Assets(assets) {}
 
     void Update(entt::registry& registry, double dt) override;
+    void OnSceneClear() override;
     SystemPhase GetPhase() const override { return SystemPhase::Physics; }
 
   private:

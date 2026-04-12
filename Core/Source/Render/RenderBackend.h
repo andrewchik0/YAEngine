@@ -14,8 +14,6 @@
 #include "VulkanSwapchain.h"
 #include "VulkanSync.h"
 
-#include <optional>
-
 namespace YAEngine
 {
   class RenderBackend

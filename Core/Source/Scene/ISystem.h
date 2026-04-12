@@ -17,6 +17,7 @@ namespace YAEngine
     virtual ~ISystem() = default;
 
     virtual void Update(entt::registry& registry, double dt) = 0;
+    virtual void OnSceneClear() {}
     virtual SystemPhase GetPhase() const = 0;
     virtual int GetPriority() const { return 0; }
   };

@@ -17,7 +17,9 @@ namespace YAEngine
 
   void Scene::DestroyEntity(Entity e)
   {
-    auto& hc = m_Registry.get<HierarchyComponent>(e);
+    // Copy hierarchy data before destroying children - recursive DestroyEntity
+    // calls may invalidate references via entt's swap-and-pop
+    auto hc = m_Registry.get<HierarchyComponent>(e);
 
     Entity child = hc.firstChild;
     while (child != entt::null)
@@ -145,26 +147,14 @@ namespace YAEngine
 
     const auto& hc = GetHierarchy(entity);
 
-    auto firstChild = hc.firstChild;
-    if (firstChild != entt::null)
+    // Iterate children only - do not traverse siblings of the root entity
+    auto child = hc.firstChild;
+    while (child != entt::null)
     {
-      auto child = GetChildByName(firstChild, name);
-      if (child != entt::null)
-        return child;
-    }
-
-    auto sibling = hc.nextSibling;
-    while (sibling != entt::null)
-    {
-      auto child = GetChildByName(sibling, name);
-
-      if (child != entt::null)
-      {
-        const auto& childName = GetName(child);
-        if (childName == name)
-          return child;
-      }
-      sibling = GetHierarchy(sibling).nextSibling;
+      auto found = GetChildByName(child, name);
+      if (found != entt::null)
+        return found;
+      child = GetHierarchy(child).nextSibling;
     }
 
     return entt::null;

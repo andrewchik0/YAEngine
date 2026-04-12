@@ -15,7 +15,6 @@
 #include "Editor/Panels/MaterialInspectorPanel.h"
 #include "Editor/EditorCameraLayer.h"
 #include "Editor/Utils/FileDialog.h"
-#include <filesystem>
 
 #include "Assets/AssetManager.h"
 #include "Render/Render.h"
@@ -23,6 +22,7 @@
 #include "Scene/ComponentRegistry.h"
 #include "Utils/ServiceRegistry.h"
 #include "Utils/Ray.h"
+#include "Scene/SystemScheduler.h"
 
 #include <glm/gtc/matrix_transform.hpp>
 
@@ -112,7 +112,7 @@ namespace YAEngine
     auto& gizmo = m_Context.render->GetGizmoRenderer();
 
     // Gizmo mode switching (1/2/3) - blocked during drag
-    if (m_Context.viewportHovered && !m_DragActive)
+    if (m_Context.viewportHovered && !b_DragActive)
     {
       if (input.IsKeyPressed(Key::D1)) m_Context.render->GetGizmoMode() = GizmoMode::Translate;
       if (input.IsKeyPressed(Key::D2)) m_Context.render->GetGizmoMode() = GizmoMode::Rotate;
@@ -142,12 +142,12 @@ namespace YAEngine
     }
 
     // --- Drag state machine ---
-    if (m_DragActive)
+    if (b_DragActive)
     {
       if (input.IsMouseReleased(MouseButton::Left))
       {
         // End drag
-        m_DragActive = false;
+        b_DragActive = false;
         gizmo.SetDraggedAxis(GizmoAxis::None);
         input.SetGizmoDragging(false);
       }
@@ -281,7 +281,7 @@ namespace YAEngine
           if (hitT)
           {
             m_DragStartHitPoint = viewportRay.origin + *hitT * viewportRay.direction;
-            m_DragActive = true;
+            b_DragActive = true;
             gizmo.SetDraggedAxis(hoveredAxis);
             input.SetGizmoDragging(true);
           }
@@ -480,6 +480,7 @@ namespace YAEngine
 
     GetRender().WaitIdle();
     m_TextureCache.Destroy();
+    m_Registry->Get<SystemScheduler>().NotifySceneClear();
     GetAssets().DestroyAll();
     GetScene().ClearScene();
     GetRender().ResetBoundState();
@@ -550,6 +551,7 @@ namespace YAEngine
 
     GetRender().WaitIdle();
     m_TextureCache.Destroy();
+    m_Registry->Get<SystemScheduler>().NotifySceneClear();
     GetAssets().DestroyAll();
     GetScene().ClearScene();
     GetRender().ResetBoundState();

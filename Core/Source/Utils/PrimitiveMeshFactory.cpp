@@ -45,6 +45,8 @@ namespace YAEngine
   ProcMesh PrimitiveMeshFactory::GenerateSphere(float radius, uint32_t stacks, uint32_t slices)
   {
     ProcMesh mesh;
+    mesh.vertices.reserve((stacks + 1) * (slices + 1));
+    mesh.indices.reserve(stacks * slices * 6);
 
     for (uint32_t y = 0; y <= stacks; y++)
     {
@@ -108,6 +110,8 @@ namespace YAEngine
   ProcMesh PrimitiveMeshFactory::GenerateBox(float sx, float sy, float sz)
   {
     ProcMesh mesh;
+    mesh.vertices.reserve(24);
+    mesh.indices.reserve(36);
     float hx = sx * 0.5f, hy = sy * 0.5f, hz = sz * 0.5f;
 
     auto face = [&](glm::vec3 n, glm::vec3 right, glm::vec3 up) {

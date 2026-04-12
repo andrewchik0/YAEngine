@@ -77,7 +77,9 @@ float calculateCSMShadow(vec3 worldPos, float viewDepth, vec3 normal)
 
   if (distToEdge < blendZone && cascade < CSM_CASCADE_COUNT - 1)
   {
-    float nextShadow = sampleShadowPCF(biasedPos, cascade + 1);
+    float nextBias = u_Shadow.cascades[cascade + 1].splitDepthAndBias.z;
+    vec3 nextBiasedPos = worldPos + normal * nextBias;
+    float nextShadow = sampleShadowPCF(nextBiasedPos, cascade + 1);
     float blendFactor = distToEdge / blendZone;
     shadow = mix(nextShadow, shadow, blendFactor);
   }

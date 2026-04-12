@@ -21,10 +21,10 @@ namespace YAEngine
     auto activeCamera = scene.GetActiveCamera();
     if (activeCamera != entt::null && scene.HasComponent<CameraComponent>(activeCamera))
     {
-      auto& transform = scene.GetComponent<LocalTransform>(activeCamera);
+      auto& local = scene.GetComponent<LocalTransform>(activeCamera);
       auto& camera = scene.GetComponent<CameraComponent>(activeCamera);
-      snapshot.camera.position = transform.position;
-      snapshot.camera.rotation = transform.rotation;
+      snapshot.camera.position = local.position;
+      snapshot.camera.rotation = local.rotation;
       snapshot.camera.fov = camera.fov;
       snapshot.camera.aspectRatio = camera.aspectRatio;
       snapshot.camera.nearPlane = camera.nearPlane;

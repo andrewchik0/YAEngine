@@ -1,5 +1,4 @@
 #pragma once
-#include <filesystem>
 
 #include "AssetManagerBase.h"
 #include "IAssetManager.h"
@@ -7,9 +6,6 @@
 #include "ModelImporter.h"
 
 #include "Scene/Scene.h"
-
-class Scene;
-class AssetManager;
 
 namespace YAEngine
 {
@@ -31,7 +27,7 @@ namespace YAEngine
 
     ModelManager() = default;
 
-    void SetDependencies(Scene* scene, AssetManager* assetManager, std::function<uint32_t(uint32_t)> allocateInstanceData)
+    void SetDependencies(Scene* scene, AssetManager* assetManager, std::function<uint32_t(uint32_t)>&& allocateInstanceData)
     {
       m_Scene = scene;
       m_AssetManager = assetManager;

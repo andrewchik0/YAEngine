@@ -10,6 +10,8 @@ namespace YAEngine
     void Step()
     {
       m_CurrentTime = glfwGetTime();
+      if (m_LastTime == 0.0)
+        m_LastTime = m_CurrentTime;
       m_DeltaTime = m_CurrentTime - m_LastTime;
       m_LastTime = m_CurrentTime;
     }
@@ -26,7 +28,7 @@ namespace YAEngine
 
     float GetFPS() const
     {
-      return 1.0f / (float)m_DeltaTime;
+      return m_DeltaTime > 0.0 ? 1.0f / static_cast<float>(m_DeltaTime) : 0.0f;
     }
 
   private:

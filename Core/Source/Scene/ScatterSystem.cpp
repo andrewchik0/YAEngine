@@ -44,6 +44,13 @@ namespace YAEngine
     return nullptr;
   }
 
+  void ScatterSystem::OnSceneClear()
+  {
+    // Assets are already destroyed by DestroyAll - just clear bookkeeping
+    m_States.clear();
+    m_PendingDestroys.clear();
+  }
+
   void ScatterSystem::Update(entt::registry& registry, double dt)
   {
     for (size_t i = 0; i < m_PendingDestroys.size();)

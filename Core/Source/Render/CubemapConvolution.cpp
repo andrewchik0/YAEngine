@@ -4,6 +4,7 @@
 #include "VulkanCommandBuffer.h"
 #include "VulkanCubicTexture.h"
 #include "ImageBarrier.h"
+#include "Utils/Log.h"
 
 namespace YAEngine
 {
@@ -43,7 +44,11 @@ namespace YAEngine
       vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
       vi.format = VK_FORMAT_R16G16B16A16_SFLOAT;
       vi.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, face, 1 };
-      vkCreateImageView(ctx.device, &vi, nullptr, &faceViews[face]);
+      if (vkCreateImageView(ctx.device, &vi, nullptr, &faceViews[face]) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Vulkan", "Failed to create irradiance face view %u", face);
+        throw std::runtime_error("Failed to create irradiance face view");
+      }
 
       VkFramebufferCreateInfo fb {};
       fb.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -53,7 +58,11 @@ namespace YAEngine
       fb.width = outputSize;
       fb.height = outputSize;
       fb.layers = 1;
-      vkCreateFramebuffer(ctx.device, &fb, nullptr, &framebuffers[face]);
+      if (vkCreateFramebuffer(ctx.device, &fb, nullptr, &framebuffers[face]) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Vulkan", "Failed to create irradiance framebuffer %u", face);
+        throw std::runtime_error("Failed to create irradiance framebuffer");
+      }
     }
 
     auto cmd = ctx.commandBuffer->BeginSingleTimeCommands();
@@ -72,7 +81,11 @@ namespace YAEngine
       poolCI.maxSets = 1;
       poolCI.poolSizeCount = 1;
       poolCI.pPoolSizes = &poolSize;
-      vkCreateDescriptorPool(ctx.device, &poolCI, nullptr, &tempPool);
+      if (vkCreateDescriptorPool(ctx.device, &poolCI, nullptr, &tempPool) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Vulkan", "Failed to create irradiance descriptor pool");
+        throw std::runtime_error("Failed to create irradiance descriptor pool");
+      }
     }
 
     VkDescriptorSet descriptorSet;
@@ -82,7 +95,11 @@ namespace YAEngine
       allocInfo.descriptorPool = tempPool;
       allocInfo.descriptorSetCount = 1;
       allocInfo.pSetLayouts = &cubicRes.irradianceDescriptorSetLayout;
-      vkAllocateDescriptorSets(ctx.device, &allocInfo, &descriptorSet);
+      if (vkAllocateDescriptorSets(ctx.device, &allocInfo, &descriptorSet) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Vulkan", "Failed to allocate irradiance descriptor set");
+        throw std::runtime_error("Failed to allocate irradiance descriptor set");
+      }
 
       VkDescriptorImageInfo imgInfo {};
       imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
@@ -194,7 +211,11 @@ namespace YAEngine
         vi.viewType = VK_IMAGE_VIEW_TYPE_2D;
         vi.format = VK_FORMAT_R16G16B16A16_SFLOAT;
         vi.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, mip, 1, face, 1 };
-        vkCreateImageView(ctx.device, &vi, nullptr, &faceViews[idx]);
+        if (vkCreateImageView(ctx.device, &vi, nullptr, &faceViews[idx]) != VK_SUCCESS)
+        {
+          YA_LOG_ERROR("Vulkan", "Failed to create prefilter face view mip %u face %u", mip, face);
+          throw std::runtime_error("Failed to create prefilter face view");
+        }
 
         VkFramebufferCreateInfo fb {};
         fb.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
@@ -204,7 +225,11 @@ namespace YAEngine
         fb.width = mipSize;
         fb.height = mipSize;
         fb.layers = 1;
-        vkCreateFramebuffer(ctx.device, &fb, nullptr, &framebuffers[idx]);
+        if (vkCreateFramebuffer(ctx.device, &fb, nullptr, &framebuffers[idx]) != VK_SUCCESS)
+        {
+          YA_LOG_ERROR("Vulkan", "Failed to create prefilter framebuffer mip %u face %u", mip, face);
+          throw std::runtime_error("Failed to create prefilter framebuffer");
+        }
       }
     }
 
@@ -224,7 +249,11 @@ namespace YAEngine
       poolCI.maxSets = 1;
       poolCI.poolSizeCount = 1;
       poolCI.pPoolSizes = &poolSize;
-      vkCreateDescriptorPool(ctx.device, &poolCI, nullptr, &tempPool);
+      if (vkCreateDescriptorPool(ctx.device, &poolCI, nullptr, &tempPool) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Vulkan", "Failed to create prefilter descriptor pool");
+        throw std::runtime_error("Failed to create prefilter descriptor pool");
+      }
     }
 
     VkDescriptorSet descriptorSet;
@@ -234,7 +263,11 @@ namespace YAEngine
       allocInfo.descriptorPool = tempPool;
       allocInfo.descriptorSetCount = 1;
       allocInfo.pSetLayouts = &cubicRes.prefilterDescriptorSetLayout;
-      vkAllocateDescriptorSets(ctx.device, &allocInfo, &descriptorSet);
+      if (vkAllocateDescriptorSets(ctx.device, &allocInfo, &descriptorSet) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Vulkan", "Failed to allocate prefilter descriptor set");
+        throw std::runtime_error("Failed to allocate prefilter descriptor set");
+      }
 
       VkDescriptorImageInfo imgInfo {};
       imgInfo.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;

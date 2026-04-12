@@ -45,7 +45,7 @@ namespace YAEngine
     uint32_t m_LastViewportHeight = 0;
 
     // Gizmo drag state
-    bool m_DragActive = false;
+    bool b_DragActive = false;
     GizmoAxis m_DragAxis {};
     GizmoMode m_DragMode {};
     LocalTransform m_DragStartLocalTransform;

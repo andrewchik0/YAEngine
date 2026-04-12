@@ -22,6 +22,8 @@ namespace YAEngine
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     bool depthBiasEnable = false;
 
+    // Compact vertex attribute format string: each pair is type + component count.
+    // Types: f = float, i = int, u = uint.
     // "f2i3u4"
     //    |
     //    V
@@ -41,7 +43,7 @@ namespace YAEngine
     void Destroy();
 
     void Bind(VkCommandBuffer commandBuffer);
-    void BindDescriptorSets(VkCommandBuffer commandBuffer, const std::vector<VkDescriptorSet>& descriptorSets, uint32_t set);
+    void BindDescriptorSets(VkCommandBuffer commandBuffer, std::initializer_list<VkDescriptorSet> descriptorSets, uint32_t set);
     void PushConstants(VkCommandBuffer cmd, void* data);
 
     VkPipeline Get() const { return m_Pipeline; }

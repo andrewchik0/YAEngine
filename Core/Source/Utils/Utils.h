@@ -19,9 +19,10 @@ namespace YAEngine
 
   inline glm::vec2 GetTAAJitter(uint64_t frame)
   {
+    uint32_t index = static_cast<uint32_t>(frame & 1023);
     return {
-      Halton(frame & 1023, 2) - 0.5f,
-      Halton(frame & 1023, 3) - 0.5f
+      Halton(index, 2) - 0.5f,
+      Halton(index, 3) - 0.5f
     };
   }
 }

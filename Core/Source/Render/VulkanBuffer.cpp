@@ -86,13 +86,14 @@ namespace YAEngine
     VulkanBuffer result;
     result.m_Size = size;
 
-    if (vmaCreateBuffer(ctx.allocator, &bufferInfo, &allocInfo, &result.m_Buffer, &result.m_Allocation, nullptr) != VK_SUCCESS)
+    VmaAllocationInfo resultInfo{};
+    if (vmaCreateBuffer(ctx.allocator, &bufferInfo, &allocInfo, &result.m_Buffer, &result.m_Allocation, &resultInfo) != VK_SUCCESS)
     {
       YA_LOG_ERROR("Render", "Failed to create mapped buffer");
       throw std::runtime_error("Failed to create mapped buffer");
     }
 
-    vmaMapMemory(ctx.allocator, result.m_Allocation, &result.m_MappedData);
+    result.m_MappedData = resultInfo.pMappedData;
     return result;
   }
 
@@ -114,13 +115,14 @@ namespace YAEngine
     VulkanBuffer result;
     result.m_Size = size;
 
-    if (vmaCreateBuffer(ctx.allocator, &bufferInfo, &allocInfo, &result.m_Buffer, &result.m_Allocation, nullptr) != VK_SUCCESS)
+    VmaAllocationInfo resultInfo{};
+    if (vmaCreateBuffer(ctx.allocator, &bufferInfo, &allocInfo, &result.m_Buffer, &result.m_Allocation, &resultInfo) != VK_SUCCESS)
     {
       YA_LOG_ERROR("Render", "Failed to create readback buffer");
       throw std::runtime_error("Failed to create readback buffer");
     }
 
-    vmaMapMemory(ctx.allocator, result.m_Allocation, &result.m_MappedData);
+    result.m_MappedData = resultInfo.pMappedData;
     return result;
   }
 
@@ -128,11 +130,7 @@ namespace YAEngine
   {
     if (m_Allocation)
     {
-      if (m_MappedData)
-      {
-        vmaUnmapMemory(ctx.allocator, m_Allocation);
-        m_MappedData = nullptr;
-      }
+      m_MappedData = nullptr;
       vmaDestroyBuffer(ctx.allocator, m_Buffer, m_Allocation);
     }
     m_Buffer = VK_NULL_HANDLE;

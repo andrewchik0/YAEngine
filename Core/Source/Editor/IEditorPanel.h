@@ -13,10 +13,10 @@ namespace YAEngine
     virtual void OnRender(EditorContext& context) = 0;
     virtual void OnSceneReady(EditorContext& context) {}
 
-    bool IsVisible() const { return m_Visible; }
-    void SetVisible(bool visible) { m_Visible = visible; }
+    bool IsVisible() const { return b_Visible; }
+    void SetVisible(bool visible) { b_Visible = visible; }
 
   protected:
-    bool m_Visible = true;
+    bool b_Visible = true;
   };
 }
