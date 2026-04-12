@@ -10,12 +10,15 @@ namespace YAEngine
   class Render;
   class Scene;
   class TerrainSystem;
+  class ThreadPool;
 
   class ScatterSystem : public ISystem
   {
   public:
-    ScatterSystem(AssetManager& assets, Scene& scene, Render& render, TerrainSystem& terrainSystem)
-      : m_Assets(assets), m_Scene(scene), m_Render(render), m_TerrainSystem(terrainSystem) {}
+    ScatterSystem(AssetManager& assets, Scene& scene, Render& render,
+                  TerrainSystem& terrainSystem, ThreadPool* threadPool = nullptr)
+      : m_Assets(assets), m_Scene(scene), m_Render(render),
+        m_TerrainSystem(terrainSystem), m_ThreadPool(threadPool) {}
 
     void Update(entt::registry& registry, double dt) override;
     void OnSceneClear() override;
@@ -45,6 +48,7 @@ namespace YAEngine
     Scene& m_Scene;
     Render& m_Render;
     TerrainSystem& m_TerrainSystem;
+    ThreadPool* m_ThreadPool = nullptr;
     std::vector<PendingDestroy> m_PendingDestroys;
     std::unordered_map<uint32_t, ScatterState> m_States;
 

@@ -21,6 +21,7 @@
 #include "Scene/SceneSerializer.h"
 #include "Scene/ComponentRegistry.h"
 #include "Utils/ServiceRegistry.h"
+#include "Utils/ThreadPool.h"
 #include "Utils/Ray.h"
 #include "Scene/SystemScheduler.h"
 
@@ -562,8 +563,9 @@ namespace YAEngine
     auto sceneDir = std::filesystem::path(path).parent_path();
     auto basePath = FindProjectRoot(sceneDir);
 
+    auto& threadPool = m_Registry->Get<ThreadPool>();
     SceneSerializer::Load(path, GetScene(), GetAssets(),
-      *m_Context.componentRegistry, GetRender(), basePath);
+      *m_Context.componentRegistry, GetRender(), basePath, &threadPool);
 
     // Recreate editor camera (destroyed by ClearScene)
     auto* editorCam = GetLayerManager().GetLayer<EditorCameraLayer>();

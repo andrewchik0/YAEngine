@@ -86,6 +86,7 @@ set(SOURCE_FILES
   Source/Assets/MaterialManager.h
   Source/Scene/Components.h
   Source/Utils/Timer.h
+  Source/Assets/CpuResourceData.h
   Source/Assets/ModelDescription.h
   Source/Assets/ModelImporter.cpp
   Source/Assets/ModelImporter.h
@@ -127,6 +128,8 @@ set(SOURCE_FILES
   Source/Render/DebugMarker.h
   Source/Render/VulkanBuffer.cpp
   Source/Render/VulkanBuffer.h
+  Source/Render/StagingBatchUploader.cpp
+  Source/Render/StagingBatchUploader.h
   Source/Render/VulkanImage.cpp
   Source/Render/VulkanImage.h
   Source/Render/RenderBackend.cpp
@@ -154,6 +157,8 @@ set(SOURCE_FILES
   Source/Utils/TerrainMeshGenerator.cpp
   Source/Utils/HeightmapLoader.h
   Source/Utils/HeightmapLoader.cpp
+  Source/Utils/MipGenerator.h
+  Source/Utils/MipGenerator.cpp
   Source/Utils/SplinePath3D.h
   Source/Utils/RoadMeshGenerator.h
   Source/Utils/RoadMeshGenerator.cpp

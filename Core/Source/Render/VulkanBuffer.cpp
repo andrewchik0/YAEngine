@@ -65,6 +65,31 @@ namespace YAEngine
     return result;
   }
 
+  VulkanBuffer VulkanBuffer::CreateGpuOnly(
+    const RenderContext& ctx,
+    VkDeviceSize size,
+    VkBufferUsageFlags usage)
+  {
+    VkBufferCreateInfo bufferInfo{};
+    bufferInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    bufferInfo.size = size;
+    bufferInfo.usage = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+    VmaAllocationCreateInfo allocInfo{};
+    allocInfo.usage = VMA_MEMORY_USAGE_GPU_ONLY;
+
+    VulkanBuffer result;
+    result.m_Size = size;
+
+    if (vmaCreateBuffer(ctx.allocator, &bufferInfo, &allocInfo, &result.m_Buffer, &result.m_Allocation, nullptr) != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to create GPU-only buffer");
+      throw std::runtime_error("Failed to create GPU-only buffer");
+    }
+
+    return result;
+  }
+
   VulkanBuffer VulkanBuffer::CreateMapped(
     const RenderContext& ctx,
     VkDeviceSize size,

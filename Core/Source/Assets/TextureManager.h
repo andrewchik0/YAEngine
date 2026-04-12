@@ -1,6 +1,7 @@
 #pragma once
 #include "AssetManagerBase.h"
 #include "IAssetManager.h"
+#include "CpuResourceData.h"
 #include "Render/VulkanTexture.h"
 
 namespace YAEngine
@@ -24,9 +25,15 @@ namespace YAEngine
 
     [[nodiscard]]
     TextureHandle Load(const std::string& filePath, bool* hasAlpha = nullptr, bool linear = false);
+
+    static CpuTextureData DecodeToCpu(const std::string& filePath, bool linear = false);
+
+    [[nodiscard]]
+    TextureHandle LoadFromCpuData(CpuTextureData&& cpuData, bool* hasAlpha = nullptr, const std::string& cachePath = "");
+
     void Destroy(TextureHandle handle);
 
-    bool CheckAlpha(void* data, uint32_t width, uint32_t height);
+    static bool CheckAlpha(void* data, uint32_t width, uint32_t height);
 
     void DestroyAll() override;
 

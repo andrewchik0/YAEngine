@@ -10,6 +10,7 @@
 #include "Scene/Components.h"
 #include "Scene/SceneSerializer.h"
 #include "Scene/ComponentRegistry.h"
+#include "Utils/ThreadPool.h"
 #include "Render/Render.h"
 #include "Assets/AssetManager.h"
 #ifdef YA_EDITOR
@@ -34,12 +35,13 @@ public:
   void OnSceneReady() override
   {
     auto& registry = m_Registry->Get<YAEngine::ComponentRegistry>();
+    auto& threadPool = m_Registry->Get<YAEngine::ThreadPool>();
 
 #ifdef TEST
     YAEngine::SceneSerializer::Load(
       APP_WORKING_DIR "/Assets/Scenes/terrain.scene",
       GetScene(), GetAssets(), registry, GetRender(),
-      APP_WORKING_DIR);
+      APP_WORKING_DIR, &threadPool);
 
 #ifdef YA_EDITOR
     auto& camState = GetScene().GetEditorCameraState();
@@ -52,7 +54,7 @@ public:
     YAEngine::SceneSerializer::Load(
       APP_WORKING_DIR "/Assets/Scenes/racing.scene",
       GetScene(), GetAssets(), registry, GetRender(),
-      APP_WORKING_DIR);
+      APP_WORKING_DIR, &threadPool);
 
     auto* controls = GetLayerManager().GetLayer<ControlsLayer>();
     if (controls)

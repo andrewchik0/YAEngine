@@ -21,6 +21,20 @@ namespace YAEngine
     return Store(std::move(model));
   }
 
+  ModelHandle ModelManager::LoadFromDescription(ModelDescription&& desc, const std::string& sourcePath, bool combinedTextures)
+  {
+    if (desc.root.children.empty())
+      return {};
+
+    auto model = std::make_unique<Model>();
+    model->rootEntity = m_Builder.Build(desc);
+
+    m_Scene->AddComponent<ModelSourceComponent>(model->rootEntity,
+      ModelSourceComponent { .path = sourcePath, .combinedTextures = combinedTextures });
+
+    return Store(std::move(model));
+  }
+
   ModelHandle ModelManager::LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances, bool combinedTextures)
   {
     auto handle = Load(path, combinedTextures);

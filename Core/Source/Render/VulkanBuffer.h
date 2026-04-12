@@ -17,6 +17,11 @@ namespace YAEngine
       VkDeviceSize size,
       VkBufferUsageFlags usage);
 
+    static VulkanBuffer CreateGpuOnly(
+      const RenderContext& ctx,
+      VkDeviceSize size,
+      VkBufferUsageFlags usage);
+
     static VulkanBuffer CreateMapped(
       const RenderContext& ctx,
       VkDeviceSize size,

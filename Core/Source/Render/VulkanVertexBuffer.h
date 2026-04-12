@@ -2,6 +2,7 @@
 
 #include "Pch.h"
 #include "VulkanBuffer.h"
+#include "Assets/CpuResourceData.h"
 
 namespace YAEngine
 {
@@ -27,6 +28,10 @@ namespace YAEngine
   public:
 
     void Create(const RenderContext& ctx, const void* inputData, size_t vertexCount, uint32_t vertexSize, const std::vector<uint32_t>& indices);
+
+    static CpuMeshData PrepareSoA(const std::vector<Vertex>& vertices, std::vector<uint32_t> indices);
+
+    void CreateFromSoA(const RenderContext& ctx, const CpuMeshData& cpuData);
     void Destroy(const RenderContext& ctx);
 
     void Draw(VkCommandBuffer cmd, uint32_t instanceCount = 1);

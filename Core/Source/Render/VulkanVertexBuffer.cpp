@@ -40,6 +40,54 @@ namespace YAEngine
     m_IndicesBuffer = VulkanBuffer::CreateStaged(ctx, indices.data(), indicesSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
   }
 
+  void VulkanVertexBuffer::CreateFromSoA(const RenderContext& ctx, const CpuMeshData& cpuData)
+  {
+    VkDeviceSize vertexSize = cpuData.vertexData.size();
+    m_AttribOffset = cpuData.attribOffset;
+
+    m_VerticesBuffer = VulkanBuffer::CreateStaged(ctx, cpuData.vertexData.data(), vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+
+    m_IndicesCount = cpuData.indices.size();
+    VkDeviceSize indicesSize = cpuData.indices.size() * sizeof(uint32_t);
+    m_IndicesBuffer = VulkanBuffer::CreateStaged(ctx, cpuData.indices.data(), indicesSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+  }
+
+  CpuMeshData VulkanVertexBuffer::PrepareSoA(const std::vector<Vertex>& vertices, std::vector<uint32_t> indices)
+  {
+    CpuMeshData result;
+    result.indices = std::move(indices);
+    result.vertexCount = vertices.size();
+
+    if (!vertices.empty())
+    {
+      glm::vec3 bbMin = vertices[0].position;
+      glm::vec3 bbMax = vertices[0].position;
+      for (size_t i = 1; i < vertices.size(); i++)
+      {
+        bbMin = glm::min(bbMin, vertices[i].position);
+        bbMax = glm::max(bbMax, vertices[i].position);
+      }
+      result.minBB = bbMin;
+      result.maxBB = bbMax;
+    }
+
+    size_t posSize = vertices.size() * sizeof(glm::vec3);
+    size_t attribSize = vertices.size() * sizeof(VertexAttribs);
+    result.attribOffset = posSize;
+    result.vertexData.resize(posSize + attribSize);
+
+    auto* dstPos = reinterpret_cast<glm::vec3*>(result.vertexData.data());
+    auto* dstAttrib = reinterpret_cast<VertexAttribs*>(result.vertexData.data() + posSize);
+
+    for (size_t i = 0; i < vertices.size(); i++)
+    {
+      dstPos[i] = vertices[i].position;
+      dstAttrib[i] = { vertices[i].tex, vertices[i].normal, vertices[i].tangent };
+    }
+
+    return result;
+  }
+
   void VulkanVertexBuffer::Destroy(const RenderContext& ctx)
   {
     m_VerticesBuffer.Destroy(ctx);

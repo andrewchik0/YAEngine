@@ -2,6 +2,7 @@
 
 #include "AssetManagerBase.h"
 #include "IAssetManager.h"
+#include "CpuResourceData.h"
 #include "Render/VulkanVertexBuffer.h"
 
 namespace YAEngine
@@ -29,6 +30,10 @@ namespace YAEngine
 
     [[nodiscard]]
     MeshHandle Load(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+
+    [[nodiscard]]
+    MeshHandle LoadFromCpuData(CpuMeshData&& cpuData);
+
     void Destroy(MeshHandle handle);
 
     void DestroyAll() override;

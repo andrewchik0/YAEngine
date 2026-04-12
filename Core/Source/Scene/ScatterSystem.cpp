@@ -11,6 +11,7 @@
 #include "Utils/SplinePath2D.h"
 #include "Utils/SplinePath3D.h"
 #include "Utils/CatmullRomCurve.h"
+#include "Utils/ThreadPool.h"
 #include "Utils/Log.h"
 
 namespace YAEngine
@@ -87,9 +88,363 @@ namespace YAEngine
     return nullptr;
   }
 
+  static float SampleHeightGrid(const TerrainHeightGrid& grid, float worldX, float worldZ)
+  {
+    if (grid.heights.empty()) return 0.0f;
+    float hs = grid.size * 0.5f;
+    float normX = glm::clamp((worldX + hs) / grid.size, 0.0f, 1.0f);
+    float normZ = glm::clamp((worldZ + hs) / grid.size, 0.0f, 1.0f);
+    float px = normX * static_cast<float>(grid.vertsPerSide - 1);
+    float pz = normZ * static_cast<float>(grid.vertsPerSide - 1);
+    uint32_t x0 = static_cast<uint32_t>(px);
+    uint32_t z0 = static_cast<uint32_t>(pz);
+    uint32_t x1 = std::min(x0 + 1, grid.vertsPerSide - 1);
+    uint32_t z1 = std::min(z0 + 1, grid.vertsPerSide - 1);
+    float fx = px - static_cast<float>(x0);
+    float fz = pz - static_cast<float>(z0);
+    float h00 = grid.heights[z0 * grid.vertsPerSide + x0];
+    float h10 = grid.heights[z0 * grid.vertsPerSide + x1];
+    float h01 = grid.heights[z1 * grid.vertsPerSide + x0];
+    float h11 = grid.heights[z1 * grid.vertsPerSide + x1];
+    float h0n = h00 + (h10 - h00) * fx;
+    float h1n = h01 + (h11 - h01) * fx;
+    return h0n + (h1n - h0n) * fz;
+  }
+
+  // --- CPU-only placement functions (thread-safe) ---
+
+  struct PlacementInput
+  {
+    ScatterComponent scatter;
+    TerrainComponent terrain;
+    const TerrainHeightGrid* heightGrid;
+    uint32_t terrainEntityId;
+    glm::mat4 nodeTransform;
+    bool hasRoadMask;
+    SplinePath3D roadSpline;
+    float roadHalfWidth;
+  };
+
+  static std::vector<glm::mat4> ComputeInstanceMatrices(const PlacementInput& input)
+  {
+    auto& scatter = input.scatter;
+    auto& terrain = input.terrain;
+    float halfSize = terrain.size * 0.5f;
+    float placementRadius = scatter.radius > 0.0f ? scatter.radius : halfSize;
+
+    SplinePath2D spline;
+    CatmullRomCurve curve;
+    const SplinePath2D* splinePtr = nullptr;
+    const CatmullRomCurve* curvePtr = nullptr;
+    if (!terrain.maskPath.empty())
+    {
+      spline = SplinePath2D(terrain.maskPath);
+      splinePtr = &spline;
+      if (!terrain.maskCurve.empty())
+      {
+        curve = CatmullRomCurve(terrain.maskCurve);
+        curvePtr = &curve;
+      }
+    }
+
+    bool useCachedHeight = input.heightGrid != nullptr;
+    float eps = terrain.size / static_cast<float>(terrain.subdivisions);
+
+    uint32_t rngState = HashScatterSeed(scatter.seed);
+    for (int i = 0; i < 4; i++)
+      ScatterRandom(rngState);
+
+    std::vector<glm::mat4> matrices;
+    matrices.reserve(scatter.count);
+
+    for (uint32_t i = 0; i < scatter.count; i++)
+    {
+      float rx = ScatterRandom(rngState) * 2.0f - 1.0f;
+      float rz = ScatterRandom(rngState) * 2.0f - 1.0f;
+
+      float wx = glm::clamp(rx * placementRadius, -halfSize, halfSize);
+      float wz = glm::clamp(rz * placementRadius, -halfSize, halfSize);
+
+      if (input.hasRoadMask)
+      {
+        float dist = DistanceToRoadXZ(wx, wz, input.roadSpline, 128);
+        float innerRadius = input.roadHalfWidth + scatter.roadMaskPadding;
+
+        if (dist < innerRadius)
+          continue;
+        if (dist > scatter.roadMaskOuterRadius)
+          continue;
+
+        if (scatter.roadMaskFalloff > 0.0f)
+        {
+          float falloffStart = scatter.roadMaskOuterRadius - scatter.roadMaskFalloff;
+          if (dist > falloffStart)
+          {
+            float falloffT = (dist - falloffStart) / scatter.roadMaskFalloff;
+            if (ScatterRandom(rngState) < falloffT)
+              continue;
+          }
+        }
+      }
+
+      float wy;
+      if (useCachedHeight)
+        wy = SampleHeightGrid(*input.heightGrid, wx, wz);
+      else
+        wy = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz, terrain, splinePtr, curvePtr);
+
+      float hL, hR, hD, hU;
+      if (useCachedHeight)
+      {
+        hL = SampleHeightGrid(*input.heightGrid, wx - eps, wz);
+        hR = SampleHeightGrid(*input.heightGrid, wx + eps, wz);
+        hD = SampleHeightGrid(*input.heightGrid, wx, wz - eps);
+        hU = SampleHeightGrid(*input.heightGrid, wx, wz + eps);
+      }
+      else
+      {
+        hL = TerrainMeshGenerator::SampleSurfaceHeight(wx - eps, wz, terrain, splinePtr, curvePtr);
+        hR = TerrainMeshGenerator::SampleSurfaceHeight(wx + eps, wz, terrain, splinePtr, curvePtr);
+        hD = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz - eps, terrain, splinePtr, curvePtr);
+        hU = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz + eps, terrain, splinePtr, curvePtr);
+      }
+
+      glm::vec3 normal = glm::normalize(glm::vec3(hL - hR, 2.0f * eps, hD - hU));
+      if (normal.y < scatter.maxSlope)
+        continue;
+
+      float angle = 0.0f;
+      if (scatter.randomYRotation)
+        angle = ScatterRandom(rngState) * glm::two_pi<float>();
+
+      float scale = scatter.minScale + ScatterRandom(rngState) * (scatter.maxScale - scatter.minScale);
+
+      glm::mat4 m(1.0f);
+      m = glm::translate(m, glm::vec3(wx, wy, wz));
+      m = glm::rotate(m, angle, glm::vec3(0.0f, 1.0f, 0.0f));
+      m = glm::scale(m, glm::vec3(scale));
+      m = m * input.nodeTransform;
+
+      matrices.push_back(m);
+    }
+
+    return matrices;
+  }
+
+  static std::vector<glm::mat4> ComputeSatelliteMatrices(
+    const ScatterComponent& scatter,
+    const TerrainComponent& terrain,
+    const TerrainHeightGrid* heightGrid,
+    const glm::mat4& nodeTransform,
+    const std::vector<glm::mat4>& sourcePositions)
+  {
+    float halfSize = terrain.size * 0.5f;
+    float eps = terrain.size / static_cast<float>(terrain.subdivisions);
+
+    SplinePath2D spline;
+    CatmullRomCurve curve;
+    const SplinePath2D* splinePtr = nullptr;
+    const CatmullRomCurve* curvePtr = nullptr;
+    if (!terrain.maskPath.empty())
+    {
+      spline = SplinePath2D(terrain.maskPath);
+      splinePtr = &spline;
+      if (!terrain.maskCurve.empty())
+      {
+        curve = CatmullRomCurve(terrain.maskCurve);
+        curvePtr = &curve;
+      }
+    }
+
+    bool useCachedHeight = heightGrid != nullptr;
+
+    auto sampleHeight = [&](float sx, float sz) -> float {
+      if (useCachedHeight)
+        return SampleHeightGrid(*heightGrid, sx, sz);
+      return TerrainMeshGenerator::SampleSurfaceHeight(sx, sz, terrain, splinePtr, curvePtr);
+    };
+
+    uint32_t rngState = HashScatterSeed(scatter.seed);
+    for (int i = 0; i < 4; i++)
+      ScatterRandom(rngState);
+
+    std::vector<glm::mat4> matrices;
+
+    for (auto& srcMatrix : sourcePositions)
+    {
+      glm::vec3 srcPos(srcMatrix[3]);
+
+      uint32_t clusterCount = scatter.clusterCountMin +
+        static_cast<uint32_t>(ScatterRandom(rngState) *
+          (scatter.clusterCountMax - scatter.clusterCountMin + 1));
+      clusterCount = std::min(clusterCount, scatter.clusterCountMax);
+
+      for (uint32_t j = 0; j < clusterCount; j++)
+      {
+        float angle = ScatterRandom(rngState) * glm::two_pi<float>();
+        float dist = ScatterRandom(rngState) * scatter.clusterRadius;
+        float wx = glm::clamp(srcPos.x + std::cos(angle) * dist, -halfSize, halfSize);
+        float wz = glm::clamp(srcPos.z + std::sin(angle) * dist, -halfSize, halfSize);
+
+        float wy = sampleHeight(wx, wz);
+
+        float hL = sampleHeight(wx - eps, wz);
+        float hR = sampleHeight(wx + eps, wz);
+        float hD = sampleHeight(wx, wz - eps);
+        float hU = sampleHeight(wx, wz + eps);
+
+        glm::vec3 normal = glm::normalize(glm::vec3(hL - hR, 2.0f * eps, hD - hU));
+        if (normal.y < scatter.maxSlope)
+          continue;
+
+        float yRot = 0.0f;
+        if (scatter.randomYRotation)
+          yRot = ScatterRandom(rngState) * glm::two_pi<float>();
+
+        float scale = scatter.minScale + ScatterRandom(rngState) * (scatter.maxScale - scatter.minScale);
+
+        glm::mat4 m(1.0f);
+        m = glm::translate(m, glm::vec3(wx, wy, wz));
+        m = glm::rotate(m, yRot, glm::vec3(0.0f, 1.0f, 0.0f));
+        m = glm::scale(m, glm::vec3(scale));
+        m = m * nodeTransform;
+
+        matrices.push_back(m);
+      }
+    }
+
+    return matrices;
+  }
+
+  // --- Shared helpers for mesh/material prep ---
+
+  struct ScatterMeshSetup
+  {
+    MeshHandle mesh;
+    MaterialHandle material;
+    glm::mat4 nodeTransform{1.0f};
+    bool valid = true;
+  };
+
+  static ScatterMeshSetup SetupModelMesh(
+    const ScatterComponent& scatter, uint32_t entityId,
+    AssetManager& assets, const ModelDescription& desc,
+    const char* namePrefix = "scatter_")
+  {
+    ScatterMeshSetup setup;
+
+    const NodeDescription* meshNode = nullptr;
+    glm::mat4 accumulatedTransform(1.0f);
+    for (auto& child : desc.root.children)
+    {
+      meshNode = FindMeshNode(child, glm::mat4(1.0f), accumulatedTransform);
+      if (meshNode) break;
+    }
+
+    if (!meshNode || !meshNode->meshIndex.has_value())
+    {
+      YA_LOG_ERROR("Scene", "Scatter model has no mesh: %s", scatter.modelPath.c_str());
+      setup.valid = false;
+      return setup;
+    }
+
+    auto& meshDesc = desc.meshes[*meshNode->meshIndex];
+    setup.mesh = assets.Meshes().Load(meshDesc.vertices, meshDesc.indices);
+
+    glm::vec3 rawMin = assets.Meshes().GetMinBB(setup.mesh);
+    glm::vec3 rawMax = assets.Meshes().GetMaxBB(setup.mesh);
+    glm::vec3 corners[8] = {
+      { rawMin.x, rawMin.y, rawMin.z }, { rawMax.x, rawMin.y, rawMin.z },
+      { rawMin.x, rawMax.y, rawMin.z }, { rawMax.x, rawMax.y, rawMin.z },
+      { rawMin.x, rawMin.y, rawMax.z }, { rawMax.x, rawMin.y, rawMax.z },
+      { rawMin.x, rawMax.y, rawMax.z }, { rawMax.x, rawMax.y, rawMax.z },
+    };
+    glm::vec3 worldMin(std::numeric_limits<float>::max());
+    glm::vec3 worldMax(std::numeric_limits<float>::lowest());
+    for (auto& c : corners)
+    {
+      glm::vec3 w = glm::vec3(accumulatedTransform * glm::vec4(c, 1.0f));
+      worldMin = glm::min(worldMin, w);
+      worldMax = glm::max(worldMax, w);
+    }
+    glm::vec3 worldCenter = (worldMin + worldMax) * 0.5f;
+
+    setup.nodeTransform = glm::translate(glm::mat4(1.0f),
+                            glm::vec3(-worldCenter.x, -worldMin.y, -worldCenter.z))
+                        * accumulatedTransform;
+
+    setup.material = assets.Materials().Create();
+    auto& mat = assets.Materials().Get(setup.material);
+    mat.name = std::string(namePrefix) + std::to_string(entityId);
+
+    if (meshNode->materialIndex.has_value())
+    {
+      auto& matDesc = desc.materials[*meshNode->materialIndex];
+      mat.albedo = matDesc.albedo;
+      mat.roughness = matDesc.roughness;
+      mat.metallic = matDesc.metallic;
+      mat.roughnessFactor = matDesc.roughnessFactor;
+      mat.metallicFactor = matDesc.metallicFactor;
+      mat.doubleSided = matDesc.doubleSided;
+      mat.combinedTextures = matDesc.combinedTextures;
+
+      if (!matDesc.baseColorTexture.empty())
+      {
+        mat.baseColorTexture = assets.Textures().Load(matDesc.baseColorTexture, &mat.hasAlpha);
+        mat.alphaTest = mat.hasAlpha;
+      }
+      if (!matDesc.metallicTexture.empty())
+        mat.metallicTexture = assets.Textures().Load(matDesc.metallicTexture, nullptr, true);
+      if (!matDesc.roughnessTexture.empty())
+        mat.roughnessTexture = assets.Textures().Load(matDesc.roughnessTexture, nullptr, true);
+      if (!matDesc.normalTexture.empty())
+        mat.normalTexture = assets.Textures().Load(matDesc.normalTexture, nullptr, true);
+    }
+
+    return setup;
+  }
+
+  static ScatterMeshSetup SetupPlaneMesh(
+    const ScatterComponent& scatter, uint32_t entityId,
+    AssetManager& assets,
+    const char* namePrefix = "scatter_")
+  {
+    ScatterMeshSetup setup;
+
+    float hw = scatter.planeWidth * 0.5f;
+    float hh = scatter.planeHeight * 0.5f;
+    ProcMesh quad;
+    quad.vertices = {
+      { .position = { -hw, 0.0f, 0.0f }, .tex = { 0.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
+      { .position = {  hw, 0.0f, 0.0f }, .tex = { 1.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
+      { .position = {  hw, hh * 2.0f, 0.0f }, .tex = { 1.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
+      { .position = { -hw, hh * 2.0f, 0.0f }, .tex = { 0.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
+      { .position = { 0.0f, 0.0f, -hw }, .tex = { 0.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
+      { .position = { 0.0f, 0.0f,  hw }, .tex = { 1.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
+      { .position = { 0.0f, hh * 2.0f,  hw }, .tex = { 1.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
+      { .position = { 0.0f, hh * 2.0f, -hw }, .tex = { 0.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
+    };
+    quad.indices = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7 };
+    setup.mesh = assets.Meshes().Load(quad.vertices, quad.indices);
+
+    setup.material = assets.Materials().Create();
+    auto& mat = assets.Materials().Get(setup.material);
+    mat.name = std::string(namePrefix) + std::to_string(entityId);
+    mat.doubleSided = true;
+    if (!scatter.materialPath.empty())
+    {
+      std::string absPath = assets.ResolvePath(scatter.materialPath);
+      mat.baseColorTexture = assets.Textures().Load(absPath, &mat.hasAlpha);
+      mat.alphaTest = mat.hasAlpha;
+    }
+
+    return setup;
+  }
+
+  // --- ScatterSystem implementation ---
+
   void ScatterSystem::OnSceneClear()
   {
-    // Assets are already destroyed by DestroyAll - just clear bookkeeping
     m_States.clear();
     m_PendingDestroys.clear();
   }
@@ -163,11 +518,210 @@ namespace YAEngine
         satellites.push_back(entity);
     }
 
-    for (auto entity : standalone)
+    if (m_ThreadPool && standalone.size() > 0)
     {
-      GenerateScatter(registry, entity);
-      registry.remove<ScatterDirty>(entity);
+      // Parallel path for standalone scatter
+
+      // Phase 1: Import all unique models in parallel
+      std::unordered_map<std::string, std::future<ModelDescription>> modelFutures;
+      for (auto entity : standalone)
+      {
+        auto& scatter = registry.get<ScatterComponent>(entity);
+        if (scatter.meshType == ScatterMeshType::Model && !scatter.modelPath.empty())
+        {
+          std::string absPath = m_Assets.ResolvePath(scatter.modelPath);
+          if (!modelFutures.contains(absPath))
+          {
+            modelFutures.emplace(absPath, m_ThreadPool->Submit(
+              [absPath]() { return ModelImporter::Import(absPath, false); }));
+          }
+        }
+      }
+
+      // Wait for all model imports
+      std::unordered_map<std::string, ModelDescription> importedModels;
+      for (auto& [path, future] : modelFutures)
+        importedModels.emplace(path, future.get());
+
+      // Phase 2: Build road mask (shared across all entities)
+      SplinePath3D roadSpline;
+      float roadHalfWidth = 0.0f;
+      bool hasRoadMask = false;
+      {
+        auto roadView = registry.view<RoadComponent>();
+        for (auto roadEntity : roadView)
+        {
+          auto& road = registry.get<RoadComponent>(roadEntity);
+          if (road.points.size() >= 2)
+          {
+            roadSpline.points = road.points;
+            roadHalfWidth = road.width * 0.5f;
+            hasRoadMask = true;
+            break;
+          }
+        }
+      }
+
+      // Phase 3: Setup meshes/materials (main thread), then submit placement in parallel
+      struct StandaloneTask
+      {
+        entt::entity entity;
+        uint32_t entityId;
+        ScatterMeshSetup setup;
+        std::future<std::vector<glm::mat4>> future;
+      };
+
+      std::vector<StandaloneTask> tasks;
+
+      for (auto entity : standalone)
+      {
+        uint32_t entityId = static_cast<uint32_t>(entity);
+        DestroyState(entityId);
+
+        auto& scatter = registry.get<ScatterComponent>(entity);
+        if (scatter.count == 0)
+        {
+          registry.remove<ScatterDirty>(entity);
+          continue;
+        }
+
+        // Find terrain
+        const TerrainComponent* terrain = nullptr;
+        entt::entity terrainEntity = entt::null;
+        if (registry.all_of<TerrainComponent>(entity))
+        {
+          terrain = &registry.get<TerrainComponent>(entity);
+          terrainEntity = entity;
+        }
+        else if (registry.all_of<HierarchyComponent>(entity))
+        {
+          auto parent = registry.get<HierarchyComponent>(entity).parent;
+          if (parent != entt::null && registry.all_of<TerrainComponent>(parent))
+          {
+            terrain = &registry.get<TerrainComponent>(parent);
+            terrainEntity = parent;
+          }
+        }
+
+        if (!terrain)
+        {
+          YA_LOG_ERROR("Scene", "ScatterComponent requires TerrainComponent on entity or parent");
+          registry.remove<ScatterDirty>(entity);
+          continue;
+        }
+
+        // Setup mesh/material on main thread
+        ScatterMeshSetup meshSetup;
+        if (scatter.meshType == ScatterMeshType::Model && !scatter.modelPath.empty())
+        {
+          std::string absPath = m_Assets.ResolvePath(scatter.modelPath);
+          meshSetup = SetupModelMesh(scatter, entityId, m_Assets, importedModels.at(absPath));
+        }
+        else
+        {
+          meshSetup = SetupPlaneMesh(scatter, entityId, m_Assets);
+        }
+
+        if (!meshSetup.valid)
+        {
+          registry.remove<ScatterDirty>(entity);
+          continue;
+        }
+
+        uint32_t terrainEntityId = static_cast<uint32_t>(terrainEntity);
+
+        PlacementInput input;
+        input.scatter = scatter;
+        input.terrain = *terrain;
+        input.heightGrid = m_TerrainSystem.GetCachedHeightGrid(terrainEntityId);
+        input.terrainEntityId = terrainEntityId;
+        input.nodeTransform = meshSetup.nodeTransform;
+        input.hasRoadMask = hasRoadMask && scatter.useRoadMask;
+        if (input.hasRoadMask)
+        {
+          input.roadSpline = roadSpline;
+          input.roadHalfWidth = roadHalfWidth;
+        }
+
+        StandaloneTask task;
+        task.entity = entity;
+        task.entityId = entityId;
+        task.setup = meshSetup;
+        task.future = m_ThreadPool->Submit(
+          [input = std::move(input)]() { return ComputeInstanceMatrices(input); });
+        tasks.push_back(std::move(task));
+      }
+
+      // Phase 4: Finalize all
+      for (auto& task : tasks)
+      {
+        auto matrices = task.future.get();
+
+        if (matrices.empty())
+        {
+          m_Assets.Meshes().Destroy(task.setup.mesh);
+          m_Assets.Materials().Destroy(task.setup.material);
+          registry.remove<ScatterDirty>(task.entity);
+          continue;
+        }
+
+        auto& scatter = registry.get<ScatterComponent>(task.entity);
+
+        glm::vec3 boundsMin(std::numeric_limits<float>::max());
+        glm::vec3 boundsMax(std::numeric_limits<float>::lowest());
+        float meshHeight = scatter.meshType == ScatterMeshType::Plane
+          ? scatter.planeHeight * scatter.maxScale
+          : scatter.maxScale;
+        float meshRadius = scatter.meshType == ScatterMeshType::Plane
+          ? scatter.planeWidth * 0.5f * scatter.maxScale
+          : scatter.maxScale;
+
+        for (auto& m : matrices)
+        {
+          glm::vec3 pos(m[3]);
+          boundsMin = glm::min(boundsMin, pos - glm::vec3(meshRadius, 0.0f, meshRadius));
+          boundsMax = glm::max(boundsMax, pos + glm::vec3(meshRadius, meshHeight, meshRadius));
+        }
+
+        ScatterState state;
+        state.mesh = task.setup.mesh;
+        state.material = task.setup.material;
+        state.instanceMatrices = std::move(matrices);
+
+        uint32_t dataSize = uint32_t(state.instanceMatrices.size() * sizeof(glm::mat4));
+        state.instanceOffset = m_Render.AllocateInstanceData(dataSize);
+
+        state.childEntity = m_Scene.CreateEntity("scatter_instances");
+        m_Scene.SetParent(state.childEntity, task.entity);
+
+        registry.emplace_or_replace<ScatterInstanceTag>(state.childEntity);
+        registry.emplace_or_replace<MeshComponent>(state.childEntity, state.mesh);
+        registry.emplace_or_replace<MaterialComponent>(state.childEntity, state.material);
+
+        registry.emplace_or_replace<LocalBounds>(state.childEntity, LocalBounds {
+          .min = boundsMin, .max = boundsMax
+        });
+        registry.emplace_or_replace<WorldBounds>(state.childEntity, WorldBounds {
+          .min = boundsMin, .max = boundsMax
+        });
+
+        m_States[task.entityId] = std::move(state);
+        auto& stored = m_States[task.entityId];
+        m_Assets.Meshes().SetInstanceData(stored.mesh, &stored.instanceMatrices, stored.instanceOffset);
+
+        registry.remove<ScatterDirty>(task.entity);
+      }
     }
+    else
+    {
+      for (auto entity : standalone)
+      {
+        GenerateScatter(registry, entity);
+        registry.remove<ScatterDirty>(entity);
+      }
+    }
+
+    // Satellites always sequential (depend on standalone scatter state)
     for (auto entity : satellites)
     {
       GenerateSatelliteScatter(registry, entity);
@@ -203,7 +757,6 @@ namespace YAEngine
     if (scatter.count == 0)
       return;
 
-    // Find terrain on this entity or parent
     const TerrainComponent* terrain = nullptr;
     entt::entity terrainEntity = entt::null;
     if (registry.all_of<TerrainComponent>(entity))
@@ -227,139 +780,22 @@ namespace YAEngine
       return;
     }
 
-    // Create mesh + material
-    ScatterState state;
-    glm::mat4 nodeTransform(1.0f);
-
+    ScatterMeshSetup meshSetup;
     if (scatter.meshType == ScatterMeshType::Model && !scatter.modelPath.empty())
     {
       std::string absPath = m_Assets.ResolvePath(scatter.modelPath);
       auto desc = ModelImporter::Import(absPath, false);
-
-      // Find first node with a mesh, accumulating parent transforms
-      const NodeDescription* meshNode = nullptr;
-      glm::mat4 accumulatedTransform(1.0f);
-      for (auto& child : desc.root.children)
-      {
-        meshNode = FindMeshNode(child, glm::mat4(1.0f), accumulatedTransform);
-        if (meshNode) break;
-      }
-
-      if (!meshNode || !meshNode->meshIndex.has_value())
-      {
-        YA_LOG_ERROR("Scene", "Scatter model has no mesh: %s", scatter.modelPath.c_str());
-        return;
-      }
-
-      // Load mesh
-      auto& meshDesc = desc.meshes[*meshNode->meshIndex];
-      state.mesh = m_Assets.Meshes().Load(meshDesc.vertices, meshDesc.indices);
-
-      // Compute world-space AABB by transforming all 8 corners through accumulated transform
-      glm::vec3 rawMin = m_Assets.Meshes().GetMinBB(state.mesh);
-      glm::vec3 rawMax = m_Assets.Meshes().GetMaxBB(state.mesh);
-      glm::vec3 corners[8] = {
-        { rawMin.x, rawMin.y, rawMin.z }, { rawMax.x, rawMin.y, rawMin.z },
-        { rawMin.x, rawMax.y, rawMin.z }, { rawMax.x, rawMax.y, rawMin.z },
-        { rawMin.x, rawMin.y, rawMax.z }, { rawMax.x, rawMin.y, rawMax.z },
-        { rawMin.x, rawMax.y, rawMax.z }, { rawMax.x, rawMax.y, rawMax.z },
-      };
-      glm::vec3 worldMin(std::numeric_limits<float>::max());
-      glm::vec3 worldMax(std::numeric_limits<float>::lowest());
-      for (auto& c : corners)
-      {
-        glm::vec3 w = glm::vec3(accumulatedTransform * glm::vec4(c, 1.0f));
-        worldMin = glm::min(worldMin, w);
-        worldMax = glm::max(worldMax, w);
-      }
-      glm::vec3 worldCenter = (worldMin + worldMax) * 0.5f;
-
-      // Re-center in world space: XZ at origin, Y base at 0
-      nodeTransform = glm::translate(glm::mat4(1.0f),
-                        glm::vec3(-worldCenter.x, -worldMin.y, -worldCenter.z))
-                    * accumulatedTransform;
-
-      // Load material from model
-      state.material = m_Assets.Materials().Create();
-      auto& mat = m_Assets.Materials().Get(state.material);
-      mat.name = "scatter_" + std::to_string(entityId);
-
-      if (meshNode->materialIndex.has_value())
-      {
-        auto& matDesc = desc.materials[*meshNode->materialIndex];
-        mat.albedo = matDesc.albedo;
-        mat.roughness = matDesc.roughness;
-        mat.metallic = matDesc.metallic;
-        mat.roughnessFactor = matDesc.roughnessFactor;
-        mat.metallicFactor = matDesc.metallicFactor;
-        mat.doubleSided = matDesc.doubleSided;
-        mat.combinedTextures = matDesc.combinedTextures;
-
-        if (!matDesc.baseColorTexture.empty())
-        {
-          mat.baseColorTexture = m_Assets.Textures().Load(matDesc.baseColorTexture, &mat.hasAlpha);
-          mat.alphaTest = mat.hasAlpha;
-        }
-        if (!matDesc.metallicTexture.empty())
-          mat.metallicTexture = m_Assets.Textures().Load(matDesc.metallicTexture, nullptr, true);
-        if (!matDesc.roughnessTexture.empty())
-          mat.roughnessTexture = m_Assets.Textures().Load(matDesc.roughnessTexture, nullptr, true);
-        if (!matDesc.normalTexture.empty())
-          mat.normalTexture = m_Assets.Textures().Load(matDesc.normalTexture, nullptr, true);
-      }
+      meshSetup = SetupModelMesh(scatter, entityId, m_Assets, desc);
     }
     else
     {
-      // Plane billboard
-      ProcMesh quad;
-      float hw = scatter.planeWidth * 0.5f;
-      float hh = scatter.planeHeight * 0.5f;
-      quad.vertices = {
-        { .position = { -hw, 0.0f, 0.0f }, .tex = { 0.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
-        { .position = {  hw, 0.0f, 0.0f }, .tex = { 1.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
-        { .position = {  hw, hh * 2.0f, 0.0f }, .tex = { 1.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
-        { .position = { -hw, hh * 2.0f, 0.0f }, .tex = { 0.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
-        { .position = { 0.0f, 0.0f, -hw }, .tex = { 0.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
-        { .position = { 0.0f, 0.0f,  hw }, .tex = { 1.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
-        { .position = { 0.0f, hh * 2.0f,  hw }, .tex = { 1.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
-        { .position = { 0.0f, hh * 2.0f, -hw }, .tex = { 0.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
-      };
-      quad.indices = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7 };
-      state.mesh = m_Assets.Meshes().Load(quad.vertices, quad.indices);
-
-      state.material = m_Assets.Materials().Create();
-      auto& mat = m_Assets.Materials().Get(state.material);
-      mat.name = "scatter_" + std::to_string(entityId);
-      mat.doubleSided = true;
-      if (!scatter.materialPath.empty())
-      {
-        std::string absPath = m_Assets.ResolvePath(scatter.materialPath);
-        mat.baseColorTexture = m_Assets.Textures().Load(absPath, &mat.hasAlpha);
-        mat.alphaTest = mat.hasAlpha;
-      }
+      meshSetup = SetupPlaneMesh(scatter, entityId, m_Assets);
     }
 
-    // Generate placement positions
-    float halfSize = terrain->size * 0.5f;
-    float placementRadius = scatter.radius > 0.0f ? scatter.radius : halfSize;
+    if (!meshSetup.valid)
+      return;
 
-    // Pre-build spline/curve once for all height samples (fallback when no cached grid)
-    SplinePath2D spline;
-    CatmullRomCurve curve;
-    const SplinePath2D* splinePtr = nullptr;
-    const CatmullRomCurve* curvePtr = nullptr;
-    if (!terrain->maskPath.empty())
-    {
-      spline = SplinePath2D(terrain->maskPath);
-      splinePtr = &spline;
-      if (!terrain->maskCurve.empty())
-      {
-        curve = CatmullRomCurve(terrain->maskCurve);
-        curvePtr = &curve;
-      }
-    }
-
-    // Build road spline for placement mask
+    // Build road mask
     SplinePath3D roadSpline;
     float roadHalfWidth = 0.0f;
     bool hasRoadMask = false;
@@ -379,15 +815,35 @@ namespace YAEngine
       }
     }
 
-    // Check if terrain has cached height grid
     uint32_t terrainEntityId = static_cast<uint32_t>(terrainEntity);
+    float halfSize = terrain->size * 0.5f;
+    float placementRadius = scatter.radius > 0.0f ? scatter.radius : halfSize;
+
+    SplinePath2D spline;
+    CatmullRomCurve curve;
+    const SplinePath2D* splinePtr = nullptr;
+    const CatmullRomCurve* curvePtr = nullptr;
+    if (!terrain->maskPath.empty())
+    {
+      spline = SplinePath2D(terrain->maskPath);
+      splinePtr = &spline;
+      if (!terrain->maskCurve.empty())
+      {
+        curve = CatmullRomCurve(terrain->maskCurve);
+        curvePtr = &curve;
+      }
+    }
+
     bool useCachedHeight = m_TerrainSystem.HasCachedHeight(terrainEntityId);
+    float eps = terrain->size / static_cast<float>(terrain->subdivisions);
 
     uint32_t rngState = HashScatterSeed(scatter.seed);
-    // Warm up RNG
     for (int i = 0; i < 4; i++)
       ScatterRandom(rngState);
 
+    ScatterState state;
+    state.mesh = meshSetup.mesh;
+    state.material = meshSetup.material;
     state.instanceMatrices.reserve(scatter.count);
 
     for (uint32_t i = 0; i < scatter.count; i++)
@@ -395,14 +851,9 @@ namespace YAEngine
       float rx = ScatterRandom(rngState) * 2.0f - 1.0f;
       float rz = ScatterRandom(rngState) * 2.0f - 1.0f;
 
-      float wx = rx * placementRadius;
-      float wz = rz * placementRadius;
+      float wx = glm::clamp(rx * placementRadius, -halfSize, halfSize);
+      float wz = glm::clamp(rz * placementRadius, -halfSize, halfSize);
 
-      // Clamp to terrain bounds
-      wx = glm::clamp(wx, -halfSize, halfSize);
-      wz = glm::clamp(wz, -halfSize, halfSize);
-
-      // Road mask filter
       if (hasRoadMask)
       {
         float dist = DistanceToRoadXZ(wx, wz, roadSpline, 128);
@@ -413,7 +864,6 @@ namespace YAEngine
         if (dist > scatter.roadMaskOuterRadius)
           continue;
 
-        // Falloff near outer boundary
         if (scatter.roadMaskFalloff > 0.0f)
         {
           float falloffStart = scatter.roadMaskOuterRadius - scatter.roadMaskFalloff;
@@ -426,15 +876,12 @@ namespace YAEngine
         }
       }
 
-      // Sample height from cached grid or analytical fallback
       float wy;
       if (useCachedHeight)
         wy = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx, wz);
       else
         wy = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz, *terrain, splinePtr, curvePtr);
 
-      // Compute slope via finite differences
-      float eps = terrain->size / static_cast<float>(terrain->subdivisions);
       float hL, hR, hD, hU;
       if (useCachedHeight)
       {
@@ -452,24 +899,20 @@ namespace YAEngine
       }
 
       glm::vec3 normal = glm::normalize(glm::vec3(hL - hR, 2.0f * eps, hD - hU));
-      float slopeY = normal.y;
-
-      if (slopeY < scatter.maxSlope)
+      if (normal.y < scatter.maxSlope)
         continue;
 
-      // Random Y rotation
       float angle = 0.0f;
       if (scatter.randomYRotation)
         angle = ScatterRandom(rngState) * glm::two_pi<float>();
 
-      // Random scale
       float scale = scatter.minScale + ScatterRandom(rngState) * (scatter.maxScale - scatter.minScale);
 
       glm::mat4 m(1.0f);
       m = glm::translate(m, glm::vec3(wx, wy, wz));
       m = glm::rotate(m, angle, glm::vec3(0.0f, 1.0f, 0.0f));
       m = glm::scale(m, glm::vec3(scale));
-      m = m * nodeTransform;
+      m = m * meshSetup.nodeTransform;
 
       state.instanceMatrices.push_back(m);
     }
@@ -481,7 +924,6 @@ namespace YAEngine
       return;
     }
 
-    // Compute world bounds from all instance positions
     glm::vec3 boundsMin(std::numeric_limits<float>::max());
     glm::vec3 boundsMax(std::numeric_limits<float>::lowest());
     float meshHeight = scatter.meshType == ScatterMeshType::Plane
@@ -498,11 +940,9 @@ namespace YAEngine
       boundsMax = glm::max(boundsMax, pos + glm::vec3(meshRadius, meshHeight, meshRadius));
     }
 
-    // Allocate instance buffer
     uint32_t dataSize = uint32_t(state.instanceMatrices.size() * sizeof(glm::mat4));
     state.instanceOffset = m_Render.AllocateInstanceData(dataSize);
 
-    // Create child entity with mesh + material
     state.childEntity = m_Scene.CreateEntity("scatter_instances");
     m_Scene.SetParent(state.childEntity, entity);
 
@@ -510,18 +950,13 @@ namespace YAEngine
     registry.emplace_or_replace<MeshComponent>(state.childEntity, state.mesh);
     registry.emplace_or_replace<MaterialComponent>(state.childEntity, state.material);
 
-    // Set bounds covering all instances to prevent incorrect frustum culling
     registry.emplace_or_replace<LocalBounds>(state.childEntity, LocalBounds {
-      .min = boundsMin,
-      .max = boundsMax
+      .min = boundsMin, .max = boundsMax
     });
     registry.emplace_or_replace<WorldBounds>(state.childEntity, WorldBounds {
-      .min = boundsMin,
-      .max = boundsMax
+      .min = boundsMin, .max = boundsMax
     });
 
-    // Move state into map first, then set instance data from stored reference
-    // to avoid dangling pointer after std::move
     m_States[entityId] = std::move(state);
     auto& stored = m_States[entityId];
     m_Assets.Meshes().SetInstanceData(stored.mesh, &stored.instanceMatrices, stored.instanceOffset);
@@ -545,7 +980,6 @@ namespace YAEngine
 
     auto& scatter = registry.get<ScatterComponent>(entity);
 
-    // Find source entity and its scatter state
     entt::entity sourceEntity = FindEntityByName(registry, scatter.clusterSource);
     if (sourceEntity == entt::null)
     {
@@ -561,7 +995,6 @@ namespace YAEngine
     }
     auto& sourcePositions = sourceIt->second.instanceMatrices;
 
-    // Find terrain on this entity or parent
     const TerrainComponent* terrain = nullptr;
     entt::entity terrainEntity = entt::null;
     if (registry.all_of<TerrainComponent>(entity))
@@ -585,209 +1018,34 @@ namespace YAEngine
       return;
     }
 
-    // Create mesh + material (same logic as GenerateScatter)
-    ScatterState state;
-    glm::mat4 nodeTransform(1.0f);
-
+    ScatterMeshSetup meshSetup;
     if (scatter.meshType == ScatterMeshType::Model && !scatter.modelPath.empty())
     {
       std::string absPath = m_Assets.ResolvePath(scatter.modelPath);
       auto desc = ModelImporter::Import(absPath, false);
-
-      const NodeDescription* meshNode = nullptr;
-      glm::mat4 accumulatedTransform(1.0f);
-      for (auto& child : desc.root.children)
-      {
-        meshNode = FindMeshNode(child, glm::mat4(1.0f), accumulatedTransform);
-        if (meshNode) break;
-      }
-
-      if (!meshNode || !meshNode->meshIndex.has_value())
-      {
-        YA_LOG_ERROR("Scene", "Scatter model has no mesh: %s", scatter.modelPath.c_str());
-        return;
-      }
-
-      auto& meshDesc = desc.meshes[*meshNode->meshIndex];
-      state.mesh = m_Assets.Meshes().Load(meshDesc.vertices, meshDesc.indices);
-
-      glm::vec3 rawMin = m_Assets.Meshes().GetMinBB(state.mesh);
-      glm::vec3 rawMax = m_Assets.Meshes().GetMaxBB(state.mesh);
-      glm::vec3 corners[8] = {
-        { rawMin.x, rawMin.y, rawMin.z }, { rawMax.x, rawMin.y, rawMin.z },
-        { rawMin.x, rawMax.y, rawMin.z }, { rawMax.x, rawMax.y, rawMin.z },
-        { rawMin.x, rawMin.y, rawMax.z }, { rawMax.x, rawMin.y, rawMax.z },
-        { rawMin.x, rawMax.y, rawMax.z }, { rawMax.x, rawMax.y, rawMax.z },
-      };
-      glm::vec3 worldMin(std::numeric_limits<float>::max());
-      glm::vec3 worldMax(std::numeric_limits<float>::lowest());
-      for (auto& c : corners)
-      {
-        glm::vec3 w = glm::vec3(accumulatedTransform * glm::vec4(c, 1.0f));
-        worldMin = glm::min(worldMin, w);
-        worldMax = glm::max(worldMax, w);
-      }
-      glm::vec3 worldCenter = (worldMin + worldMax) * 0.5f;
-      nodeTransform = glm::translate(glm::mat4(1.0f),
-                        glm::vec3(-worldCenter.x, -worldMin.y, -worldCenter.z))
-                    * accumulatedTransform;
-
-      state.material = m_Assets.Materials().Create();
-      auto& mat = m_Assets.Materials().Get(state.material);
-      mat.name = "scatter_sat_" + std::to_string(entityId);
-
-      if (meshNode->materialIndex.has_value())
-      {
-        auto& matDesc = desc.materials[*meshNode->materialIndex];
-        mat.albedo = matDesc.albedo;
-        mat.roughness = matDesc.roughness;
-        mat.metallic = matDesc.metallic;
-        mat.roughnessFactor = matDesc.roughnessFactor;
-        mat.metallicFactor = matDesc.metallicFactor;
-        mat.doubleSided = matDesc.doubleSided;
-        mat.combinedTextures = matDesc.combinedTextures;
-
-        if (!matDesc.baseColorTexture.empty())
-        {
-          mat.baseColorTexture = m_Assets.Textures().Load(matDesc.baseColorTexture, &mat.hasAlpha);
-          mat.alphaTest = mat.hasAlpha;
-        }
-        if (!matDesc.metallicTexture.empty())
-          mat.metallicTexture = m_Assets.Textures().Load(matDesc.metallicTexture, nullptr, true);
-        if (!matDesc.roughnessTexture.empty())
-          mat.roughnessTexture = m_Assets.Textures().Load(matDesc.roughnessTexture, nullptr, true);
-        if (!matDesc.normalTexture.empty())
-          mat.normalTexture = m_Assets.Textures().Load(matDesc.normalTexture, nullptr, true);
-      }
+      meshSetup = SetupModelMesh(scatter, entityId, m_Assets, desc, "scatter_sat_");
     }
     else
     {
-      ProcMesh quad;
-      float hw = scatter.planeWidth * 0.5f;
-      float hh = scatter.planeHeight * 0.5f;
-      quad.vertices = {
-        { .position = { -hw, 0.0f, 0.0f }, .tex = { 0.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
-        { .position = {  hw, 0.0f, 0.0f }, .tex = { 1.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
-        { .position = {  hw, hh * 2.0f, 0.0f }, .tex = { 1.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
-        { .position = { -hw, hh * 2.0f, 0.0f }, .tex = { 0.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 1.0f, 0.0f, 0.0f, 1.0f } },
-        { .position = { 0.0f, 0.0f, -hw }, .tex = { 0.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
-        { .position = { 0.0f, 0.0f,  hw }, .tex = { 1.0f, 1.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
-        { .position = { 0.0f, hh * 2.0f,  hw }, .tex = { 1.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
-        { .position = { 0.0f, hh * 2.0f, -hw }, .tex = { 0.0f, 0.0f }, .normal = { 0.0f, 1.0f, 0.0f }, .tangent = { 0.0f, 0.0f, 1.0f, 1.0f } },
-      };
-      quad.indices = { 0, 1, 2, 0, 2, 3, 4, 5, 6, 4, 6, 7 };
-      state.mesh = m_Assets.Meshes().Load(quad.vertices, quad.indices);
-
-      state.material = m_Assets.Materials().Create();
-      auto& mat = m_Assets.Materials().Get(state.material);
-      mat.name = "scatter_sat_" + std::to_string(entityId);
-      mat.doubleSided = true;
-      if (!scatter.materialPath.empty())
-      {
-        std::string absPath = m_Assets.ResolvePath(scatter.materialPath);
-        mat.baseColorTexture = m_Assets.Textures().Load(absPath, &mat.hasAlpha);
-        mat.alphaTest = mat.hasAlpha;
-      }
+      meshSetup = SetupPlaneMesh(scatter, entityId, m_Assets, "scatter_sat_");
     }
 
-    // Prepare terrain height sampling
-    float halfSize = terrain->size * 0.5f;
-
-    SplinePath2D spline;
-    CatmullRomCurve curve;
-    const SplinePath2D* splinePtr = nullptr;
-    const CatmullRomCurve* curvePtr = nullptr;
-    if (!terrain->maskPath.empty())
-    {
-      spline = SplinePath2D(terrain->maskPath);
-      splinePtr = &spline;
-      if (!terrain->maskCurve.empty())
-      {
-        curve = CatmullRomCurve(terrain->maskCurve);
-        curvePtr = &curve;
-      }
-    }
+    if (!meshSetup.valid)
+      return;
 
     uint32_t terrainEntityId = static_cast<uint32_t>(terrainEntity);
-    bool useCachedHeight = m_TerrainSystem.HasCachedHeight(terrainEntityId);
-    float eps = terrain->size / static_cast<float>(terrain->subdivisions);
+    const TerrainHeightGrid* heightGrid = m_TerrainSystem.GetCachedHeightGrid(terrainEntityId);
 
-    uint32_t rngState = HashScatterSeed(scatter.seed);
-    for (int i = 0; i < 4; i++)
-      ScatterRandom(rngState);
+    auto matrices = ComputeSatelliteMatrices(scatter, *terrain, heightGrid,
+      meshSetup.nodeTransform, sourcePositions);
 
-    // Generate satellites around each source position
-    for (auto& srcMatrix : sourcePositions)
+    if (matrices.empty())
     {
-      glm::vec3 srcPos(srcMatrix[3]);
-
-      uint32_t clusterCount = scatter.clusterCountMin +
-        static_cast<uint32_t>(ScatterRandom(rngState) *
-          (scatter.clusterCountMax - scatter.clusterCountMin + 1));
-      clusterCount = std::min(clusterCount, scatter.clusterCountMax);
-
-      for (uint32_t j = 0; j < clusterCount; j++)
-      {
-        float angle = ScatterRandom(rngState) * glm::two_pi<float>();
-        float dist = ScatterRandom(rngState) * scatter.clusterRadius;
-        float wx = srcPos.x + std::cos(angle) * dist;
-        float wz = srcPos.z + std::sin(angle) * dist;
-
-        wx = glm::clamp(wx, -halfSize, halfSize);
-        wz = glm::clamp(wz, -halfSize, halfSize);
-
-        // Sample height
-        float wy;
-        if (useCachedHeight)
-          wy = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx, wz);
-        else
-          wy = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz, *terrain, splinePtr, curvePtr);
-
-        // Slope check
-        float hL, hR, hD, hU;
-        if (useCachedHeight)
-        {
-          hL = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx - eps, wz);
-          hR = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx + eps, wz);
-          hD = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx, wz - eps);
-          hU = m_TerrainSystem.SampleCachedHeight(terrainEntityId, wx, wz + eps);
-        }
-        else
-        {
-          hL = TerrainMeshGenerator::SampleSurfaceHeight(wx - eps, wz, *terrain, splinePtr, curvePtr);
-          hR = TerrainMeshGenerator::SampleSurfaceHeight(wx + eps, wz, *terrain, splinePtr, curvePtr);
-          hD = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz - eps, *terrain, splinePtr, curvePtr);
-          hU = TerrainMeshGenerator::SampleSurfaceHeight(wx, wz + eps, *terrain, splinePtr, curvePtr);
-        }
-
-        glm::vec3 normal = glm::normalize(glm::vec3(hL - hR, 2.0f * eps, hD - hU));
-        if (normal.y < scatter.maxSlope)
-          continue;
-
-        float yRot = 0.0f;
-        if (scatter.randomYRotation)
-          yRot = ScatterRandom(rngState) * glm::two_pi<float>();
-
-        float scale = scatter.minScale + ScatterRandom(rngState) * (scatter.maxScale - scatter.minScale);
-
-        glm::mat4 m(1.0f);
-        m = glm::translate(m, glm::vec3(wx, wy, wz));
-        m = glm::rotate(m, yRot, glm::vec3(0.0f, 1.0f, 0.0f));
-        m = glm::scale(m, glm::vec3(scale));
-        m = m * nodeTransform;
-
-        state.instanceMatrices.push_back(m);
-      }
-    }
-
-    if (state.instanceMatrices.empty())
-    {
-      m_Assets.Meshes().Destroy(state.mesh);
-      m_Assets.Materials().Destroy(state.material);
+      m_Assets.Meshes().Destroy(meshSetup.mesh);
+      m_Assets.Materials().Destroy(meshSetup.material);
       return;
     }
 
-    // Compute world bounds
     glm::vec3 boundsMin(std::numeric_limits<float>::max());
     glm::vec3 boundsMax(std::numeric_limits<float>::lowest());
     float meshHeight = scatter.meshType == ScatterMeshType::Plane
@@ -797,12 +1055,17 @@ namespace YAEngine
       ? scatter.planeWidth * 0.5f * scatter.maxScale
       : scatter.maxScale;
 
-    for (auto& m : state.instanceMatrices)
+    for (auto& m : matrices)
     {
       glm::vec3 pos(m[3]);
       boundsMin = glm::min(boundsMin, pos - glm::vec3(meshRadius, 0.0f, meshRadius));
       boundsMax = glm::max(boundsMax, pos + glm::vec3(meshRadius, meshHeight, meshRadius));
     }
+
+    ScatterState state;
+    state.mesh = meshSetup.mesh;
+    state.material = meshSetup.material;
+    state.instanceMatrices = std::move(matrices);
 
     uint32_t dataSize = uint32_t(state.instanceMatrices.size() * sizeof(glm::mat4));
     state.instanceOffset = m_Render.AllocateInstanceData(dataSize);
@@ -815,12 +1078,10 @@ namespace YAEngine
     registry.emplace_or_replace<MaterialComponent>(state.childEntity, state.material);
 
     registry.emplace_or_replace<LocalBounds>(state.childEntity, LocalBounds {
-      .min = boundsMin,
-      .max = boundsMax
+      .min = boundsMin, .max = boundsMax
     });
     registry.emplace_or_replace<WorldBounds>(state.childEntity, WorldBounds {
-      .min = boundsMin,
-      .max = boundsMax
+      .min = boundsMin, .max = boundsMax
     });
 
     m_States[entityId] = std::move(state);

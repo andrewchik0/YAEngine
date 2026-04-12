@@ -36,6 +36,7 @@ namespace YAEngine
     }
 
     ModelHandle Load(const std::string& path, bool combinedTextures = false);
+    ModelHandle LoadFromDescription(ModelDescription&& desc, const std::string& sourcePath, bool combinedTextures);
     ModelHandle LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances, bool combinedTextures = false);
 
     void Destroy(ModelHandle handle);

@@ -26,6 +26,15 @@ namespace YAEngine
     return Store(std::move(mesh));
   }
 
+  MeshHandle MeshManager::LoadFromCpuData(CpuMeshData&& cpuData)
+  {
+    auto mesh = std::make_unique<Mesh>();
+    mesh->vertexBuffer.CreateFromSoA(*m_Ctx, cpuData);
+    mesh->minBB = cpuData.minBB;
+    mesh->maxBB = cpuData.maxBB;
+    return Store(std::move(mesh));
+  }
+
   void MeshManager::Destroy(MeshHandle handle)
   {
     Get(handle).vertexBuffer.Destroy(*m_Ctx);
