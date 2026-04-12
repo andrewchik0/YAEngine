@@ -32,7 +32,7 @@ namespace YAEngine
         *hasAlpha = alpha;
 
       VkFormat format = linear ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_SRGB;
-      texture->m_VulkanTexture.Load(*m_Ctx, data, width, height, 4, format);
+      texture->m_VulkanTexture.Load(*m_Ctx, data, width, height, 4, format, true, alpha);
       stbi_image_free(data);
 
       auto handle = Store(std::move(texture));

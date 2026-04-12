@@ -65,13 +65,23 @@ namespace YAEngine
     return std::sqrt(minDistSq);
   }
 
-  static const NodeDescription* FindMeshNode(const NodeDescription& node)
+  static const NodeDescription* FindMeshNode(const NodeDescription& node,
+                                              glm::mat4 parentTransform,
+                                              glm::mat4& outAccumulatedTransform)
   {
+    glm::mat4 local = glm::translate(glm::mat4(1.0f), node.position)
+                    * glm::mat4_cast(node.rotation)
+                    * glm::scale(glm::mat4(1.0f), node.scale);
+    glm::mat4 world = parentTransform * local;
+
     if (node.meshIndex.has_value())
+    {
+      outAccumulatedTransform = world;
       return &node;
+    }
     for (auto& child : node.children)
     {
-      auto* found = FindMeshNode(child);
+      auto* found = FindMeshNode(child, world, outAccumulatedTransform);
       if (found) return found;
     }
     return nullptr;
@@ -104,12 +114,23 @@ namespace YAEngine
       }
     }
 
-    // When terrain changes, mark scatter on same entity as dirty
-    auto terrainView = registry.view<TerrainDirty, ScatterComponent>();
+    // When terrain changes, mark scatter on same entity and children as dirty
+    auto terrainView = registry.view<TerrainDirty>();
     for (auto entity : terrainView)
     {
-      if (!registry.all_of<ScatterDirty>(entity))
+      if (registry.all_of<ScatterComponent>(entity) && !registry.all_of<ScatterDirty>(entity))
         registry.emplace<ScatterDirty>(entity);
+
+      if (registry.all_of<HierarchyComponent>(entity))
+      {
+        entt::entity child = registry.get<HierarchyComponent>(entity).firstChild;
+        while (child != entt::null)
+        {
+          if (registry.all_of<ScatterComponent>(child) && !registry.all_of<ScatterDirty>(child))
+            registry.emplace<ScatterDirty>(child);
+          child = registry.get<HierarchyComponent>(child).nextSibling;
+        }
+      }
     }
 
     auto view = registry.view<ScatterComponent, ScatterDirty>();
@@ -181,11 +202,12 @@ namespace YAEngine
       std::string absPath = m_Assets.ResolvePath(scatter.modelPath);
       auto desc = ModelImporter::Import(absPath, false);
 
-      // Find first node with a mesh
+      // Find first node with a mesh, accumulating parent transforms
       const NodeDescription* meshNode = nullptr;
+      glm::mat4 accumulatedTransform(1.0f);
       for (auto& child : desc.root.children)
       {
-        meshNode = FindMeshNode(child);
+        meshNode = FindMeshNode(child, glm::mat4(1.0f), accumulatedTransform);
         if (meshNode) break;
       }
 
@@ -199,17 +221,29 @@ namespace YAEngine
       auto& meshDesc = desc.meshes[*meshNode->meshIndex];
       state.mesh = m_Assets.Meshes().Load(meshDesc.vertices, meshDesc.indices);
 
-      // Center the mesh: XZ at origin, Y base at 0
-      glm::vec3 meshMin = m_Assets.Meshes().GetMinBB(state.mesh);
-      glm::vec3 meshMax = m_Assets.Meshes().GetMaxBB(state.mesh);
-      glm::vec3 meshCenter = (meshMin + meshMax) * 0.5f;
-      glm::vec3 meshOffset(-meshCenter.x, -meshMin.y, -meshCenter.z);
+      // Compute world-space AABB by transforming all 8 corners through accumulated transform
+      glm::vec3 rawMin = m_Assets.Meshes().GetMinBB(state.mesh);
+      glm::vec3 rawMax = m_Assets.Meshes().GetMaxBB(state.mesh);
+      glm::vec3 corners[8] = {
+        { rawMin.x, rawMin.y, rawMin.z }, { rawMax.x, rawMin.y, rawMin.z },
+        { rawMin.x, rawMax.y, rawMin.z }, { rawMax.x, rawMax.y, rawMin.z },
+        { rawMin.x, rawMin.y, rawMax.z }, { rawMax.x, rawMin.y, rawMax.z },
+        { rawMin.x, rawMax.y, rawMax.z }, { rawMax.x, rawMax.y, rawMax.z },
+      };
+      glm::vec3 worldMin(std::numeric_limits<float>::max());
+      glm::vec3 worldMax(std::numeric_limits<float>::lowest());
+      for (auto& c : corners)
+      {
+        glm::vec3 w = glm::vec3(accumulatedTransform * glm::vec4(c, 1.0f));
+        worldMin = glm::min(worldMin, w);
+        worldMax = glm::max(worldMax, w);
+      }
+      glm::vec3 worldCenter = (worldMin + worldMax) * 0.5f;
 
-      // Bake node transform + mesh centering into instance matrices
-      nodeTransform = glm::translate(glm::mat4(1.0f), meshNode->position)
-                    * glm::mat4_cast(meshNode->rotation)
-                    * glm::scale(glm::mat4(1.0f), meshNode->scale)
-                    * glm::translate(glm::mat4(1.0f), meshOffset);
+      // Re-center in world space: XZ at origin, Y base at 0
+      nodeTransform = glm::translate(glm::mat4(1.0f),
+                        glm::vec3(-worldCenter.x, -worldMin.y, -worldCenter.z))
+                    * accumulatedTransform;
 
       // Load material from model
       state.material = m_Assets.Materials().Create();
