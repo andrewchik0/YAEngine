@@ -73,6 +73,9 @@ namespace YAEngine
     int GetDebugView() const { return m_CurrentTexture; }
     void SetDebugView(int view) { m_CurrentTexture = view; }
     bool& GetSSAOEnabled() { return b_SSAOEnabled; }
+    float& GetSSAOIntensity() { return m_SSAOIntensity; }
+    float& GetSSAORadius() { return m_SSAORadius; }
+    float& GetSSAOBias() { return m_SSAOBias; }
     bool& GetSSREnabled() { return b_SSREnabled; }
     bool& GetTAAEnabled() { return b_TAAEnabled; }
     bool& GetShadowsEnabled() { return b_ShadowsEnabled; }
@@ -95,6 +98,9 @@ namespace YAEngine
     float m_Exposure = 1.0f;
     int m_CurrentTexture = 0;
     bool b_SSAOEnabled = true;
+    float m_SSAOIntensity = 1.5f;
+    float m_SSAORadius = 0.2f;
+    float m_SSAOBias = 0.025f;
     bool b_SSREnabled = true;
     bool b_TAAEnabled = true;
     bool b_ShadowsEnabled = true;

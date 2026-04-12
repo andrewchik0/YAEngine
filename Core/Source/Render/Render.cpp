@@ -336,6 +336,9 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.tileCountX = (m_FrameUniformBuffer.uniforms.screenWidth + TILE_SIZE - 1) / TILE_SIZE;
     m_FrameUniformBuffer.uniforms.tileCountY = (m_FrameUniformBuffer.uniforms.screenHeight + TILE_SIZE - 1) / TILE_SIZE;
     m_FrameUniformBuffer.uniforms.ssaoEnabled = b_SSAOEnabled ? 1 : 0;
+    m_FrameUniformBuffer.uniforms.ssaoRadius = m_SSAORadius;
+    m_FrameUniformBuffer.uniforms.ssaoIntensity = m_SSAOIntensity;
+    m_FrameUniformBuffer.uniforms.ssaoBias = m_SSAOBias;
     m_FrameUniformBuffer.uniforms.ssrEnabled = b_SSREnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.hizMipCount = static_cast<int>(m_Graph.GetResourceDesc(m_HiZResource).mipLevels);

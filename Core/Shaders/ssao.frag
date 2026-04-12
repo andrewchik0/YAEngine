@@ -12,12 +12,12 @@ layout(set = 1, binding = 2) uniform sampler2D noiseTexture;
 #include "../Shared/SSAOKernel.h"
 layout(set = 1, binding = 3) uniform SSAOKernelBlock { SSAOKernel u_Kernel; };
 
-const float RADIUS = 0.2;
-const float BIAS = 0.025;
-const float INTENSITY = 1.5;
-
 void main()
 {
+  float radius = u_Frame.ssaoRadius;
+  float bias = u_Frame.ssaoBias;
+  float intensity = u_Frame.ssaoIntensity;
+
   float depth = textureLod(depthTexture, uv, 0.0).r;
 
   if (depth >= 1.0)
@@ -53,7 +53,7 @@ void main()
 
   for (int i = 0; i < SSAO_KERNEL_SIZE; i++)
   {
-    vec3 samplePos = viewPos + (TBN * u_Kernel.samples[i].xyz) * RADIUS;
+    vec3 samplePos = viewPos + (TBN * u_Kernel.samples[i].xyz) * radius;
 
     vec4 clip = u_Frame.proj * vec4(samplePos, 1.0);
     vec2 sampleUV = (clip.xy / clip.w) * 0.5 + 0.5;
@@ -65,17 +65,17 @@ void main()
     float sampleLinearDepth = linearizeDepth(sampledDepth);
     float expectedLinearDepth = linearizeDepth(clip.z / clip.w);
 
-    float scaledBias = BIAS * max(1.0, linearDepthCenter * 0.1);
+    float scaledBias = bias * max(1.0, linearDepthCenter * 0.1);
     float depthDiff = sampleLinearDepth - expectedLinearDepth;
     float isOccluded = step(scaledBias, -depthDiff);
 
-    float maxRange = max(RADIUS * 2.0, linearDepthCenter * 0.02);
+    float maxRange = max(radius * 2.0, linearDepthCenter * 0.02);
     float rangeSmooth = smoothstep(maxRange, maxRange * 0.5, abs(linearDepthCenter - sampleLinearDepth));
     float rangeCheck = mix(1.0, rangeSmooth, step(sampleLinearDepth, linearDepthCenter));
 
     occlusion += isOccluded * rangeCheck * notSky;
   }
 
-  float ao = 1.0 - (occlusion / float(SSAO_KERNEL_SIZE)) * INTENSITY;
+  float ao = 1.0 - (occlusion / float(SSAO_KERNEL_SIZE)) * intensity;
   outColor = vec4(clamp(ao, 0.0, 1.0));
 }

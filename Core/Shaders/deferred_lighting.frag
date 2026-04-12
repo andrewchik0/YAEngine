@@ -10,7 +10,6 @@ layout(location = 0) out vec4 outColor;
 layout(set = 1, binding = 0) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 1) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 2) uniform sampler2D depthTexture;
-layout(set = 1, binding = 3) uniform sampler2D ssaoTexture;
 
 // Lights (set 2)
 #include "../Shared/LightData.h"
@@ -81,7 +80,7 @@ float evaluateProbeWeight(vec3 worldPos, LightProbeInfo probe)
 }
 
 vec3 sampleProbeIBL(vec3 normal, vec3 R, float roughness, float NdotV,
-  vec3 f0, vec3 albedo, float metallic, int arrayIndex, float ao)
+  vec3 f0, vec3 albedo, float metallic, int arrayIndex)
 {
   vec3 kD = 1.0 - fresnelSchlickRoughness(NdotV, f0, roughness);
   kD *= (1.0 - metallic);
@@ -94,7 +93,7 @@ vec3 sampleProbeIBL(vec3 normal, vec3 R, float roughness, float NdotV,
   vec3 F = fresnelSchlickRoughness(NdotV, f0, roughness);
   vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
 
-  return kD * diffuse * ao + specular * (1.0 - clamp(roughness, 0.0, 0.8));
+  return kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
 }
 
 void main()
@@ -134,11 +133,6 @@ void main()
   // Reconstruct world position from depth
   vec3 viewPos = reconstructViewPos(uv, depth);
   vec3 worldPos = (u_Frame.invView * vec4(viewPos, 1.0)).xyz;
-
-  // SSAO
-  float ao = texture(ssaoTexture, uv).r;
-  if (u_Frame.ssaoEnabled == 0)
-    ao = 1.0;
 
   // PBR IBL lighting with light probe support
   vec3 viewVec = normalize(u_Frame.cameraPosition - worldPos);
@@ -183,7 +177,7 @@ void main()
     if (bestIdx >= 0)
     {
       vec3 primaryIBL = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic,
-        u_Probes.probes[bestIdx].arrayIndex, ao);
+        u_Probes.probes[bestIdx].arrayIndex);
 
       if (bestWeight >= 1.0)
       {
@@ -193,20 +187,20 @@ void main()
       {
         // Blend with secondary probe or skybox fallback (index 0)
         int fallbackIndex = (secondIdx >= 0) ? u_Probes.probes[secondIdx].arrayIndex : 0;
-        vec3 fallbackIBL = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, fallbackIndex, ao);
+        vec3 fallbackIBL = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, fallbackIndex);
         ambient = mix(fallbackIBL, primaryIBL, bestWeight);
       }
     }
     else
     {
       // No probe covers this pixel - use skybox (index 0)
-      ambient = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, 0, ao);
+      ambient = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, 0);
     }
   }
   else
   {
     // No probes at all - use skybox (index 0)
-    ambient = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, 0, ao);
+    ambient = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, 0);
   }
 
   // Analytical lights - tile-culled

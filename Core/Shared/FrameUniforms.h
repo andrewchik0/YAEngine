@@ -40,6 +40,9 @@ struct FrameUniforms
   mat4 invView;
   int tonemapMode;
   float bloomIntensity;
+  float ssaoRadius;
+  float ssaoIntensity;
+  float ssaoBias;
 };
 
 #ifdef __cplusplus

@@ -68,5 +68,11 @@ void main()
   color = applyTonemap(color);
   color = pow(color, vec3(1.0 / u_Frame.gamma));
 
+  if (u_Frame.ssaoEnabled != 0)
+  {
+    float ao = texture(ssaoTexture, uv).r;
+    color *= ao;
+  }
+
   outColor = vec4(color, 1.0);
 }

@@ -219,7 +219,7 @@ namespace YAEngine
     // 6. Deferred Lighting - fullscreen IBL + analytical lights from G-buffer
     m_DeferredLightingPassIndex = m_Graph.AddPass({
       .name = "DeferredLighting",
-      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_SSAOBlurred},
+      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth},
       .colorOutputs = {m_LitColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
@@ -227,7 +227,6 @@ namespace YAEngine
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
-        auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
 
         auto& pipeline = m_PSOCache.Get(m_DeferredLightingPipeline);
         pipeline.Bind(ctx.cmd);
@@ -237,8 +236,6 @@ namespace YAEngine
           gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
           mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
-          ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_DeferredLightingDescriptorSets[currentFrame].Get()}, 1);

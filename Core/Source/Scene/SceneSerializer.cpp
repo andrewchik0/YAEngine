@@ -99,6 +99,9 @@ namespace YAEngine
     settings["exposure"] = render.GetExposure();
     settings["tonemapMode"] = render.GetTonemapMode();
     settings["ssao"] = render.GetSSAOEnabled();
+    settings["ssaoIntensity"] = render.GetSSAOIntensity();
+    settings["ssaoRadius"] = render.GetSSAORadius();
+    settings["ssaoBias"] = render.GetSSAOBias();
     settings["ssr"] = render.GetSSREnabled();
     settings["taa"] = render.GetTAAEnabled();
     settings["shadows"] = render.GetShadowsEnabled();
@@ -167,6 +170,9 @@ namespace YAEngine
       if (settings["exposure"]) render.GetExposure() = settings["exposure"].as<float>();
       if (settings["tonemapMode"]) render.GetTonemapMode() = settings["tonemapMode"].as<int>();
       if (settings["ssao"]) render.GetSSAOEnabled() = settings["ssao"].as<bool>();
+      if (settings["ssaoIntensity"]) render.GetSSAOIntensity() = settings["ssaoIntensity"].as<float>();
+      if (settings["ssaoRadius"]) render.GetSSAORadius() = settings["ssaoRadius"].as<float>();
+      if (settings["ssaoBias"]) render.GetSSAOBias() = settings["ssaoBias"].as<float>();
       if (settings["ssr"]) render.GetSSREnabled() = settings["ssr"].as<bool>();
       if (settings["taa"]) render.GetTAAEnabled() = settings["taa"].as<bool>();
       if (settings["shadows"]) render.GetShadowsEnabled() = settings["shadows"].as<bool>();

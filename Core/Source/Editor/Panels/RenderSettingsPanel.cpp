@@ -85,6 +85,12 @@ namespace YAEngine
     if (ImGui::CollapsingHeader(ICON_FA_SLIDERS " Post-Processing", ImGuiTreeNodeFlags_DefaultOpen))
     {
       ImGui::Checkbox("SSAO", &context.render->GetSSAOEnabled());
+      if (context.render->GetSSAOEnabled())
+      {
+        ImGui::DragFloat("SSAO Intensity", &context.render->GetSSAOIntensity(), 0.01f, 0.0f, 50.0f);
+        ImGui::DragFloat("SSAO Radius", &context.render->GetSSAORadius(), 0.005f, 0.01f, 1.0f);
+        ImGui::DragFloat("SSAO Bias", &context.render->GetSSAOBias(), 0.001f, 0.0f, 0.1f);
+      }
       ImGui::Checkbox("SSR", &context.render->GetSSREnabled());
       ImGui::Checkbox("TAA", &context.render->GetTAAEnabled());
 
