@@ -26,7 +26,7 @@ namespace YAEngine
     glm::quat rotation { 1, 0, 0, 0 };
     float fov = glm::radians(58.31f);
     float aspectRatio = 16.0f / 9.0f;
-    float nearPlane = 0.01f;
+    float nearPlane = 0.1f;
     float farPlane = 1000.0f;
   };
 

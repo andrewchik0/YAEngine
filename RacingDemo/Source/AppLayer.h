@@ -16,7 +16,7 @@
 #include "Editor/EditorCameraLayer.h"
 #endif
 
-#define TEST
+// #define TEST
 
 class AppLayer : public YAEngine::Layer
 {
@@ -63,6 +63,25 @@ public:
       auto view = GetScene().GetView<YAEngine::ModelSourceComponent>();
       for (auto e : view)
       {
+        GetScene().AddComponent<VehicleComponent>(e);
+
+        auto wheels = std::array<YAEngine::Entity, 4> {
+          GetScene().GetChildByName(e, "wheel-left-front"),
+          GetScene().GetChildByName(e, "wheel-right-front"),
+          GetScene().GetChildByName(e, "wheel-left-back"),
+          GetScene().GetChildByName(e, "wheel-right-back")
+        };
+
+        for (int i = 0; i < 4; i++)
+        {
+          auto baseRot = GetScene().GetTransform(wheels[i]).rotation;
+          GetScene().AddComponent<WheelComponent>(wheels[i],
+            WheelComponent {
+              .baseRot = baseRot,
+              .isFront = (i < 2)
+            });
+        }
+
         controls->SetTarget(e);
         break;
       }

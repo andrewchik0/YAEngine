@@ -43,7 +43,7 @@ namespace YAEngine
   {
     float fov = glm::radians(58.31f);
     float aspectRatio = 16.0f / 9.0f;
-    float nearPlane = .01f;
+    float nearPlane = .1f;
     float farPlane = 1000.0f;
 
     void Resize(float width, float height)
