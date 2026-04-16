@@ -22,6 +22,11 @@ namespace YAEngine
     static_cast<Engine*>(userData)->RenderUI();
   }
 
+  static void DebugDrawGizmosCallback(void* userData)
+  {
+    static_cast<Engine*>(userData)->DebugDrawGizmos();
+  }
+
   FrameContext Engine::MakeFrameContext(SceneSnapshot& snapshot)
   {
     return FrameContext {
@@ -33,7 +38,9 @@ namespace YAEngine
       .windowWidth = m_Window.GetWidth(),
       .windowHeight = m_Window.GetHeight(),
       .renderUI = RenderUICallback,
-      .renderUIData = this
+      .renderUIData = this,
+      .debugDrawGizmos = DebugDrawGizmosCallback,
+      .debugDrawGizmosData = this
     };
   }
 
@@ -49,12 +56,14 @@ namespace YAEngine
     m_Registry.Register<Render>(&m_Render);
     m_Registry.Register<AssetManager>(&m_AssetManager);
     m_Registry.Register<Scene>(&m_Scene);
+    m_Registry.Register<CollisionQueryService>(&m_CollisionQueryService);
     m_Registry.Register<SystemScheduler>(&m_Scheduler);
     m_Registry.Register<ComponentRegistry>(&m_ComponentRegistry);
     m_Registry.Register<LayerManager>(&m_LayerManager);
     m_LayerManager.SetRegistry(m_Registry);
 
     auto& terrainSystem = m_Scheduler.AddSystem<TerrainSystem>(m_AssetManager, &m_ThreadPool);
+    m_Registry.Register<TerrainSystem>(&terrainSystem);
     m_Scheduler.AddSystem<RoadSystem>(m_AssetManager);
     m_Scheduler.AddSystem<ScatterSystem>(m_AssetManager, m_Scene, m_Render, terrainSystem, &m_ThreadPool);
     m_Scheduler.AddSystem<TransformSystem>();

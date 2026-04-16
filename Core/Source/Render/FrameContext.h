@@ -21,5 +21,8 @@ namespace YAEngine
     uint32_t windowHeight;
     void(*renderUI)(void* userData) = nullptr;
     void* renderUIData = nullptr;
+    // Invoked inside Render::Draw after gizmo Clear(), so layer-added gizmos survive to GPU submit.
+    void(*debugDrawGizmos)(void* userData) = nullptr;
+    void* debugDrawGizmosData = nullptr;
   };
 }

@@ -183,6 +183,7 @@ namespace YAEngine
     GizmoRenderer m_GizmoRenderer;
     bool b_GizmosEnabled = true;
     bool b_ProbeVolumesVisible = true;
+    bool b_CollidersVisible = false;
     bool b_HasSelectedEntity = false;
     glm::vec3 m_SelectedEntityPosition { 0.0f };
     GizmoMode m_GizmoMode = GizmoMode::Translate;
@@ -331,6 +332,7 @@ namespace YAEngine
     uint32_t GetViewportHeight() const { return m_ViewportHeight; }
     bool& GetGizmosEnabled() { return b_GizmosEnabled; }
     bool& GetProbeVolumesVisible() { return b_ProbeVolumesVisible; }
+    bool& GetCollidersVisible() { return b_CollidersVisible; }
     GizmoRenderer& GetGizmoRenderer() { return m_GizmoRenderer; }
     void SetSelectedEntityPosition(const glm::vec3& pos) { b_HasSelectedEntity = true; m_SelectedEntityPosition = pos; }
     void ClearSelectedEntity() { b_HasSelectedEntity = false; }

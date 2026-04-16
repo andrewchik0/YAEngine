@@ -458,6 +458,9 @@ namespace YAEngine
           case GizmoMode::Scale:     m_GizmoRenderer.DrawScaleGizmo(m_SelectedEntityPosition, camPos); break;
         }
       }
+
+      if (frame.debugDrawGizmos)
+        frame.debugDrawGizmos(frame.debugDrawGizmosData);
     }
 #endif
 

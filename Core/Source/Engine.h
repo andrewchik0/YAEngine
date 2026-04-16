@@ -12,6 +12,7 @@
 #include "Scene/Scene.h"
 #include "Scene/SystemScheduler.h"
 #include "Scene/ComponentRegistry.h"
+#include "Scene/CollisionQueryService.h"
 #include "Utils/Timer.h"
 #include "Utils/ThreadPool.h"
 #include "Utils/MainThreadDispatcher.h"
@@ -55,6 +56,11 @@ namespace YAEngine
       m_LayerManager.CallRenderUI();
     }
 
+    void DebugDrawGizmos()
+    {
+      m_LayerManager.CallDebugDrawGizmos();
+    }
+
     Scene& GetScene() { return m_Scene; }
     Render& GetRender() { return m_Render; }
     AssetManager& GetAssetManager() { return m_AssetManager; }
@@ -80,6 +86,7 @@ namespace YAEngine
     Render m_Render {};
     AssetManager m_AssetManager;
     Scene m_Scene;
+    CollisionQueryService m_CollisionQueryService { m_Scene };
     SystemScheduler m_Scheduler;
     ComponentRegistry m_ComponentRegistry;
     LayerManager m_LayerManager;

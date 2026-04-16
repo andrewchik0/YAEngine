@@ -441,6 +441,53 @@ namespace YAEngine
     return setup;
   }
 
+  // Builds per-instance AABB colliders from scatter instance matrices.
+  // Planes (grass/billboards) are skipped because we don't want to collide with them.
+  // meshMin/meshMax are the actual mesh-space AABB corners from the mesh asset; each
+  // instance matrix already folds in the centering nodeTransform, so transforming the
+  // 8 corners gives a tight world-space AABB that matches the rendered model.
+  static void BuildInstancedColliders(entt::registry& registry, entt::entity childEntity,
+                                      const ScatterComponent& scatter,
+                                      const std::vector<glm::mat4>& matrices,
+                                      const glm::vec3& meshMin, const glm::vec3& meshMax)
+  {
+    if (scatter.meshType == ScatterMeshType::Plane)
+      return;
+
+    InstancedColliderComponent colliders;
+    colliders.instances.reserve(matrices.size());
+
+    const glm::vec3 corners[8] = {
+      { meshMin.x, meshMin.y, meshMin.z }, { meshMax.x, meshMin.y, meshMin.z },
+      { meshMin.x, meshMax.y, meshMin.z }, { meshMax.x, meshMax.y, meshMin.z },
+      { meshMin.x, meshMin.y, meshMax.z }, { meshMax.x, meshMin.y, meshMax.z },
+      { meshMin.x, meshMax.y, meshMax.z }, { meshMax.x, meshMax.y, meshMax.z },
+    };
+
+    for (auto& m : matrices)
+    {
+      glm::vec3 worldMin(std::numeric_limits<float>::max());
+      glm::vec3 worldMax(std::numeric_limits<float>::lowest());
+      for (auto& c : corners)
+      {
+        glm::vec3 w = glm::vec3(m * glm::vec4(c, 1.0f));
+        worldMin = glm::min(worldMin, w);
+        worldMax = glm::max(worldMax, w);
+      }
+      glm::vec3 center = (worldMin + worldMax) * 0.5f;
+      glm::vec3 halfExtents = (worldMax - worldMin) * 0.5f;
+      colliders.instances.push_back(InstancedColliderComponent::Entry {
+        .center = center,
+        .halfExtents = halfExtents
+      });
+    }
+
+    YA_LOG_INFO("Physics", "Scatter entity %u: %zu instanced colliders",
+                static_cast<uint32_t>(childEntity), colliders.instances.size());
+
+    registry.emplace_or_replace<InstancedColliderComponent>(childEntity, std::move(colliders));
+  }
+
   // --- ScatterSystem implementation ---
 
   void ScatterSystem::OnSceneClear()
@@ -715,6 +762,11 @@ namespace YAEngine
           .min = boundsMin, .max = boundsMax
         });
 
+        glm::vec3 meshMin = m_Assets.Meshes().GetMinBB(state.mesh);
+        glm::vec3 meshMax = m_Assets.Meshes().GetMaxBB(state.mesh);
+        BuildInstancedColliders(registry, state.childEntity, scatter,
+                                state.instanceMatrices, meshMin, meshMax);
+
         m_States[task.entityId] = std::move(state);
         auto& stored = m_States[task.entityId];
         m_Assets.Meshes().SetInstanceData(stored.mesh, &stored.instanceMatrices, stored.instanceOffset);
@@ -979,6 +1031,13 @@ namespace YAEngine
       .min = boundsMin, .max = boundsMax
     });
 
+    {
+      glm::vec3 meshMin = m_Assets.Meshes().GetMinBB(state.mesh);
+      glm::vec3 meshMax = m_Assets.Meshes().GetMaxBB(state.mesh);
+      BuildInstancedColliders(registry, state.childEntity, scatter,
+                              state.instanceMatrices, meshMin, meshMax);
+    }
+
     m_States[entityId] = std::move(state);
     auto& stored = m_States[entityId];
     m_Assets.Meshes().SetInstanceData(stored.mesh, &stored.instanceMatrices, stored.instanceOffset);
@@ -1115,6 +1174,13 @@ namespace YAEngine
     registry.emplace_or_replace<WorldBounds>(state.childEntity, WorldBounds {
       .min = boundsMin, .max = boundsMax
     });
+
+    {
+      glm::vec3 meshMin = m_Assets.Meshes().GetMinBB(state.mesh);
+      glm::vec3 meshMax = m_Assets.Meshes().GetMaxBB(state.mesh);
+      BuildInstancedColliders(registry, state.childEntity, scatter,
+                              state.instanceMatrices, meshMin, meshMax);
+    }
 
     m_States[entityId] = std::move(state);
     auto& stored = m_States[entityId];

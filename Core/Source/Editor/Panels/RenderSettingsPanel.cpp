@@ -128,6 +128,7 @@ namespace YAEngine
     {
       ImGui::Checkbox("Gizmos", &context.render->GetGizmosEnabled());
       ImGui::Checkbox("Probe Volumes", &context.render->GetProbeVolumesVisible());
+      ImGui::Checkbox("Colliders", &context.render->GetCollidersVisible());
 
       if (ImGui::Button(ICON_FA_ROTATE " Recompile Shaders"))
         context.render->GetShaderHotReload().RecompileAll();

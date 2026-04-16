@@ -1,10 +1,27 @@
 #include "ControlsLayer.h"
 #include "Input/InputSystem.h"
+#include "Utils/Log.h"
 
 void ControlsLayer::Update(double dt)
 {
   if (m_Car == entt::null) return;
   if (!GetScene().HasComponent<VehicleComponent>(m_Car)) return;
+
+  if (m_TerrainSystem == nullptr)
+    m_TerrainSystem = &m_Registry->Get<YAEngine::TerrainSystem>();
+  if (m_CollisionService == nullptr)
+    m_CollisionService = &m_Registry->Get<YAEngine::CollisionQueryService>();
+  if (m_TerrainEntity == entt::null)
+  {
+    auto terrainView = GetScene().GetView<YAEngine::TerrainComponent>();
+    for (auto te : terrainView)
+    {
+      m_TerrainEntity = te;
+      YA_LOG_INFO("Physics", "Terrain resolved for snap: entity=%u",
+        static_cast<uint32_t>(m_TerrainEntity));
+      break;
+    }
+  }
 
   auto& input = GetInput();
 
@@ -56,7 +73,37 @@ void ControlsLayer::Update(double dt)
   rotation = rotDelta * rotation;
 
   glm::dvec3 forward = rotation * glm::dvec3(0, 0, 1);
+  glm::dvec3 prevPosition = position;
   position += forward * vehicle->speed * dt;
+
+  if (m_TerrainEntity != entt::null
+    && m_TerrainSystem->HasCachedHeight(static_cast<uint32_t>(m_TerrainEntity)))
+  {
+    position.y = static_cast<double>(m_TerrainSystem->SampleCachedHeight(
+      static_cast<uint32_t>(m_TerrainEntity),
+      static_cast<float>(position.x),
+      static_cast<float>(position.z)));
+  }
+
+  if (GetScene().HasComponent<YAEngine::ColliderComponent>(car))
+  {
+    auto& collider = GetScene().GetComponent<YAEngine::ColliderComponent>(car);
+    glm::vec3 center = glm::vec3(position) + collider.localOffset;
+    glm::vec3 aMin = center - collider.halfExtents;
+    glm::vec3 aMax = center + collider.halfExtents;
+    auto hits = m_CollisionService->OverlapAABB(aMin, aMax, 1u);
+    if (!hits.empty())
+    {
+      static bool s_LoggedBlock = false;
+      if (!s_LoggedBlock)
+      {
+        YA_LOG_INFO("Physics", "Car blocked by static collider, entity=%u",
+          static_cast<uint32_t>(hits[0]));
+        s_LoggedBlock = true;
+      }
+      position = prevPosition;
+    }
+  }
 
   GetScene().GetTransform(car).position = position;
   GetScene().GetTransform(car).rotation = rotation;

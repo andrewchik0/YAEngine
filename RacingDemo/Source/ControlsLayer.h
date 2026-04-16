@@ -2,6 +2,8 @@
 #include "Layer.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
+#include "Scene/TerrainSystem.h"
+#include "Scene/CollisionQueryService.h"
 #include "GameComponents.h"
 
 class ControlsLayer : public YAEngine::Layer
@@ -16,6 +18,7 @@ public:
     m_Camera = GetScene().CreateEntity("camera");
     GetScene().AddComponent<YAEngine::CameraComponent>(m_Camera);
     GetScene().AddComponent<FollowCameraComponent>(m_Camera);
+    GetScene().AddComponent<YAEngine::NoSerializeTag>(m_Camera);
 
     glm::dvec3 eulerDegrees = glm::vec3(160.0, -0.0, -180.0);
     glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
@@ -31,4 +34,9 @@ public:
   }
 
   void Update(double deltaTime) override;
+
+private:
+  YAEngine::TerrainSystem* m_TerrainSystem = nullptr;
+  YAEngine::CollisionQueryService* m_CollisionService = nullptr;
+  YAEngine::Entity m_TerrainEntity = entt::null;
 };

@@ -174,6 +174,8 @@ set(SOURCE_FILES
   Source/Scene/RoadSystem.cpp
   Source/Scene/ScatterSystem.h
   Source/Scene/ScatterSystem.cpp
+  Source/Scene/CollisionQueryService.h
+  Source/Scene/CollisionQueryService.cpp
 )
 
 if(YA_EDITOR)

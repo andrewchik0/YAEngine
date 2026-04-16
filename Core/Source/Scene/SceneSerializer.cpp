@@ -29,6 +29,8 @@ namespace YAEngine
     // Skip runtime-generated entities
     if (scene.HasComponent<ScatterInstanceTag>(entity))
       return;
+    if (scene.HasComponent<NoSerializeTag>(entity))
+      return;
 #ifdef YA_EDITOR
     if (scene.HasComponent<EditorOnlyTag>(entity))
       return;
@@ -141,6 +143,8 @@ namespace YAEngine
     auto view = scene.GetView<RootTag>();
     for (auto e : view)
     {
+      if (scene.HasComponent<NoSerializeTag>(e))
+        continue;
 #ifdef YA_EDITOR
       if (scene.HasComponent<EditorOnlyTag>(e))
         continue;

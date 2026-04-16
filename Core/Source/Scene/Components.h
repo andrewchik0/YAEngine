@@ -210,6 +210,41 @@ namespace YAEngine
   struct ScatterDirty {};
   struct ScatterInstanceTag {};
 
+  // opt-out flag for entities created in C++ at runtime that must not be persisted to scene files
+  struct NoSerializeTag {};
+
+  enum class ColliderShape : uint8_t
+  {
+    AABB
+  };
+
+  struct ColliderComponent
+  {
+    ColliderShape shape = ColliderShape::AABB;
+    glm::vec3 localOffset { 0.0f };
+    glm::vec3 halfExtents { 0.5f };
+    bool isStatic = true;
+    uint32_t layer = 1;
+    // bitmask of layers this collider interacts with; queried as (candidate.layer & query.mask)
+    uint32_t mask = ~0u;
+  };
+
+  // single entity holds many colliders because ScatterSystem renders clusters as one instanced mesh
+  struct InstancedColliderComponent
+  {
+    struct Entry
+    {
+      glm::vec3 center;
+      glm::vec3 halfExtents;
+    };
+
+    ColliderShape shape = ColliderShape::AABB;
+    uint32_t layer = 1;
+    uint32_t mask = ~0u;
+    bool isStatic = true;
+    std::vector<Entry> instances;
+  };
+
 #ifdef YA_EDITOR
   struct EditorOnlyTag {};
 #endif

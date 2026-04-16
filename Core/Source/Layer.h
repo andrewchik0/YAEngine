@@ -34,6 +34,7 @@ namespace YAEngine
     virtual void Update(double deltaTime) {}
     virtual void LateUpdate(double deltaTime) {}
     virtual void RenderUI() {}
+    virtual void DebugDrawGizmos() {}
 
   protected:
     ServiceRegistry* m_Registry = nullptr;

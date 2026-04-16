@@ -20,6 +20,7 @@ namespace YAEngine
     void OnSceneReady() override;
     void Update(double deltaTime) override;
     void RenderUI() override;
+    void DebugDrawGizmos() override;
     void OnDetach() override;
 
   private:

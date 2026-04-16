@@ -443,6 +443,51 @@ namespace YAEngine
     GetInput().SetViewportHovered(m_Context.viewportHovered);
   }
 
+  void EditorLayer::DebugDrawGizmos()
+  {
+    if (!m_Context.render || !m_Context.render->GetCollidersVisible())
+      return;
+
+    auto& gizmo = m_Context.render->GetGizmoRenderer();
+
+    constexpr uint32_t MAX_INSTANCED_AABBS = 2000;
+    static bool s_InstancedOverflowReported = false;
+    const glm::vec4 staticColor(0.2f, 0.9f, 0.3f, 0.85f);
+
+    for (auto [entity, collider, wt] : GetScene().GetView<ColliderComponent, WorldTransform>().each())
+    {
+      glm::vec3 center = glm::vec3(wt.world * glm::vec4(collider.localOffset, 1.0f));
+      glm::vec3 scale(
+        glm::length(glm::vec3(wt.world[0])),
+        glm::length(glm::vec3(wt.world[1])),
+        glm::length(glm::vec3(wt.world[2])));
+      gizmo.DrawWireBoxDepthTested(center, collider.halfExtents * scale, staticColor);
+    }
+
+    uint32_t instancedTotal = 0;
+    for (auto [entity, instanced] : GetScene().GetView<InstancedColliderComponent>().each())
+      instancedTotal += static_cast<uint32_t>(instanced.instances.size());
+
+    uint32_t instancedDrawn = 0;
+    for (auto [entity, instanced] : GetScene().GetView<InstancedColliderComponent>().each())
+    {
+      for (auto& entry : instanced.instances)
+      {
+        if (instancedDrawn >= MAX_INSTANCED_AABBS) break;
+        gizmo.DrawWireBoxDepthTested(entry.center, entry.halfExtents, staticColor);
+        instancedDrawn++;
+      }
+      if (instancedDrawn >= MAX_INSTANCED_AABBS) break;
+    }
+
+    if (instancedTotal > MAX_INSTANCED_AABBS && !s_InstancedOverflowReported)
+    {
+      YA_LOG_WARN("Physics", "Collider debug draw: %u instanced AABBs exceeds cap %u, truncating",
+                  instancedTotal, MAX_INSTANCED_AABBS);
+      s_InstancedOverflowReported = true;
+    }
+  }
+
   void EditorLayer::OnDetach()
   {
     GetRender().WaitIdle();

@@ -69,6 +69,12 @@ namespace YAEngine
         layer->RenderUI();
     }
 
+    void CallDebugDrawGizmos()
+    {
+      for (auto& layer : m_LayerStack)
+        layer->DebugDrawGizmos();
+    }
+
     void CallOnDetach()
     {
       for (auto& layer : m_LayerStack)
