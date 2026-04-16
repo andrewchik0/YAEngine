@@ -76,40 +76,183 @@ void ControlsLayer::Update(double dt)
   double turnSpeed = glm::radians(260.0 - vehicle->speed / vehicle->maxSpeed * 160.0);
   double turn = vehicle->wheelsSteer * (1.0 / 0.03) * turnSpeed * dt * (vehicle->speed / vehicle->maxSpeed);
 
+  double prevYaw = vehicle->yaw;
   vehicle->yaw += turn;
   glm::dquat yawRot = glm::angleAxis(vehicle->yaw, glm::dvec3(0, 1, 0));
+  glm::dquat prevYawRot = glm::angleAxis(prevYaw, glm::dvec3(0, 1, 0));
 
   glm::dvec3 forward = yawRot * glm::dvec3(0, 0, 1);
   glm::dvec3 prevPosition = position;
-  position += forward * vehicle->speed * dt;
+  glm::dvec3 deltaXZ = forward * vehicle->speed * dt;
+  deltaXZ.y = 0.0;
 
-  if (m_TerrainEntity != entt::null
-    && m_TerrainSystem->HasCachedHeight(static_cast<uint32_t>(m_TerrainEntity)))
-  {
-    position.y = static_cast<double>(m_TerrainSystem->SampleCachedHeight(
-      static_cast<uint32_t>(m_TerrainEntity),
-      static_cast<float>(position.x),
-      static_cast<float>(position.z)));
-  }
+  bool hasTerrainCache = (m_TerrainEntity != entt::null
+    && m_TerrainSystem->HasCachedHeight(static_cast<uint32_t>(m_TerrainEntity)));
 
-  if (GetScene().HasComponent<YAEngine::ColliderComponent>(car))
+  auto snapY = [&](glm::dvec3 p) -> glm::dvec3
   {
+    if (hasTerrainCache)
+      p.y = static_cast<double>(m_TerrainSystem->SampleCachedHeight(
+        static_cast<uint32_t>(m_TerrainEntity),
+        static_cast<float>(p.x), static_cast<float>(p.z)));
+    return p;
+  };
+
+  bool hasCollider = GetScene().HasComponent<YAEngine::ColliderComponent>(car);
+
+  auto obbHit = [&](const glm::dvec3& tryPos, const glm::dquat& tryYaw, entt::entity* outHit) -> bool
+  {
+    if (!hasCollider) return false;
     auto& collider = GetScene().GetComponent<YAEngine::ColliderComponent>(car);
-    glm::quat orientation = glm::quat(yawRot);
-    glm::vec3 center = glm::vec3(position) + orientation * collider.localOffset;
+    glm::quat orientation = glm::quat(tryYaw);
+    glm::vec3 center = glm::vec3(tryPos) + orientation * collider.localOffset;
     auto hits = m_CollisionService->OverlapOBB(center, collider.halfExtents, orientation, 1u);
-    if (!hits.empty())
+    if (hits.empty()) return false;
+    if (outHit) *outHit = hits[0];
+    return true;
+  };
+
+  // Derives contact normal (XZ unit vector pointing away from wall) by picking the dominant
+  // separating axis between the car and the hit collider's AABB. Works for both single and instanced.
+  auto contactNormalXZ = [&](entt::entity hit, const glm::dvec3& carPos) -> glm::dvec3
+  {
+    glm::vec3 bCenter(0.0f);
+    glm::vec3 bHalf(1.0f);
+
+    if (GetScene().HasComponent<YAEngine::ColliderComponent>(hit)
+      && GetScene().HasComponent<YAEngine::WorldTransform>(hit))
     {
-      static bool s_LoggedBlock = false;
-      if (!s_LoggedBlock)
+      auto& c = GetScene().GetComponent<YAEngine::ColliderComponent>(hit);
+      auto& wt = GetScene().GetComponent<YAEngine::WorldTransform>(hit);
+      bCenter = glm::vec3(wt.world * glm::vec4(c.localOffset, 1.0f));
+      glm::vec3 scale(
+        glm::length(glm::vec3(wt.world[0])),
+        glm::length(glm::vec3(wt.world[1])),
+        glm::length(glm::vec3(wt.world[2])));
+      bHalf = c.halfExtents * scale;
+    }
+    else if (GetScene().HasComponent<YAEngine::InstancedColliderComponent>(hit))
+    {
+      auto& ic = GetScene().GetComponent<YAEngine::InstancedColliderComponent>(hit);
+      double bestDist2 = std::numeric_limits<double>::infinity();
+      for (auto& e : ic.instances)
       {
-        YA_LOG_INFO("Physics", "Car blocked by static collider, entity=%u",
-          static_cast<uint32_t>(hits[0]));
-        s_LoggedBlock = true;
+        double dx = static_cast<double>(e.center.x) - carPos.x;
+        double dz = static_cast<double>(e.center.z) - carPos.z;
+        double d2 = dx * dx + dz * dz;
+        if (d2 < bestDist2)
+        {
+          bestDist2 = d2;
+          bCenter = e.center;
+          bHalf = e.halfExtents;
+        }
       }
-      position = prevPosition;
+    }
+
+    double dx = carPos.x - static_cast<double>(bCenter.x);
+    double dz = carPos.z - static_cast<double>(bCenter.z);
+    double nx = dx / std::max(1e-6, static_cast<double>(bHalf.x));
+    double nz = dz / std::max(1e-6, static_cast<double>(bHalf.z));
+
+    if (std::abs(nx) >= std::abs(nz))
+      return glm::dvec3(nx >= 0.0 ? 1.0 : -1.0, 0.0, 0.0);
+    return glm::dvec3(0.0, 0.0, nz >= 0.0 ? 1.0 : -1.0);
+  };
+
+  // If we were already overlapping at the frame start, allow any motion so the car can escape.
+  bool wasOverlapping = hasCollider && obbHit(snapY(prevPosition), prevYawRot, nullptr);
+
+  glm::dvec3 finalXZ = prevPosition + deltaXZ;
+  bool translationFullyBlocked = false;
+  entt::entity blockerEntity = entt::null;
+
+  if (!wasOverlapping && hasCollider)
+  {
+    entt::entity hitId = entt::null;
+    if (obbHit(snapY(finalXZ), yawRot, &hitId))
+    {
+      blockerEntity = hitId;
+      glm::dvec3 N = contactNormalXZ(hitId, prevPosition);
+
+      double deltaLen = glm::length(deltaXZ);
+      double normComp = glm::dot(deltaXZ, N);
+      // Kill only the into-wall component; preserve away-from-wall motion.
+      glm::dvec3 tComp = deltaXZ - std::min(0.0, normComp) * N;
+      double tLen = glm::length(tComp);
+
+      // Head-on hit (nearly all motion was into the wall): full stop.
+      const double kHeadOnThreshold = 0.1;
+      if (deltaLen < 1e-6 || tLen < kHeadOnThreshold * deltaLen)
+      {
+        finalXZ = prevPosition;
+        translationFullyBlocked = true;
+      }
+      else
+      {
+        // Scraping friction: lose a fraction of tangent motion per second.
+        const double kSlideFriction = 2.5;
+        double slideKeep = std::max(0.0, 1.0 - kSlideFriction * dt);
+        glm::dvec3 slideDelta = tComp * slideKeep;
+        glm::dvec3 slidePos = prevPosition + slideDelta;
+
+        if (obbHit(snapY(slidePos), yawRot, nullptr))
+        {
+          finalXZ = prevPosition;
+          translationFullyBlocked = true;
+        }
+        else
+        {
+          finalXZ = slidePos;
+          vehicle->speed *= slideKeep;
+
+          // Alignment torque: rotate yaw toward the slide direction so the body scrapes
+          // along the wall instead of staying pointed into it.
+          double slideDeltaLen = glm::length(slideDelta);
+          if (slideDeltaLen > 1e-6)
+          {
+            glm::dvec3 slideDir = slideDelta / slideDeltaLen;
+            double targetYaw = std::atan2(slideDir.x, slideDir.z);
+            double yawDiff = targetYaw - vehicle->yaw;
+            const double kPi = 3.141592653589793;
+            while (yawDiff > kPi) yawDiff -= 2.0 * kPi;
+            while (yawDiff < -kPi) yawDiff += 2.0 * kPi;
+            const double kAlignRate = glm::radians(150.0);
+            double yawStep = glm::clamp(yawDiff, -kAlignRate * dt, kAlignRate * dt);
+            double alignedYaw = vehicle->yaw + yawStep;
+            glm::dquat alignedRot = glm::angleAxis(alignedYaw, glm::dvec3(0, 1, 0));
+            if (!obbHit(snapY(finalXZ), alignedRot, nullptr))
+            {
+              vehicle->yaw = alignedYaw;
+              yawRot = alignedRot;
+            }
+          }
+        }
+      }
     }
   }
+
+  position = snapY(finalXZ);
+
+  if (translationFullyBlocked)
+    vehicle->speed = 0.0;
+
+  // Invariant guard: end-of-frame state must not overlap. If a player-induced turn rotated
+  // the OBB into a wall at a full-stop position, revert yaw to the known-clean previous value.
+  // Without this guard, the next frame's wasOverlapping would disable enforcement, letting
+  // the car tunnel through the collider.
+  if (hasCollider && !wasOverlapping && obbHit(position, yawRot, nullptr))
+  {
+    vehicle->yaw = prevYaw;
+    yawRot = prevYawRot;
+  }
+
+  bool inContact = translationFullyBlocked;
+  if (inContact && !vehicle->wasInContact)
+  {
+    YA_LOG_INFO("Physics", "Car contact begin, collider entity=%u",
+      static_cast<uint32_t>(blockerEntity));
+  }
+  vehicle->wasInContact = inContact;
 
   glm::dquat targetTilt { 1, 0, 0, 0 };
   if (m_TerrainEntity != entt::null

@@ -16,6 +16,7 @@ struct VehicleComponent
   double drag = 5.0;
   double yaw = 0.0;
   bool yawInitialized = false;
+  bool wasInContact = false;
   glm::dquat tilt { 1, 0, 0, 0 };
 };
 
