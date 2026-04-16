@@ -146,6 +146,10 @@ namespace YAEngine
     float width = 4.0f;
     float uvScale = 1.0f;
     uint32_t segments = 64;
+    float carveInnerRadius = 0.0f;
+    float carveOuterRadius = 0.0f;
+    float carveDepthOffset = 0.0f;
+    std::vector<glm::vec2> carveCurve;
   };
 
   struct RoadDirty {};
@@ -156,9 +160,21 @@ namespace YAEngine
     TextureHandle layer1Normal;
     TextureHandle layer1Roughness;
     TextureHandle layer1Metallic;
+    TextureHandle layer2Albedo;
+    TextureHandle layer2Normal;
+    TextureHandle layer2Roughness;
+    TextureHandle layer2Metallic;
+    glm::vec3 layer2Tint { 1.0f, 1.0f, 1.0f };
+    float layer2RoughnessFactor = 1.0f;
+    float layer2MetallicFactor = 0.0f;
+    float layer2UvScale = 8.0f;
     float slopeStart = 0.7f;
     float slopeEnd = 0.85f;
     float layer1UvScale = 8.0f;
+    float shoulderInnerRadius = 0.0f;
+    float shoulderOuterRadius = 0.0f;
+    float shoulderWarpAmplitude = 0.0f;
+    float shoulderWarpScale = 0.1f;
   };
 
   enum class ScatterMeshType : uint8_t

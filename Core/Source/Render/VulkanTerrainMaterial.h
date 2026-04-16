@@ -33,13 +33,13 @@ namespace YAEngine
 
     void Bind(TextureManager& textures, Material& layer0,
               const TerrainMaterialComponent& layer1,
+              const std::vector<glm::vec2>& roadPolyline,
               uint32_t currentFrame, const VulkanTexture& noneTexture);
 
   private:
 
     std::vector<VulkanDescriptorSet> m_DescriptorSets;
     std::vector<VulkanUniformBuffer> m_UniformBuffers;
-    uint32_t m_BoundGeneration = UINT32_MAX;
     uint32_t m_LastFrame = UINT32_MAX;
   };
 }

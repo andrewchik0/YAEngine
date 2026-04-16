@@ -5,6 +5,7 @@
 #include "Utils/HeightmapLoader.h"
 #include "Utils/CatmullRomCurve.h"
 #include "Utils/SplinePath2D.h"
+#include "Utils/SplinePath3D.h"
 #include <glm/gtc/noise.hpp>
 
 namespace YAEngine
@@ -167,6 +168,59 @@ namespace YAEngine
     return normalized;
   }
 
+  static std::pair<float, float> DistanceAndYToSpline(float wx, float wz,
+    const SplinePath3D& spline, int32_t segments = 64)
+  {
+    float minDistSq = std::numeric_limits<float>::max();
+    float bestY = 0.0f;
+    glm::vec2 point(wx, wz);
+
+    glm::vec3 prev3d = spline.Evaluate(0.0f);
+    glm::vec2 prev(prev3d.x, prev3d.z);
+    float prevY = prev3d.y;
+
+    for (int32_t i = 1; i <= segments; i++)
+    {
+      float t = static_cast<float>(i) / static_cast<float>(segments);
+      glm::vec3 curr3d = spline.Evaluate(t);
+      glm::vec2 curr(curr3d.x, curr3d.z);
+      float currY = curr3d.y;
+
+      glm::vec2 edge = curr - prev;
+      float edgeLenSq = glm::dot(edge, edge);
+      float proj = 0.0f;
+      if (edgeLenSq > 0.0f)
+        proj = glm::clamp(glm::dot(point - prev, edge) / edgeLenSq, 0.0f, 1.0f);
+
+      glm::vec2 closest = prev + proj * edge;
+      float distSq = glm::dot(point - closest, point - closest);
+      if (distSq < minDistSq)
+      {
+        minDistSq = distSq;
+        bestY = glm::mix(prevY, currY, proj);
+      }
+
+      prev = curr;
+      prevY = currY;
+    }
+
+    return { std::sqrt(minDistSq), bestY };
+  }
+
+  static float ApplyCarve(float noiseY, float wx, float wz, const TerrainCarveParams* carve)
+  {
+    if (!carve || carve->outerRadius <= 0.0f || !carve->spline || carve->spline->points.size() < 2)
+      return noiseY;
+
+    auto [distXZ, roadY] = DistanceAndYToSpline(wx, wz, *carve->spline);
+    float influence = 1.0f - glm::smoothstep(carve->innerRadius, carve->outerRadius, distXZ);
+
+    if (carve->curve)
+      influence = carve->curve->Evaluate(influence);
+
+    return glm::mix(noiseY, roadY - carve->depthOffset, influence);
+  }
+
   float TerrainMeshGenerator::SampleSurfaceHeight(float worldX, float worldZ, const TerrainComponent& params)
   {
     if (params.maskPath.empty())
@@ -175,26 +229,43 @@ namespace YAEngine
     SplinePath2D spline(params.maskPath);
     CatmullRomCurve curve;
     const CatmullRomCurve* curvePtr = params.maskCurve.empty() ? nullptr : &(curve = CatmullRomCurve(params.maskCurve));
-    return SampleSurfaceHeight(worldX, worldZ, params, &spline, curvePtr);
+    return SampleSurfaceHeight(worldX, worldZ, params, &spline, curvePtr, nullptr);
   }
 
   float TerrainMeshGenerator::SampleSurfaceHeight(float worldX, float worldZ, const TerrainComponent& params,
     const SplinePath2D* spline, const CatmullRomCurve* curve)
   {
+    return SampleSurfaceHeight(worldX, worldZ, params, spline, curve, nullptr);
+  }
+
+  float TerrainMeshGenerator::SampleSurfaceHeight(float worldX, float worldZ, const TerrainComponent& params,
+    const SplinePath2D* maskSpline, const CatmullRomCurve* maskCurve, const TerrainCarveParams* carve)
+  {
     float noise = SampleHeight(worldX, worldZ, params);
 
-    if (!spline)
-      return noise * params.heightScale;
+    float wy;
+    if (!maskSpline)
+    {
+      wy = noise * params.heightScale;
+    }
+    else
+    {
+      float halfSize = params.size * 0.5f;
+      float normX = (worldX + halfSize) / params.size;
+      float normZ = (worldZ + halfSize) / params.size;
+      float mask = ComputeMask(normX, normZ, params, maskSpline, maskCurve);
+      wy = (noise * 0.5f + 0.5f) * mask * params.heightScale;
+    }
 
-    float halfSize = params.size * 0.5f;
-    float normX = (worldX + halfSize) / params.size;
-    float normZ = (worldZ + halfSize) / params.size;
-
-    float mask = ComputeMask(normX, normZ, params, spline, curve);
-    return (noise * 0.5f + 0.5f) * mask * params.heightScale;
+    return ApplyCarve(wy, worldX, worldZ, carve);
   }
 
   ProcMesh TerrainMeshGenerator::Generate(const TerrainComponent& params)
+  {
+    return Generate(params, static_cast<const TerrainCarveParams*>(nullptr));
+  }
+
+  ProcMesh TerrainMeshGenerator::Generate(const TerrainComponent& params, const TerrainCarveParams* carve)
   {
     ProcMesh mesh;
 
@@ -243,6 +314,8 @@ namespace YAEngine
         else
           wy = noise * params.heightScale;
 
+        wy = ApplyCarve(wy, wx, wz, carve);
+
         heights[z * vertsPerSide + x] = wy;
 
         float u = normX * params.uvScale;
@@ -264,6 +337,12 @@ namespace YAEngine
   }
 
   ProcMesh TerrainMeshGenerator::Generate(const TerrainComponent& params, const HeightmapData& heightmap)
+  {
+    return Generate(params, heightmap, nullptr);
+  }
+
+  ProcMesh TerrainMeshGenerator::Generate(const TerrainComponent& params, const HeightmapData& heightmap,
+    const TerrainCarveParams* carve)
   {
     ProcMesh mesh;
 
@@ -289,6 +368,8 @@ namespace YAEngine
         float wx = -halfSize + static_cast<float>(x) * step;
         float wz = -halfSize + static_cast<float>(z) * step;
         float wy = SampleHeightmap(normU, normV, heightmap) * params.heightScale;
+
+        wy = ApplyCarve(wy, wx, wz, carve);
 
         heights[z * vertsPerSide + x] = wy;
 

@@ -77,7 +77,8 @@ namespace YAEngine
     {
       auto& layer0 = materialManager.Get(frame.snapshot.terrainData.layer0);
       m_TerrainMaterial.Bind(frame.assets.Textures(), layer0,
-        *frame.snapshot.terrainData.layer1, currentFrame, m_NoneTexture);
+        *frame.snapshot.terrainData.layer1, frame.snapshot.terrainData.roadPolyline,
+        currentFrame, m_NoneTexture);
     }
 
     uint8_t lastSortKey = UINT8_MAX;

@@ -18,52 +18,42 @@ layout(location = 2) out vec2 outVelocity;
 void main() {
   float gamma = u_Frame.gamma;
 
-  // Slope-based blend factor: 0 = flat (layer0/sand), 1 = steep (layer1/rock)
+  // Slope-based blend factor: 0 = flat (ground), 1 = steep (rock)
   float slope = 1.0 - abs(dot(normalize(inNormal), vec3(0.0, 1.0, 0.0)));
-  float blend = smoothstep(u_Terrain.slopeStart, u_Terrain.slopeEnd, slope);
+  float slopeMask = smoothstep(u_Terrain.slopeStart, u_Terrain.slopeEnd, slope);
+
+  // Shoulder mask: 1 = inside inner radius (gravel), 0 = outside outer radius (sand)
+  float shoulderMask = 0.0;
+  if (u_Terrain.shoulderOuterRadius > 0.0) {
+    vec2 sampleP = shoulderDomainWarp(inPosition.xz);
+    float distToRoad = distanceToPolyline2D(sampleP);
+    shoulderMask = 1.0 - smoothstep(u_Terrain.shoulderInnerRadius, u_Terrain.shoulderOuterRadius, distToRoad);
+  }
 
   vec2 uv0 = inTexCoord;
   vec2 uv1 = inTexCoord * u_Terrain.layer1UvScale / u_Terrain.layer0UvScale;
+  vec2 uv2 = inTexCoord * u_Terrain.layer2UvScale / u_Terrain.layer0UvScale;
 
-  // Layer 0 (sand)
-  float hasL0Albedo = float(u_Terrain.textureMask & 1);
-  vec4 albedo0Tex = mix(vec4(1.0), texture(layer0AlbedoTexture, uv0), hasL0Albedo);
-  vec4 albedo0 = vec4(u_Terrain.layer0Albedo, 1.0) * albedo0Tex;
+  LayerSample sand   = sampleLayer0(uv0);
+  LayerSample rock   = sampleLayer1(uv1);
+  LayerSample gravel = sampleLayer2(uv2);
 
-  float hasL0Normal = float((u_Terrain.textureMask >> 1) & 1);
-  vec3 n0_ts = texture(layer0NormalTexture, uv0).rgb * 2.0 - 1.0;
+  // Ground = blend sand <-> gravel by shoulder distance, then ground <-> rock by slope.
+  vec4 albedoGround    = mix(sand.albedo,   gravel.albedo,   shoulderMask);
+  vec3 normalTSGround  = mix(sand.normalTS, gravel.normalTS, shoulderMask);
+  float roughnessGround = mix(sand.roughness, gravel.roughness, shoulderMask);
+  float metallicGround  = mix(sand.metallic,  gravel.metallic,  shoulderMask);
 
-  float hasL0Roughness = float((u_Terrain.textureMask >> 2) & 1);
-  float roughness0 = u_Terrain.layer0Roughness * mix(1.0, texture(layer0RoughnessTexture, uv0).r, hasL0Roughness);
+  vec4 albedo    = mix(albedoGround,    rock.albedo,   slopeMask);
+  vec3 normalTS  = mix(normalTSGround,  rock.normalTS, slopeMask);
+  float roughness = mix(roughnessGround, rock.roughness, slopeMask);
+  float metallic  = mix(metallicGround,  rock.metallic,  slopeMask);
 
-  float hasL0Metallic = float((u_Terrain.textureMask >> 3) & 1);
-  float metallic0 = u_Terrain.layer0Metallic * mix(1.0, texture(layer0MetallicTexture, uv0).b, hasL0Metallic);
-
-  // Layer 1 (rock)
-  float hasL1Albedo = float((u_Terrain.textureMask >> 4) & 1);
-  vec4 albedo1Tex = mix(vec4(1.0), texture(layer1AlbedoTexture, uv1), hasL1Albedo);
-  vec4 albedo1 = vec4(u_Terrain.layer1Albedo, 1.0) * albedo1Tex;
-
-  float hasL1Normal = float((u_Terrain.textureMask >> 5) & 1);
-  vec3 n1_ts = texture(layer1NormalTexture, uv1).rgb * 2.0 - 1.0;
-
-  float hasL1Roughness = float((u_Terrain.textureMask >> 6) & 1);
-  float roughness1 = u_Terrain.layer1Roughness * mix(1.0, texture(layer1RoughnessTexture, uv1).r, hasL1Roughness);
-
-  float hasL1Metallic = float((u_Terrain.textureMask >> 7) & 1);
-  float metallic1 = u_Terrain.layer1Metallic * mix(1.0, texture(layer1MetallicTexture, uv1).b, hasL1Metallic);
-
-  // Blend layers
-  vec4 albedo = mix(albedo0, albedo1, blend);
   albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
 
-  float hasAnyNormal = max(hasL0Normal, hasL1Normal);
-  // Add tangent-space up fallback when no normal maps to avoid normalizing zero vector -> NaN
-  vec3 n_ts = normalize(mix(n0_ts * hasL0Normal, n1_ts * hasL1Normal, blend) + vec3(0.0, 0.0, 1.0 - hasAnyNormal));
-  vec3 normal = mix(inNormal, normalize(inTBN * n_ts), hasAnyNormal);
-
-  float roughness = mix(roughness0, roughness1, blend);
-  float metallic = mix(metallic0, metallic1, blend);
+  // Bit positions: layer0 normal=1, layer1 normal=5, layer2 normal=9
+  float hasAnyNormal = float(((u_Terrain.textureMask >> 1) | (u_Terrain.textureMask >> 5) | (u_Terrain.textureMask >> 9)) & 1);
+  vec3 normal = mix(inNormal, normalize(inTBN * normalize(normalTS)), hasAnyNormal);
 
   // Velocity
   vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;

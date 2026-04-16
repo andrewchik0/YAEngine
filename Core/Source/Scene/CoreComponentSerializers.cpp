@@ -396,9 +396,24 @@ namespace YAEngine
         SerializeTextureField(n, "layer1NormalTexture", tm.layer1Normal, textures, assets);
         SerializeTextureField(n, "layer1RoughnessTexture", tm.layer1Roughness, textures, assets);
         SerializeTextureField(n, "layer1MetallicTexture", tm.layer1Metallic, textures, assets);
+        SerializeTextureField(n, "layer2AlbedoTexture", tm.layer2Albedo, textures, assets);
+        SerializeTextureField(n, "layer2NormalTexture", tm.layer2Normal, textures, assets);
+        SerializeTextureField(n, "layer2RoughnessTexture", tm.layer2Roughness, textures, assets);
+        SerializeTextureField(n, "layer2MetallicTexture", tm.layer2Metallic, textures, assets);
         n["slopeStart"] = tm.slopeStart;
         n["slopeEnd"] = tm.slopeEnd;
         n["layer1UvScale"] = tm.layer1UvScale;
+        n["layer2UvScale"] = tm.layer2UvScale;
+        n["layer2Tint"] = std::vector<float> { tm.layer2Tint.r, tm.layer2Tint.g, tm.layer2Tint.b };
+        n["layer2RoughnessFactor"] = tm.layer2RoughnessFactor;
+        n["layer2MetallicFactor"] = tm.layer2MetallicFactor;
+        n["shoulderInnerRadius"] = tm.shoulderInnerRadius;
+        n["shoulderOuterRadius"] = tm.shoulderOuterRadius;
+        if (tm.shoulderWarpAmplitude != 0.0f)
+        {
+          n["shoulderWarpAmplitude"] = tm.shoulderWarpAmplitude;
+          n["shoulderWarpScale"] = tm.shoulderWarpScale;
+        }
         return n;
       },
       [&assets](entt::registry& reg, entt::entity e, const YAML::Node& n) {
@@ -407,9 +422,22 @@ namespace YAEngine
         tm.layer1Normal = DeserializeTextureField(n, "layer1NormalTexture", assets);
         tm.layer1Roughness = DeserializeTextureField(n, "layer1RoughnessTexture", assets);
         tm.layer1Metallic = DeserializeTextureField(n, "layer1MetallicTexture", assets);
+        tm.layer2Albedo = DeserializeTextureField(n, "layer2AlbedoTexture", assets);
+        tm.layer2Normal = DeserializeTextureField(n, "layer2NormalTexture", assets);
+        tm.layer2Roughness = DeserializeTextureField(n, "layer2RoughnessTexture", assets);
+        tm.layer2Metallic = DeserializeTextureField(n, "layer2MetallicTexture", assets);
         if (n["slopeStart"]) tm.slopeStart = n["slopeStart"].as<float>();
         if (n["slopeEnd"]) tm.slopeEnd = n["slopeEnd"].as<float>();
         if (n["layer1UvScale"]) tm.layer1UvScale = n["layer1UvScale"].as<float>();
+        if (n["layer2UvScale"]) tm.layer2UvScale = n["layer2UvScale"].as<float>();
+        if (n["layer2Tint"])
+          tm.layer2Tint = glm::vec3(n["layer2Tint"][0].as<float>(), n["layer2Tint"][1].as<float>(), n["layer2Tint"][2].as<float>());
+        if (n["layer2RoughnessFactor"]) tm.layer2RoughnessFactor = n["layer2RoughnessFactor"].as<float>();
+        if (n["layer2MetallicFactor"]) tm.layer2MetallicFactor = n["layer2MetallicFactor"].as<float>();
+        if (n["shoulderInnerRadius"]) tm.shoulderInnerRadius = n["shoulderInnerRadius"].as<float>();
+        if (n["shoulderOuterRadius"]) tm.shoulderOuterRadius = n["shoulderOuterRadius"].as<float>();
+        if (n["shoulderWarpAmplitude"]) tm.shoulderWarpAmplitude = n["shoulderWarpAmplitude"].as<float>();
+        if (n["shoulderWarpScale"]) tm.shoulderWarpScale = n["shoulderWarpScale"].as<float>();
         reg.emplace_or_replace<TerrainMaterialComponent>(e, tm);
       }
     );
@@ -432,6 +460,25 @@ namespace YAEngine
         n["width"] = r.width;
         n["uvScale"] = r.uvScale;
         n["segments"] = r.segments;
+        if (r.carveOuterRadius > 0.0f)
+        {
+          n["carveInnerRadius"] = r.carveInnerRadius;
+          n["carveOuterRadius"] = r.carveOuterRadius;
+          if (r.carveDepthOffset != 0.0f)
+            n["carveDepthOffset"] = r.carveDepthOffset;
+          if (!r.carveCurve.empty())
+          {
+            YAML::Node curveNode;
+            for (auto& p : r.carveCurve)
+            {
+              YAML::Node pt;
+              pt.push_back(p.x);
+              pt.push_back(p.y);
+              curveNode.push_back(pt);
+            }
+            n["carveCurve"] = curveNode;
+          }
+        }
         return n;
       },
       [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
@@ -448,6 +495,17 @@ namespace YAEngine
         if (n["width"]) r.width = n["width"].as<float>();
         if (n["uvScale"]) r.uvScale = n["uvScale"].as<float>();
         if (n["segments"]) r.segments = n["segments"].as<uint32_t>();
+        if (n["carveInnerRadius"]) r.carveInnerRadius = n["carveInnerRadius"].as<float>();
+        if (n["carveOuterRadius"]) r.carveOuterRadius = n["carveOuterRadius"].as<float>();
+        if (n["carveDepthOffset"]) r.carveDepthOffset = n["carveDepthOffset"].as<float>();
+        if (n["carveCurve"])
+        {
+          for (size_t i = 0; i < n["carveCurve"].size(); i++)
+          {
+            auto pt = n["carveCurve"][i];
+            r.carveCurve.push_back(glm::vec2(pt[0].as<float>(), pt[1].as<float>()));
+          }
+        }
         reg.emplace_or_replace<RoadComponent>(e, r);
         if (!reg.all_of<RoadDirty>(e))
           reg.emplace<RoadDirty>(e);

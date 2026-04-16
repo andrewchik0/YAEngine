@@ -3,6 +3,8 @@
 #include "Components.h"
 #include "Assets/AssetManager.h"
 #include "Utils/TerrainMeshGenerator.h"
+#include "Utils/SplinePath3D.h"
+#include "Utils/CatmullRomCurve.h"
 #include "Utils/ThreadPool.h"
 #include "Utils/Log.h"
 
@@ -61,10 +63,47 @@ namespace YAEngine
     return h0 + (h1 - h0) * fz;
   }
 
+  struct RoadCarveSnapshot
+  {
+    SplinePath3D spline;
+    CatmullRomCurve curve;
+    float innerRadius = 0.0f;
+    float outerRadius = 0.0f;
+    float depthOffset = 0.0f;
+    bool hasCurve = false;
+    bool active = false;
+  };
+
+  static RoadCarveSnapshot CaptureRoadCarve(entt::registry& registry)
+  {
+    RoadCarveSnapshot snap;
+    auto roadView = registry.view<RoadComponent>();
+    for (auto roadEntity : roadView)
+    {
+      auto& road = registry.get<RoadComponent>(roadEntity);
+      if (road.points.size() < 2 || road.carveOuterRadius <= 0.0f)
+        continue;
+
+      snap.spline.points = road.points;
+      snap.innerRadius = road.carveInnerRadius;
+      snap.outerRadius = road.carveOuterRadius;
+      snap.depthOffset = road.carveDepthOffset;
+      if (!road.carveCurve.empty())
+      {
+        snap.curve = CatmullRomCurve { road.carveCurve };
+        snap.hasCurve = true;
+      }
+      snap.active = true;
+      break;
+    }
+    return snap;
+  }
+
   static TerrainGenResult GenerateTerrainCpu(
     const TerrainComponent& terrain,
     const std::string& absHeightmapPath,
-    const HeightmapData* cachedHeightmap)
+    const HeightmapData* cachedHeightmap,
+    const RoadCarveSnapshot& carveSnap)
   {
     TerrainGenResult result;
 
@@ -85,10 +124,22 @@ namespace YAEngine
       }
     }
 
+    TerrainCarveParams carveParams;
+    const TerrainCarveParams* carvePtr = nullptr;
+    if (carveSnap.active)
+    {
+      carveParams.spline = &carveSnap.spline;
+      carveParams.innerRadius = carveSnap.innerRadius;
+      carveParams.outerRadius = carveSnap.outerRadius;
+      carveParams.depthOffset = carveSnap.depthOffset;
+      carveParams.curve = carveSnap.hasCurve ? &carveSnap.curve : nullptr;
+      carvePtr = &carveParams;
+    }
+
     if (hmPtr)
-      result.mesh = TerrainMeshGenerator::Generate(terrain, *hmPtr);
+      result.mesh = TerrainMeshGenerator::Generate(terrain, *hmPtr, carvePtr);
     else
-      result.mesh = TerrainMeshGenerator::Generate(terrain);
+      result.mesh = TerrainMeshGenerator::Generate(terrain, carvePtr);
 
     result.heightGrid.vertsPerSide = terrain.subdivisions + 1;
     result.heightGrid.size = terrain.size;
@@ -158,7 +209,27 @@ namespace YAEngine
       }
     }
 
+    bool roadChanged = false;
+    {
+      auto roadDirtyView = registry.view<RoadDirty>();
+      roadChanged = roadDirtyView.begin() != roadDirtyView.end();
+    }
+    if (roadChanged)
+    {
+      auto terrainView = registry.view<TerrainComponent>();
+      for (auto entity : terrainView)
+      {
+        if (!registry.all_of<TerrainDirty>(entity))
+          registry.emplace<TerrainDirty>(entity);
+      }
+    }
+
     auto view = registry.view<TerrainComponent, TerrainDirty>();
+
+    if (view.begin() == view.end())
+      return;
+
+    RoadCarveSnapshot carveSnap = CaptureRoadCarve(registry);
 
     if (m_ThreadPool)
     {
@@ -200,8 +271,8 @@ namespace YAEngine
 
         TerrainComponent terrainCopy = terrain;
         task.future = m_ThreadPool->Submit(
-          [terrainCopy, absPath, cachedHm]() {
-            return GenerateTerrainCpu(terrainCopy, absPath, cachedHm);
+          [terrainCopy, absPath, cachedHm, carveSnap]() {
+            return GenerateTerrainCpu(terrainCopy, absPath, cachedHm, carveSnap);
           });
 
         tasks.push_back(std::move(task));
@@ -245,7 +316,7 @@ namespace YAEngine
           }
         }
 
-        auto result = GenerateTerrainCpu(terrain, absPath, cachedHm);
+        auto result = GenerateTerrainCpu(terrain, absPath, cachedHm, carveSnap);
         FinalizeTerrain(registry, entity, std::move(result), oldMesh, hadOldMesh);
       }
     }

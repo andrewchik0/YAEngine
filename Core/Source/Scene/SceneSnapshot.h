@@ -7,6 +7,8 @@
 #include "Scene/Components.h"
 #include "Assets/MeshManager.h"
 #include "Assets/MaterialManager.h"
+#include "Utils/SplinePath3D.h"
+#include "TerrainMaterialUniforms.h"
 
 namespace YAEngine
 {
@@ -82,6 +84,28 @@ namespace YAEngine
     });
 
     snapshot.visibleCount = uint32_t(snapshot.objects.size());
+
+    // Sample road polyline for terrain shoulder mask (XZ only)
+    snapshot.terrainData.roadPolyline.clear();
+    auto roadView = reg.view<RoadComponent>();
+    for (auto roadEntity : roadView)
+    {
+      auto& road = reg.get<RoadComponent>(roadEntity);
+      if (road.points.size() < 2) continue;
+
+      SplinePath3D spline;
+      spline.points = road.points;
+
+      uint32_t segCount = MAX_ROAD_SEGMENTS;
+      snapshot.terrainData.roadPolyline.reserve(segCount);
+      for (uint32_t i = 0; i < segCount; i++)
+      {
+        float t = float(i) / float(segCount - 1);
+        glm::vec3 p = spline.Evaluate(t);
+        snapshot.terrainData.roadPolyline.emplace_back(p.x, p.z);
+      }
+      break;
+    }
 
     // Extract light probes
     snapshot.probeBuffer.probeCount = 0;

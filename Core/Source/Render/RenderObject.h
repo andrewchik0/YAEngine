@@ -60,6 +60,7 @@ namespace YAEngine
   {
     MaterialHandle layer0;
     const TerrainMaterialComponent* layer1 = nullptr;
+    std::vector<glm::vec2> roadPolyline;
   };
 
   struct SceneSnapshot

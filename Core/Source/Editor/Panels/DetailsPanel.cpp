@@ -445,6 +445,39 @@ namespace YAEngine
         ImGui::PopID();
       }
 
+      ImGui::Separator();
+      ImGui::Text("Terrain Carving");
+
+      ImGui::DragFloat("Carve Inner Radius", &road.carveInnerRadius, 0.1f, 0.0f, 50.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::DragFloat("Carve Outer Radius", &road.carveOuterRadius, 0.1f, 0.0f, 50.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      ImGui::DragFloat("Carve Depth Offset", &road.carveDepthOffset, 0.01f, 0.0f, 5.0f);
+      committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+      if (road.carveCurve.empty())
+      {
+        if (ImGui::Button("Add Carve Curve"))
+        {
+          road.carveCurve = { { 0.0f, 0.0f }, { 1.0f, 1.0f } };
+          committed = true;
+        }
+      }
+      else
+      {
+        ImGui::Text("Carve Curve");
+        if (CurveEditor::Edit("##CarveCurve", road.carveCurve))
+          committed = true;
+
+        if (ImGui::Button("Remove Carve Curve"))
+        {
+          road.carveCurve.clear();
+          committed = true;
+        }
+      }
+
       if (committed && !scene.GetRegistry().all_of<RoadDirty>(entity))
         scene.GetRegistry().emplace<RoadDirty>(entity);
     }
@@ -911,6 +944,17 @@ namespace YAEngine
         ImGui::DragFloat("Slope Start", &tm.slopeStart, 0.01f, 0.0f, 1.0f);
         ImGui::DragFloat("Slope End", &tm.slopeEnd, 0.01f, 0.0f, 1.0f);
         ImGui::DragFloat("Layer 1 UV Scale", &tm.layer1UvScale, 0.1f, 0.1f, 100.0f);
+
+        ImGui::Separator();
+        ImGui::Text("Layer 2 (Shoulder/Gravel)");
+        ImGui::DragFloat("Layer 2 UV Scale", &tm.layer2UvScale, 0.1f, 0.1f, 100.0f);
+        ImGui::ColorEdit3("Layer 2 Tint", &tm.layer2Tint.x);
+        ImGui::DragFloat("Layer 2 Roughness", &tm.layer2RoughnessFactor, 0.01f, 0.0f, 2.0f);
+        ImGui::DragFloat("Layer 2 Metallic", &tm.layer2MetallicFactor, 0.01f, 0.0f, 2.0f);
+        ImGui::DragFloat("Shoulder Inner Radius", &tm.shoulderInnerRadius, 0.1f, 0.0f, 50.0f);
+        ImGui::DragFloat("Shoulder Outer Radius", &tm.shoulderOuterRadius, 0.1f, 0.0f, 50.0f);
+        ImGui::DragFloat("Shoulder Warp Amplitude", &tm.shoulderWarpAmplitude, 0.05f, 0.0f, 20.0f);
+        ImGui::DragFloat("Shoulder Warp Scale", &tm.shoulderWarpScale, 0.005f, 0.001f, 1.0f);
       }
       ImGui::PopID();
     }
