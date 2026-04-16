@@ -14,6 +14,9 @@ struct VehicleComponent
   double accelerationBack = 5.0;
   double brake = 15.0;
   double drag = 5.0;
+  double yaw = 0.0;
+  bool yawInitialized = false;
+  glm::dquat tilt { 1, 0, 0, 0 };
 };
 
 struct WheelComponent
