@@ -3,6 +3,7 @@
 #include <entt/entt.hpp>
 #include "Scene/ISystem.h"
 #include "Assets/MeshManager.h"
+#include "Assets/ModelDescription.h"
 
 namespace YAEngine
 {
@@ -32,6 +33,8 @@ namespace YAEngine
     {
       MeshHandle mesh;
       MaterialHandle material;
+      uint32_t instanceOffset;
+      uint32_t instanceSize;
       uint32_t framesLeft;
     };
 
@@ -51,6 +54,7 @@ namespace YAEngine
     ThreadPool* m_ThreadPool = nullptr;
     std::vector<PendingDestroy> m_PendingDestroys;
     std::unordered_map<uint32_t, ScatterState> m_States;
+    std::unordered_map<std::string, ModelDescription> m_ModelCache;
 
     void DestroyState(uint32_t entityId);
     void GenerateScatter(entt::registry& registry, entt::entity entity);

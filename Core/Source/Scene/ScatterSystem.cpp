@@ -447,6 +447,7 @@ namespace YAEngine
   {
     m_States.clear();
     m_PendingDestroys.clear();
+    m_ModelCache.clear();
   }
 
   void ScatterSystem::Update(entt::registry& registry, double dt)
@@ -460,6 +461,8 @@ namespace YAEngine
           m_Assets.Meshes().Destroy(pending.mesh);
         if (m_Assets.Materials().Has(pending.material))
           m_Assets.Materials().Destroy(pending.material);
+        if (pending.instanceSize > 0 && pending.instanceOffset != UINT32_MAX)
+          m_Render.FreeInstanceData(pending.instanceOffset, pending.instanceSize);
         m_PendingDestroys[i] = m_PendingDestroys.back();
         m_PendingDestroys.pop_back();
       }
@@ -522,7 +525,7 @@ namespace YAEngine
     {
       // Parallel path for standalone scatter
 
-      // Phase 1: Import all unique models in parallel
+      // Phase 1: Import all unique models in parallel, skipping any already cached
       std::unordered_map<std::string, std::future<ModelDescription>> modelFutures;
       for (auto entity : standalone)
       {
@@ -530,18 +533,16 @@ namespace YAEngine
         if (scatter.meshType == ScatterMeshType::Model && !scatter.modelPath.empty())
         {
           std::string absPath = m_Assets.ResolvePath(scatter.modelPath);
-          if (!modelFutures.contains(absPath))
-          {
-            modelFutures.emplace(absPath, m_ThreadPool->Submit(
-              [absPath]() { return ModelImporter::Import(absPath, false); }));
-          }
+          if (m_ModelCache.contains(absPath) || modelFutures.contains(absPath))
+            continue;
+          modelFutures.emplace(absPath, m_ThreadPool->Submit(
+            [absPath]() { return ModelImporter::Import(absPath, false); }));
         }
       }
 
-      // Wait for all model imports
-      std::unordered_map<std::string, ModelDescription> importedModels;
+      // Wait for all model imports and merge into the persistent cache
       for (auto& [path, future] : modelFutures)
-        importedModels.emplace(path, future.get());
+        m_ModelCache.emplace(path, future.get());
 
       // Phase 2: Build road mask (shared across all entities)
       SplinePath3D roadSpline;
@@ -615,7 +616,7 @@ namespace YAEngine
         if (scatter.meshType == ScatterMeshType::Model && !scatter.modelPath.empty())
         {
           std::string absPath = m_Assets.ResolvePath(scatter.modelPath);
-          meshSetup = SetupModelMesh(scatter, entityId, m_Assets, importedModels.at(absPath));
+          meshSetup = SetupModelMesh(scatter, entityId, m_Assets, m_ModelCache.at(absPath));
         }
         else
         {
@@ -690,6 +691,15 @@ namespace YAEngine
 
         uint32_t dataSize = uint32_t(state.instanceMatrices.size() * sizeof(glm::mat4));
         state.instanceOffset = m_Render.AllocateInstanceData(dataSize);
+        if (state.instanceOffset == UINT32_MAX)
+        {
+          YA_LOG_ERROR("Render", "Scatter instance buffer out of space: requested %u bytes, dropping scatter for entity %u",
+            dataSize, task.entityId);
+          m_Assets.Meshes().Destroy(task.setup.mesh);
+          m_Assets.Materials().Destroy(task.setup.material);
+          registry.remove<ScatterDirty>(task.entity);
+          continue;
+        }
 
         state.childEntity = m_Scene.CreateEntity("scatter_instances");
         m_Scene.SetParent(state.childEntity, task.entity);
@@ -742,6 +752,8 @@ namespace YAEngine
     m_PendingDestroys.push_back({
       .mesh = state.mesh,
       .material = state.material,
+      .instanceOffset = state.instanceOffset,
+      .instanceSize = uint32_t(state.instanceMatrices.size() * sizeof(glm::mat4)),
       .framesLeft = DESTROY_DELAY_FRAMES
     });
 
@@ -784,8 +796,10 @@ namespace YAEngine
     if (scatter.meshType == ScatterMeshType::Model && !scatter.modelPath.empty())
     {
       std::string absPath = m_Assets.ResolvePath(scatter.modelPath);
-      auto desc = ModelImporter::Import(absPath, false);
-      meshSetup = SetupModelMesh(scatter, entityId, m_Assets, desc);
+      auto it = m_ModelCache.find(absPath);
+      if (it == m_ModelCache.end())
+        it = m_ModelCache.emplace(absPath, ModelImporter::Import(absPath, false)).first;
+      meshSetup = SetupModelMesh(scatter, entityId, m_Assets, it->second);
     }
     else
     {
@@ -942,6 +956,14 @@ namespace YAEngine
 
     uint32_t dataSize = uint32_t(state.instanceMatrices.size() * sizeof(glm::mat4));
     state.instanceOffset = m_Render.AllocateInstanceData(dataSize);
+    if (state.instanceOffset == UINT32_MAX)
+    {
+      YA_LOG_ERROR("Render", "Scatter instance buffer out of space: requested %u bytes, dropping scatter for entity %u",
+        dataSize, entityId);
+      m_Assets.Meshes().Destroy(state.mesh);
+      m_Assets.Materials().Destroy(state.material);
+      return;
+    }
 
     state.childEntity = m_Scene.CreateEntity("scatter_instances");
     m_Scene.SetParent(state.childEntity, entity);
@@ -1022,8 +1044,10 @@ namespace YAEngine
     if (scatter.meshType == ScatterMeshType::Model && !scatter.modelPath.empty())
     {
       std::string absPath = m_Assets.ResolvePath(scatter.modelPath);
-      auto desc = ModelImporter::Import(absPath, false);
-      meshSetup = SetupModelMesh(scatter, entityId, m_Assets, desc, "scatter_sat_");
+      auto it = m_ModelCache.find(absPath);
+      if (it == m_ModelCache.end())
+        it = m_ModelCache.emplace(absPath, ModelImporter::Import(absPath, false)).first;
+      meshSetup = SetupModelMesh(scatter, entityId, m_Assets, it->second, "scatter_sat_");
     }
     else
     {
@@ -1069,6 +1093,14 @@ namespace YAEngine
 
     uint32_t dataSize = uint32_t(state.instanceMatrices.size() * sizeof(glm::mat4));
     state.instanceOffset = m_Render.AllocateInstanceData(dataSize);
+    if (state.instanceOffset == UINT32_MAX)
+    {
+      YA_LOG_ERROR("Render", "Scatter instance buffer out of space: requested %u bytes, dropping scatter for entity %u",
+        dataSize, entityId);
+      m_Assets.Meshes().Destroy(state.mesh);
+      m_Assets.Materials().Destroy(state.material);
+      return;
+    }
 
     state.childEntity = m_Scene.CreateEntity("scatter_satellite");
     m_Scene.SetParent(state.childEntity, entity);

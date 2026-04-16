@@ -27,7 +27,6 @@ namespace YAEngine
       }
     };
     m_InstanceDescriptorSet.Init(ctx, instanceDesc);
-    constexpr auto MAX_INSTANCES = 10000;
     m_InstanceBuffer.Create(ctx, MAX_INSTANCES * sizeof(glm::mat4));
     m_InstanceDescriptorSet.WriteStorageBuffer(0, m_InstanceBuffer.Get(), MAX_INSTANCES * sizeof(glm::mat4));
 

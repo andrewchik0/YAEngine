@@ -36,6 +36,8 @@ namespace YAEngine
   class Render
   {
   public:
+    static constexpr uint32_t MAX_INSTANCES = 100000;
+
     void Init(GLFWwindow* window, const RenderSpecs &specs);
     void Destroy();
     void Resize();
@@ -66,6 +68,11 @@ namespace YAEngine
     uint32_t AllocateInstanceData(uint32_t size)
     {
       return m_InstanceBuffer.Allocate(size);
+    }
+
+    void FreeInstanceData(uint32_t offset, uint32_t size)
+    {
+      m_InstanceBuffer.Free(offset, size);
     }
 
     float& GetGamma() { return m_Gamma; }

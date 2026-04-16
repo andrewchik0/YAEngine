@@ -27,6 +27,11 @@ namespace YAEngine
       return m_Buffer.Allocate(size);
     }
 
+    void Free(uint32_t offset, uint32_t size)
+    {
+      m_Buffer.Free(offset, size);
+    }
+
     void ResetAllocator()
     {
       m_Buffer.ResetAllocator();

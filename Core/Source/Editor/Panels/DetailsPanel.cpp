@@ -683,6 +683,7 @@ namespace YAEngine
       auto entity = context.selectedEntity;
       auto& scene = *context.scene;
       bool committed = false;
+      const bool isSatellite = !scatter.clusterSource.empty();
 
       const char* meshTypes[] = { "Plane", "Model" };
       int meshType = static_cast<int>(scatter.meshType);
@@ -724,10 +725,13 @@ namespace YAEngine
         }
       }
 
-      int count = static_cast<int>(scatter.count);
-      ImGui::DragInt("Count", &count, 1.0f, 0, 100000);
-      scatter.count = static_cast<uint32_t>(std::max(0, count));
-      committed |= ImGui::IsItemDeactivatedAfterEdit();
+      if (!isSatellite)
+      {
+        int count = static_cast<int>(scatter.count);
+        ImGui::DragInt("Count", &count, 1.0f, 0, static_cast<int>(Render::MAX_INSTANCES));
+        scatter.count = static_cast<uint32_t>(std::max(0, count));
+        committed |= ImGui::IsItemDeactivatedAfterEdit();
+      }
 
       int seed = scatter.seed;
       ImGui::DragInt("Seed", &seed);
@@ -740,21 +744,25 @@ namespace YAEngine
       committed |= ImGui::IsItemDeactivatedAfterEdit();
       ImGui::DragFloat("Max Slope", &scatter.maxSlope, 0.01f, 0.0f, 1.0f);
       committed |= ImGui::IsItemDeactivatedAfterEdit();
-      ImGui::Checkbox("Random Y Rotation", &scatter.randomYRotation);
-      committed |= ImGui::IsItemDeactivatedAfterEdit();
-      ImGui::DragFloat("Radius", &scatter.radius, 0.5f, 0.0f, 10000.0f);
-      committed |= ImGui::IsItemDeactivatedAfterEdit();
-
-      if (ImGui::Checkbox("Use Road Mask", &scatter.useRoadMask))
+      if (ImGui::Checkbox("Random Y Rotation", &scatter.randomYRotation))
         committed = true;
-      if (scatter.useRoadMask)
+
+      if (!isSatellite)
       {
-        ImGui::DragFloat("Road Padding", &scatter.roadMaskPadding, 0.1f, 0.0f, 50.0f);
+        ImGui::DragFloat("Radius", &scatter.radius, 0.5f, 0.0f, 10000.0f);
         committed |= ImGui::IsItemDeactivatedAfterEdit();
-        ImGui::DragFloat("Outer Radius", &scatter.roadMaskOuterRadius, 0.5f, 0.0f, 200.0f);
-        committed |= ImGui::IsItemDeactivatedAfterEdit();
-        ImGui::DragFloat("Falloff", &scatter.roadMaskFalloff, 0.1f, 0.0f, 50.0f);
-        committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+        if (ImGui::Checkbox("Use Road Mask", &scatter.useRoadMask))
+          committed = true;
+        if (scatter.useRoadMask)
+        {
+          ImGui::DragFloat("Road Padding", &scatter.roadMaskPadding, 0.1f, 0.0f, 50.0f);
+          committed |= ImGui::IsItemDeactivatedAfterEdit();
+          ImGui::DragFloat("Outer Radius", &scatter.roadMaskOuterRadius, 0.5f, 0.0f, 200.0f);
+          committed |= ImGui::IsItemDeactivatedAfterEdit();
+          ImGui::DragFloat("Falloff", &scatter.roadMaskFalloff, 0.1f, 0.0f, 50.0f);
+          committed |= ImGui::IsItemDeactivatedAfterEdit();
+        }
       }
 
       ImGui::Separator();
@@ -766,15 +774,15 @@ namespace YAEngine
         scatter.clusterSource = clusterBuf;
         committed = true;
       }
-      if (!scatter.clusterSource.empty())
+      if (isSatellite)
       {
         ImGui::DragFloat("Cluster Radius", &scatter.clusterRadius, 0.1f, 0.5f, 20.0f);
         committed |= ImGui::IsItemDeactivatedAfterEdit();
         int cMin = static_cast<int>(scatter.clusterCountMin);
         int cMax = static_cast<int>(scatter.clusterCountMax);
-        ImGui::DragInt("Cluster Count Min", &cMin, 0.1f, 0, 10);
+        ImGui::DragInt("Cluster Count Min", &cMin, 0.1f, 0, 1000);
         committed |= ImGui::IsItemDeactivatedAfterEdit();
-        ImGui::DragInt("Cluster Count Max", &cMax, 0.1f, 0, 10);
+        ImGui::DragInt("Cluster Count Max", &cMax, 0.1f, 0, 1000);
         committed |= ImGui::IsItemDeactivatedAfterEdit();
         scatter.clusterCountMin = static_cast<uint32_t>(std::max(0, cMin));
         scatter.clusterCountMax = static_cast<uint32_t>(std::max(static_cast<int>(scatter.clusterCountMin), cMax));

@@ -51,6 +51,7 @@ namespace YAEngine
       va_end(args);
 
       fprintf(out, "%s\n", colorEnd);
+      fflush(out);
     }
 
   private:

@@ -1,6 +1,7 @@
 #include "ModelManager.h"
 
 #include "AssetManager.h"
+#include "Utils/Log.h"
 
 namespace YAEngine
 {
@@ -44,7 +45,15 @@ namespace YAEngine
     auto& model = Get(handle);
 
     model.modelMatrices = instances;
-    model.offset = m_AllocateInstanceData(uint32_t(instances.size() * sizeof(glm::mat4)));
+    uint32_t dataSize = uint32_t(instances.size() * sizeof(glm::mat4));
+    model.offset = m_AllocateInstanceData(dataSize);
+
+    if (model.offset == UINT32_MAX)
+    {
+      YA_LOG_ERROR("Render", "Model instance buffer out of space: requested %u bytes, skipping instance data for '%s'",
+        dataSize, path.c_str());
+      return handle;
+    }
 
     TraverseInstanceData(model.rootEntity, &model.modelMatrices, model.offset);
 
