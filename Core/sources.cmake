@@ -174,6 +174,8 @@ set(SOURCE_FILES
   Source/Scene/RoadSystem.cpp
   Source/Scene/ScatterSystem.h
   Source/Scene/ScatterSystem.cpp
+  Source/Scene/ModelColliderSystem.h
+  Source/Scene/ModelColliderSystem.cpp
   Source/Scene/CollisionQueryService.h
   Source/Scene/CollisionQueryService.cpp
 )

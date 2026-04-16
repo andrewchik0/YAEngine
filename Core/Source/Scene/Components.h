@@ -90,7 +90,16 @@ namespace YAEngine
   {
     std::string path;
     bool combinedTextures = false;
+
+    bool colliderEnabled = false;
+    glm::vec3 colliderHalfExtentsScale { 1.0f };
+    glm::vec3 colliderOffset { 0.0f };
+    bool colliderIsStatic = true;
+    uint32_t colliderLayer = 1u;
+    uint32_t colliderMask = ~0u;
   };
+
+  struct ModelColliderDirty {};
 
   enum class ProbeShape : uint8_t
   {

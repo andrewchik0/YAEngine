@@ -7,6 +7,7 @@
 #include "Scene/TerrainSystem.h"
 #include "Scene/RoadSystem.h"
 #include "Scene/ScatterSystem.h"
+#include "Scene/ModelColliderSystem.h"
 #include "Scene/CoreComponentSerializers.h"
 
 #include <imgui.h>
@@ -66,6 +67,7 @@ namespace YAEngine
     m_Registry.Register<TerrainSystem>(&terrainSystem);
     m_Scheduler.AddSystem<RoadSystem>(m_AssetManager);
     m_Scheduler.AddSystem<ScatterSystem>(m_AssetManager, m_Scene, m_Render, terrainSystem, &m_ThreadPool);
+    m_Scheduler.AddSystem<ModelColliderSystem>(m_AssetManager);
     m_Scheduler.AddSystem<TransformSystem>();
     m_Scheduler.AddSystem<BoundsUpdateSystem>();
 

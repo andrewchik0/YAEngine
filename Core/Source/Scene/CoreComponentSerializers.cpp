@@ -239,13 +239,33 @@ namespace YAEngine
         n["path"] = assets.MakeRelative(m.path);
         if (m.combinedTextures)
           n["combinedTextures"] = true;
+        if (m.colliderEnabled)
+          n["colliderEnabled"] = m.colliderEnabled;
+        if (m.colliderHalfExtentsScale != glm::vec3(1.0f))
+          n["colliderHalfExtentsScale"] = SerializeVec3(m.colliderHalfExtentsScale);
+        if (m.colliderOffset != glm::vec3(0.0f))
+          n["colliderOffset"] = SerializeVec3(m.colliderOffset);
+        if (!m.colliderIsStatic)
+          n["colliderIsStatic"] = m.colliderIsStatic;
+        if (m.colliderLayer != 1u)
+          n["colliderLayer"] = m.colliderLayer;
+        if (m.colliderMask != ~0u)
+          n["colliderMask"] = m.colliderMask;
         return n;
       },
       [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
         ModelSourceComponent m;
         m.path = n["path"].as<std::string>();
         if (n["combinedTextures"]) m.combinedTextures = n["combinedTextures"].as<bool>();
+        if (n["colliderEnabled"]) m.colliderEnabled = n["colliderEnabled"].as<bool>();
+        if (n["colliderHalfExtentsScale"]) m.colliderHalfExtentsScale = DeserializeVec3(n["colliderHalfExtentsScale"]);
+        if (n["colliderOffset"]) m.colliderOffset = DeserializeVec3(n["colliderOffset"]);
+        if (n["colliderIsStatic"]) m.colliderIsStatic = n["colliderIsStatic"].as<bool>();
+        if (n["colliderLayer"]) m.colliderLayer = n["colliderLayer"].as<uint32_t>();
+        if (n["colliderMask"]) m.colliderMask = n["colliderMask"].as<uint32_t>();
         reg.emplace_or_replace<ModelSourceComponent>(e, m);
+        if (!reg.all_of<ModelColliderDirty>(e))
+          reg.emplace<ModelColliderDirty>(e);
       }
     );
 

@@ -680,6 +680,34 @@ namespace YAEngine
         SetCombinedTexturesRecursive(*context.scene, *context.assetManager,
           context.selectedEntity, model.combinedTextures);
       }
+
+      ImGui::Separator();
+      ImGui::Text("Collider");
+
+      auto entity = context.selectedEntity;
+      auto& scene = *context.scene;
+      bool colliderDirty = false;
+
+      if (ImGui::Checkbox("Enabled##ModelCollider", &model.colliderEnabled))
+        colliderDirty = true;
+
+      if (model.colliderEnabled)
+      {
+        ImGui::DragFloat3("Offset##ModelCollider", &model.colliderOffset.x, 0.05f);
+        colliderDirty |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::DragFloat3("Half Extents Scale##ModelCollider", &model.colliderHalfExtentsScale.x, 0.05f, 0.0f, 10.0f);
+        colliderDirty |= ImGui::IsItemDeactivatedAfterEdit();
+
+        if (ImGui::Checkbox("Static##ModelCollider", &model.colliderIsStatic))
+          colliderDirty = true;
+        ImGui::DragScalar("Layer##ModelCollider", ImGuiDataType_U32, &model.colliderLayer, 1.0f);
+        colliderDirty |= ImGui::IsItemDeactivatedAfterEdit();
+        ImGui::DragScalar("Mask##ModelCollider",  ImGuiDataType_U32, &model.colliderMask,  1.0f);
+        colliderDirty |= ImGui::IsItemDeactivatedAfterEdit();
+      }
+
+      if (colliderDirty && !scene.GetRegistry().all_of<ModelColliderDirty>(entity))
+        scene.GetRegistry().emplace<ModelColliderDirty>(entity);
     }
   }
 
