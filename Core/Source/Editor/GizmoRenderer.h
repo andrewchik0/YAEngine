@@ -43,8 +43,10 @@ namespace YAEngine
 
     void DrawWireSphere(const glm::vec3& center, float radius, const glm::vec4& color);
     void DrawWireBox(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color);
+    void DrawWireBox(const glm::vec3& center, const glm::vec3& extents, const glm::quat& rotation, const glm::vec4& color);
     void DrawWireSphereDepthTested(const glm::vec3& center, float radius, const glm::vec4& color);
     void DrawWireBoxDepthTested(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color);
+    void DrawWireBoxDepthTested(const glm::vec3& center, const glm::vec3& extents, const glm::quat& rotation, const glm::vec4& color);
     void DrawWireCone(const glm::vec3& origin, const glm::vec3& direction, float height, float angle, const glm::vec4& color);
     void DrawArrow(const glm::vec3& origin, const glm::vec3& direction, float length, const glm::vec4& color);
 

@@ -231,6 +231,14 @@ namespace YAEngine
     m_Requests.push_back({ GizmoShape::Box, GizmoRenderMode::Wire, transform, color });
   }
 
+  void GizmoRenderer::DrawWireBox(const glm::vec3& center, const glm::vec3& extents, const glm::quat& rotation, const glm::vec4& color)
+  {
+    glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
+                         * glm::mat4_cast(rotation)
+                         * glm::scale(glm::mat4(1.0f), extents);
+    m_Requests.push_back({ GizmoShape::Box, GizmoRenderMode::Wire, transform, color });
+  }
+
   void GizmoRenderer::DrawWireSphereDepthTested(const glm::vec3& center, float radius, const glm::vec4& color)
   {
     glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
@@ -241,6 +249,14 @@ namespace YAEngine
   void GizmoRenderer::DrawWireBoxDepthTested(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color)
   {
     glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
+                         * glm::scale(glm::mat4(1.0f), extents);
+    m_Requests.push_back({ GizmoShape::Box, GizmoRenderMode::WireDepthTested, transform, color });
+  }
+
+  void GizmoRenderer::DrawWireBoxDepthTested(const glm::vec3& center, const glm::vec3& extents, const glm::quat& rotation, const glm::vec4& color)
+  {
+    glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
+                         * glm::mat4_cast(rotation)
                          * glm::scale(glm::mat4(1.0f), extents);
     m_Requests.push_back({ GizmoShape::Box, GizmoRenderMode::WireDepthTested, transform, color });
   }

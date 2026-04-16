@@ -451,10 +451,17 @@ namespace YAEngine
                                       const std::vector<glm::mat4>& matrices,
                                       const glm::vec3& meshMin, const glm::vec3& meshMax)
   {
-    if (scatter.meshType == ScatterMeshType::Plane)
+    if (scatter.meshType == ScatterMeshType::Plane || !scatter.colliderEnabled)
+    {
+      if (registry.all_of<InstancedColliderComponent>(childEntity))
+        registry.remove<InstancedColliderComponent>(childEntity);
       return;
+    }
 
     InstancedColliderComponent colliders;
+    colliders.isStatic = scatter.colliderIsStatic;
+    colliders.layer = scatter.colliderLayer;
+    colliders.mask = scatter.colliderMask;
     colliders.instances.reserve(matrices.size());
 
     const glm::vec3 corners[8] = {
@@ -474,8 +481,8 @@ namespace YAEngine
         worldMin = glm::min(worldMin, w);
         worldMax = glm::max(worldMax, w);
       }
-      glm::vec3 center = (worldMin + worldMax) * 0.5f;
-      glm::vec3 halfExtents = (worldMax - worldMin) * 0.5f;
+      glm::vec3 center = (worldMin + worldMax) * 0.5f + scatter.colliderOffset;
+      glm::vec3 halfExtents = (worldMax - worldMin) * 0.5f * scatter.colliderHalfExtentsScale;
       colliders.instances.push_back(InstancedColliderComponent::Entry {
         .center = center,
         .halfExtents = halfExtents

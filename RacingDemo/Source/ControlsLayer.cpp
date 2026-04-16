@@ -88,10 +88,9 @@ void ControlsLayer::Update(double dt)
   if (GetScene().HasComponent<YAEngine::ColliderComponent>(car))
   {
     auto& collider = GetScene().GetComponent<YAEngine::ColliderComponent>(car);
-    glm::vec3 center = glm::vec3(position) + collider.localOffset;
-    glm::vec3 aMin = center - collider.halfExtents;
-    glm::vec3 aMax = center + collider.halfExtents;
-    auto hits = m_CollisionService->OverlapAABB(aMin, aMax, 1u);
+    glm::quat orientation = glm::quat(rotation);
+    glm::vec3 center = glm::vec3(position) + orientation * collider.localOffset;
+    auto hits = m_CollisionService->OverlapOBB(center, collider.halfExtents, orientation, 1u);
     if (!hits.empty())
     {
       static bool s_LoggedBlock = false;

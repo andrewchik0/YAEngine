@@ -66,14 +66,6 @@ public:
           continue;
 
         GetScene().AddComponent<VehicleComponent>(e);
-        GetScene().AddComponent<YAEngine::ColliderComponent>(e, YAEngine::ColliderComponent {
-          .shape = YAEngine::ColliderShape::AABB,
-          .localOffset = { 0.0f, 0.75f, 0.0f },
-          .halfExtents = { 1.0f, 0.75f, 2.25f },
-          .isStatic = false,
-          .layer = 2u,
-          .mask = ~0u
-        });
 
         auto wheels = std::array<YAEngine::Entity, 4> {
           GetScene().GetChildByName(e, "wheel-left-front"),

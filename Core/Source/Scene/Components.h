@@ -205,6 +205,13 @@ namespace YAEngine
     float clusterRadius = 3.0f;
     uint32_t clusterCountMin = 1;
     uint32_t clusterCountMax = 3;
+
+    bool colliderEnabled = true;
+    glm::vec3 colliderHalfExtentsScale { 1.0f };
+    glm::vec3 colliderOffset { 0.0f };
+    bool colliderIsStatic = true;
+    uint32_t colliderLayer = 1u;
+    uint32_t colliderMask = ~0u;
   };
 
   struct ScatterDirty {};

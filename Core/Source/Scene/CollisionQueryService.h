@@ -16,6 +16,11 @@ namespace YAEngine
                                           const glm::vec3& worldMax,
                                           uint32_t mask) const;
 
+    std::vector<entt::entity> OverlapOBB(const glm::vec3& center,
+                                         const glm::vec3& halfExtents,
+                                         const glm::quat& orientation,
+                                         uint32_t mask) const;
+
   private:
     Scene& m_Scene;
   };

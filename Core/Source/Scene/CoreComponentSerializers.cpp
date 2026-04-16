@@ -551,6 +551,18 @@ namespace YAEngine
           n["clusterCountMin"] = s.clusterCountMin;
           n["clusterCountMax"] = s.clusterCountMax;
         }
+        if (!s.colliderEnabled)
+          n["colliderEnabled"] = s.colliderEnabled;
+        if (s.colliderHalfExtentsScale != glm::vec3(1.0f))
+          n["colliderHalfExtentsScale"] = SerializeVec3(s.colliderHalfExtentsScale);
+        if (s.colliderOffset != glm::vec3(0.0f))
+          n["colliderOffset"] = SerializeVec3(s.colliderOffset);
+        if (!s.colliderIsStatic)
+          n["colliderIsStatic"] = s.colliderIsStatic;
+        if (s.colliderLayer != 1u)
+          n["colliderLayer"] = s.colliderLayer;
+        if (s.colliderMask != ~0u)
+          n["colliderMask"] = s.colliderMask;
         return n;
       },
       [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
@@ -579,6 +591,12 @@ namespace YAEngine
         if (n["clusterRadius"]) s.clusterRadius = n["clusterRadius"].as<float>();
         if (n["clusterCountMin"]) s.clusterCountMin = n["clusterCountMin"].as<uint32_t>();
         if (n["clusterCountMax"]) s.clusterCountMax = n["clusterCountMax"].as<uint32_t>();
+        if (n["colliderEnabled"]) s.colliderEnabled = n["colliderEnabled"].as<bool>();
+        if (n["colliderHalfExtentsScale"]) s.colliderHalfExtentsScale = DeserializeVec3(n["colliderHalfExtentsScale"]);
+        if (n["colliderOffset"]) s.colliderOffset = DeserializeVec3(n["colliderOffset"]);
+        if (n["colliderIsStatic"]) s.colliderIsStatic = n["colliderIsStatic"].as<bool>();
+        if (n["colliderLayer"]) s.colliderLayer = n["colliderLayer"].as<uint32_t>();
+        if (n["colliderMask"]) s.colliderMask = n["colliderMask"].as<uint32_t>();
         reg.emplace_or_replace<ScatterComponent>(e, s);
         if (!reg.all_of<ScatterDirty>(e))
           reg.emplace<ScatterDirty>(e);

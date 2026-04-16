@@ -694,6 +694,37 @@ namespace YAEngine
     }
   }
 
+  static bool DrawCollider(ColliderComponent& collider)
+  {
+    ImGui::PushID("Collider");
+    bool open = ImGui::CollapsingHeader(ICON_FA_CUBE " Collider", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    if (ImGui::Button(ICON_FA_XMARK "##RemoveCollider", ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight())))
+    {
+      ImGui::PopStyleColor(3);
+      ImGui::PopID();
+      return true;
+    }
+    ImGui::PopStyleColor(3);
+
+    if (open)
+    {
+      ImGui::DragFloat3("Local Offset", &collider.localOffset.x, 0.05f);
+      ImGui::DragFloat3("Half Extents", &collider.halfExtents.x, 0.05f, 0.0f, 1000.0f);
+      ImGui::Checkbox("Static", &collider.isStatic);
+
+      ImGui::DragScalar("Layer", ImGuiDataType_U32, &collider.layer, 1.0f);
+      ImGui::DragScalar("Mask",  ImGuiDataType_U32, &collider.mask,  1.0f);
+    }
+
+    ImGui::PopID();
+    return false;
+  }
+
   static bool DrawScatter(EditorContext& context, ScatterComponent& scatter)
   {
     ImGui::PushID("Scatter");
@@ -819,6 +850,30 @@ namespace YAEngine
         committed |= ImGui::IsItemDeactivatedAfterEdit();
         scatter.clusterCountMin = static_cast<uint32_t>(std::max(0, cMin));
         scatter.clusterCountMax = static_cast<uint32_t>(std::max(static_cast<int>(scatter.clusterCountMin), cMax));
+      }
+
+      if (scatter.meshType != ScatterMeshType::Plane)
+      {
+        ImGui::Separator();
+        ImGui::Text("Collider");
+
+        if (ImGui::Checkbox("Enabled##Collider", &scatter.colliderEnabled))
+          committed = true;
+
+        if (scatter.colliderEnabled)
+        {
+          ImGui::DragFloat3("Offset##Collider", &scatter.colliderOffset.x, 0.05f);
+          committed |= ImGui::IsItemDeactivatedAfterEdit();
+          ImGui::DragFloat3("Half Extents Scale##Collider", &scatter.colliderHalfExtentsScale.x, 0.05f, 0.0f, 10.0f);
+          committed |= ImGui::IsItemDeactivatedAfterEdit();
+
+          if (ImGui::Checkbox("Static##Collider", &scatter.colliderIsStatic))
+            committed = true;
+          ImGui::DragScalar("Layer##Collider", ImGuiDataType_U32, &scatter.colliderLayer, 1.0f);
+          committed |= ImGui::IsItemDeactivatedAfterEdit();
+          ImGui::DragScalar("Mask##Collider",  ImGuiDataType_U32, &scatter.colliderMask,  1.0f);
+          committed |= ImGui::IsItemDeactivatedAfterEdit();
+        }
       }
 
       if (committed && !scene.GetRegistry().all_of<ScatterDirty>(entity))
@@ -965,6 +1020,12 @@ namespace YAEngine
     if (scene.HasComponent<CameraComponent>(entity))
       DrawCamera(scene.GetComponent<CameraComponent>(entity));
 
+    if (scene.HasComponent<ColliderComponent>(entity))
+    {
+      if (DrawCollider(scene.GetComponent<ColliderComponent>(entity)))
+        scene.RemoveComponent<ColliderComponent>(entity);
+    }
+
     ImGui::Separator();
 
     float buttonWidth = ImGui::GetContentRegionAvail().x;
@@ -1014,6 +1075,12 @@ namespace YAEngine
           scene.AddComponent<ScatterComponent>(entity);
           scene.GetRegistry().emplace_or_replace<ScatterDirty>(entity);
         }
+      }
+
+      if (!scene.HasComponent<ColliderComponent>(entity))
+      {
+        if (ImGui::MenuItem(ICON_FA_CUBE " Collider"))
+          scene.AddComponent<ColliderComponent>(entity);
       }
 
       ImGui::EndPopup();

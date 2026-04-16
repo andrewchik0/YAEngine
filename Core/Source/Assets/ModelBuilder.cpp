@@ -5,6 +5,34 @@
 
 namespace YAEngine
 {
+  static glm::mat4 ComposeNodeLocal(const NodeDescription& node)
+  {
+    return glm::translate(glm::mat4(1.0f), node.position)
+         * glm::toMat4(node.rotation)
+         * glm::scale(glm::mat4(1.0f), node.scale);
+  }
+
+  // Expand an AABB by another AABB transformed into the same frame by matrix m.
+  static void AccumulateTransformedAABB(const glm::vec3& inMin, const glm::vec3& inMax, const glm::mat4& m,
+                                        glm::vec3& outMin, glm::vec3& outMax)
+  {
+    // empty child bounds: skip so they don't pollute the union
+    if (inMin.x > inMax.x || inMin.y > inMax.y || inMin.z > inMax.z) return;
+
+    const glm::vec3 corners[8] = {
+      { inMin.x, inMin.y, inMin.z }, { inMax.x, inMin.y, inMin.z },
+      { inMin.x, inMax.y, inMin.z }, { inMax.x, inMax.y, inMin.z },
+      { inMin.x, inMin.y, inMax.z }, { inMax.x, inMin.y, inMax.z },
+      { inMin.x, inMax.y, inMax.z }, { inMax.x, inMax.y, inMax.z },
+    };
+    for (auto& c : corners)
+    {
+      const glm::vec3 tc = glm::vec3(m * glm::vec4(c, 1.0f));
+      outMin = glm::min(outMin, tc);
+      outMax = glm::max(outMax, tc);
+    }
+  }
+
   Entity ModelBuilder::Build(const ModelDescription& desc)
   {
     Entity rootEntity = m_Scene->CreateEntity(desc.root.name);
@@ -18,8 +46,7 @@ namespace YAEngine
       Entity child = BuildNode(childNode, rootEntity, desc);
       auto& childBounds = m_Scene->GetComponent<LocalBounds>(child);
 
-      rootMinBB = glm::min(rootMinBB, childBounds.min);
-      rootMaxBB = glm::max(rootMaxBB, childBounds.max);
+      AccumulateTransformedAABB(childBounds.min, childBounds.max, ComposeNodeLocal(childNode), rootMinBB, rootMaxBB);
 
       if (prevChild == entt::null)
         m_Scene->GetHierarchy(rootEntity).firstChild = child;
@@ -108,8 +135,7 @@ namespace YAEngine
       Entity child = BuildNode(childNode, entity, desc);
       auto& childBounds = m_Scene->GetComponent<LocalBounds>(child);
 
-      nodeMinBB = glm::min(nodeMinBB, childBounds.min);
-      nodeMaxBB = glm::max(nodeMaxBB, childBounds.max);
+      AccumulateTransformedAABB(childBounds.min, childBounds.max, ComposeNodeLocal(childNode), nodeMinBB, nodeMaxBB);
 
       if (prevChild == entt::null)
       {

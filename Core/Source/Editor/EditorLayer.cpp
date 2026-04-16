@@ -461,7 +461,12 @@ namespace YAEngine
         glm::length(glm::vec3(wt.world[0])),
         glm::length(glm::vec3(wt.world[1])),
         glm::length(glm::vec3(wt.world[2])));
-      gizmo.DrawWireBoxDepthTested(center, collider.halfExtents * scale, staticColor);
+      glm::mat3 rotMat(
+        glm::vec3(wt.world[0]) / (scale.x > 0.0f ? scale.x : 1.0f),
+        glm::vec3(wt.world[1]) / (scale.y > 0.0f ? scale.y : 1.0f),
+        glm::vec3(wt.world[2]) / (scale.z > 0.0f ? scale.z : 1.0f));
+      glm::quat rotation = glm::quat_cast(rotMat);
+      gizmo.DrawWireBoxDepthTested(center, collider.halfExtents * scale, rotation, staticColor);
     }
 
     uint32_t instancedTotal = 0;
