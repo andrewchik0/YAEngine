@@ -53,6 +53,25 @@ namespace YAEngine
     depthInfo.doubleSided = true;
     m_DepthPipelines[3] = m_PSOCache.Register(ctx.device, depthRP, depthInfo, pipelineCache);
 
+    // [6] alpha-test non-instanced, [7] alpha-test instanced
+    // Alpha-test always rendered doubleSided (foliage).
+    {
+      PipelineCreateInfo depthAlphaInfo = {
+        .fragmentShaderFile = "alphatest_discard.frag",
+        .vertexShaderFile = "mesh_depth_alphatest.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .doubleSided = true,
+        .colorAttachmentCount = 0,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
+      };
+      m_DepthPipelines[6] = m_PSOCache.Register(ctx.device, depthRP, depthAlphaInfo, pipelineCache);
+
+      depthAlphaInfo.vertexShaderFile = "mesh_instanced_depth_alphatest.vert";
+      depthAlphaInfo.sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(), m_InstanceDescriptorSet.GetLayout() });
+      m_DepthPipelines[7] = m_PSOCache.Register(ctx.device, depthRP, depthAlphaInfo, pipelineCache);
+    }
+
     // Shadow pipelines (depth-only with depth bias, using shadow atlas render pass)
     VkRenderPass shadowRP = m_ShadowManager.GetAtlas().GetRenderPass();
     {
@@ -77,6 +96,24 @@ namespace YAEngine
       m_ShadowPipelines[2] = m_PSOCache.Register(ctx.device, shadowRP, shadowInfo, pipelineCache);
       shadowInfo.doubleSided = true;
       m_ShadowPipelines[3] = m_PSOCache.Register(ctx.device, shadowRP, shadowInfo, pipelineCache);
+
+      // [6] alpha-test non-instanced, [7] alpha-test instanced
+      // Alpha-test always rendered doubleSided (foliage).
+      PipelineCreateInfo shadowAlphaInfo = {
+        .fragmentShaderFile = "alphatest_discard.frag",
+        .vertexShaderFile = "shadow_alphatest.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int) + sizeof(int),
+        .doubleSided = true,
+        .colorAttachmentCount = 0,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout(), m_DefaultMaterial.GetLayout() })
+      };
+      shadowAlphaInfo.depthBiasEnable = true;
+      m_ShadowPipelines[6] = m_PSOCache.Register(ctx.device, shadowRP, shadowAlphaInfo, pipelineCache);
+
+      shadowAlphaInfo.vertexShaderFile = "shadow_instanced_alphatest.vert";
+      shadowAlphaInfo.sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout(), m_DefaultMaterial.GetLayout(), m_InstanceDescriptorSet.GetLayout() });
+      m_ShadowPipelines[7] = m_PSOCache.Register(ctx.device, shadowRP, shadowAlphaInfo, pipelineCache);
     }
 
     VkRenderPass mainRP = m_Graph.GetPassRenderPass(m_GBufferPassIndex);
@@ -127,28 +164,32 @@ namespace YAEngine
       m_ForwardPipelines[5] = m_PSOCache.Register(ctx.device, mainRP, terrainInfo, pipelineCache);
     }
 
-    // [6] alpha-test non-instanced (depth write enabled - skipped in depth prepass)
+    // [6] alpha-test non-instanced (depth from prepass - no depth write, LEQUAL)
     {
       PipelineCreateInfo alphaTestInfo = {
         .fragmentShaderFile = "gbuffer_alphatest.frag",
         .vertexShaderFile = "mesh.vert",
         .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .depthWrite = false,
         .doubleSided = true,
         .colorAttachmentCount = 3,
+        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
       };
       m_ForwardPipelines[6] = m_PSOCache.Register(ctx.device, mainRP, alphaTestInfo, pipelineCache);
     }
 
-    // [7] alpha-test instanced (depth write enabled - skipped in depth prepass)
+    // [7] alpha-test instanced (depth from prepass - no depth write, LEQUAL)
     {
       PipelineCreateInfo alphaTestInstInfo = {
         .fragmentShaderFile = "gbuffer_alphatest.frag",
         .vertexShaderFile = "mesh_instanced.vert",
         .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .depthWrite = false,
         .doubleSided = true,
         .colorAttachmentCount = 3,
+        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(), m_InstanceDescriptorSet.GetLayout() })
       };

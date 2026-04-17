@@ -83,6 +83,7 @@ namespace YAEngine
     float radius = 10.0f;
     float innerCone = glm::radians(25.0f);
     float outerCone = glm::radians(35.0f);
+    float shadowDistance = 200.0f;
     bool castShadow = false;
   };
 

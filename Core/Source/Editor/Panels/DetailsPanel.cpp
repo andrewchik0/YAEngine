@@ -221,6 +221,9 @@ namespace YAEngine
       }
 
       ImGui::Checkbox("Cast Shadow", &light.castShadow);
+
+      if (light.type == LightType::Directional && light.castShadow)
+        ImGui::DragFloat("Shadow Distance", &light.shadowDistance, 1.0f, 1.0f, 5000.0f, "%.1f");
     }
 
     return false;

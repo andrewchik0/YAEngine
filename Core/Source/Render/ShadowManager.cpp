@@ -103,10 +103,10 @@ namespace YAEngine
     m_Atlas.Destroy(ctx);
   }
 
-  void ShadowManager::ComputeCascadeSplits(float nearPlane, float farPlane)
+  void ShadowManager::ComputeCascadeSplits(float nearPlane, float shadowDistance)
   {
-    float range = farPlane - nearPlane;
-    float ratio = farPlane / nearPlane;
+    float range = shadowDistance - nearPlane;
+    float ratio = shadowDistance / nearPlane;
 
     m_CascadeSplits[0] = nearPlane;
     for (uint32_t i = 1; i <= CSM_CASCADE_COUNT; i++)
@@ -199,20 +199,33 @@ namespace YAEngine
   void ShadowManager::ComputeCascades(
     const glm::mat4& cameraView,
     const glm::mat4& cameraProj,
-    float nearPlane, float farPlane,
+    float cameraNear, float cameraFar,
+    float shadowDistance,
     const glm::vec3& lightDirection)
   {
+    if (shadowDistance <= cameraNear)
+    {
+      m_ShadowData.shadowsEnabled = 0;
+      return;
+    }
+
+    if (shadowDistance > cameraFar)
+    {
+      shadowDistance = cameraFar;
+    }
+
     m_ShadowData.shadowsEnabled = 1;
 
-    ComputeCascadeSplits(nearPlane, farPlane);
+    ComputeCascadeSplits(cameraNear, shadowDistance);
 
     glm::mat4 invViewProj = glm::inverse(cameraProj * cameraView);
 
     for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
     {
-      // Normalize split distances to [0, 1] range for frustum interpolation
-      float nearSplit = (m_CascadeSplits[i] - nearPlane) / (farPlane - nearPlane);
-      float farSplit = (m_CascadeSplits[i + 1] - nearPlane) / (farPlane - nearPlane);
+      // Normalize split distances against the real camera frustum range so the
+      // frustum corners interpolated from invViewProj remain valid.
+      float nearSplit = (m_CascadeSplits[i] - cameraNear) / (cameraFar - cameraNear);
+      float farSplit = (m_CascadeSplits[i + 1] - cameraNear) / (cameraFar - cameraNear);
 
       float texelWorldSize = FitCascadeToFrustum(i, invViewProj, nearSplit, farSplit, glm::normalize(lightDirection));
 

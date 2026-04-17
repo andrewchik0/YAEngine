@@ -20,7 +20,8 @@ namespace YAEngine
     void ComputeCascades(
       const glm::mat4& cameraView,
       const glm::mat4& cameraProj,
-      float nearPlane, float farPlane,
+      float cameraNear, float cameraFar,
+      float shadowDistance,
       const glm::vec3& lightDirection);
 
     void ComputeSpotShadow(uint32_t spotIndex,
@@ -51,7 +52,7 @@ namespace YAEngine
 
   private:
 
-    void ComputeCascadeSplits(float nearPlane, float farPlane);
+    void ComputeCascadeSplits(float nearPlane, float shadowDistance);
     float FitCascadeToFrustum(uint32_t cascadeIndex,
       const glm::mat4& invViewProj,
       float nearSplit, float farSplit,

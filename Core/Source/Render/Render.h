@@ -242,7 +242,7 @@ namespace YAEngine
 
     PipelineCache m_PSOCache;
     PipelineHandle m_ForwardPipelines[8] {};
-    PipelineHandle m_DepthPipelines[4] {};
+    PipelineHandle m_DepthPipelines[8] {};
     PipelineHandle m_QuadPipeline {};
     PipelineHandle m_TAAPipeline {};
     PipelineHandle m_SSRPipeline {};
@@ -256,7 +256,7 @@ namespace YAEngine
     PipelineHandle m_BloomUpsamplePipeline {};
     PipelineHandle m_ExposureHistogramPipeline {};
     PipelineHandle m_ExposureAdaptPipeline {};
-    PipelineHandle m_ShadowPipelines[4] {};
+    PipelineHandle m_ShadowPipelines[8] {};
 
     VulkanMaterial m_DefaultMaterial {};
     VulkanTerrainMaterial m_TerrainMaterial {};

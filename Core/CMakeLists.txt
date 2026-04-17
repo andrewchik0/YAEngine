@@ -43,6 +43,14 @@ add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   shadow.vert shadow_instanced.vert.spv -DINSTANCED)
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  shadow.vert shadow_alphatest.vert.spv -DALPHA_TEST)
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  shadow.vert shadow_instanced_alphatest.vert.spv -DINSTANCED -DALPHA_TEST)
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  mesh.vert mesh_depth_alphatest.vert.spv -DDEPTH_ONLY -DALPHA_TEST)
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  mesh.vert mesh_instanced_depth_alphatest.vert.spv -DINSTANCED -DDEPTH_ONLY -DALPHA_TEST)
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   gbuffer.frag gbuffer_alphatest.frag.spv -DALPHA_TEST)
 target_compile_definitions(Core PRIVATE
   WORKING_DIR="${CMAKE_CURRENT_SOURCE_DIR}"

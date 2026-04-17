@@ -74,6 +74,8 @@ namespace YAEngine
         }
         if (l.castShadow)
           n["castShadow"] = true;
+        if (l.type == LightType::Directional && l.shadowDistance != 200.0f)
+          n["shadowDistance"] = l.shadowDistance;
         return n;
       },
       [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
@@ -91,6 +93,7 @@ namespace YAEngine
         if (n["innerCone"]) l.innerCone = n["innerCone"].as<float>();
         if (n["outerCone"]) l.outerCone = n["outerCone"].as<float>();
         if (n["castShadow"]) l.castShadow = n["castShadow"].as<bool>();
+        if (n["shadowDistance"]) l.shadowDistance = n["shadowDistance"].as<float>();
         reg.emplace_or_replace<LightComponent>(e, l);
       }
     );

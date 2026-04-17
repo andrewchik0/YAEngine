@@ -35,6 +35,7 @@ namespace YAEngine
   {
     glm::vec3 direction { 0.0f, -1.0f, 0.0f };
     glm::vec3 position { 0.0f };
+    float shadowDistance = 200.0f;
     bool castShadow = false;
   };
 

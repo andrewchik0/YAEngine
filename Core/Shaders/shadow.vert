@@ -1,10 +1,19 @@
 layout(location = 0) in vec3 inPosition;
 
+#ifdef ALPHA_TEST
+layout(location = 1) in vec2 inTexCoord;
+layout(location = 0) out vec2 outTexCoord;
+#endif
+
 #include "../Shared/ShadowData.h"
 layout(set = 0, binding = 0) uniform ShadowCascadesBlock { ShadowBuffer u_Shadow; };
 
 #ifdef INSTANCED
+  #ifdef ALPHA_TEST
+layout(set = 2, binding = 0) readonly buffer Instances
+  #else
 layout(set = 1, binding = 0) readonly buffer Instances
+  #endif
 {
   mat4 data[];
 } instances;
@@ -39,4 +48,8 @@ void main()
 
   vec4 worldPos = worldMatrix * vec4(inPosition, 1.0);
   gl_Position = getShadowViewProj(pc.shadowMatrixIndex) * worldPos;
+
+#ifdef ALPHA_TEST
+  outTexCoord = inTexCoord;
+#endif
 }

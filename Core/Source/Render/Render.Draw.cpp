@@ -208,6 +208,9 @@ namespace YAEngine
     VkDescriptorSet frameUBO = frameUBOOverride != VK_NULL_HANDLE
       ? frameUBOOverride : m_FrameUniformBuffer.GetDescriptorSet(currentFrame);
     auto& meshManager = frame.assets.Meshes();
+    auto& materialManager = frame.assets.Materials();
+    auto& cubeMapManager = frame.assets.CubeMaps();
+    auto skybox = frame.snapshot.skybox;
 
     m_DepthDrawCommands.clear();
     m_DepthDrawCommands.reserve(frame.snapshot.visibleCount);
@@ -215,14 +218,14 @@ namespace YAEngine
     {
       auto& obj = frame.snapshot.objects[i];
       if (obj.noShading) continue;
-      if (obj.isAlphaTest) continue;
 
       m_DepthDrawCommands.push_back({
         .instanced = (obj.instanceData != nullptr),
         .doubleSided = obj.doubleSided,
         .noShading = false,
-        .materialIndex = 0,
-        .materialGeneration = 0,
+        .isAlphaTest = obj.isAlphaTest,
+        .materialIndex = obj.material.index,
+        .materialGeneration = obj.material.generation,
         .meshIndex = obj.mesh.index,
         .meshGeneration = obj.mesh.generation,
         .worldTransform = obj.worldTransform,
@@ -236,10 +239,29 @@ namespace YAEngine
       {
         uint8_t ka = a.SortKey(), kb = b.SortKey();
         if (ka != kb) return ka < kb;
+        if (a.materialIndex != b.materialIndex) return a.materialIndex < b.materialIndex;
         return a.meshIndex < b.meshIndex;
       });
 
+    // Pre-bind materials needed by alpha-test depth pipelines
+    uint32_t lastMaterialIndex = UINT32_MAX;
+    uint32_t lastMaterialGeneration = UINT32_MAX;
+    for (auto& dc : m_DepthDrawCommands)
+    {
+      if (!dc.isAlphaTest) continue;
+      if (dc.materialIndex == lastMaterialIndex && dc.materialGeneration == lastMaterialGeneration) continue;
+      lastMaterialIndex = dc.materialIndex;
+      lastMaterialGeneration = dc.materialGeneration;
+
+      MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+      auto& mat = materialManager.Get(matHandle);
+      mat.cubemap = skybox;
+      materialManager.GetVulkanMaterial(matHandle).Bind(frame.assets.Textures(), cubeMapManager, frame.cubicResources, mat, currentFrame, m_NoneTexture);
+    }
+
     uint8_t lastSortKey = UINT8_MAX;
+    lastMaterialIndex = UINT32_MAX;
+    uint32_t lastMaterialGen = UINT32_MAX;
     VulkanPipeline* currentPipeline = nullptr;
 
     for (auto& dc : m_DepthDrawCommands)
@@ -253,6 +275,16 @@ namespace YAEngine
         currentPipeline->Bind(cmd);
         currentPipeline->BindDescriptorSets(cmd, {frameUBO}, 0);
         lastSortKey = sortKey;
+        lastMaterialIndex = UINT32_MAX;
+        lastMaterialGen = UINT32_MAX;
+      }
+
+      if (dc.isAlphaTest && (dc.materialIndex != lastMaterialIndex || dc.materialGeneration != lastMaterialGen))
+      {
+        MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+        currentPipeline->BindDescriptorSets(cmd, {materialManager.GetVulkanMaterial(matHandle).GetDescriptorSet(currentFrame)}, 1);
+        lastMaterialIndex = dc.materialIndex;
+        lastMaterialGen = dc.materialGeneration;
       }
 
       struct
@@ -268,12 +300,16 @@ namespace YAEngine
       if (dc.instanced)
       {
         instanceCount = uint32_t(dc.instanceData->size());
-        currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 1);
+        uint32_t instanceSetIndex = dc.isAlphaTest ? 2 : 1;
+        currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, instanceSetIndex);
         m_InstanceBuffer.Update(dc.instanceOffset, dc.instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
       }
 
       auto& vb = meshManager.GetVertexBuffer(meshHandle);
-      vb.DrawPositionOnly(cmd, instanceCount);
+      if (dc.isAlphaTest)
+        vb.Draw(cmd, instanceCount);
+      else
+        vb.DrawPositionOnly(cmd, instanceCount);
     }
   }
 
@@ -288,14 +324,14 @@ namespace YAEngine
     {
       auto& obj = frame.snapshot.objects[i];
       if (obj.noShading) continue;
-      if (obj.isAlphaTest) continue;
 
       m_ShadowDrawCommands.push_back({
         .instanced = (obj.instanceData != nullptr),
         .doubleSided = obj.doubleSided,
         .noShading = false,
-        .materialIndex = 0,
-        .materialGeneration = 0,
+        .isAlphaTest = obj.isAlphaTest,
+        .materialIndex = obj.material.index,
+        .materialGeneration = obj.material.generation,
         .meshIndex = obj.mesh.index,
         .meshGeneration = obj.mesh.generation,
         .worldTransform = obj.worldTransform,
@@ -311,8 +347,28 @@ namespace YAEngine
       {
         uint8_t ka = a.SortKey(), kb = b.SortKey();
         if (ka != kb) return ka < kb;
+        if (a.materialIndex != b.materialIndex) return a.materialIndex < b.materialIndex;
         return a.meshIndex < b.meshIndex;
       });
+
+    // Pre-bind materials needed by alpha-test shadow pipelines
+    auto& materialManager = frame.assets.Materials();
+    auto& cubeMapManager = frame.assets.CubeMaps();
+    auto skybox = frame.snapshot.skybox;
+    uint32_t preLastMaterialIndex = UINT32_MAX;
+    uint32_t preLastMaterialGeneration = UINT32_MAX;
+    for (auto& dc : m_ShadowDrawCommands)
+    {
+      if (!dc.isAlphaTest) continue;
+      if (dc.materialIndex == preLastMaterialIndex && dc.materialGeneration == preLastMaterialGeneration) continue;
+      preLastMaterialIndex = dc.materialIndex;
+      preLastMaterialGeneration = dc.materialGeneration;
+
+      MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+      auto& mat = materialManager.Get(matHandle);
+      mat.cubemap = skybox;
+      materialManager.GetVulkanMaterial(matHandle).Bind(frame.assets.Textures(), cubeMapManager, frame.cubicResources, mat, m_Backend.GetCurrentFrameIndex(), m_NoneTexture);
+    }
 
     bool hasDirectionalShadow = b_ShadowsEnabled && frame.snapshot.directionalShadow.castShadow;
     bool hasSpotShadows = b_ShadowsEnabled && !frame.snapshot.spotShadowRequests.empty();
@@ -337,6 +393,7 @@ namespace YAEngine
         m_FrameUniformBuffer.uniforms.view,
         m_PrevProj,
         cam.nearPlane, cam.farPlane,
+        shadow.shadowDistance,
         shadow.direction);
     }
     else
@@ -401,6 +458,8 @@ namespace YAEngine
       vkCmdSetScissor(cmd, 0, 1, &sv.scissor);
 
       uint8_t lastSortKey = UINT8_MAX;
+      uint32_t lastMaterialIndex = UINT32_MAX;
+      uint32_t lastMaterialGen = UINT32_MAX;
       VulkanPipeline* currentPipeline = nullptr;
 
       for (auto& dc : m_ShadowDrawCommands)
@@ -422,6 +481,17 @@ namespace YAEngine
           currentPipeline->BindDescriptorSets(cmd,
             { m_ShadowManager.GetShadowCascadeUBODescriptorSet(currentFrame) }, 0);
           lastSortKey = sortKey;
+          lastMaterialIndex = UINT32_MAX;
+          lastMaterialGen = UINT32_MAX;
+        }
+
+        if (dc.isAlphaTest && (dc.materialIndex != lastMaterialIndex || dc.materialGeneration != lastMaterialGen))
+        {
+          MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+          currentPipeline->BindDescriptorSets(cmd,
+            { materialManager.GetVulkanMaterial(matHandle).GetDescriptorSet(currentFrame) }, 1);
+          lastMaterialIndex = dc.materialIndex;
+          lastMaterialGen = dc.materialGeneration;
         }
 
         struct
@@ -439,10 +509,15 @@ namespace YAEngine
         if (dc.instanced)
         {
           instanceCount = uint32_t(dc.instanceData->size());
-          currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 1);
+          uint32_t instanceSetIndex = dc.isAlphaTest ? 2 : 1;
+          currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, instanceSetIndex);
         }
 
-        meshManager.GetVertexBuffer(meshHandle).DrawPositionOnly(cmd, instanceCount);
+        auto& vb = meshManager.GetVertexBuffer(meshHandle);
+        if (dc.isAlphaTest)
+          vb.Draw(cmd, instanceCount);
+        else
+          vb.DrawPositionOnly(cmd, instanceCount);
       }
     };
 

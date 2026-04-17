@@ -197,6 +197,7 @@ namespace YAEngine
             lights.directional.colorPad = glm::vec4(light.color, 0.0f);
             snapshot.directionalShadow.direction = forward;
             snapshot.directionalShadow.position = position;
+            snapshot.directionalShadow.shadowDistance = light.shadowDistance;
             snapshot.directionalShadow.castShadow = light.castShadow;
             hasDirectional = true;
           }
