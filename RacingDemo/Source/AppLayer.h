@@ -70,8 +70,8 @@ public:
         auto wheels = std::array<YAEngine::Entity, 4> {
           GetScene().GetChildByName(e, "wheel-left-front"),
           GetScene().GetChildByName(e, "wheel-right-front"),
-          GetScene().GetChildByName(e, "wheel-left-back"),
-          GetScene().GetChildByName(e, "wheel-right-back")
+          GetScene().GetChildByName(e, "wheel-left-rear"),
+          GetScene().GetChildByName(e, "wheel-right-rear")
         };
 
         for (int i = 0; i < 4; i++)

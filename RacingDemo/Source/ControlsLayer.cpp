@@ -285,7 +285,7 @@ void ControlsLayer::Update(double dt)
 
   glm::dquat rotation = vehicle->tilt * yawRot;
 
-  GetScene().GetTransform(car).position = position;
+  GetScene().GetTransform(car).position = position + glm::dvec3(0,0.05,0);
   GetScene().GetTransform(car).rotation = rotation;
   GetScene().MarkDirty(car);
 
@@ -342,7 +342,7 @@ void ControlsLayer::Update(double dt)
     glm::quat steerRot = glm::identity<glm::quat>();
     if (wc.isFront)
     {
-      steerRot = glm::angleAxis(vehicle->wheelsSteer * 10.0f, glm::dvec3(0,1,0));
+      steerRot = glm::angleAxis(vehicle->wheelsSteer * 10.0f, glm::dvec3(0,0,1));
     }
 
     glm::quat spinRot = glm::angleAxis(wc.spinAngle, glm::dvec3(1,0,0));
