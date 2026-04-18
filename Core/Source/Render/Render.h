@@ -106,6 +106,9 @@ namespace YAEngine
 
     const RenderStats& GetStats() const { return m_Stats; }
 
+    void ResetTAAHistory() { b_ResetTAAPending = true; }
+    void ResetAutoExposure() { b_ResetAutoExposurePending = true; }
+
   private:
 
     float m_Gamma = 2.2f;
@@ -216,6 +219,8 @@ namespace YAEngine
     uint64_t m_GlobalFrameIndex = 0;
     uint32_t m_TAAIndex = 0;
     bool b_Resized = false;
+    bool b_ResetTAAPending = false;
+    bool b_ResetAutoExposurePending = false;
 
     glm::mat4 m_PrevView = glm::mat4(1.0f);
     glm::mat4 m_PrevProj = glm::mat4(1.0f);

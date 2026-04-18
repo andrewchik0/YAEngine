@@ -4,6 +4,10 @@ set(SOURCES
   Source/ControlsLayer.cpp
   Source/AppLayer.h
   Source/GameComponents.h
+  Source/ReelFormat.h
+  Source/ReelFormat.cpp
+  Source/ReelPlaybackLayer.h
+  Source/ReelPlaybackLayer.cpp
 )
 
 add_executable(RacingDemo)

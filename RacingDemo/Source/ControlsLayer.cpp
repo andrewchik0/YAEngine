@@ -25,6 +25,9 @@ void ControlsLayer::Update(double dt)
 
   auto& input = GetInput();
 
+  if (input.IsKeyPressed(YAEngine::Key::C))
+    b_StaticLookAt = !b_StaticLookAt;
+
   auto car = m_Car;
   auto* vehicle = &GetScene().GetComponent<VehicleComponent>(car);
 
@@ -38,10 +41,10 @@ void ControlsLayer::Update(double dt)
     vehicle->yawInitialized = true;
   }
 
-  bool arrowLeft  = input.IsKeyDown(YAEngine::Key::Left);
-  bool arrowRight = input.IsKeyDown(YAEngine::Key::Right);
-  bool arrowUp    = input.IsKeyDown(YAEngine::Key::Up);
-  bool arrowDown  = input.IsKeyDown(YAEngine::Key::Down);
+  bool arrowLeft  = m_InputOverride.active ? m_InputOverride.left  : input.IsKeyDown(YAEngine::Key::Left);
+  bool arrowRight = m_InputOverride.active ? m_InputOverride.right : input.IsKeyDown(YAEngine::Key::Right);
+  bool arrowUp    = m_InputOverride.active ? m_InputOverride.up    : input.IsKeyDown(YAEngine::Key::Up);
+  bool arrowDown  = m_InputOverride.active ? m_InputOverride.down  : input.IsKeyDown(YAEngine::Key::Down);
 
   if (arrowLeft)
   {
@@ -295,38 +298,66 @@ void ControlsLayer::Update(double dt)
     auto& cam = GetScene().GetComponent<YAEngine::CameraComponent>(m_Camera);
     auto& camTc = GetScene().GetTransform(m_Camera);
 
-    glm::dvec3 eulerDegrees = glm::dvec3(160.0, -0.0, -180.0);
-    glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
-    glm::dquat extraRot = glm::dquat(eulerRadians);
-
-    glm::dquat camRot = camTc.rotation;
-    glm::dquat targetRot = yawRot * extraRot;
-
     double t = 1.0 - std::exp(-follow.smoothSpeed * dt);
 
-    camRot = glm::slerp(camRot, targetRot, t);
-    camTc.rotation = camRot;
-
-    double normSpeed = glm::clamp(vehicle->speed / vehicle->maxSpeed, 0.0, 1.0);
-    double backFactor = glm::smoothstep(0.5, 1.0, normSpeed);
-
-    glm::dvec3 dynamicOffset = follow.offset;
-    dynamicOffset.z *= glm::mix(1.0, 0.6, backFactor);
-
-    glm::dvec3 targetPos = position + yawRot * dynamicOffset;
-
-    glm::dvec3 camPos = camTc.position;
-    camPos = glm::mix(camPos, targetPos, t);
-    camTc.position = camPos;
-
-    if (vehicle->speed > .01)
+    if (b_StaticLookAt)
     {
-      double speedNorm = glm::clamp(vehicle->speed / vehicle->maxSpeed, 0.0, 1.0);
-      double factor = glm::smoothstep(0.0, 1.0, speedNorm);
-      double targetFov = glm::mix(follow.baseFov, follow.maxFov, factor);
+      glm::dvec3 camPos = glm::dvec3(camTc.position);
+      glm::dvec3 toCar = position - camPos;
+      double len = glm::length(toCar);
+      if (len > 1e-6)
+      {
+        glm::dvec3 dir = toCar / len;
+        double pitch = std::asin(glm::clamp(dir.y, -1.0, 1.0));
+        double yaw = std::atan2(-dir.x, -dir.z);
+        glm::dquat qYaw = glm::angleAxis(yaw, glm::dvec3(0, 1, 0));
+        glm::dquat qPitch = glm::angleAxis(pitch, glm::dvec3(1, 0, 0));
+        glm::dquat targetRot = qYaw * qPitch;
+        glm::dquat camRot = glm::dquat(camTc.rotation);
+        camTc.rotation = glm::slerp(camRot, targetRot, t);
 
-      double lerpSpeed = 5.0;
-      cam.fov = float(glm::mix(double(cam.fov), targetFov, 1.0 - std::exp(-lerpSpeed * dt)));
+        const double nearDist = 15.0;
+        const double farDist = 100.0;
+        const double minFov = glm::radians(15.0);
+        double zoomT = glm::smoothstep(nearDist, farDist, len);
+        double targetFov = glm::mix(follow.baseFov, minFov, zoomT);
+        double fovLerp = 1.0 - std::exp(-5.0 * dt);
+        cam.fov = float(glm::mix(double(cam.fov), targetFov, fovLerp));
+      }
+    }
+    else
+    {
+      glm::dvec3 eulerDegrees = glm::dvec3(160.0, -0.0, -180.0);
+      glm::dvec3 eulerRadians = glm::radians(eulerDegrees);
+      glm::dquat extraRot = glm::dquat(eulerRadians);
+
+      glm::dquat camRot = camTc.rotation;
+      glm::dquat targetRot = yawRot * extraRot;
+
+      camRot = glm::slerp(camRot, targetRot, t);
+      camTc.rotation = camRot;
+
+      double normSpeed = glm::clamp(vehicle->speed / vehicle->maxSpeed, 0.0, 1.0);
+      double backFactor = glm::smoothstep(0.5, 1.0, normSpeed);
+
+      glm::dvec3 dynamicOffset = follow.offset;
+      dynamicOffset.z *= glm::mix(1.0, 0.6, backFactor);
+
+      glm::dvec3 targetPos = position + yawRot * dynamicOffset;
+
+      glm::dvec3 camPos = camTc.position;
+      camPos = glm::mix(camPos, targetPos, t);
+      camTc.position = camPos;
+
+      if (vehicle->speed > .01)
+      {
+        double speedNorm = glm::clamp(vehicle->speed / vehicle->maxSpeed, 0.0, 1.0);
+        double factor = glm::smoothstep(0.0, 1.0, speedNorm);
+        double targetFov = glm::mix(follow.baseFov, follow.maxFov, factor);
+
+        double lerpSpeed = 5.0;
+        cam.fov = float(glm::mix(double(cam.fov), targetFov, 1.0 - std::exp(-lerpSpeed * dt)));
+      }
     }
   }
 

@@ -320,6 +320,19 @@ namespace YAEngine
     }
 #endif
 
+    if (b_ResetTAAPending)
+    {
+      vkDeviceWaitIdle(m_Backend.GetContext().device);
+      ClearHistoryBuffers();
+      b_ResetTAAPending = false;
+    }
+    if (b_ResetAutoExposurePending)
+    {
+      float unity = 1.0f;
+      m_ExposureBuffer.Update(0, &unity, sizeof(float));
+      b_ResetAutoExposurePending = false;
+    }
+
     auto imageIndex = m_Backend.BeginFrame();
     if (!imageIndex)
     {

@@ -9,9 +9,19 @@
 class ControlsLayer : public YAEngine::Layer
 {
 public:
+  struct InputOverride
+  {
+    bool active = false;
+    bool up = false;
+    bool down = false;
+    bool left = false;
+    bool right = false;
+  };
 
   YAEngine::Entity m_Car = entt::null;
   YAEngine::Entity m_Camera = entt::null;
+  InputOverride m_InputOverride;
+  bool b_StaticLookAt = false;
 
   void OnSceneReady() override
   {

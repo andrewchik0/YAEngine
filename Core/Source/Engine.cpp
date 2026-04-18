@@ -49,6 +49,7 @@ namespace YAEngine
     : m_Window(specs.windowSpecs),
       m_InputSystem(m_Window)
   {
+    m_Registry.Register<Engine>(this);
     m_Registry.Register<ThreadPool>(&m_ThreadPool);
     m_Registry.Register<MainThreadDispatcher>(&m_Dispatcher);
     m_Registry.Register<Window>(&m_Window);
@@ -117,6 +118,8 @@ namespace YAEngine
 
     while (m_Window.IsOpen())
     {
+      double frameStartTime = glfwGetTime();
+
       m_InputSystem.ProcessEvents();
       m_Dispatcher.ProcessAll();
 
@@ -145,13 +148,21 @@ namespace YAEngine
       m_Timer.Step();
 
       double frameDt = m_Timer.GetDeltaTime();
-      m_Accumulator += frameDt;
-      if (m_Accumulator > FIXED_DT * MAX_FIXED_STEPS)
-        m_Accumulator = FIXED_DT * MAX_FIXED_STEPS;
-      while (m_Accumulator >= FIXED_DT)
+      if (b_ReelPlaybackMode)
       {
+        frameDt = FIXED_DT;
         m_LayerManager.CallFixedUpdate(FIXED_DT);
-        m_Accumulator -= FIXED_DT;
+      }
+      else
+      {
+        m_Accumulator += frameDt;
+        if (m_Accumulator > FIXED_DT * MAX_FIXED_STEPS)
+          m_Accumulator = FIXED_DT * MAX_FIXED_STEPS;
+        while (m_Accumulator >= FIXED_DT)
+        {
+          m_LayerManager.CallFixedUpdate(FIXED_DT);
+          m_Accumulator -= FIXED_DT;
+        }
       }
 
       m_Scheduler.Run(m_Scene.GetRegistry(), frameDt);
@@ -170,6 +181,14 @@ namespace YAEngine
 
       auto frame = MakeFrameContext(m_Snapshot);
       m_Render.Draw(frame);
+
+      if (b_ReelPlaybackMode)
+      {
+        double elapsed = glfwGetTime() - frameStartTime;
+        double remaining = FIXED_DT - elapsed;
+        if (remaining > 0.0)
+          std::this_thread::sleep_for(std::chrono::duration<double>(remaining));
+      }
     }
 
     m_LayerManager.CallOnDetach();

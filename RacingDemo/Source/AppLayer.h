@@ -5,6 +5,7 @@
 #include "Window.h"
 #include "Input/InputSystem.h"
 #include "ControlsLayer.h"
+#include "ReelPlaybackLayer.h"
 #include "GameComponents.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
@@ -28,6 +29,7 @@ public:
   {
     GetWindow().Maximize();
 #ifndef TEST
+    GetLayerManager().PushLayer<ReelPlaybackLayer>();
     GetLayerManager().PushLayer<ControlsLayer>();
 #endif
   }
@@ -55,6 +57,9 @@ public:
       APP_WORKING_DIR "/Assets/Scenes/racing.scene",
       GetScene(), GetAssets(), registry, GetRender(),
       APP_WORKING_DIR, &threadPool);
+
+    if (auto* reel = GetLayerManager().GetLayer<ReelPlaybackLayer>())
+      reel->SetReelPath(APP_WORKING_DIR "/Assets/Scenes/racing.reel");
 
     auto* controls = GetLayerManager().GetLayer<ControlsLayer>();
     if (controls)

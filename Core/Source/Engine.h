@@ -73,6 +73,13 @@ namespace YAEngine
     MainThreadDispatcher& GetDispatcher() { return m_Dispatcher; }
     ComponentRegistry& GetComponentRegistry() { return m_ComponentRegistry; }
 
+    void SetReelPlaybackMode(bool enabled)
+    {
+      b_ReelPlaybackMode = enabled;
+      if (enabled) m_Accumulator = 0.0;
+    }
+    bool IsReelPlaybackMode() const { return b_ReelPlaybackMode; }
+
   private:
     FrameContext MakeFrameContext(SceneSnapshot& snapshot);
 
@@ -94,8 +101,9 @@ namespace YAEngine
     SceneSnapshot m_Snapshot;
     LightBuffer m_LightData {};
 
-    static constexpr double FIXED_DT = 1.0 / 60.0;
+    static constexpr double FIXED_DT = 1.0 / 144.0;
     static constexpr int MAX_FIXED_STEPS = 5;
     double m_Accumulator = 0.0;
+    bool b_ReelPlaybackMode = false;
   };
 }
