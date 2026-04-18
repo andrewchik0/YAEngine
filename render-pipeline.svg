@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 460" font-family="Segoe UI, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1020 550" font-family="Segoe UI, sans-serif">
   <defs>
     <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
       <path d="M0,0 L10,5 L0,10 z" fill="#aaa"/>
@@ -10,86 +10,113 @@
 
   <text x="510" y="22" text-anchor="middle" fill="#ddd" font-size="16" font-weight="bold">YAEngine Render Pipeline</text>
 
-  <!-- Row 1: 0..4 (LR) -->
+  <!-- Row 1: 0..3 (LR) -->
   <g>
-    <rect x="30"  y="50" width="160" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
-    <text x="110" y="85" text-anchor="middle" fill="white" font-size="15" font-weight="bold">0. Shadows</text>
+    <rect x="30"  y="50" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="135" y="78" text-anchor="middle" fill="white" font-size="15" font-weight="bold">0. Shadows</text>
+    <text x="135" y="97" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">CSM + atlas</text>
 
-    <rect x="230" y="50" width="160" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
-    <text x="310" y="85" text-anchor="middle" fill="white" font-size="15" font-weight="bold">1. DepthPre</text>
+    <rect x="280" y="50" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="385" y="78" text-anchor="middle" fill="white" font-size="15" font-weight="bold">1. DepthPre</text>
+    <text x="385" y="97" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">early-Z</text>
 
-    <rect x="430" y="50" width="160" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
-    <text x="510" y="85" text-anchor="middle" fill="white" font-size="15" font-weight="bold">2. GBuffer</text>
+    <rect x="530" y="50" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="635" y="78" text-anchor="middle" fill="white" font-size="15" font-weight="bold">2. GBuffer</text>
+    <text x="635" y="97" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">albedo / normal / MR</text>
 
-    <rect x="630" y="50" width="160" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
-    <text x="710" y="85" text-anchor="middle" fill="white" font-size="15" font-weight="bold">3. SSAO</text>
-
-    <rect x="830" y="50" width="160" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
-    <text x="910" y="85" text-anchor="middle" fill="white" font-size="15" font-weight="bold">4. BlurH</text>
+    <rect x="780" y="50" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="885" y="78" text-anchor="middle" fill="white" font-size="15" font-weight="bold">3. SSAO</text>
+    <text x="885" y="97" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">ambient occlusion</text>
   </g>
 
-  <!-- Row 2: 5..9 (RL visually: 5 right, 9 left) -->
+  <!-- Row 2: 4..7 (RL visually: 4 right, 7 left) -->
   <g>
-    <rect x="830" y="190" width="160" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
-    <text x="910" y="225" text-anchor="middle" fill="white" font-size="15" font-weight="bold">5. BlurV</text>
+    <rect x="780" y="170" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="885" y="198" text-anchor="middle" fill="white" font-size="15" font-weight="bold">4. BlurH</text>
+    <text x="885" y="217" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">bilateral</text>
 
-    <rect x="630" y="190" width="160" height="60" rx="8" fill="#6a2a7a" stroke="#b8b" stroke-width="2"/>
-    <text x="710" y="225" text-anchor="middle" fill="white" font-size="15" font-weight="bold">6. LightCull</text>
+    <rect x="530" y="170" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="635" y="198" text-anchor="middle" fill="white" font-size="15" font-weight="bold">5. BlurV</text>
+    <text x="635" y="217" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">bilateral</text>
 
-    <rect x="430" y="190" width="160" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
-    <text x="510" y="225" text-anchor="middle" fill="white" font-size="15" font-weight="bold">7. Deferred</text>
+    <rect x="280" y="170" width="210" height="60" rx="8" fill="#6a2a7a" stroke="#b8b" stroke-width="2"/>
+    <text x="385" y="198" text-anchor="middle" fill="white" font-size="15" font-weight="bold">6. LightCull</text>
+    <text x="385" y="217" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">16x16 tiles</text>
 
-    <rect x="230" y="190" width="160" height="60" rx="8" fill="#6a2a7a" stroke="#b8b" stroke-width="2"/>
-    <text x="310" y="225" text-anchor="middle" fill="white" font-size="15" font-weight="bold">8. HiZ</text>
-
-    <rect x="30"  y="190" width="160" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
-    <text x="110" y="225" text-anchor="middle" fill="white" font-size="15" font-weight="bold">9. SSR</text>
+    <rect x="30"  y="170" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="135" y="198" text-anchor="middle" fill="white" font-size="15" font-weight="bold">7. Deferred</text>
+    <text x="135" y="217" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">PBR lighting</text>
   </g>
 
-  <!-- Row 3: 10..14 (LR) -->
+  <!-- Row 3: 8..11 (LR) -->
   <g>
-    <rect x="30"  y="330" width="160" height="60" rx="8" fill="#6a2a7a" stroke="#b8b" stroke-width="2"/>
-    <text x="110" y="365" text-anchor="middle" fill="white" font-size="15" font-weight="bold">10. Bloom</text>
+    <rect x="30"  y="290" width="210" height="60" rx="8" fill="#6a2a7a" stroke="#b8b" stroke-width="2"/>
+    <text x="135" y="318" text-anchor="middle" fill="white" font-size="15" font-weight="bold">8. HiZ</text>
+    <text x="135" y="337" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">depth mip chain</text>
 
-    <rect x="230" y="330" width="160" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
-    <text x="310" y="365" text-anchor="middle" fill="white" font-size="15" font-weight="bold">11. TAA</text>
+    <rect x="280" y="290" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="385" y="318" text-anchor="middle" fill="white" font-size="15" font-weight="bold">9. SSR</text>
+    <text x="385" y="337" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">Hi-Z ray march</text>
 
-    <rect x="430" y="330" width="160" height="60" rx="8" fill="#6a2a7a" stroke="#b8b" stroke-width="2"/>
-    <text x="510" y="365" text-anchor="middle" fill="white" font-size="15" font-weight="bold">12. Histogram</text>
+    <rect x="530" y="290" width="210" height="60" rx="8" fill="#6a2a7a" stroke="#b8b" stroke-width="2"/>
+    <text x="635" y="318" text-anchor="middle" fill="white" font-size="15" font-weight="bold">10. Bloom</text>
+    <text x="635" y="337" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">dual filter</text>
 
-    <rect x="630" y="330" width="160" height="60" rx="8" fill="#6a2a7a" stroke="#b8b" stroke-width="2"/>
-    <text x="710" y="365" text-anchor="middle" fill="white" font-size="15" font-weight="bold">13. Exposure</text>
+    <rect x="780" y="290" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="885" y="318" text-anchor="middle" fill="white" font-size="15" font-weight="bold">11. TAA</text>
+    <text x="885" y="337" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">Halton jitter</text>
+  </g>
 
-    <rect x="830" y="330" width="160" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
-    <text x="910" y="365" text-anchor="middle" fill="white" font-size="15" font-weight="bold">14. Swapchain</text>
+  <!-- Row 4: 12..15 (RL visually: 12 right, 15 left) -->
+  <g>
+    <rect x="780" y="410" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="885" y="438" text-anchor="middle" fill="white" font-size="15" font-weight="bold">12. Transparent</text>
+    <text x="885" y="457" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">forward PBR</text>
+
+    <rect x="530" y="410" width="210" height="60" rx="8" fill="#6a2a7a" stroke="#b8b" stroke-width="2"/>
+    <text x="635" y="438" text-anchor="middle" fill="white" font-size="15" font-weight="bold">13. Histogram</text>
+    <text x="635" y="457" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">luminance bins</text>
+
+    <rect x="280" y="410" width="210" height="60" rx="8" fill="#6a2a7a" stroke="#b8b" stroke-width="2"/>
+    <text x="385" y="438" text-anchor="middle" fill="white" font-size="15" font-weight="bold">14. Exposure</text>
+    <text x="385" y="457" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">auto adapt</text>
+
+    <rect x="30"  y="410" width="210" height="60" rx="8" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
+    <text x="135" y="438" text-anchor="middle" fill="white" font-size="15" font-weight="bold">15. Swapchain</text>
+    <text x="135" y="457" text-anchor="middle" fill="white" fill-opacity="0.65" font-size="12">tonemap + present</text>
   </g>
 
   <!-- Row 1 horizontal arrows -->
-  <line x1="190" y1="80" x2="226" y2="80" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="390" y1="80" x2="426" y2="80" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="590" y1="80" x2="626" y2="80" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="790" y1="80" x2="826" y2="80" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="240" y1="80" x2="276" y2="80" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="490" y1="80" x2="526" y2="80" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="740" y1="80" x2="776" y2="80" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <!-- Row 1 -> Row 2 (4 -> 5, on the right side) -->
-  <line x1="910" y1="110" x2="910" y2="186" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <!-- Row 1 -> Row 2 (3 -> 4, right side) -->
+  <line x1="885" y1="110" x2="885" y2="166" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Row 2 horizontal arrows (RL visually) -->
-  <line x1="830" y1="220" x2="794" y2="220" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="630" y1="220" x2="594" y2="220" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="430" y1="220" x2="394" y2="220" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="230" y1="220" x2="194" y2="220" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="780" y1="200" x2="744" y2="200" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="200" x2="494" y2="200" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="280" y1="200" x2="244" y2="200" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
 
-  <!-- Row 2 -> Row 3 (9 -> 10, on the left side) -->
-  <line x1="110" y1="250" x2="110" y2="326" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <!-- Row 2 -> Row 3 (7 -> 8, left side) -->
+  <line x1="135" y1="230" x2="135" y2="286" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Row 3 horizontal arrows -->
-  <line x1="190" y1="360" x2="226" y2="360" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="390" y1="360" x2="426" y2="360" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="590" y1="360" x2="626" y2="360" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
-  <line x1="790" y1="360" x2="826" y2="360" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="240" y1="320" x2="276" y2="320" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="490" y1="320" x2="526" y2="320" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="740" y1="320" x2="776" y2="320" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Row 3 -> Row 4 (11 -> 12, right side) -->
+  <line x1="885" y1="350" x2="885" y2="406" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- Row 4 horizontal arrows (RL visually) -->
+  <line x1="780" y1="440" x2="744" y2="440" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="530" y1="440" x2="494" y2="440" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="280" y1="440" x2="244" y2="440" stroke="#aaa" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- Legend -->
-  <g transform="translate(30, 420)">
+  <g transform="translate(30, 500)">
     <rect x="0"  y="0" width="18" height="18" rx="3" fill="#2a4d7a" stroke="#88b" stroke-width="2"/>
     <text x="26" y="14" fill="#ddd" font-size="13">raster / fragment pass</text>
 
