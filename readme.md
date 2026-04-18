@@ -48,6 +48,8 @@ The `YA_EDITOR` flag toggles editor layer. All editor code is `#ifdef`-guarded o
 - **Exponential height fog** - distance + altitude falloff
 - **Tonemapping** - ACES and AgX
 
+![render-pipeline](render-pipeline.svg)
+
 ## Architecture & Optimization
 
 The goal was to keep the renderer declarative at the pass level and keep the engine flexible enough to add features without rewrites. Notable pieces:
