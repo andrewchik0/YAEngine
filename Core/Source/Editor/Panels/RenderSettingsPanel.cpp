@@ -76,7 +76,7 @@ namespace YAEngine
 
       int debugViewIndex = context.render->GetDebugView();
       const char* debugViews[] = {
-        "Off", "Albedo", "Metallic", "Roughness", "Normals", "SSAO", "SSR"
+        "Off", "Albedo", "Metallic", "Roughness", "Normals", "SSAO", "SSR", "Wireframe"
       };
       if (ImGui::Combo("Debug View", &debugViewIndex, debugViews, IM_ARRAYSIZE(debugViews)))
         context.render->SetDebugView(debugViewIndex);

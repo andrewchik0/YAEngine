@@ -15,6 +15,17 @@ namespace YAEngine
     return m_PSOCache.Get(m_ForwardTransparentPipelines[idx]);
   }
 
+  VulkanPipeline& Render::GetWireframePipeline(const DrawCommand& dc)
+  {
+    return m_PSOCache.Get(m_WireframePipelines[dc.SortKey()]);
+  }
+
+  VulkanPipeline& Render::GetWireframeTransparentPipeline(const DrawCommand& dc)
+  {
+    uint32_t idx = (dc.instanced ? 2u : 0u) + (dc.doubleSided ? 1u : 0u);
+    return m_PSOCache.Get(m_WireframeTransparentPipelines[idx]);
+  }
+
   VulkanPipeline& Render::GetDepthPipeline(const DrawCommand& dc)
   {
     assert(!dc.noShading && "Depth pipeline not available for noShading draw commands");
@@ -200,6 +211,103 @@ namespace YAEngine
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(), m_InstanceDescriptorSet.GetLayout() })
       };
       m_ForwardPipelines[7] = m_PSOCache.Register(ctx.device, mainRP, alphaTestInstInfo, pipelineCache);
+    }
+
+    // Wireframe pipelines (debug view). Mirror forward pipelines in GBuffer pass but with
+    // polygonMode LINE; depth bias wins against filled depth-prepass surfaces.
+    {
+      PipelineCreateInfo wfInfo = {
+        .fragmentShaderFile = "gbuffer_wireframe.frag",
+        .vertexShaderFile = "mesh.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .depthWrite = false,
+        .colorAttachmentCount = 3,
+        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .polygonMode = VK_POLYGON_MODE_LINE,
+        .depthBiasEnable = true,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
+      };
+
+      // [0] normal, [1] doubleSided
+      m_WireframePipelines[0] = m_PSOCache.Register(ctx.device, mainRP, wfInfo, pipelineCache);
+      wfInfo.doubleSided = true;
+      m_WireframePipelines[1] = m_PSOCache.Register(ctx.device, mainRP, wfInfo, pipelineCache);
+
+      // [2] instanced, [3] instanced+doubleSided
+      wfInfo.sets.push_back(m_InstanceDescriptorSet.GetLayout());
+      wfInfo.vertexShaderFile = "mesh_instanced.vert";
+      wfInfo.doubleSided = false;
+      m_WireframePipelines[2] = m_PSOCache.Register(ctx.device, mainRP, wfInfo, pipelineCache);
+      wfInfo.doubleSided = true;
+      m_WireframePipelines[3] = m_PSOCache.Register(ctx.device, mainRP, wfInfo, pipelineCache);
+
+      // [4] noShading
+      wfInfo.sets.pop_back();
+      wfInfo.doubleSided = true;
+      wfInfo.vertexShaderFile = "mesh.vert";
+      m_WireframePipelines[4] = m_PSOCache.Register(ctx.device, mainRP, wfInfo, pipelineCache);
+
+      // [5] terrain
+      PipelineCreateInfo wfTerrainInfo = {
+        .fragmentShaderFile = "gbuffer_wireframe.frag",
+        .vertexShaderFile = "mesh.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .depthWrite = false,
+        .colorAttachmentCount = 3,
+        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .polygonMode = VK_POLYGON_MODE_LINE,
+        .depthBiasEnable = true,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_TerrainMaterial.GetLayout() })
+      };
+      m_WireframePipelines[5] = m_PSOCache.Register(ctx.device, mainRP, wfTerrainInfo, pipelineCache);
+
+      // [6] alpha-test non-instanced
+      PipelineCreateInfo wfAlphaInfo = {
+        .fragmentShaderFile = "gbuffer_wireframe.frag",
+        .vertexShaderFile = "mesh.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .depthWrite = false,
+        .doubleSided = true,
+        .colorAttachmentCount = 3,
+        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .polygonMode = VK_POLYGON_MODE_LINE,
+        .depthBiasEnable = true,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
+      };
+      m_WireframePipelines[6] = m_PSOCache.Register(ctx.device, mainRP, wfAlphaInfo, pipelineCache);
+
+      // [7] alpha-test instanced
+      wfAlphaInfo.vertexShaderFile = "mesh_instanced.vert";
+      wfAlphaInfo.sets.push_back(m_InstanceDescriptorSet.GetLayout());
+      m_WireframePipelines[7] = m_PSOCache.Register(ctx.device, mainRP, wfAlphaInfo, pipelineCache);
+
+      // Transparent wireframe variants - rendered in GBuffer pass (not transparent pass)
+      // to produce a single-pass wireframe image via gbuffer0.
+      PipelineCreateInfo wfTrInfo = {
+        .fragmentShaderFile = "gbuffer_wireframe.frag",
+        .vertexShaderFile = "mesh.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .depthWrite = false,
+        .colorAttachmentCount = 3,
+        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .polygonMode = VK_POLYGON_MODE_LINE,
+        .depthBiasEnable = true,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
+      };
+      m_WireframeTransparentPipelines[0] = m_PSOCache.Register(ctx.device, mainRP, wfTrInfo, pipelineCache);
+      wfTrInfo.doubleSided = true;
+      m_WireframeTransparentPipelines[1] = m_PSOCache.Register(ctx.device, mainRP, wfTrInfo, pipelineCache);
+
+      wfTrInfo.doubleSided = false;
+      wfTrInfo.vertexShaderFile = "mesh_instanced.vert";
+      wfTrInfo.sets.push_back(m_InstanceDescriptorSet.GetLayout());
+      m_WireframeTransparentPipelines[2] = m_PSOCache.Register(ctx.device, mainRP, wfTrInfo, pipelineCache);
+      wfTrInfo.doubleSided = true;
+      m_WireframeTransparentPipelines[3] = m_PSOCache.Register(ctx.device, mainRP, wfTrInfo, pipelineCache);
     }
 
     // Swapchain descriptor sets (set 1 - set 0 is FrameUniformBuffer)

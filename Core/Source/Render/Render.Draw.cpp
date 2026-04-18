@@ -106,6 +106,10 @@ namespace YAEngine
         currentFrame, m_NoneTexture);
     }
 
+    bool wireframeMode = (m_CurrentTexture == DEBUG_VIEW_WIREFRAME);
+    if (wireframeMode)
+      vkCmdSetDepthBias(cmd, -1.0f, 0.0f, -1.0f);
+
     uint8_t lastSortKey = UINT8_MAX;
     lastMaterialIndex = UINT32_MAX;
     uint32_t lastMaterialGen = UINT32_MAX;
@@ -119,7 +123,7 @@ namespace YAEngine
       uint8_t sortKey = dc.SortKey();
       if (sortKey != lastSortKey)
       {
-        currentPipeline = &GetForwardPipeline(dc);
+        currentPipeline = wireframeMode ? &GetWireframePipeline(dc) : &GetForwardPipeline(dc);
         currentPipeline->Bind(cmd);
         currentPipeline->BindDescriptorSets(cmd, {frameUBO}, 0);
         lastSortKey = sortKey;
@@ -164,6 +168,80 @@ namespace YAEngine
       vb.Draw(cmd, instanceCount);
     }
 
+    // Wireframe debug draws transparent geometry in the GBuffer pass to get everything
+    // into gbuffer0 in a single pass; the transparent pass is skipped via early return.
+    if (wireframeMode && !m_TransparentDrawCommands.empty())
+    {
+      // Pre-bind transparent materials (texture upload + descriptor write)
+      uint32_t preLastMaterialIndex = UINT32_MAX;
+      uint32_t preLastMaterialGen = UINT32_MAX;
+      for (auto& dc : m_TransparentDrawCommands)
+      {
+        if (dc.materialIndex == preLastMaterialIndex && dc.materialGeneration == preLastMaterialGen) continue;
+        preLastMaterialIndex = dc.materialIndex;
+        preLastMaterialGen = dc.materialGeneration;
+
+        MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+        auto& mat = materialManager.Get(matHandle);
+        mat.cubemap = skybox;
+        materialManager.GetVulkanMaterial(matHandle).Bind(frame.assets.Textures(), cubeMapManager, frame.cubicResources, mat, currentFrame, m_NoneTexture);
+      }
+
+      uint32_t lastPipelineIdx = UINT32_MAX;
+      lastMaterialIndex = UINT32_MAX;
+      lastMaterialGen = UINT32_MAX;
+      currentPipeline = nullptr;
+
+      for (auto& dc : m_TransparentDrawCommands)
+      {
+        MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+        MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
+
+        uint32_t pipelineIdx = (dc.instanced ? 2u : 0u) + (dc.doubleSided ? 1u : 0u);
+        if (pipelineIdx != lastPipelineIdx)
+        {
+          currentPipeline = &GetWireframeTransparentPipeline(dc);
+          currentPipeline->Bind(cmd);
+          currentPipeline->BindDescriptorSets(cmd, {frameUBO}, 0);
+          lastPipelineIdx = pipelineIdx;
+          lastMaterialIndex = UINT32_MAX;
+          lastMaterialGen = UINT32_MAX;
+        }
+
+        if (dc.materialIndex != lastMaterialIndex || dc.materialGeneration != lastMaterialGen)
+        {
+          currentPipeline->BindDescriptorSets(cmd,
+            {materialManager.GetVulkanMaterial(matHandle).GetDescriptorSet(currentFrame)}, 1);
+          lastMaterialIndex = dc.materialIndex;
+          lastMaterialGen = dc.materialGeneration;
+        }
+
+        struct
+        {
+          glm::mat4 model;
+          int offset = 0;
+        } data;
+        data.model = dc.worldTransform;
+        if (dc.instanced)
+          data.offset = dc.instanceOffset / sizeof(glm::mat4);
+        currentPipeline->PushConstants(cmd, &data);
+
+        uint32_t instanceCount = 1;
+        if (dc.instanced)
+        {
+          instanceCount = uint32_t(dc.instanceData->size());
+          currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 2);
+          m_InstanceBuffer.Update(dc.instanceOffset, dc.instanceData->data(),
+            uint32_t(instanceCount * sizeof(glm::mat4)));
+        }
+
+        auto& vb = meshManager.GetVertexBuffer(meshHandle);
+        m_Stats.drawCalls++;
+        m_Stats.triangles += uint32_t(vb.GetIndexCount() / 3) * instanceCount;
+        m_Stats.vertices += uint32_t(vb.GetIndexCount()) * instanceCount;
+        vb.Draw(cmd, instanceCount);
+      }
+    }
   }
 
   void Render::SetUpCamera(FrameContext& frame)
@@ -611,6 +689,10 @@ namespace YAEngine
   void Render::DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame)
   {
     if (m_TransparentDrawCommands.empty())
+      return;
+
+    // Wireframe debug draws transparent geometry inside GBuffer pass instead
+    if (m_CurrentTexture == DEBUG_VIEW_WIREFRAME)
       return;
 
     auto currentFrame = frameIndex;

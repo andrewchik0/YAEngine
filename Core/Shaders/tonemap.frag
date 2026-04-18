@@ -55,6 +55,9 @@ void main()
       outColor = vec4(color, 1.0);
     }
     return;
+  case 7: // Wireframe (gbuffer0 albedo already holds wireframe color on black clear)
+    outColor = vec4(texture(gbuffer0Texture, uv).rgb, 1.0);
+    return;
   }
 
   // Default: tone-mapped final image

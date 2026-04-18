@@ -37,6 +37,7 @@ namespace YAEngine
   {
   public:
     static constexpr uint32_t MAX_INSTANCES = 100000;
+    static constexpr int32_t DEBUG_VIEW_WIREFRAME = 7;
 
     void Init(GLFWwindow* window, const RenderSpecs &specs);
     void Destroy();
@@ -245,6 +246,8 @@ namespace YAEngine
     PipelineCache m_PSOCache;
     PipelineHandle m_ForwardPipelines[8] {};
     PipelineHandle m_ForwardTransparentPipelines[4] {};
+    PipelineHandle m_WireframePipelines[8] {};
+    PipelineHandle m_WireframeTransparentPipelines[4] {};
     PipelineHandle m_DepthPipelines[8] {};
     PipelineHandle m_QuadPipeline {};
     PipelineHandle m_TAAPipeline {};
@@ -323,6 +326,8 @@ namespace YAEngine
 
     VulkanPipeline& GetForwardPipeline(const DrawCommand& dc);
     VulkanPipeline& GetForwardTransparentPipeline(const DrawCommand& dc);
+    VulkanPipeline& GetWireframePipeline(const DrawCommand& dc);
+    VulkanPipeline& GetWireframeTransparentPipeline(const DrawCommand& dc);
     VulkanPipeline& GetDepthPipeline(const DrawCommand& dc);
 
     void DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame);
