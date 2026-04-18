@@ -31,6 +31,8 @@ namespace YAEngine
     dst.alphaTest = src.alphaTest;
     dst.combinedTextures = src.combinedTextures;
     dst.doubleSided = src.doubleSided;
+    dst.transparent = src.transparent;
+    dst.opacity = src.opacity;
     dst.shadingModel = src.shadingModel;
     dst.baseColorTexture = src.baseColorTexture;
     dst.metallicTexture = src.metallicTexture;

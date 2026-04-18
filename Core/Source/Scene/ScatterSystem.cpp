@@ -387,11 +387,12 @@ namespace YAEngine
       mat.metallicFactor = matDesc.metallicFactor;
       mat.doubleSided = matDesc.doubleSided;
       mat.combinedTextures = matDesc.combinedTextures;
+      mat.transparent = matDesc.transparent;
 
       if (!matDesc.baseColorTexture.empty())
       {
         mat.baseColorTexture = assets.Textures().Load(matDesc.baseColorTexture, &mat.hasAlpha);
-        mat.alphaTest = mat.hasAlpha;
+        mat.alphaTest = mat.hasAlpha && !mat.transparent;
       }
       if (!matDesc.metallicTexture.empty())
         mat.metallicTexture = assets.Textures().Load(matDesc.metallicTexture, nullptr, true);

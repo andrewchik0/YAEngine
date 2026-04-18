@@ -190,6 +190,10 @@ namespace YAEngine
 
         if (mat.alphaTest != mat.hasAlpha)
           n["alphaTest"] = mat.alphaTest;
+        if (mat.transparent)
+          n["transparent"] = true;
+        if (mat.opacity != 1.0f)
+          n["opacity"] = mat.opacity;
 
         auto& textures = assets.Textures();
         SerializeTextureField(n, "baseColorTexture", mat.baseColorTexture, textures, assets);
@@ -215,6 +219,8 @@ namespace YAEngine
         if (n["roughnessFactor"]) mat.roughnessFactor = n["roughnessFactor"].as<float>();
         if (n["metallicFactor"]) mat.metallicFactor = n["metallicFactor"].as<float>();
         if (n["doubleSided"]) mat.doubleSided = n["doubleSided"].as<bool>();
+        if (n["transparent"]) mat.transparent = n["transparent"].as<bool>();
+        if (n["opacity"]) mat.opacity = n["opacity"].as<float>();
         if (n["shadingModel"])
         {
           auto sm = n["shadingModel"].as<std::string>();

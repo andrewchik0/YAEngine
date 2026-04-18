@@ -19,6 +19,7 @@ namespace YAEngine
     bool noShading = false;
     bool isTerrain = false;
     bool isAlphaTest = false;
+    bool isTransparent = false;
   };
 
   struct CameraData

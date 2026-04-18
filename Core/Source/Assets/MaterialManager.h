@@ -34,6 +34,8 @@ namespace YAEngine
     bool alphaTest{false};
     bool combinedTextures{false};
     bool doubleSided{false};
+    bool transparent{false};
+    float opacity{1.0f};
     ShadingModel shadingModel{ShadingModel::Lit};
 
     TextureHandle baseColorTexture;

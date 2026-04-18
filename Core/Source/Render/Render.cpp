@@ -177,6 +177,14 @@ namespace YAEngine
         fb = VK_NULL_HANDLE;
       }
     }
+    for (auto& fb : m_TransparentFramebuffers)
+    {
+      if (fb != VK_NULL_HANDLE)
+      {
+        vkDestroyFramebuffer(ctx.device, fb, nullptr);
+        fb = VK_NULL_HANDLE;
+      }
+    }
     m_TAADepth.Destroy(ctx);
 
     for (auto& set : m_SwapChainDescriptorSets)
@@ -274,6 +282,14 @@ namespace YAEngine
         fb = VK_NULL_HANDLE;
       }
     }
+    for (auto& fb : m_TransparentFramebuffers)
+    {
+      if (fb != VK_NULL_HANDLE)
+      {
+        vkDestroyFramebuffer(ctx.device, fb, nullptr);
+        fb = VK_NULL_HANDLE;
+      }
+    }
     m_TAADepth.Destroy(ctx);
     CreateTAAFramebuffers();
 
@@ -357,6 +373,10 @@ namespace YAEngine
     m_Graph.SetPassInput(m_TAAPassIndex, 1, historyRead);
     m_Graph.SetPassColorOutput(m_TAAPassIndex, 0, historyWrite);
     m_Graph.SetPassFramebuffer(m_TAAPassIndex, m_TAAFramebuffers[m_TAAIndex]);
+
+    // Forward transparent renders into the same TAA history target written this frame.
+    m_Graph.SetPassColorOutput(m_ForwardTransparentPassIndex, 0, historyWrite);
+    m_Graph.SetPassFramebuffer(m_ForwardTransparentPassIndex, m_TransparentFramebuffers[m_TAAIndex]);
 
     m_Graph.SetPassInput(m_HistogramPassIndex, 0, historyWrite);
 

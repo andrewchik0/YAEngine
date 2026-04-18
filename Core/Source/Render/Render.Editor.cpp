@@ -83,6 +83,14 @@ namespace YAEngine
         fb = VK_NULL_HANDLE;
       }
     }
+    for (auto& fb : m_TransparentFramebuffers)
+    {
+      if (fb != VK_NULL_HANDLE)
+      {
+        vkDestroyFramebuffer(ctx.device, fb, nullptr);
+        fb = VK_NULL_HANDLE;
+      }
+    }
     m_TAADepth.Destroy(ctx);
     CreateTAAFramebuffers();
     ClearHistoryBuffers();

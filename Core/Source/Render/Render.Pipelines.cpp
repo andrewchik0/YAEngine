@@ -9,6 +9,12 @@ namespace YAEngine
     return m_PSOCache.Get(m_ForwardPipelines[dc.SortKey()]);
   }
 
+  VulkanPipeline& Render::GetForwardTransparentPipeline(const DrawCommand& dc)
+  {
+    uint32_t idx = (dc.instanced ? 2u : 0u) + (dc.doubleSided ? 1u : 0u);
+    return m_PSOCache.Get(m_ForwardTransparentPipelines[idx]);
+  }
+
   VulkanPipeline& Render::GetDepthPipeline(const DrawCommand& dc)
   {
     assert(!dc.noShading && "Depth pipeline not available for noShading draw commands");
@@ -494,6 +500,44 @@ namespace YAEngine
       })
     };
     m_DeferredLightingPipeline = m_PSOCache.Register(ctx.device, deferredRP, deferredInfo, pipelineCache);
+
+    // Forward Transparent pipelines - same lights/IBL/material descriptor sets as deferred,
+    // depth LOAD/write/LEQUAL, src-alpha blending, output to TAAHistory0.
+    {
+      VkRenderPass transparentRP = m_Graph.GetPassRenderPass(m_ForwardTransparentPassIndex);
+
+      PipelineCreateInfo trInfo = {
+        .fragmentShaderFile = "forward_transparent.frag",
+        .vertexShaderFile = "mesh.vert",
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+        .depthWrite = true,
+        .blending = true,
+        .colorAttachmentCount = 1,
+        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({
+          m_FrameUniformBuffer.GetLayout(),
+          m_DefaultMaterial.GetLayout(),
+          m_DeferredLightingLightDescriptorSets[0].GetLayout(),
+          m_IBLDescriptorSets[0].GetLayout(),
+        })
+      };
+
+      // [0] normal, [1] doubleSided
+      m_ForwardTransparentPipelines[0] = m_PSOCache.Register(ctx.device, transparentRP, trInfo, pipelineCache);
+      trInfo.doubleSided = true;
+      m_ForwardTransparentPipelines[1] = m_PSOCache.Register(ctx.device, transparentRP, trInfo, pipelineCache);
+
+      // [2] instanced, [3] instanced + doubleSided
+      // Use mesh_transparent_instanced permutation that binds Instances at set=4
+      // (set=2 is taken by lights buffer in transparent pipeline layout).
+      trInfo.doubleSided = false;
+      trInfo.vertexShaderFile = "mesh_transparent_instanced.vert";
+      trInfo.sets.push_back(m_InstanceDescriptorSet.GetLayout());
+      m_ForwardTransparentPipelines[2] = m_PSOCache.Register(ctx.device, transparentRP, trInfo, pipelineCache);
+      trInfo.doubleSided = true;
+      m_ForwardTransparentPipelines[3] = m_PSOCache.Register(ctx.device, transparentRP, trInfo, pipelineCache);
+    }
 
     // Light cull compute pipeline - descriptor sets
     m_LightCullInputDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());

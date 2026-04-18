@@ -13,6 +13,7 @@ struct MaterialUniforms
   float metallic;
   int textureMask;
   int sg;
+  float opacity;
 };
 
 #ifdef __cplusplus

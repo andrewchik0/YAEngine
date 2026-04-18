@@ -467,6 +467,22 @@ namespace YAEngine
       }
     });
 
+    // Forward transparent pass - blends transparent meshes on top of TAA result
+    // using existing MainDepth (LOAD, no write, LEQUAL) so depth match deferred.
+    m_ForwardTransparentPassIndex = m_Graph.AddPass({
+      .name = "ForwardTransparent",
+      .inputs = {m_MainDepth},
+      .colorOutputs = {m_TAAHistory0},
+      .depthOutput = m_MainDepth,
+      .clearColor = false,
+      .clearDepth = false,
+      .externalFramebuffer = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
+        DrawTransparent(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame);
+      }
+    });
+
     // Auto Exposure - histogram build (compute)
     m_HistogramPassIndex = m_Graph.AddPass({
       .name = "HistogramBuild",
@@ -752,6 +768,36 @@ namespace YAEngine
 
       YA_DEBUG_NAMEF(ctx.device, VK_OBJECT_TYPE_FRAMEBUFFER,
         m_TAAFramebuffers[i], "TAA FB %u", i);
+    }
+
+    VkRenderPass transparentRP = m_Graph.GetPassRenderPass(m_ForwardTransparentPassIndex);
+
+    for (uint32_t i = 0; i < 2; i++)
+    {
+      RGHandle historyHandle = (i == 0) ? m_TAAHistory0 : m_TAAHistory1;
+
+      VkImageView views[2] = {
+        m_Graph.GetResource(historyHandle).GetView(),
+        m_Graph.GetResource(m_MainDepth).GetView()
+      };
+
+      VkFramebufferCreateInfo fbInfo{};
+      fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+      fbInfo.renderPass = transparentRP;
+      fbInfo.attachmentCount = 2;
+      fbInfo.pAttachments = views;
+      fbInfo.width = m_Graph.GetExtent().width;
+      fbInfo.height = m_Graph.GetExtent().height;
+      fbInfo.layers = 1;
+
+      if (vkCreateFramebuffer(ctx.device, &fbInfo, nullptr, &m_TransparentFramebuffers[i]) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Render", "Failed to create transparent framebuffer %d", i);
+        throw std::runtime_error("Failed to create transparent framebuffer!");
+      }
+
+      YA_DEBUG_NAMEF(ctx.device, VK_OBJECT_TYPE_FRAMEBUFFER,
+        m_TransparentFramebuffers[i], "Transparent FB %u", i);
     }
   }
 

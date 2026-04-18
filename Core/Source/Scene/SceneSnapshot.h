@@ -65,6 +65,7 @@ namespace YAEngine
         .noShading = (mat.shadingModel == ShadingModel::Unlit),
         .isTerrain = hasTerrain,
         .isAlphaTest = mat.alphaTest,
+        .isTransparent = mat.transparent,
       };
 
       if (hasTerrain)

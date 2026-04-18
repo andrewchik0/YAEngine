@@ -23,6 +23,8 @@ invariant gl_Position;
 #ifdef INSTANCED
   #if defined(DEPTH_ONLY) && !defined(ALPHA_TEST)
 layout(set = 1, binding = 0) readonly buffer Instances
+  #elif defined(TRANSPARENT)
+layout(set = 4, binding = 0) readonly buffer Instances
   #else
 layout(set = 2, binding = 0) readonly buffer Instances
   #endif

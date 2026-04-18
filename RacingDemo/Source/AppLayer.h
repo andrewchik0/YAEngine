@@ -89,6 +89,21 @@ public:
         break;
       }
     }
+
+    // Smoke-test transparent pass: mark first opaque glTF material as transparent.
+    {
+      auto& matMgr = GetAssets().Materials();
+      bool done = false;
+      matMgr.ForEach([&done](YAEngine::Material& mat)
+      {
+        if (done) return;
+        if (mat.hasAlpha || mat.alphaTest) return;
+        mat.transparent = true;
+        mat.opacity = 0.35f;
+        mat.MarkChanged();
+        done = true;
+      });
+    }
 #endif
   }
 

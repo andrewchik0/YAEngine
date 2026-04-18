@@ -170,6 +170,12 @@ namespace YAEngine
     material->Get(AI_MATKEY_TWOSIDED, twoSided);
     matDesc.doubleSided = (twoSided != 0);
 
+    aiString alphaMode;
+    if (material->Get(AI_MATKEY_GLTF_ALPHAMODE, alphaMode) == AI_SUCCESS)
+    {
+      matDesc.transparent = (std::string(alphaMode.C_Str()) == "BLEND");
+    }
+
     std::string baseColorTexture = GetTexturePath(material, aiTextureType_DIFFUSE);
     std::string metallicTexture = GetTexturePath(material, aiTextureType_METALNESS);
     std::string roughnessTexture = GetTexturePath(material, aiTextureType_DIFFUSE_ROUGHNESS);

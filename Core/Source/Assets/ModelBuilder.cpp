@@ -106,11 +106,12 @@ namespace YAEngine
       mat.sg = matDesc.sg;
       mat.combinedTextures = matDesc.combinedTextures;
       mat.doubleSided = matDesc.doubleSided;
+      mat.transparent = matDesc.transparent;
 
       if (!matDesc.baseColorTexture.empty())
       {
         mat.baseColorTexture = m_AssetManager->Textures().Load(matDesc.baseColorTexture, &mat.hasAlpha);
-        mat.alphaTest = mat.hasAlpha;
+        mat.alphaTest = mat.hasAlpha && !mat.transparent;
       }
       if (!matDesc.metallicTexture.empty())
         mat.metallicTexture = m_AssetManager->Textures().Load(matDesc.metallicTexture, nullptr, true);

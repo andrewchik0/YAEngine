@@ -202,6 +202,7 @@ namespace YAEngine
     uint32_t m_SSRPassIndex {};
     uint32_t m_BloomPassIndex {};
     uint32_t m_TAAPassIndex {};
+    uint32_t m_ForwardTransparentPassIndex {};
     uint32_t m_HistogramPassIndex {};
     uint32_t m_ExposureAdaptPassIndex {};
     uint32_t m_SwapchainPassIndex {};
@@ -209,6 +210,7 @@ namespace YAEngine
     // TAA external framebuffers (ping-pong)
     VulkanImage m_TAADepth;
     std::array<VkFramebuffer, 2> m_TAAFramebuffers {};
+    std::array<VkFramebuffer, 2> m_TransparentFramebuffers {};
 
     uint64_t m_GlobalFrameIndex = 0;
     uint32_t m_TAAIndex = 0;
@@ -242,6 +244,7 @@ namespace YAEngine
 
     PipelineCache m_PSOCache;
     PipelineHandle m_ForwardPipelines[8] {};
+    PipelineHandle m_ForwardTransparentPipelines[4] {};
     PipelineHandle m_DepthPipelines[8] {};
     PipelineHandle m_QuadPipeline {};
     PipelineHandle m_TAAPipeline {};
@@ -291,6 +294,7 @@ namespace YAEngine
       bool noShading;
       bool isTerrain;
       bool isAlphaTest;
+      bool isTransparent;
       uint32_t materialIndex;
       uint32_t materialGeneration;
       uint32_t meshIndex;
@@ -300,9 +304,11 @@ namespace YAEngine
       glm::vec3 boundsMax { std::numeric_limits<float>::lowest() };
       std::vector<glm::mat4>* instanceData;
       uint32_t instanceOffset;
+      float cameraDistanceSq = 0.0f;
 
       uint8_t SortKey() const
       {
+        if (isTransparent) return 8 + (instanced ? 2 : 0) + (doubleSided ? 1 : 0);
         if (isAlphaTest) return instanced ? 7 : 6;
         if (isTerrain) return 5;
         if (noShading) return 4;
@@ -313,9 +319,13 @@ namespace YAEngine
     std::vector<DrawCommand> m_DrawCommands;
     std::vector<DrawCommand> m_DepthDrawCommands;
     std::vector<DrawCommand> m_ShadowDrawCommands;
+    std::vector<DrawCommand> m_TransparentDrawCommands;
 
     VulkanPipeline& GetForwardPipeline(const DrawCommand& dc);
+    VulkanPipeline& GetForwardTransparentPipeline(const DrawCommand& dc);
     VulkanPipeline& GetDepthPipeline(const DrawCommand& dc);
+
+    void DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame);
 
   public:
     const RenderContext& GetContext() const { return m_Backend.GetContext(); }

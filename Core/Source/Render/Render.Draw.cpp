@@ -23,13 +23,38 @@ namespace YAEngine
     auto skybox = frame.snapshot.skybox;
 
     m_DrawCommands.clear();
+    m_TransparentDrawCommands.clear();
 
     uint32_t visibleCount = frame.snapshot.visibleCount;
     m_DrawCommands.reserve(visibleCount);
+    glm::vec3 camPos = frame.snapshot.camera.position;
     for (uint32_t i = 0; i < visibleCount; i++)
     {
       auto& obj = frame.snapshot.objects[i];
       bool isInstanced = (obj.instanceData != nullptr) && !obj.noShading;
+
+      if (obj.isTransparent)
+      {
+        glm::vec3 center = glm::vec3(obj.worldTransform[3]);
+        glm::vec3 d = center - camPos;
+        m_TransparentDrawCommands.push_back({
+          .instanced = isInstanced,
+          .doubleSided = obj.doubleSided,
+          .noShading = obj.noShading,
+          .isTerrain = obj.isTerrain,
+          .isAlphaTest = obj.isAlphaTest,
+          .isTransparent = true,
+          .materialIndex = obj.material.index,
+          .materialGeneration = obj.material.generation,
+          .meshIndex = obj.mesh.index,
+          .meshGeneration = obj.mesh.generation,
+          .worldTransform = obj.worldTransform,
+          .instanceData = obj.instanceData,
+          .instanceOffset = obj.instanceOffset,
+          .cameraDistanceSq = glm::dot(d, d),
+        });
+        continue;
+      }
 
       m_DrawCommands.push_back({
         .instanced = isInstanced,
@@ -218,6 +243,7 @@ namespace YAEngine
     {
       auto& obj = frame.snapshot.objects[i];
       if (obj.noShading) continue;
+      if (obj.isTransparent) continue;
 
       m_DepthDrawCommands.push_back({
         .instanced = (obj.instanceData != nullptr),
@@ -324,6 +350,7 @@ namespace YAEngine
     {
       auto& obj = frame.snapshot.objects[i];
       if (obj.noShading) continue;
+      if (obj.isTransparent) continue;
 
       m_ShadowDrawCommands.push_back({
         .instanced = (obj.instanceData != nullptr),
@@ -579,5 +606,97 @@ namespace YAEngine
   void Render::DrawQuad(VkCommandBuffer cmd)
   {
     vkCmdDraw(cmd, 3, 1, 0, 0);
+  }
+
+  void Render::DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame)
+  {
+    if (m_TransparentDrawCommands.empty())
+      return;
+
+    auto currentFrame = frameIndex;
+    VkDescriptorSet frameUBO = m_FrameUniformBuffer.GetDescriptorSet(currentFrame);
+    auto& meshManager = frame.assets.Meshes();
+    auto& materialManager = frame.assets.Materials();
+    auto& cubeMapManager = frame.assets.CubeMaps();
+    auto skybox = frame.snapshot.skybox;
+
+    // Back-to-front sort by squared distance to camera
+    std::sort(m_TransparentDrawCommands.begin(), m_TransparentDrawCommands.end(),
+      [](const DrawCommand& a, const DrawCommand& b)
+      {
+        return a.cameraDistanceSq > b.cameraDistanceSq;
+      });
+
+    // Pre-bind all transparent materials (texture upload + descriptor write)
+    uint32_t preLastMaterialIndex = UINT32_MAX;
+    uint32_t preLastMaterialGen = UINT32_MAX;
+    for (auto& dc : m_TransparentDrawCommands)
+    {
+      if (dc.materialIndex == preLastMaterialIndex && dc.materialGeneration == preLastMaterialGen) continue;
+      preLastMaterialIndex = dc.materialIndex;
+      preLastMaterialGen = dc.materialGeneration;
+
+      MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+      auto& mat = materialManager.Get(matHandle);
+      mat.cubemap = skybox;
+      materialManager.GetVulkanMaterial(matHandle).Bind(frame.assets.Textures(), cubeMapManager, frame.cubicResources, mat, currentFrame, m_NoneTexture);
+    }
+
+    uint32_t lastPipelineIdx = UINT32_MAX;
+    uint32_t lastMaterialIndex = UINT32_MAX;
+    uint32_t lastMaterialGen = UINT32_MAX;
+    VulkanPipeline* currentPipeline = nullptr;
+
+    for (auto& dc : m_TransparentDrawCommands)
+    {
+      MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+      MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
+
+      uint32_t pipelineIdx = (dc.instanced ? 2u : 0u) + (dc.doubleSided ? 1u : 0u);
+      if (pipelineIdx != lastPipelineIdx)
+      {
+        currentPipeline = &GetForwardTransparentPipeline(dc);
+        currentPipeline->Bind(cmd);
+        currentPipeline->BindDescriptorSets(cmd, {frameUBO}, 0);
+        currentPipeline->BindDescriptorSets(cmd, {m_DeferredLightingLightDescriptorSets[currentFrame].Get()}, 2);
+        currentPipeline->BindDescriptorSets(cmd, {m_IBLDescriptorSets[currentFrame].Get()}, 3);
+        lastPipelineIdx = pipelineIdx;
+        lastMaterialIndex = UINT32_MAX;
+        lastMaterialGen = UINT32_MAX;
+      }
+
+      if (dc.materialIndex != lastMaterialIndex || dc.materialGeneration != lastMaterialGen)
+      {
+        currentPipeline->BindDescriptorSets(cmd,
+          {materialManager.GetVulkanMaterial(matHandle).GetDescriptorSet(currentFrame)}, 1);
+        lastMaterialIndex = dc.materialIndex;
+        lastMaterialGen = dc.materialGeneration;
+      }
+
+      struct
+      {
+        glm::mat4 model;
+        int offset = 0;
+      } data;
+      data.model = dc.worldTransform;
+      if (dc.instanced)
+        data.offset = dc.instanceOffset / sizeof(glm::mat4);
+      currentPipeline->PushConstants(cmd, &data);
+
+      uint32_t instanceCount = 1;
+      if (dc.instanced)
+      {
+        instanceCount = uint32_t(dc.instanceData->size());
+        currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 4);
+        m_InstanceBuffer.Update(dc.instanceOffset, dc.instanceData->data(),
+          uint32_t(instanceCount * sizeof(glm::mat4)));
+      }
+
+      auto& vb = meshManager.GetVertexBuffer(meshHandle);
+      m_Stats.drawCalls++;
+      m_Stats.triangles += uint32_t(vb.GetIndexCount() / 3) * instanceCount;
+      m_Stats.vertices += uint32_t(vb.GetIndexCount()) * instanceCount;
+      vb.Draw(cmd, instanceCount);
+    }
   }
 }
