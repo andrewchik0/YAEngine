@@ -4,7 +4,9 @@
 #include "Scene/Components.h"
 #include "Scene/TerrainSystem.h"
 #include "Scene/CollisionQueryService.h"
+#include "Assets/Handle.h"
 #include "GameComponents.h"
+#include "SparkPool.h"
 
 class ControlsLayer : public YAEngine::Layer
 {
@@ -49,4 +51,8 @@ private:
   YAEngine::TerrainSystem* m_TerrainSystem = nullptr;
   YAEngine::CollisionQueryService* m_CollisionService = nullptr;
   YAEngine::Entity m_TerrainEntity = entt::null;
+
+  SparkPool m_SparkPool;
+  YAEngine::TextureHandle m_SparkTexture;
+  std::vector<YAEngine::ParticleInstance> m_SparkInstances;
 };

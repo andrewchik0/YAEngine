@@ -74,13 +74,25 @@ namespace YAEngine
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
     VkPipelineColorBlendAttachmentState blendTemplate{};
-    blendTemplate.blendEnable = info.blending ? VK_TRUE : VK_FALSE;
-    blendTemplate.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
-    blendTemplate.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    blendTemplate.colorBlendOp = VK_BLEND_OP_ADD;
-    blendTemplate.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-    blendTemplate.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-    blendTemplate.alphaBlendOp = VK_BLEND_OP_ADD;
+    blendTemplate.blendEnable = (info.blending || info.additiveBlend) ? VK_TRUE : VK_FALSE;
+    if (info.additiveBlend)
+    {
+      blendTemplate.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+      blendTemplate.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+      blendTemplate.colorBlendOp = VK_BLEND_OP_ADD;
+      blendTemplate.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      blendTemplate.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      blendTemplate.alphaBlendOp = VK_BLEND_OP_ADD;
+    }
+    else
+    {
+      blendTemplate.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+      blendTemplate.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+      blendTemplate.colorBlendOp = VK_BLEND_OP_ADD;
+      blendTemplate.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      blendTemplate.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+      blendTemplate.alphaBlendOp = VK_BLEND_OP_ADD;
+    }
     blendTemplate.colorWriteMask =
         VK_COLOR_COMPONENT_R_BIT |
         VK_COLOR_COMPONENT_G_BIT |

@@ -686,13 +686,34 @@ namespace YAEngine
     vkCmdDraw(cmd, 3, 1, 0, 0);
   }
 
-  void Render::DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame)
+  void Render::SubmitParticles(std::span<const ParticleInstance> particles, TextureHandle texture)
   {
-    if (m_TransparentDrawCommands.empty())
+    if (particles.empty() || !texture)
+      return;
+    if (m_PendingParticleBatches.size() >= MAX_PARTICLE_BATCHES_PER_FRAME)
       return;
 
+    const uint32_t remaining = MAX_PARTICLES_PER_FRAME - uint32_t(m_ParticleStage.size());
+    if (remaining == 0)
+      return;
+
+    const uint32_t count = std::min(uint32_t(particles.size()), remaining);
+    const uint32_t firstInstance = uint32_t(m_ParticleStage.size());
+    m_ParticleStage.insert(m_ParticleStage.end(), particles.begin(), particles.begin() + count);
+    m_PendingParticleBatches.push_back({ firstInstance, count, texture });
+  }
+
+  void Render::DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame)
+  {
     // Wireframe debug draws transparent geometry inside GBuffer pass instead
     if (m_CurrentTexture == DEBUG_VIEW_WIREFRAME)
+    {
+      m_ParticleStage.clear();
+      m_PendingParticleBatches.clear();
+      return;
+    }
+
+    if (m_TransparentDrawCommands.empty() && m_PendingParticleBatches.empty())
       return;
 
     auto currentFrame = frameIndex;
@@ -780,5 +801,41 @@ namespace YAEngine
       m_Stats.vertices += uint32_t(vb.GetIndexCount()) * instanceCount;
       vb.Draw(cmd, instanceCount);
     }
+
+    if (!m_PendingParticleBatches.empty())
+    {
+      DebugMarker::BeginLabel(cmd, "Particles", 1.0f, 0.6f, 0.2f);
+
+      m_ParticleInstanceBuffers[currentFrame].Update(0,
+        m_ParticleStage.data(),
+        uint32_t(m_ParticleStage.size() * sizeof(ParticleInstance)));
+
+      auto& particlePipeline = m_PSOCache.Get(m_ParticlePipeline);
+      particlePipeline.Bind(cmd);
+      particlePipeline.BindDescriptorSets(cmd, { frameUBO }, 0);
+
+      auto& textureManager = frame.assets.Textures();
+      uint32_t batchIdx = 0;
+      for (auto& batch : m_PendingParticleBatches)
+      {
+        auto& tex = textureManager.GetVulkanTexture(batch.texture);
+        uint32_t setIdx = currentFrame * MAX_PARTICLE_BATCHES_PER_FRAME + batchIdx;
+        auto& descSet = m_ParticleDescriptorSets[setIdx];
+        descSet.WriteCombinedImageSampler(1, tex.GetView(), tex.GetSampler());
+        particlePipeline.BindDescriptorSets(cmd, { descSet.Get() }, 1);
+
+        vkCmdDraw(cmd, 4, batch.count, 0, batch.firstInstance);
+
+        m_Stats.drawCalls++;
+        m_Stats.triangles += 2 * batch.count;
+        m_Stats.vertices += 4 * batch.count;
+        batchIdx++;
+      }
+
+      DebugMarker::EndLabel(cmd);
+    }
+
+    m_ParticleStage.clear();
+    m_PendingParticleBatches.clear();
   }
 }

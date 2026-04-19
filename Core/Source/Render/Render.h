@@ -15,6 +15,8 @@
 #include "ShadowManager.h"
 #include "LightProbeAtlas.h"
 #include "LightProbeStorageBuffer.h"
+#include "Assets/Handle.h"
+#include "ParticleInstance.h"
 
 #ifdef YA_EDITOR
 #include <entt/fwd.hpp>
@@ -37,6 +39,8 @@ namespace YAEngine
   {
   public:
     static constexpr uint32_t MAX_INSTANCES = 100000;
+    static constexpr uint32_t MAX_PARTICLES_PER_FRAME = 8192;
+    static constexpr uint32_t MAX_PARTICLE_BATCHES_PER_FRAME = 16;
     static constexpr int32_t DEBUG_VIEW_WIREFRAME = 7;
 
     void Init(GLFWwindow* window, const RenderSpecs &specs);
@@ -108,6 +112,8 @@ namespace YAEngine
 
     void ResetTAAHistory() { b_ResetTAAPending = true; }
     void ResetAutoExposure() { b_ResetAutoExposurePending = true; }
+
+    void SubmitParticles(std::span<const ParticleInstance> particles, TextureHandle texture);
 
   private:
 
@@ -328,6 +334,19 @@ namespace YAEngine
     std::vector<DrawCommand> m_DepthDrawCommands;
     std::vector<DrawCommand> m_ShadowDrawCommands;
     std::vector<DrawCommand> m_TransparentDrawCommands;
+
+    struct ParticleBatch
+    {
+      uint32_t firstInstance;
+      uint32_t count;
+      TextureHandle texture;
+    };
+
+    PipelineHandle m_ParticlePipeline {};
+    std::vector<VulkanStorageBuffer> m_ParticleInstanceBuffers;
+    std::vector<VulkanDescriptorSet> m_ParticleDescriptorSets;
+    std::vector<ParticleInstance> m_ParticleStage;
+    std::vector<ParticleBatch> m_PendingParticleBatches;
 
     VulkanPipeline& GetForwardPipeline(const DrawCommand& dc);
     VulkanPipeline& GetForwardTransparentPipeline(const DrawCommand& dc);

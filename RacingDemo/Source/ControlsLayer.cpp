@@ -1,5 +1,7 @@
 #include "ControlsLayer.h"
 #include "Input/InputSystem.h"
+#include "Render/Render.h"
+#include "Assets/AssetManager.h"
 #include "Utils/Log.h"
 
 void ControlsLayer::Update(double dt)
@@ -11,6 +13,9 @@ void ControlsLayer::Update(double dt)
     m_TerrainSystem = &m_Registry->Get<YAEngine::TerrainSystem>();
   if (m_CollisionService == nullptr)
     m_CollisionService = &m_Registry->Get<YAEngine::CollisionQueryService>();
+  if (!m_SparkTexture)
+    m_SparkTexture = GetAssets().Textures().Load(
+      GetAssets().ResolvePath("Assets/Textures/spark.png"));
   if (m_TerrainEntity == entt::null)
   {
     auto terrainView = GetScene().GetView<YAEngine::TerrainComponent>();
@@ -254,6 +259,15 @@ void ControlsLayer::Update(double dt)
   {
     YA_LOG_INFO("Physics", "Car contact begin, collider entity=%u",
       static_cast<uint32_t>(blockerEntity));
+
+    glm::dvec3 contactNormal(0.0, 0.0, 1.0);
+    if (blockerEntity != entt::null)
+      contactNormal = contactNormalXZ(blockerEntity, prevPosition);
+    glm::vec3 emitOrigin = glm::vec3(prevPosition) + glm::vec3(forward) * 0.9f + glm::vec3(0.0f, 0.4f, 0.0f);
+    glm::vec3 emitNormal = glm::vec3(contactNormal.x, 0.5f, contactNormal.z);
+    double speedFactor = glm::clamp(std::abs(vehicle->speed) / vehicle->maxSpeed, 0.0, 1.0);
+    uint32_t burstCount = 80u + static_cast<uint32_t>(speedFactor * 160.0);
+    m_SparkPool.Emit(emitOrigin, emitNormal, burstCount);
   }
   vehicle->wasInContact = inContact;
 
@@ -379,5 +393,14 @@ void ControlsLayer::Update(double dt)
     glm::quat spinRot = glm::angleAxis(wc.spinAngle, glm::dvec3(1,0,0));
 
     tc.rotation = steerRot * glm::quat(wc.baseRot) * spinRot;
+  }
+
+  m_SparkPool.Update(dt);
+  if (m_SparkPool.HasAliveSparks() && m_SparkTexture)
+  {
+    m_SparkInstances.clear();
+    m_SparkPool.FillInstances(m_SparkInstances);
+    if (!m_SparkInstances.empty())
+      GetRender().SubmitParticles(m_SparkInstances, m_SparkTexture);
   }
 }

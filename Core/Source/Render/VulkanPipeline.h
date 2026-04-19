@@ -16,6 +16,7 @@ namespace YAEngine
     bool depthTesting = true;
     bool depthWrite = true;
     bool blending = false;
+    bool additiveBlend = false;
     bool doubleSided = false;
     uint32_t colorAttachmentCount = 1;
     VkCompareOp compareOp = VK_COMPARE_OP_LESS;

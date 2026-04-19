@@ -784,5 +784,72 @@ namespace YAEngine
       m_ExposureReadDescriptorSets[i].WriteStorageBuffer(0, m_ExposureBuffer.Get(), sizeof(float));
     }
 
+    // Particle system - per-frame mapped SSBO + pooled descriptor sets (SSBO + sampler),
+    // rendered via additive-blended triangle strip in the forward transparent pass.
+    {
+      const uint32_t framesInFlight = m_Backend.GetMaxFramesInFlight();
+      const VkDeviceSize particleBufferSize = MAX_PARTICLES_PER_FRAME * sizeof(ParticleInstance);
+
+      m_ParticleInstanceBuffers.resize(framesInFlight);
+      for (uint32_t i = 0; i < framesInFlight; i++)
+        m_ParticleInstanceBuffers[i].Create(ctx, particleBufferSize);
+
+      SetDescription particleDesc = {
+        .set = 1,
+        .bindings = {
+          { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT },
+          { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+        }
+      };
+
+      m_ParticleDescriptorSets.resize(framesInFlight * MAX_PARTICLE_BATCHES_PER_FRAME);
+      VkDescriptorSetLayout particleLayout = VK_NULL_HANDLE;
+      for (size_t i = 0; i < m_ParticleDescriptorSets.size(); i++)
+      {
+        if (i == 0)
+        {
+          m_ParticleDescriptorSets[i].Init(ctx, particleDesc);
+          particleLayout = m_ParticleDescriptorSets[i].GetLayout();
+        }
+        else
+        {
+          m_ParticleDescriptorSets[i].Init(ctx, particleLayout);
+        }
+      }
+
+      // Pre-write the SSBO binding (one per frame-in-flight, replicated across batches).
+      for (uint32_t f = 0; f < framesInFlight; f++)
+      {
+        for (uint32_t b = 0; b < MAX_PARTICLE_BATCHES_PER_FRAME; b++)
+        {
+          m_ParticleDescriptorSets[f * MAX_PARTICLE_BATCHES_PER_FRAME + b]
+            .WriteStorageBuffer(0, m_ParticleInstanceBuffers[f].Get(), particleBufferSize);
+        }
+      }
+
+      VkRenderPass transparentRP = m_Graph.GetPassRenderPass(m_ForwardTransparentPassIndex);
+      PipelineCreateInfo particlePipelineInfo = {
+        .fragmentShaderFile = "particle.frag",
+        .vertexShaderFile = "particle.vert",
+        .pushConstantSize = 4,
+        .depthTesting = true,
+        .depthWrite = false,
+        .additiveBlend = true,
+        .doubleSided = true,
+        .colorAttachmentCount = 1,
+        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
+        .vertexInputFormat = "",
+        .sets = std::vector({
+          m_FrameUniformBuffer.GetLayout(),
+          particleLayout,
+        })
+      };
+      m_ParticlePipeline = m_PSOCache.Register(ctx.device, transparentRP, particlePipelineInfo, pipelineCache);
+
+      m_ParticleStage.reserve(MAX_PARTICLES_PER_FRAME);
+      m_PendingParticleBatches.reserve(MAX_PARTICLE_BATCHES_PER_FRAME);
+    }
+
   }
 }

@@ -14,6 +14,7 @@
 #include "Utils/ThreadPool.h"
 #include "Render/Render.h"
 #include "Assets/AssetManager.h"
+#include "SparkPool.h"
 #ifdef YA_EDITOR
 #include "Editor/EditorCameraLayer.h"
 #endif
@@ -44,6 +45,10 @@ public:
       APP_WORKING_DIR "/Assets/Scenes/test.scene",
       GetScene(), GetAssets(), registry, GetRender(),
       APP_WORKING_DIR, &threadPool);
+
+    m_TestSparkEmitter = GetScene().CreateEntity("spark_emitter_test");
+    GetScene().GetTransform(m_TestSparkEmitter).position = glm::dvec3(0.0, 2.0, 0.0);
+    GetScene().AddComponent<YAEngine::NoSerializeTag>(m_TestSparkEmitter);
 
 #ifdef YA_EDITOR
     auto& camState = GetScene().GetEditorCameraState();
@@ -114,6 +119,24 @@ public:
 
   void Update(double deltaTime) override
   {
+#ifdef TEST
+    if (m_TestSparkEmitter != entt::null)
+    {
+      if (!m_TestSparkTexture)
+        m_TestSparkTexture = GetAssets().Textures().Load(
+          GetAssets().ResolvePath("Assets/Textures/spark.png"));
+
+      glm::vec3 pos = glm::vec3(GetScene().GetTransform(m_TestSparkEmitter).position);
+      m_TestSparkPool.Emit(pos, glm::vec3(0.0f, 1.0f, 0.0f), 1);
+      m_TestSparkPool.Update(deltaTime);
+
+      m_TestSparkInstances.clear();
+      m_TestSparkPool.FillInstances(m_TestSparkInstances);
+      if (!m_TestSparkInstances.empty() && m_TestSparkTexture)
+        GetRender().SubmitParticles(m_TestSparkInstances, m_TestSparkTexture);
+    }
+#endif
+
 #ifdef YA_EDITOR
     if (GetInput().IsKeyPressed(YAEngine::Key::Escape))
     {
@@ -145,4 +168,11 @@ public:
 #endif
   }
 
+private:
+#ifdef TEST
+  YAEngine::Entity m_TestSparkEmitter = entt::null;
+  SparkPool m_TestSparkPool;
+  YAEngine::TextureHandle m_TestSparkTexture;
+  std::vector<YAEngine::ParticleInstance> m_TestSparkInstances;
+#endif
 };

@@ -214,6 +214,10 @@ namespace YAEngine
       set.Destroy();
     for (auto& set : m_IBLDescriptorSets)
       set.Destroy();
+    for (auto& set : m_ParticleDescriptorSets)
+      set.Destroy();
+    for (auto& buf : m_ParticleInstanceBuffers)
+      buf.Destroy(ctx);
 
     m_SSAONoise.Destroy(ctx);
     m_SSAOKernelUBO.Destroy(ctx);
