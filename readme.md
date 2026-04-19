@@ -2,7 +2,8 @@
 
 Real-time 3D rendering engine implemented with Vulkan API. C++23, Windows.
 
-<iframe width="560" height="315" src="https://www.youtube.com/embed/9NUcyKXAWYY?si=H2C4lIFqVgdVD9wY" title="YAEngine" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
+Engine showcase: [https://www.youtube.com/watch?v=9NUcyKXAWYY](https://www.youtube.com/watch?v=9NUcyKXAWYY)
+[![Engine showcase](https://img.youtube.com/vi/9NUcyKXAWYY/maxresdefault.jpg)](https://www.youtube.com/watch?v=9NUcyKXAWYY)
 
 ## Build & Run
 
