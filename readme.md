@@ -2,7 +2,7 @@
 
 Real-time 3D rendering engine implemented with Vulkan API. C++23, Windows.
 
-![YAEngine Editor](screenshot.jpg)
+<iframe width="560" height="315" src="https://www.youtube.com/embed/9NUcyKXAWYY?si=H2C4lIFqVgdVD9wY" title="YAEngine" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" referrerpolicy="strict-origin-when-cross-origin" allowfullscreen></iframe>
 
 ## Build & Run
 
@@ -31,13 +31,15 @@ The `YA_EDITOR` flag toggles editor layer. All editor code is `#ifdef`-guarded o
 
 ## Graphics Features
 
-- **Deferred PBR.** Cook-Torrance BRDF, metallic/roughness workflow.
+- **Deferred PBR.** Cook-Torrance, metallic/roughness.
 
-- **Shadows.** CSM for the directional light, cube shadows for up to four point lights, standard spot shadows. All of them share one 8192x8192 atlas.
+- **Transparent forward.** Post-TAA, shares deferred lighting/IBL.
 
-- **Tile-based light culling.** Compute pass divides the screen into 16x16 tiles and writes a per-tile light index list.
+- **Shadows.** CSM (directional) + cube (4 point) + spot, shared 8192х8192 atlas.
 
-- **IBL + light probes.** Engine generates the full IBL set on the GPU: cubemap, irradiance convolution, roughness-prefiltered specular.
+- **Tile-based light culling.** 16х16 tiles, compute pass writes per-tile light list.
+
+- **IBL + light probes.** GPU-baked: cubemap, irradiance convolution, roughness-prefiltered specular.
 
 **Screen-space effects:**
 - **SSAO** - bilateral blur
@@ -45,8 +47,8 @@ The `YA_EDITOR` flag toggles editor layer. All editor code is `#ifdef`-guarded o
 - **TAA** - Halton jitter + variance clipping
 - **Bloom** - 6-mip dual-filter
 - **Auto exposure** - GPU histogram
-- **Exponential height fog** - distance + altitude falloff
-- **Tonemapping** - ACES and AgX
+- **Height fog** - distance + altitude falloff
+- **Tonemapping** - ACES or AgX
 
 ![render-pipeline](render-pipeline.svg)
 
@@ -54,22 +56,22 @@ The `YA_EDITOR` flag toggles editor layer. All editor code is `#ifdef`-guarded o
 
 The goal was to keep the renderer declarative at the pass level and keep the engine flexible enough to add features without rewrites. Notable pieces:
 
-- **Render graph.** Passes are declared once with their inputs and outputs; the graph allocates transient images, builds render passes and framebuffers, and inserts Vulkan barriers on its own.
+- **Render graph.** Declarative passes; auto-allocates transient images, render passes, framebuffers, barriers.
 
-- **Draw command sorting.** Three-level sort key: pipeline variant > material > mesh. Same sort runs through GBuffer, depth prepass and shadow passes.
+- **Draw command sorting.** 3-level key (pipeline > material > mesh), shared by GBuffer, depth prepass, shadows.
 
-- **Shared C++/GLSL headers.** UBO layouts are defined once - the struct the CPU fills is the struct the GPU reads, no two-sided maintenance.
+- **Shared C++/GLSL headers.** UBO layouts defined once, used on both sides.
 
-- **Asset system.** Generational slot maps with typed handles - passing a `MeshHandle` where a `TextureHandle` is expected won't compile.
+- **Asset system.** Generational slot maps + typed handles (mismatched handle = compile error).
 
-- **Async asset loading.** Model imports, texture decoding and IBL generation run on a thread pool; the main thread only picks up the final Vulkan uploads.
+- **Async asset loading.** Model import, texture decode, IBL bake on thread pool; main thread only does Vulkan uploads.
 
-- **ECS.** `entt` for storage, a custom `SystemScheduler` for ordering, dirty-flag transform propagation - only changed subtrees are reprocessed each frame.
+- **ECS.** `entt` storage + custom `SystemScheduler` + dirty-flag transform propagation.
 
-- **Scene serialization.** YAML via a type-erased `ComponentRegistry` - adding a new serializable component doesn't require touching the serializer.
+- **Scene serialization.** YAML + type-erased `ComponentRegistry`, new components self-register.
 
-- **Shader hot-reload (editor).** File watcher + dependency graph: a changed `.glsl` include triggers recompilation of every shader that pulls it in, and the pipeline cache rebuilds only affected pipelines. Runs on a worker thread, the frame loop never blocks.
+- **Shader hot-reload (editor).** File watcher + include dependency graph; rebuilds only affected pipelines on a worker thread, never blocks the frame.
 
-- **Editor.** Dockable ImGui panels, custom 3D gizmos rendered through their own render-graph passes, offscreen viewport whose resolution is independent of the window.
+- **Editor.** Dockable ImGui, 3D gizmos as render-graph passes, offscreen viewport.
 
-- **Build system.** CMake + NMake (single-config, clean CI). Custom shader compiler handles `#include` resolution, shared C++/GLSL headers and pipeline permutations.
+- **Build system.** CMake + NMake. Custom shader compiler handles `#include`, shared C++/GLSL headers, pipeline permutations.

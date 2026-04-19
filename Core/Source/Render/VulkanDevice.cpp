@@ -30,6 +30,7 @@ namespace YAEngine
     VkPhysicalDeviceFeatures deviceFeatures{};
     deviceFeatures.samplerAnisotropy = VK_TRUE;
     deviceFeatures.wideLines = VK_TRUE;
+    deviceFeatures.fillModeNonSolid = VK_TRUE;
     deviceFeatures.imageCubeArray = VK_TRUE;
 
     VkDeviceCreateInfo createInfo{};
