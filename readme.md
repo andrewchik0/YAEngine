@@ -2,8 +2,8 @@
 
 Real-time 3D rendering engine implemented with Vulkan API. C++23, Windows.
 
-Engine showcase: [https://www.youtube.com/watch?v=9NUcyKXAWYY](https://www.youtube.com/watch?v=9NUcyKXAWYY)
-[![Engine showcase](https://img.youtube.com/vi/9NUcyKXAWYY/maxresdefault.jpg)](https://www.youtube.com/watch?v=9NUcyKXAWYY)
+Engine showcase: [https://www.youtube.com/watch?v=FQEjXE9ix4U](https://www.youtube.com/watch?v=FQEjXE9ix4U)
+[![Engine showcase](https://img.youtube.com/vi/FQEjXE9ix4U/maxresdefault.jpg)](https://www.youtube.com/watch?v=FQEjXE9ix4U)
 
 ## Build & Run
 
