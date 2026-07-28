@@ -219,7 +219,7 @@ namespace YAEngine
     // 6. Deferred Lighting - fullscreen IBL + analytical lights from G-buffer
     m_DeferredLightingPassIndex = m_Graph.AddPass({
       .name = "DeferredLighting",
-      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth},
+      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_SSAOBlurred},
       .colorOutputs = {m_LitColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
@@ -227,6 +227,7 @@ namespace YAEngine
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+        auto& ssao = m_Graph.GetResource(m_SSAOBlurred);
 
         auto& pipeline = m_PSOCache.Get(m_DeferredLightingPipeline);
         pipeline.Bind(ctx.cmd);
@@ -236,6 +237,8 @@ namespace YAEngine
           gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
           mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
+          ssao.GetView(), ssao.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_DeferredLightingDescriptorSets[currentFrame].Get()}, 1);
@@ -331,13 +334,68 @@ namespace YAEngine
       }
     });
 
+
+    m_TAAPassIndex = m_Graph.AddPass({
+      .name = "TAAPass",
+      .inputs = {m_SSRColor, m_TAAHistory1, m_MainVelocity, m_MainDepth},
+      .colorOutputs = {m_TAAHistory0},
+      .externalFramebuffer = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto& ssrColor = m_Graph.GetResource(m_SSRColor);
+        auto historyReadHandle = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
+        auto& historyPrev = m_Graph.GetResource(historyReadHandle);
+        auto& velocity = m_Graph.GetResource(m_MainVelocity);
+        auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        auto& pipeline = m_PSOCache.Get(m_TAAPipeline);
+        pipeline.Bind(ctx.cmd);
+        m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(0,
+          ssrColor.GetView(), ssrColor.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          historyPrev.GetView(), historyPrev.GetSampler(), historyPrev.GetLayout());
+        m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(2,
+          velocity.GetView(), velocity.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(3,
+          mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_TAADescriptorSets[currentFrame].Get()}, 1);
+        DrawQuad(ctx.cmd);
+      }
+    });
+
+    // Forward transparent pass - blends transparent meshes on top of TAA result
+    // using existing MainDepth (LOAD, no write, LEQUAL) so depth match deferred.
+    m_ForwardTransparentPassIndex = m_Graph.AddPass({
+      .name = "ForwardTransparent",
+      .inputs = {m_MainDepth},
+      .colorOutputs = {m_TAAHistory0},
+      .depthOutput = m_MainDepth,
+      .clearColor = false,
+      .clearDepth = false,
+      .externalFramebuffer = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
+        DrawTransparent(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame);
+      }
+    });
+
     // 8. Bloom - downsample/upsample chain (compute)
     m_BloomPassIndex = m_Graph.AddPass({
       .name = "BloomPass",
-      .inputs = {m_SSRColor},
+      // Bloom sources the previous frame's resolved image, not the raw lit frame: building it
+      // from a jittered buffer and compositing after the resolve puts unfiltered flicker
+      // straight into the final image, which TAA can no longer remove.
+      // Both histories are declared: History0 has a static writer (TAAPass, ForwardTransparent)
+      // and is what orders this pass after the resolve, History1 is here so the ping-pong
+      // buffer actually sampled on alternate frames still gets its barrier.
+      .inputs = {m_TAAHistory0, m_TAAHistory1},
       .isCompute = true,
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_BloomEnabled) return;
+
+        // Previous frame's resolved image: index 1 holds History1, index 0 holds History0
+        uint32_t bloomSrcSet = m_TAAIndex == 0 ? 1 : 0;
 
         uint32_t baseW = m_Graph.GetExtent().width;
         uint32_t baseH = m_Graph.GetExtent().height;
@@ -367,7 +425,9 @@ namespace YAEngine
           pc.threshold = m_BloomThreshold;
           pc.softKnee = m_BloomSoftKnee;
 
-          downPipeline.BindDescriptorSets(ctx.cmd, {m_BloomDownsampleDescriptorSets[mip].Get()}, 0);
+          downPipeline.BindDescriptorSets(ctx.cmd, {mip == 0
+            ? m_BloomHistorySrcSets[bloomSrcSet].Get()
+            : m_BloomDownsampleDescriptorSets[mip].Get()}, 0);
           downPipeline.PushConstants(ctx.cmd, &pc);
           downPipeline.Dispatch(ctx.cmd, (dstW + 15) / 16, (dstH + 15) / 16, 1);
 
@@ -438,48 +498,6 @@ namespace YAEngine
           VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
           VK_IMAGE_ASPECT_COLOR_BIT, 0, mipCount);
         m_BloomImage.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-      }
-    });
-
-    m_TAAPassIndex = m_Graph.AddPass({
-      .name = "TAAPass",
-      .inputs = {m_SSRColor, m_TAAHistory1, m_MainVelocity},
-      .colorOutputs = {m_TAAHistory0},
-      .externalFramebuffer = true,
-      .execute = [this](const RGExecuteContext& ctx) {
-        auto& ssrColor = m_Graph.GetResource(m_SSRColor);
-        auto historyReadHandle = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
-        auto& historyPrev = m_Graph.GetResource(historyReadHandle);
-        auto& velocity = m_Graph.GetResource(m_MainVelocity);
-
-        auto currentFrame = m_Backend.GetCurrentFrameIndex();
-        auto& pipeline = m_PSOCache.Get(m_TAAPipeline);
-        pipeline.Bind(ctx.cmd);
-        m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(0,
-          ssrColor.GetView(), ssrColor.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(1,
-          historyPrev.GetView(), historyPrev.GetSampler(), historyPrev.GetLayout());
-        m_TAADescriptorSets[currentFrame].WriteCombinedImageSampler(2,
-          velocity.GetView(), velocity.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_TAADescriptorSets[currentFrame].Get()}, 1);
-        DrawQuad(ctx.cmd);
-      }
-    });
-
-    // Forward transparent pass - blends transparent meshes on top of TAA result
-    // using existing MainDepth (LOAD, no write, LEQUAL) so depth match deferred.
-    m_ForwardTransparentPassIndex = m_Graph.AddPass({
-      .name = "ForwardTransparent",
-      .inputs = {m_MainDepth},
-      .colorOutputs = {m_TAAHistory0},
-      .depthOutput = m_MainDepth,
-      .clearColor = false,
-      .clearDepth = false,
-      .externalFramebuffer = true,
-      .execute = [this](const RGExecuteContext& ctx) {
-        auto* frame = static_cast<FrameContext*>(ctx.userData);
-        DrawTransparent(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame);
       }
     });
 
@@ -599,7 +617,7 @@ namespace YAEngine
 
     m_SceneComposePassIndex = m_Graph.AddPass({
       .name = "SceneComposePass",
-      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_GBuffer0, m_GBuffer1},
+      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor},
       .colorOutputs = {m_SceneColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
@@ -607,6 +625,8 @@ namespace YAEngine
         auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
+        auto& velocity = m_Graph.GetResource(m_MainVelocity);
+        auto& preResolve = m_Graph.GetResource(m_SSRColor);
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         auto& pipeline = m_PSOCache.Get(m_QuadPipeline);
@@ -619,6 +639,10 @@ namespace YAEngine
           gbuffer0.GetView(), gbuffer0.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
           gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
+          velocity.GetView(), velocity.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(5,
+          preResolve.GetView(), preResolve.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
@@ -678,7 +702,7 @@ namespace YAEngine
     // Swapchain pass - production mode: tone mapping + ImGui overlay
     m_SwapchainPassIndex = m_Graph.AddPass({
       .name = "SwapchainPass",
-      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_GBuffer0, m_GBuffer1},
+      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor},
       .colorOutputs = {},
       .externalFramebuffer = true,
       .externalFormat = swapFormat,
@@ -691,6 +715,8 @@ namespace YAEngine
         auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
+        auto& velocity = m_Graph.GetResource(m_MainVelocity);
+        auto& preResolve = m_Graph.GetResource(m_SSRColor);
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         auto& pipeline = m_PSOCache.Get(m_QuadPipeline);
@@ -703,6 +729,10 @@ namespace YAEngine
           gbuffer0.GetView(), gbuffer0.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
           gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
+          velocity.GetView(), velocity.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(5,
+          preResolve.GetView(), preResolve.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);

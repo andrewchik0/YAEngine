@@ -7,6 +7,8 @@ layout(location = 7) in vec4 inPrevClipPos;
 
 #include "common.glsl"
 
+#include "utils.glsl"
+
 #include "material.glsl"
 
 layout(location = 0) out vec4 outGBuffer0;
@@ -19,9 +21,7 @@ void main() {
   float base = float(u_Material.textureMask & 1);
   vec4 albedo = texture(baseColorTexture, inTexCoord) * base + vec4(u_Material.albedo, 1.0) * (1.0 - base);
 
-  vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;
-  vec2 prevNDC = inPrevClipPos.xy / inPrevClipPos.w;
-  vec2 velocity = (curNDC - prevNDC) * 0.5;
+  vec2 velocity = computeVelocity(inCurClipPos, inPrevClipPos);
 
   if (albedo.a < 0.5)
   {

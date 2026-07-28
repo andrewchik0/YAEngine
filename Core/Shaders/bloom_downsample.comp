@@ -36,7 +36,7 @@ void main()
   vec2 srcTexelSize = 1.0 / vec2(pc.srcWidth, pc.srcHeight);
   vec2 uv = (vec2(pos) * 2.0 + 1.0) * srcTexelSize;
 
-  // For mip 0: source is SSR color (single mip, LOD = 0)
+  // For mip 0: source is the previous frame's resolved TAA history (single mip, LOD = 0)
   // For mip N: source is bloom image, read from mip N-1
   float srcLod = max(float(pc.mipLevel) - 1.0, 0.0);
 

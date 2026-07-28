@@ -76,7 +76,8 @@ namespace YAEngine
 
       int debugViewIndex = context.render->GetDebugView();
       const char* debugViews[] = {
-        "Off", "Albedo", "Metallic", "Roughness", "Normals", "SSAO", "SSR", "Wireframe"
+        "Off", "Albedo", "Metallic", "Roughness", "Normals", "SSAO", "SSR", "Wireframe",
+        "TAA Delta", "Velocity"
       };
       if (ImGui::Combo("Debug View", &debugViewIndex, debugViews, IM_ARRAYSIZE(debugViews)))
         context.render->SetDebugView(debugViewIndex);
@@ -93,6 +94,8 @@ namespace YAEngine
       }
       ImGui::Checkbox("SSR", &context.render->GetSSREnabled());
       ImGui::Checkbox("TAA", &context.render->GetTAAEnabled());
+      if (context.render->GetTAAEnabled())
+        ImGui::DragFloat("TAA Clamp Sigma", &context.render->GetTAAClampSigma(), 0.01f, 0.0f, 8.0f);
 
       ImGui::Checkbox("Bloom", &context.render->GetBloomEnabled());
       if (context.render->GetBloomEnabled())

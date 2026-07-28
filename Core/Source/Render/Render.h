@@ -90,6 +90,7 @@ namespace YAEngine
     float& GetSSAOBias() { return m_SSAOBias; }
     bool& GetSSREnabled() { return b_SSREnabled; }
     bool& GetTAAEnabled() { return b_TAAEnabled; }
+    float& GetTAAClampSigma() { return m_TAAClampSigma; }
     bool& GetShadowsEnabled() { return b_ShadowsEnabled; }
     int& GetTonemapMode() { return m_TonemapMode; }
     bool& GetAutoExposureEnabled() { return b_AutoExposureEnabled; }
@@ -126,6 +127,9 @@ namespace YAEngine
     float m_SSAOBias = 0.025f;
     bool b_SSREnabled = true;
     bool b_TAAEnabled = true;
+    // Width of the variance clipping box in sigmas. Low values collapse the box on locally
+    // uniform neighbourhoods and throw away converged history on sub-pixel geometry.
+    float m_TAAClampSigma = 0.979f;
     bool b_ShadowsEnabled = true;
     int m_TonemapMode = TONEMAP_AGX;
     bool b_AutoExposureEnabled = true;
@@ -160,8 +164,18 @@ namespace YAEngine
     void CreateBloomResources();
     void DestroyBloomResources();
 
+    // Debug frame capture, armed via the YA_CAPTURE_DIR environment variable
+    void InitFrameCapture();
+    void CaptureFrame();
+
     RenderBackend m_Backend;
     RenderGraph m_Graph;
+
+    std::string m_CaptureDir;
+    int m_CaptureWarmup = 90;
+    int m_CaptureFramesLeft = 16;
+    int m_CaptureIndex = 0;
+    bool b_CaptureManifestOpen = false;
 
     // Render graph resource handles - G-buffer
     RGHandle m_GBuffer0 {};       // R8G8B8A8_UNORM: albedo.rgb + metallic
@@ -291,6 +305,7 @@ namespace YAEngine
     std::vector<VkImageView> m_BloomMipViews;
     std::vector<VulkanDescriptorSet> m_BloomDownsampleDescriptorSets;
     std::vector<VulkanDescriptorSet> m_BloomUpsampleDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_BloomHistorySrcSets;
     VulkanDescriptorSet m_BloomReadDescriptorSet;
 
     // Auto exposure

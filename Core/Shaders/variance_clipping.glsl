@@ -5,8 +5,11 @@
 
 // CONFIG
 
-#define EMA_IIR_INVERSE_CUTOFF_FREQUENCY        (0.93)      // 0.0 - 0.999
-#define VARIANCE_CLIPPING_COLOR_BOX_SIGMA       (0.979)      // 0.5 - 1.0
+#define EMA_IIR_INVERSE_CUTOFF_FREQUENCY        (0.97)      // 0.0 - 0.999
+// Blackman-Harris approximation used to resolve the jittered sample back onto the pixel
+// centre. More negative = tighter filter, sharper image, less flicker suppression.
+#define RECONSTRUCTION_FILTER_FALLOFF           (-2.29)
+// Box width lives in u_Frame.taaClampSigma - runtime tunable per scene.
 
 // ------------------------------------------------------------------------- //
 
@@ -54,55 +57,22 @@ void getVarianceClippingBounds(vec3 color, sampler2D colorSampler, ivec2 screenS
   vec3 colorVar = tm * tm;
 
   // Marco Salvi's Implementation (by Chris Wyman)
+  // Coordinates are clamped: an unclamped texelFetch past the edge is undefined per spec, and
+  // in practice returns black, which widens the box along the screen border.
+  ivec2 maxCoord = textureSize(colorSampler, 0) - ivec2(1);
 
-  vec3 fetch = vec3(0);
-
+  for (int y = -1; y <= 1; ++y)
   {
-     {
-       fetch = texelFetch(colorSampler, screenSpaceUV + ivec2(-1, -1), 0).rgb;
-       fetch = tonemapYCoCg(rgbToYCoCg(fetch));
-       colorAvg += fetch;
-       colorVar += fetch * fetch;
+    for (int x = -1; x <= 1; ++x)
+    {
+      // Centre is already seeded from the caller's colour, which may be filtered
+      if (x == 0 && y == 0) continue;
 
-       fetch = texelFetch(colorSampler, screenSpaceUV + ivec2( 0, -1), 0).rgb;
-       fetch = tonemapYCoCg(rgbToYCoCg(fetch));
-       colorAvg += fetch;
-       colorVar += fetch * fetch;
-
-       fetch = texelFetch(colorSampler, screenSpaceUV + ivec2( 1, -1), 0).rgb;
-       fetch = tonemapYCoCg(rgbToYCoCg(fetch));
-       colorAvg += fetch;
-       colorVar += fetch * fetch;
-     }
-
-     {
-       fetch = texelFetch(colorSampler, screenSpaceUV + ivec2(-1,  0), 0).rgb;
-       fetch = tonemapYCoCg(rgbToYCoCg(fetch));
-       colorAvg += fetch;
-       colorVar += fetch * fetch;
-
-       fetch = texelFetch(colorSampler, screenSpaceUV + ivec2( 1,  0), 0).rgb;
-       fetch = tonemapYCoCg(rgbToYCoCg(fetch));
-       colorAvg += fetch;
-       colorVar += fetch * fetch;
-     }
-
-     {
-       fetch = texelFetch(colorSampler, screenSpaceUV + ivec2(-1,  1), 0).rgb;
-       fetch = tonemapYCoCg(rgbToYCoCg(fetch));
-       colorAvg += fetch;
-       colorVar += fetch * fetch;
-
-       fetch = texelFetch(colorSampler, screenSpaceUV + ivec2( 0,  1), 0).rgb;
-       fetch = tonemapYCoCg(rgbToYCoCg(fetch));
-       colorAvg += fetch;
-       colorVar += fetch * fetch;
-
-       fetch = texelFetch(colorSampler, screenSpaceUV + ivec2( 1,  1), 0).rgb;
-       fetch = tonemapYCoCg(rgbToYCoCg(fetch));
-       colorAvg += fetch;
-       colorVar += fetch * fetch;
-     }
+      vec3 fetch = texelFetch(colorSampler, clamp(screenSpaceUV + ivec2(x, y), ivec2(0), maxCoord), 0).rgb;
+      fetch = tonemapYCoCg(rgbToYCoCg(fetch));
+      colorAvg += fetch;
+      colorVar += fetch * fetch;
+    }
   }
 
   colorAvg *= (1.0 / 9.0);

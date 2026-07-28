@@ -49,6 +49,7 @@ struct FrameUniforms
   vec3 fogColor;
   float fogStartDistance;
   float fogMaxOpacity;
+  float taaClampSigma;
 };
 
 #ifdef __cplusplus

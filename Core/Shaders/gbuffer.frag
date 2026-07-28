@@ -7,6 +7,8 @@ layout(location = 7) in vec4 inPrevClipPos;
 
 #include "common.glsl"
 
+#include "utils.glsl"
+
 #include "material.glsl"
 
 layout(location = 0) out vec4 outGBuffer0;
@@ -46,9 +48,7 @@ void main() {
     combinedTextures
   );
 
-  vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;
-  vec2 prevNDC = inPrevClipPos.xy / inPrevClipPos.w;
-  vec2 velocity = (curNDC - prevNDC) * 0.5;
+  vec2 velocity = computeVelocity(inCurClipPos, inPrevClipPos);
 
   // GBuffer0: albedo.rgb + metallic
   outGBuffer0 = vec4(albedo.rgb, metallic);

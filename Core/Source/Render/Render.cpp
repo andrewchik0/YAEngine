@@ -138,6 +138,8 @@ namespace YAEngine
 
     m_CubicResources.Init(ctx);
 
+    InitFrameCapture();
+
     vkDeviceWaitIdle(ctx.device);
   }
 
@@ -372,6 +374,7 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.ssaoBias = m_SSAOBias;
     m_FrameUniformBuffer.uniforms.ssrEnabled = b_SSREnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;
+    m_FrameUniformBuffer.uniforms.taaClampSigma = m_TAAClampSigma;
     m_FrameUniformBuffer.uniforms.hizMipCount = static_cast<int>(m_Graph.GetResourceDesc(m_HiZResource).mipLevels);
     m_FrameUniformBuffer.uniforms.frameIndex = static_cast<int>(m_GlobalFrameIndex);
     m_FrameUniformBuffer.uniforms.tonemapMode = m_TonemapMode;
@@ -511,6 +514,9 @@ namespace YAEngine
     {
       Resize();
     }
+
+    CaptureFrame();
+
     m_TAAIndex = (m_TAAIndex + 1) % 2;
     m_GlobalFrameIndex++;
   }

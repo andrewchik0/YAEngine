@@ -134,7 +134,8 @@ namespace YAEngine
       imageDesc.width = width;
       imageDesc.height = height;
       imageDesc.format = res.desc.format;
-      imageDesc.usage = res.usage;
+      // TRANSFER_SRC so debug frame capture can copy any graph resource out
+      imageDesc.usage = res.usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
       imageDesc.aspectMask = res.desc.aspect;
       imageDesc.mipLevels = res.desc.mipLevels;
 
@@ -528,6 +529,12 @@ namespace YAEngine
       YA_LOG_ERROR("Render", "Render graph has a cycle");
       throw std::runtime_error("Render graph has a cycle!");
     }
+
+    // Execution order is decided here once, from the static declarations - SetPassInput and
+    // SetPassColorOutput run per frame and do not re-sort. A pass whose declared inputs have
+    // no static writer lands at in-degree 0 and silently floats to the front of the frame.
+    for (uint32_t i = 0; i < n; i++)
+      YA_LOG_VERBOSE("Render", "Pass order %2u: %s", i, m_Passes[order[i]].info.name.c_str());
 
     return order;
   }

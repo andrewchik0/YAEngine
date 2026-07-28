@@ -8,6 +8,8 @@ layout(set = 1, binding = 0) uniform sampler2D frame;
 layout(set = 1, binding = 1) uniform sampler2D ssaoTexture;
 layout(set = 1, binding = 2) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 3) uniform sampler2D gbuffer1Texture;
+layout(set = 1, binding = 4) uniform sampler2D velocityTexture;
+layout(set = 1, binding = 5) uniform sampler2D preResolveTexture;
 
 layout(std430, set = 2, binding = 0) readonly buffer ExposureSSBO
 {
@@ -58,6 +60,21 @@ void main()
   case 7: // Wireframe (gbuffer0 albedo already holds wireframe color on black clear)
     outColor = vec4(texture(gbuffer0Texture, uv).rgb, 1.0);
     return;
+  case 8: // TAA delta: how far the resolve moved the frame away from its own input.
+          // Near-black everywhere means the history is not contributing and TAA is a no-op.
+    {
+      vec3 preResolve = texture(preResolveTexture, uv).rgb;
+      vec3 resolved = texture(frame, uv).rgb;
+      outColor = vec4(abs(resolved - preResolve) * 10.0, 1.0);
+    }
+    return;
+  case 9: // Motion vectors, scaled to be visible. Must be pure black on a static camera:
+          // red = horizontal, green = vertical, brightness = magnitude.
+    {
+      vec2 velocity = texture(velocityTexture, uv).rg;
+      outColor = vec4(abs(velocity) * 200.0, 0.0, 1.0);
+    }
+    return;
   }
 
   // Default: tone-mapped final image
@@ -70,12 +87,6 @@ void main()
   color = color * finalExposure;
   color = applyTonemap(color);
   color = pow(color, vec3(1.0 / u_Frame.gamma));
-
-  if (u_Frame.ssaoEnabled != 0)
-  {
-    float ao = texture(ssaoTexture, uv).r;
-    color *= ao;
-  }
 
   outColor = vec4(color, 1.0);
 }

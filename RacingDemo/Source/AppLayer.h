@@ -20,6 +20,7 @@
 #endif
 
 // #define TEST
+#define SPONZA
 
 class AppLayer : public YAEngine::Layer
 {
@@ -29,7 +30,7 @@ public:
   void OnAttach() override
   {
     GetWindow().Maximize();
-#ifndef TEST
+#if !defined(TEST) && !defined(SPONZA)
     GetLayerManager().PushLayer<ReelPlaybackLayer>();
     GetLayerManager().PushLayer<ControlsLayer>();
 #endif
@@ -56,6 +57,12 @@ public:
     camState.pitch = glm::radians(-60.0f);
     camState.yaw = glm::radians(180.0f);
 #endif
+
+#elif defined(SPONZA)
+    YAEngine::SceneSerializer::Load(
+      APP_WORKING_DIR "/Assets/Scenes/sponza.scene",
+      GetScene(), GetAssets(), registry, GetRender(),
+      APP_WORKING_DIR, &threadPool);
 
 #else
     YAEngine::SceneSerializer::Load(

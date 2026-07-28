@@ -108,6 +108,7 @@ namespace YAEngine
     settings["ssaoBias"] = render.GetSSAOBias();
     settings["ssr"] = render.GetSSREnabled();
     settings["taa"] = render.GetTAAEnabled();
+    settings["taaClampSigma"] = render.GetTAAClampSigma();
     settings["shadows"] = render.GetShadowsEnabled();
     settings["autoExposure"] = render.GetAutoExposureEnabled();
     settings["adaptSpeedUp"] = render.GetAdaptSpeedUp();
@@ -192,6 +193,7 @@ namespace YAEngine
     if (settings["ssaoBias"]) render.GetSSAOBias() = settings["ssaoBias"].as<float>();
     if (settings["ssr"]) render.GetSSREnabled() = settings["ssr"].as<bool>();
     if (settings["taa"]) render.GetTAAEnabled() = settings["taa"].as<bool>();
+    if (settings["taaClampSigma"]) render.GetTAAClampSigma() = settings["taaClampSigma"].as<float>();
     if (settings["shadows"]) render.GetShadowsEnabled() = settings["shadows"].as<bool>();
     if (settings["autoExposure"]) render.GetAutoExposureEnabled() = settings["autoExposure"].as<bool>();
     if (settings["adaptSpeedUp"]) render.GetAdaptSpeedUp() = settings["adaptSpeedUp"].as<float>();

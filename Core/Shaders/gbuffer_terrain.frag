@@ -7,6 +7,8 @@ layout(location = 7) in vec4 inPrevClipPos;
 
 #include "common.glsl"
 
+#include "utils.glsl"
+
 #include "terrain_material.glsl"
 
 layout(location = 0) out vec4 outGBuffer0;
@@ -55,10 +57,7 @@ void main() {
   float hasAnyNormal = float(((u_Terrain.textureMask >> 1) | (u_Terrain.textureMask >> 5) | (u_Terrain.textureMask >> 9)) & 1);
   vec3 normal = mix(inNormal, normalize(inTBN * normalize(normalTS)), hasAnyNormal);
 
-  // Velocity
-  vec2 curNDC = inCurClipPos.xy / inCurClipPos.w;
-  vec2 prevNDC = inPrevClipPos.xy / inPrevClipPos.w;
-  vec2 velocity = (curNDC - prevNDC) * 0.5;
+  vec2 velocity = computeVelocity(inCurClipPos, inPrevClipPos);
 
   // GBuffer0: albedo.rgb + metallic
   outGBuffer0 = vec4(albedo.rgb, metallic);

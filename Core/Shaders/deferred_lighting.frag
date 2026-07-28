@@ -8,6 +8,7 @@ layout(location = 0) out vec4 outColor;
 layout(set = 1, binding = 0) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 1) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 2) uniform sampler2D depthTexture;
+layout(set = 1, binding = 3) uniform sampler2D ssaoTexture;
 
 const float DEPTH_EPSILON = 1.0;
 const int SHADING_PBR = 0;
@@ -63,6 +64,11 @@ void main()
   vec3 Lo = computeDirectLighting(worldPos, viewPos, normal, viewVec, albedo, metallic, roughness, f0, NdotV, ivec2(gl_FragCoord.xy));
 
   vec3 resultColor = max(ambient + Lo, vec3(0.0));
+
+  // AO is applied here, not after tone mapping: it is derived from the jittered depth buffer
+  // and changes every frame, so it has to go through TAA or it flickers on fine geometry.
+  if (u_Frame.ssaoEnabled != 0)
+    resultColor *= texture(ssaoTexture, uv).r;
 
   if (u_Frame.fogEnabled != 0)
   {

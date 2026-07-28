@@ -110,23 +110,31 @@ namespace YAEngine
     }
 
     // Write downsample descriptors
-    // Mip 0: reads SSR color (stable RG resource view), writes bloom mip 0
+    // Mip 0: source is the resolved TAA history, which ping-pongs - see m_BloomHistorySrcSets
     // Mip 1+: reads bloom full image via sampler (specific mip via textureLod), writes bloom mip N
-    auto& ssrColor = m_Graph.GetResource(m_SSRColor);
-    for (uint32_t mip = 0; mip < mipCount; mip++)
+    // Index 0 is never written or bound - m_BloomHistorySrcSets covers mip 0. It is kept
+    // because the other sets borrow its layout.
+    for (uint32_t mip = 1; mip < mipCount; mip++)
     {
-      if (mip == 0)
-      {
-        m_BloomDownsampleDescriptorSets[mip].WriteCombinedImageSampler(0,
-          ssrColor.GetView(), ssrColor.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-      }
-      else
-      {
-        m_BloomDownsampleDescriptorSets[mip].WriteCombinedImageSampler(0,
-          m_BloomImage.GetView(), m_BloomImage.GetSampler(), VK_IMAGE_LAYOUT_GENERAL);
-      }
+      m_BloomDownsampleDescriptorSets[mip].WriteCombinedImageSampler(0,
+        m_BloomImage.GetView(), m_BloomImage.GetSampler(), VK_IMAGE_LAYOUT_GENERAL);
       m_BloomDownsampleDescriptorSets[mip].WriteStorageImage(1,
         m_BloomMipViews[mip], VK_IMAGE_LAYOUT_GENERAL);
+    }
+
+    // One pre-written set per TAA history buffer. Rewriting a single set every frame races
+    // with the previous frame still reading it - the sets are not per frame-in-flight.
+    const RGHandle historyHandles[2] = { m_TAAHistory0, m_TAAHistory1 };
+    m_BloomHistorySrcSets.resize(2);
+    for (uint32_t i = 0; i < 2; i++)
+    {
+      m_BloomHistorySrcSets[i].Init(ctx, m_BloomDownsampleDescriptorSets[0].GetLayout());
+
+      auto& history = m_Graph.GetResource(historyHandles[i]);
+      m_BloomHistorySrcSets[i].WriteCombinedImageSampler(0,
+        history.GetView(), history.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      m_BloomHistorySrcSets[i].WriteStorageImage(1,
+        m_BloomMipViews[0], VK_IMAGE_LAYOUT_GENERAL);
     }
 
     // Write upsample descriptors
@@ -162,6 +170,10 @@ namespace YAEngine
     for (auto& set : m_BloomDownsampleDescriptorSets)
       set.Destroy();
     m_BloomDownsampleDescriptorSets.clear();
+
+    for (auto& set : m_BloomHistorySrcSets)
+      set.Destroy();
+    m_BloomHistorySrcSets.clear();
 
     for (auto& set : m_BloomUpsampleDescriptorSets)
       set.Destroy();

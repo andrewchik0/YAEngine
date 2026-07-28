@@ -6,8 +6,31 @@ layout(location = 0) out vec4 outColor;
 layout(set = 1, binding = 0) uniform sampler2D frame;
 layout(set = 1, binding = 1) uniform sampler2D history;
 layout(set = 1, binding = 2) uniform sampler2D velocityTexture;
+layout(set = 1, binding = 3) uniform sampler2D depthTexture;
 
 #include "variance_clipping.glsl"
+
+const float BACKGROUND_DEPTH = 1.0;
+
+// Background pixels are never rasterized, so the velocity buffer still holds its clear value
+// there. Reproject the view ray instead: an infinitely distant sample follows camera rotation
+// but not translation, which is why the direction is transformed with w = 0.
+// The result is unjittered like the geometry path - see computeVelocity in utils.glsl.
+vec2 backgroundVelocity(vec2 ndc)
+{
+  vec4 viewPos = u_Frame.invProj * vec4(ndc, 1.0, 1.0);
+  vec3 worldDir = mat3(u_Frame.invView) * viewPos.xyz;
+
+  // Parenthesised: without them this is mat4 * mat4 per fragment before the mat-vec
+  vec4 prevClip = u_Frame.prevProj * (u_Frame.prevView * vec4(worldDir, 0.0));
+
+  // Direction was behind the previous camera: no history exists, push the lookup out of bounds
+  if (prevClip.w <= 0.0)
+    return vec2(2.0);
+
+  vec2 curNDC = ndc + vec2(u_Frame.jitterX, u_Frame.jitterY);
+  return (curNDC - prevClip.xy / prevClip.w) * 0.5;
+}
 
 void main()
 {
@@ -18,17 +41,53 @@ void main()
     return;
   }
 
-  vec2 unjitteredUV = uv - vec2(u_Frame.jitterX, u_Frame.jitterY) * 0.5;
-  ivec2 screenSpaceUV = ivec2(unjitteredUV * vec2(u_Frame.screenWidth, u_Frame.screenHeight));
+  ivec2 screenSpaceUV = ivec2(gl_FragCoord.xy);
 
-  vec3 currentColor = texture(frame, unjitteredUV).rgb;
+  // Reconstruction filter. Every pixel of this frame was rasterized at the same sub-pixel
+  // jitter offset, so a raw point sample carries that offset into the blend and the output
+  // wobbles by (1 - blendFactor) of the sample's own frame-to-frame swing. Weighting the
+  // neighbourhood by each sample's distance to the pixel centre re-centres the estimate.
+  vec2 jitterPixels = vec2(u_Frame.jitterX, u_Frame.jitterY)
+                    * 0.5 * vec2(u_Frame.screenWidth, u_Frame.screenHeight);
+
+  // exp(-a * (dx*dx + dy*dy)) factors into exp(-a*dx*dx) * exp(-a*dy*dy), so the nine weights
+  // come from six exponentials instead of nine. They only depend on uniforms.
+  float wx[3];
+  float wy[3];
+  for (int i = -1; i <= 1; ++i)
+  {
+    float dx = float(i) + jitterPixels.x;
+    float dy = float(i) + jitterPixels.y;
+    wx[i + 1] = exp(RECONSTRUCTION_FILTER_FALLOFF * dx * dx);
+    wy[i + 1] = exp(RECONSTRUCTION_FILTER_FALLOFF * dy * dy);
+  }
+
+  ivec2 maxCoord = textureSize(frame, 0) - ivec2(1);
+  vec3 filtered = vec3(0.0);
+  float weightSum = 0.0;
+
+  for (int y = -1; y <= 1; ++y)
+  {
+    for (int x = -1; x <= 1; ++x)
+    {
+      float w = wx[x + 1] * wy[y + 1];
+      filtered += texelFetch(frame, clamp(screenSpaceUV + ivec2(x, y), ivec2(0), maxCoord), 0).rgb * w;
+      weightSum += w;
+    }
+  }
+
+  vec3 currentColor = filtered / max(weightSum, 1e-5);
   vec3 currentYCoCg = rgbToYCoCg(currentColor);
 
   vec3 colorMin = vec3(0);
   vec3 colorMax = vec3(0);
-  getVarianceClippingBounds(currentYCoCg, frame, screenSpaceUV, VARIANCE_CLIPPING_COLOR_BOX_SIGMA, colorMin, colorMax);
+  getVarianceClippingBounds(currentYCoCg, frame, screenSpaceUV, u_Frame.taaClampSigma, colorMin, colorMax);
 
-  vec2 velocity = texture(velocityTexture, uv).rg;
+  float depth = texture(depthTexture, uv).r;
+  vec2 velocity = depth >= BACKGROUND_DEPTH
+    ? backgroundVelocity(uv * 2.0 - 1.0)
+    : texture(velocityTexture, uv).rg;
+
   vec2 historyUV = uv - velocity;
 
   bool historyValid = historyUV.x >= 0.0 && historyUV.x <= 1.0
