@@ -29,13 +29,20 @@ namespace YAEngine
 
     desc.basePath = std::filesystem::path(path).parent_path();
     desc.root.name = std::filesystem::path(path).filename().string();
+    desc.sourcePath = path;
 
-    ProcessNode(desc, desc.root, scene->mRootNode, scene, combinedTextures);
+    // Meshes share materials, so process each one once up front. This keeps
+    // desc.materials indexed exactly like scene->mMaterials.
+    desc.materials.reserve(scene->mNumMaterials);
+    for (uint32_t i = 0; i < scene->mNumMaterials; i++)
+      ProcessMaterial(desc, scene->mMaterials[i], scene, combinedTextures);
+
+    ProcessNode(desc, desc.root, scene->mRootNode, scene);
 
     return desc;
   }
 
-  void ModelImporter::ProcessNode(ModelDescription& desc, NodeDescription& parentNode, aiNode* node, const aiScene* scene, bool combinedTextures)
+  void ModelImporter::ProcessNode(ModelDescription& desc, NodeDescription& parentNode, aiNode* node, const aiScene* scene)
   {
     NodeDescription nodeDesc;
     nodeDesc.name = node->mName.C_Str();
@@ -51,18 +58,18 @@ namespace YAEngine
     for (size_t i = 0; i < node->mNumMeshes; ++i)
     {
       aiMesh* ai_mesh = scene->mMeshes[node->mMeshes[i]];
-      ProcessMesh(desc, nodeDesc, ai_mesh, scene, combinedTextures);
+      ProcessMesh(desc, nodeDesc, ai_mesh);
     }
 
     for (size_t i = 0; i < node->mNumChildren; ++i)
     {
-      ProcessNode(desc, nodeDesc, node->mChildren[i], scene, combinedTextures);
+      ProcessNode(desc, nodeDesc, node->mChildren[i], scene);
     }
 
     parentNode.children.push_back(std::move(nodeDesc));
   }
 
-  void ModelImporter::ProcessMesh(ModelDescription& desc, NodeDescription& parentNode, aiMesh* mesh, const aiScene* scene, bool combinedTextures)
+  void ModelImporter::ProcessMesh(ModelDescription& desc, NodeDescription& parentNode, aiMesh* mesh)
   {
     MeshDescription meshDesc;
 
@@ -122,18 +129,15 @@ namespace YAEngine
     uint32_t meshIndex = static_cast<uint32_t>(desc.meshes.size());
     desc.meshes.push_back(std::move(meshDesc));
 
-    aiMaterial* aiMat = scene->mMaterials[mesh->mMaterialIndex];
-    uint32_t materialIndex = ProcessMaterial(desc, aiMat, combinedTextures);
-
     NodeDescription meshNode;
     meshNode.name = mesh->mName.C_Str();
     meshNode.meshIndex = meshIndex;
-    meshNode.materialIndex = materialIndex;
+    meshNode.materialIndex = mesh->mMaterialIndex;
 
     parentNode.children.push_back(std::move(meshNode));
   }
 
-  uint32_t ModelImporter::ProcessMaterial(ModelDescription& desc, const aiMaterial* material, bool combinedTextures)
+  uint32_t ModelImporter::ProcessMaterial(ModelDescription& desc, const aiMaterial* material, const aiScene* scene, bool combinedTextures)
   {
     MaterialDescription matDesc;
 
@@ -176,51 +180,100 @@ namespace YAEngine
       matDesc.transparent = (std::string(alphaMode.C_Str()) == "BLEND");
     }
 
-    std::string baseColorTexture = GetTexturePath(material, aiTextureType_DIFFUSE);
-    std::string metallicTexture = GetTexturePath(material, aiTextureType_METALNESS);
-    std::string roughnessTexture = GetTexturePath(material, aiTextureType_DIFFUSE_ROUGHNESS);
-    std::string normalTexture = GetTexturePath(material, aiTextureType_NORMALS);
-    std::string normalPBR = GetTexturePath(material, aiTextureType_NORMAL_CAMERA);
-    std::string emissiveTexture = GetTexturePath(material, aiTextureType_EMISSIVE);
-    std::string heightTexture = GetTexturePath(material, aiTextureType_HEIGHT);
-    std::string specularTexture = GetTexturePath(material, aiTextureType_SPECULAR);
+    std::string baseColorTexture = ResolveTexturePath(desc, scene, material, aiTextureType_DIFFUSE);
+    std::string metallicTexture = ResolveTexturePath(desc, scene, material, aiTextureType_METALNESS);
+    std::string roughnessTexture = ResolveTexturePath(desc, scene, material, aiTextureType_DIFFUSE_ROUGHNESS);
+    std::string normalTexture = ResolveTexturePath(desc, scene, material, aiTextureType_NORMALS);
+    std::string normalPBR = ResolveTexturePath(desc, scene, material, aiTextureType_NORMAL_CAMERA);
+    std::string emissiveTexture = ResolveTexturePath(desc, scene, material, aiTextureType_EMISSIVE);
+    std::string heightTexture = ResolveTexturePath(desc, scene, material, aiTextureType_HEIGHT);
+    std::string specularTexture = ResolveTexturePath(desc, scene, material, aiTextureType_SPECULAR);
 
     if (!baseColorTexture.empty())
-      matDesc.baseColorTexture = (desc.basePath / baseColorTexture).string();
+      matDesc.baseColorTexture = baseColorTexture;
     if (!metallicTexture.empty())
-      matDesc.metallicTexture = (desc.basePath / metallicTexture).string();
+      matDesc.metallicTexture = metallicTexture;
     if (!roughnessTexture.empty())
-      matDesc.roughnessTexture = (desc.basePath / roughnessTexture).string();
+      matDesc.roughnessTexture = roughnessTexture;
     else if (hasSG && !specularTexture.empty())
-      matDesc.roughnessTexture = (desc.basePath / specularTexture).string();
+      matDesc.roughnessTexture = specularTexture;
     if (!specularTexture.empty())
-      matDesc.specularTexture = (desc.basePath / specularTexture).string();
+      matDesc.specularTexture = specularTexture;
     if (!emissiveTexture.empty())
-      matDesc.emissiveTexture = (desc.basePath / emissiveTexture).string();
+      matDesc.emissiveTexture = emissiveTexture;
 
     if (!normalTexture.empty())
-      matDesc.normalTexture = (desc.basePath / normalTexture).string();
+      matDesc.normalTexture = normalTexture;
     else if (!normalPBR.empty())
-      matDesc.normalTexture = (desc.basePath / normalPBR).string();
+      matDesc.normalTexture = normalPBR;
     else if (!heightTexture.empty())
-      matDesc.heightTexture = (desc.basePath / heightTexture).string();
+      matDesc.heightTexture = heightTexture;
+
+    // glTF packs both values into one texture (G = roughness, B = metallic) and assimp
+    // reports it in the metalness and roughness slots alike - identical paths mean packed.
+    if (!matDesc.metallicTexture.empty() && matDesc.metallicTexture == matDesc.roughnessTexture)
+      matDesc.combinedTextures = true;
+
+    // A metallic map with no factor in the file still needs a neutral multiplier
+    if (metallic < 0.0f && !matDesc.metallicTexture.empty())
+      matDesc.metallic = 1.0f;
 
     uint32_t index = static_cast<uint32_t>(desc.materials.size());
     desc.materials.push_back(std::move(matDesc));
     return index;
   }
 
-  std::string ModelImporter::GetTexturePath(const aiMaterial* mat, aiTextureType type)
+  std::string ModelImporter::ResolveTexturePath(ModelDescription& desc, const aiScene* scene,
+    const aiMaterial* mat, aiTextureType type)
   {
-    if (mat->GetTextureCount(type) > 0)
+    if (mat->GetTextureCount(type) == 0)
+      return "";
+
+    aiString path;
+    if (mat->GetTexture(type, 0, &path) != AI_SUCCESS)
+      return "";
+
+    // Resolves both "*N" GLB references and FBX embedded media referenced by file name
+    if (const aiTexture* embedded = scene->GetEmbeddedTexture(path.C_Str()))
+      return StoreEmbeddedTexture(desc, embedded, path.C_Str());
+
+    return (desc.basePath / path.C_Str()).string();
+  }
+
+  std::string ModelImporter::StoreEmbeddedTexture(ModelDescription& desc, const aiTexture* texture,
+    const std::string& refName)
+  {
+    std::string key = desc.sourcePath + "*" + refName;
+    if (desc.embeddedTextures.contains(key))
+      return key;
+
+    EmbeddedTexture entry;
+
+    if (texture->mHeight == 0)
     {
-      aiString path;
-      if (mat->GetTexture(type, 0, &path) == AI_SUCCESS)
+      // Compressed payload - mWidth holds the byte count, decoded by stb later
+      auto* bytes = reinterpret_cast<const uint8_t*>(texture->pcData);
+      entry.data.assign(bytes, bytes + texture->mWidth);
+    }
+    else
+    {
+      entry.width = texture->mWidth;
+      entry.height = texture->mHeight;
+
+      size_t texelCount = size_t(texture->mWidth) * texture->mHeight;
+      entry.data.resize(texelCount * 4);
+      for (size_t i = 0; i < texelCount; i++)
       {
-        return { path.C_Str() };
+        const aiTexel& texel = texture->pcData[i];
+        entry.data[i * 4 + 0] = texel.r;
+        entry.data[i * 4 + 1] = texel.g;
+        entry.data[i * 4 + 2] = texel.b;
+        entry.data[i * 4 + 3] = texel.a;
       }
     }
-    return "";
+
+    desc.embeddedTextures.emplace(key, std::move(entry));
+    return key;
   }
 
   void ModelImporter::ComputeMeshBB(const aiMesh* mesh, glm::vec3& outMin, glm::vec3& outMax)

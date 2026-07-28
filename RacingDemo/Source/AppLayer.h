@@ -60,7 +60,7 @@ public:
 
 #elif defined(SPONZA)
     YAEngine::SceneSerializer::Load(
-      APP_WORKING_DIR "/Assets/Scenes/sponza.scene",
+      APP_WORKING_DIR "/Assets/Scenes/cafe.scene",
       GetScene(), GetAssets(), registry, GetRender(),
       APP_WORKING_DIR, &threadPool);
 

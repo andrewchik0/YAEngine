@@ -389,17 +389,25 @@ namespace YAEngine
       mat.combinedTextures = matDesc.combinedTextures;
       mat.transparent = matDesc.transparent;
 
+      auto loadTexture = [&](const std::string& path, bool linear, bool* hasAlpha)
+      {
+        const EmbeddedTexture* embedded = desc.FindEmbedded(path);
+        return embedded != nullptr
+          ? assets.Textures().LoadEmbedded(*embedded, path, hasAlpha, linear)
+          : assets.Textures().Load(path, hasAlpha, linear);
+      };
+
       if (!matDesc.baseColorTexture.empty())
       {
-        mat.baseColorTexture = assets.Textures().Load(matDesc.baseColorTexture, &mat.hasAlpha);
+        mat.baseColorTexture = loadTexture(matDesc.baseColorTexture, false, &mat.hasAlpha);
         mat.alphaTest = mat.hasAlpha && !mat.transparent;
       }
       if (!matDesc.metallicTexture.empty())
-        mat.metallicTexture = assets.Textures().Load(matDesc.metallicTexture, nullptr, true);
+        mat.metallicTexture = loadTexture(matDesc.metallicTexture, true, nullptr);
       if (!matDesc.roughnessTexture.empty())
-        mat.roughnessTexture = assets.Textures().Load(matDesc.roughnessTexture, nullptr, true);
+        mat.roughnessTexture = loadTexture(matDesc.roughnessTexture, true, nullptr);
       if (!matDesc.normalTexture.empty())
-        mat.normalTexture = assets.Textures().Load(matDesc.normalTexture, nullptr, true);
+        mat.normalTexture = loadTexture(matDesc.normalTexture, true, nullptr);
     }
 
     return setup;

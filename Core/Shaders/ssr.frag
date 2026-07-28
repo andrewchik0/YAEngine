@@ -275,7 +275,8 @@ void main()
   vec3 reflectDirWorld = mat3(u_Frame.invView) * reflectDir;
   float backfaceFade = 1.0 - smoothstep(-0.17, 0.0, dot(reflectDirWorld, hitNormal));
 
-  vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade * silhouetteFade * contactFade * backfaceFade, vec3(0.0), vec3(1.0));
+  vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade * silhouetteFade * contactFade * backfaceFade
+                       * u_Frame.ssrIntensity, vec3(0.0), vec3(1.0));
 
   outColor = vec4(originalColor * (1.0 - ssrMask) + reflectedColor * ssrMask, 1.0);
 }

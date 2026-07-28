@@ -21,7 +21,8 @@ namespace YAEngine
 
   private:
 
-    Entity BuildNode(const NodeDescription& node, Entity parent, const ModelDescription& desc);
+    Entity BuildNode(const NodeDescription& node, Entity parent, const ModelDescription& desc,
+      std::unordered_map<uint32_t, MaterialHandle>& materialCache);
 
     Scene* m_Scene = nullptr;
     AssetManager* m_AssetManager = nullptr;

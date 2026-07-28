@@ -107,6 +107,7 @@ namespace YAEngine
     settings["ssaoRadius"] = render.GetSSAORadius();
     settings["ssaoBias"] = render.GetSSAOBias();
     settings["ssr"] = render.GetSSREnabled();
+    settings["ssrIntensity"] = render.GetSSRIntensity();
     settings["taa"] = render.GetTAAEnabled();
     settings["taaClampSigma"] = render.GetTAAClampSigma();
     settings["shadows"] = render.GetShadowsEnabled();
@@ -192,6 +193,7 @@ namespace YAEngine
     if (settings["ssaoRadius"]) render.GetSSAORadius() = settings["ssaoRadius"].as<float>();
     if (settings["ssaoBias"]) render.GetSSAOBias() = settings["ssaoBias"].as<float>();
     if (settings["ssr"]) render.GetSSREnabled() = settings["ssr"].as<bool>();
+    if (settings["ssrIntensity"]) render.GetSSRIntensity() = settings["ssrIntensity"].as<float>();
     if (settings["taa"]) render.GetTAAEnabled() = settings["taa"].as<bool>();
     if (settings["taaClampSigma"]) render.GetTAAClampSigma() = settings["taaClampSigma"].as<float>();
     if (settings["shadows"]) render.GetShadowsEnabled() = settings["shadows"].as<bool>();
@@ -467,11 +469,17 @@ namespace YAEngine
     std::unordered_map<std::string, size_t> textureKeyMap;
     std::vector<TextureTask> textureTasks;
 
-    auto scheduleTexture = [&](const std::string& path, bool linear)
+    auto scheduleTexture = [&](const ModelDescription& desc, const std::string& path, bool linear)
     {
       if (path.empty())
         return;
-      auto canonical = std::filesystem::weakly_canonical(path).string();
+
+      // Embedded texture paths are synthetic keys - canonicalizing them would break the lookup
+      const EmbeddedTexture* embedded = desc.FindEmbedded(path);
+      auto canonical = embedded != nullptr
+        ? path
+        : std::filesystem::weakly_canonical(path).string();
+
       std::string key = canonical + (linear ? "|1" : "|0");
       if (textureKeyMap.contains(key))
         return;
@@ -481,9 +489,18 @@ namespace YAEngine
       task.originalPath = path;
       task.canonicalPath = canonical;
       task.linear = linear;
-      task.future = threadPool.Submit([path, linear]() {
-        return TextureManager::DecodeToCpu(path, linear);
-      });
+      if (embedded != nullptr)
+      {
+        task.future = threadPool.Submit([embedded, linear]() {
+          return TextureManager::DecodeEmbeddedToCpu(*embedded, linear);
+        });
+      }
+      else
+      {
+        task.future = threadPool.Submit([path, linear]() {
+          return TextureManager::DecodeToCpu(path, linear);
+        });
+      }
       textureTasks.push_back(std::move(task));
     };
 
@@ -491,13 +508,13 @@ namespace YAEngine
     {
       for (auto& mat : desc.materials)
       {
-        scheduleTexture(mat.baseColorTexture, false);
-        scheduleTexture(mat.metallicTexture, true);
-        scheduleTexture(mat.roughnessTexture, true);
-        scheduleTexture(mat.specularTexture, true);
-        scheduleTexture(mat.emissiveTexture, false);
-        scheduleTexture(mat.normalTexture, true);
-        scheduleTexture(mat.heightTexture, true);
+        scheduleTexture(desc, mat.baseColorTexture, false);
+        scheduleTexture(desc, mat.metallicTexture, true);
+        scheduleTexture(desc, mat.roughnessTexture, true);
+        scheduleTexture(desc, mat.specularTexture, true);
+        scheduleTexture(desc, mat.emissiveTexture, false);
+        scheduleTexture(desc, mat.normalTexture, true);
+        scheduleTexture(desc, mat.heightTexture, true);
       }
     }
 

@@ -9,6 +9,37 @@
 
 namespace YAEngine
 {
+  static CpuTextureData BuildCpuTextureData(const uint8_t* rgba, uint32_t width, uint32_t height, bool linear)
+  {
+    CpuTextureData result;
+    result.width = width;
+    result.height = height;
+    result.pixelSize = 4;
+    result.linear = linear;
+    result.repeat = true;
+
+    result.hasAlpha = TextureManager::CheckAlpha(rgba, width, height);
+
+    uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+
+    if (result.hasAlpha)
+    {
+      result.hasCpuMips = true;
+      MipGenerator::GenerateWithAlphaCoverage(rgba, width, height, mipLevels, result.mips);
+    }
+    else
+    {
+      result.hasCpuMips = false;
+      result.mips.resize(1);
+      result.mips[0].width = width;
+      result.mips[0].height = height;
+      size_t dataSize = static_cast<size_t>(width) * height * result.pixelSize;
+      result.mips[0].data.assign(rgba, rgba + dataSize);
+    }
+
+    return result;
+  }
+
   TextureHandle TextureManager::Load(const std::string& path, bool* hasAlpha, bool linear)
   {
     auto canonical = std::filesystem::weakly_canonical(path).string();
@@ -45,6 +76,29 @@ namespace YAEngine
       YA_LOG_ERROR("Assets", "Failed to load texture: %s", path.c_str());
       return {};
     }
+  }
+
+  TextureHandle TextureManager::LoadEmbedded(const EmbeddedTexture& texture, const std::string& cacheKey,
+    bool* hasAlpha, bool linear)
+  {
+    CacheKey key { cacheKey, linear };
+
+    auto it = m_Cache.find(key);
+    if (it != m_Cache.end() && Has(it->second))
+    {
+      if (hasAlpha != nullptr)
+        *hasAlpha = Get(it->second).m_HasAlpha;
+      return it->second;
+    }
+
+    auto cpuData = DecodeEmbeddedToCpu(texture, linear);
+    if (cpuData.width == 0)
+    {
+      YA_LOG_ERROR("Assets", "Failed to load embedded texture: %s", cacheKey.c_str());
+      return {};
+    }
+
+    return LoadFromCpuData(std::move(cpuData), hasAlpha, cacheKey);
   }
 
   TextureHandle TextureManager::LoadFromCpuData(CpuTextureData&& cpuData, bool* hasAlpha, const std::string& cachePath)
@@ -85,40 +139,43 @@ namespace YAEngine
 
   CpuTextureData TextureManager::DecodeToCpu(const std::string& filePath, bool linear)
   {
-    CpuTextureData result;
     int32_t width, height, channels;
 
     void* data = stbi_load(filePath.c_str(), &width, &height, &channels, 4);
     if (!data)
     {
       YA_LOG_ERROR("Assets", "DecodeToCpu: failed to load texture: %s", filePath.c_str());
-      return result;
+      return {};
     }
 
-    result.width = static_cast<uint32_t>(width);
-    result.height = static_cast<uint32_t>(height);
-    result.pixelSize = 4;
-    result.linear = linear;
-    result.repeat = true;
+    CpuTextureData result = BuildCpuTextureData(static_cast<const uint8_t*>(data),
+      static_cast<uint32_t>(width), static_cast<uint32_t>(height), linear);
 
-    result.hasAlpha = CheckAlpha(data, result.width, result.height);
+    stbi_image_free(data);
+    return result;
+  }
 
-    uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(result.width, result.height)))) + 1;
+  CpuTextureData TextureManager::DecodeEmbeddedToCpu(const EmbeddedTexture& texture, bool linear)
+  {
+    if (texture.data.empty())
+      return {};
 
-    if (result.hasAlpha && result.pixelSize == 4)
+    // Uncompressed payload is already RGBA8 - no decoding needed
+    if (texture.width != 0 && texture.height != 0)
+      return BuildCpuTextureData(texture.data.data(), texture.width, texture.height, linear);
+
+    int32_t width, height, channels;
+
+    void* data = stbi_load_from_memory(texture.data.data(), static_cast<int32_t>(texture.data.size()),
+      &width, &height, &channels, 4);
+    if (!data)
     {
-      result.hasCpuMips = true;
-      MipGenerator::GenerateWithAlphaCoverage(static_cast<uint8_t*>(data), result.width, result.height, mipLevels, result.mips);
+      YA_LOG_ERROR("Assets", "DecodeEmbeddedToCpu: failed to decode embedded texture (%zu bytes)", texture.data.size());
+      return {};
     }
-    else
-    {
-      result.hasCpuMips = false;
-      result.mips.resize(1);
-      result.mips[0].width = result.width;
-      result.mips[0].height = result.height;
-      size_t dataSize = static_cast<size_t>(result.width) * result.height * result.pixelSize;
-      result.mips[0].data.assign(static_cast<uint8_t*>(data), static_cast<uint8_t*>(data) + dataSize);
-    }
+
+    CpuTextureData result = BuildCpuTextureData(static_cast<const uint8_t*>(data),
+      static_cast<uint32_t>(width), static_cast<uint32_t>(height), linear);
 
     stbi_image_free(data);
     return result;
@@ -143,9 +200,9 @@ namespace YAEngine
     m_Cache.clear();
   }
 
-  bool TextureManager::CheckAlpha(void* data, uint32_t width, uint32_t height)
+  bool TextureManager::CheckAlpha(const void* data, uint32_t width, uint32_t height)
   {
-    uint8_t* pixels = (uint8_t *)data;
+    const uint8_t* pixels = (const uint8_t *)data;
 
     for (size_t i = 3; i < static_cast<size_t>(width) * height * 4; i += 4)
     {

@@ -26,14 +26,20 @@ namespace YAEngine
     [[nodiscard]]
     TextureHandle Load(const std::string& filePath, bool* hasAlpha = nullptr, bool linear = false);
 
+    [[nodiscard]]
+    TextureHandle LoadEmbedded(const EmbeddedTexture& texture, const std::string& cacheKey,
+      bool* hasAlpha = nullptr, bool linear = false);
+
     static CpuTextureData DecodeToCpu(const std::string& filePath, bool linear = false);
+
+    static CpuTextureData DecodeEmbeddedToCpu(const EmbeddedTexture& texture, bool linear = false);
 
     [[nodiscard]]
     TextureHandle LoadFromCpuData(CpuTextureData&& cpuData, bool* hasAlpha = nullptr, const std::string& cachePath = "");
 
     void Destroy(TextureHandle handle);
 
-    static bool CheckAlpha(void* data, uint32_t width, uint32_t height);
+    static bool CheckAlpha(const void* data, uint32_t width, uint32_t height);
 
     void DestroyAll() override;
 

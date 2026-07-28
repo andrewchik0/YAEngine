@@ -89,6 +89,7 @@ namespace YAEngine
     float& GetSSAORadius() { return m_SSAORadius; }
     float& GetSSAOBias() { return m_SSAOBias; }
     bool& GetSSREnabled() { return b_SSREnabled; }
+    float& GetSSRIntensity() { return m_SSRIntensity; }
     bool& GetTAAEnabled() { return b_TAAEnabled; }
     float& GetTAAClampSigma() { return m_TAAClampSigma; }
     bool& GetShadowsEnabled() { return b_ShadowsEnabled; }
@@ -126,6 +127,9 @@ namespace YAEngine
     float m_SSAORadius = 0.2f;
     float m_SSAOBias = 0.025f;
     bool b_SSREnabled = true;
+    // Artistic multiplier on the SSR mask. Fresnel keeps dielectric reflections near 4%,
+    // so values above 1 are the usual way to make them readable.
+    float m_SSRIntensity = 1.0f;
     bool b_TAAEnabled = true;
     // Width of the variance clipping box in sigmas. Low values collapse the box on locally
     // uniform neighbourhoods and throw away converged history on sub-pixel geometry.

@@ -6,6 +6,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "Render/VulkanVertexBuffer.h"
+#include "CpuResourceData.h"
 
 namespace YAEngine
 {
@@ -61,5 +62,15 @@ namespace YAEngine
     std::vector<MeshDescription> meshes;
     std::vector<MaterialDescription> materials;
     std::filesystem::path basePath;
+    std::string sourcePath;
+
+    // Keyed by the synthetic path stored in MaterialDescription texture fields
+    std::unordered_map<std::string, EmbeddedTexture> embeddedTextures;
+
+    const EmbeddedTexture* FindEmbedded(const std::string& path) const
+    {
+      auto it = embeddedTextures.find(path);
+      return it != embeddedTextures.end() ? &it->second : nullptr;
+    }
   };
 }

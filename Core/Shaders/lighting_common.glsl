@@ -69,73 +69,133 @@ float evaluateProbeWeight(vec3 worldPos, LightProbeInfo probe)
   }
 }
 
-vec3 sampleProbeIBL(vec3 normal, vec3 R, float roughness, float NdotV,
-  vec3 f0, vec3 albedo, float metallic, int arrayIndex)
+void fetchProbeMaps(vec3 normal, vec3 R, float roughness, int arrayIndex,
+  out vec3 irradiance, out vec3 prefiltered)
+{
+  irradiance = texture(irradianceArray, vec4(normal, float(arrayIndex))).rgb;
+  prefiltered = textureLod(prefilterArray, vec4(R, float(arrayIndex)), roughness * MAX_REFLECTION_LOD).rgb;
+}
+
+// Shading is linear in both maps, so probes can be blended before this runs
+// and the BRDF lookup only has to happen once per pixel.
+vec3 shadeIBL(vec3 irradiance, vec3 prefiltered, float roughness, float NdotV,
+  vec3 f0, vec3 albedo, float metallic)
 {
   vec3 kD = 1.0 - fresnelSchlickRoughness(NdotV, f0, roughness);
   kD *= (1.0 - metallic);
 
-  vec3 irradiance = texture(irradianceArray, vec4(normal, float(arrayIndex))).rgb;
   vec3 diffuse = irradiance * albedo;
 
-  vec3 prefilteredColor = textureLod(prefilterArray, vec4(R, float(arrayIndex)), roughness * MAX_REFLECTION_LOD).rgb;
   vec2 brdf = texture(iblBrdfLut, vec2(NdotV, clamp(roughness, 0.01, 0.99))).rg;
   vec3 F = fresnelSchlickRoughness(NdotV, f0, roughness);
-  vec3 specular = prefilteredColor * (F * brdf.x + brdf.y);
+  vec3 specular = prefiltered * (F * brdf.x + brdf.y);
 
   return kD * diffuse + specular * (1.0 - clamp(roughness, 0.0, 0.8));
 }
 
+vec3 sampleProbeIBL(vec3 normal, vec3 R, float roughness, float NdotV,
+  vec3 f0, vec3 albedo, float metallic, int arrayIndex)
+{
+  vec3 irradiance, prefiltered;
+  fetchProbeMaps(normal, R, roughness, arrayIndex, irradiance, prefiltered);
+  return shadeIBL(irradiance, prefiltered, roughness, NdotV, f0, albedo, metallic);
+}
+
+// Probes actually blended per pixel. Each one costs an irradiance plus a prefilter
+// sample, so the pool is capped and only the heaviest contributors survive.
+#define MAX_BLENDED_PROBES 3
+
+#define NO_PRIORITY (-999999)
+
 vec3 computeAmbientIBL(vec3 worldPos, vec3 normal, vec3 R, float roughness, float NdotV,
   vec3 f0, vec3 albedo, float metallic)
 {
-  if (u_Probes.probeCount > 0)
+  int probeCount = min(u_Probes.probeCount, MAX_LIGHT_PROBES);
+
+  // Single pass over the probes, keeping the strongest few ordered by priority
+  // first and weight second
+  int selected[MAX_BLENDED_PROBES];
+  float weights[MAX_BLENDED_PROBES];
+  int priorities[MAX_BLENDED_PROBES];
+  for (int k = 0; k < MAX_BLENDED_PROBES; k++)
   {
-    int bestIdx = -1;
-    float bestWeight = 0.0;
-    int bestPriority = -999999;
-    int secondIdx = -1;
-    float secondWeight = 0.0;
-    int secondPriority = -999999;
-
-    for (int i = 0; i < min(u_Probes.probeCount, MAX_LIGHT_PROBES); i++)
-    {
-      float w = evaluateProbeWeight(worldPos, u_Probes.probes[i]);
-      if (w <= 0.0) continue;
-
-      int pri = u_Probes.probes[i].priority;
-      if (pri > bestPriority || (pri == bestPriority && w > bestWeight))
-      {
-        secondIdx = bestIdx;
-        secondWeight = bestWeight;
-        secondPriority = bestPriority;
-        bestIdx = i;
-        bestWeight = w;
-        bestPriority = pri;
-      }
-      else if (pri > secondPriority || (pri == secondPriority && w > secondWeight))
-      {
-        secondIdx = i;
-        secondWeight = w;
-        secondPriority = pri;
-      }
-    }
-
-    if (bestIdx >= 0)
-    {
-      vec3 primaryIBL = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic,
-        u_Probes.probes[bestIdx].arrayIndex);
-
-      if (bestWeight >= 1.0)
-        return primaryIBL;
-
-      int fallbackIndex = (secondIdx >= 0) ? u_Probes.probes[secondIdx].arrayIndex : 0;
-      vec3 fallbackIBL = sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, fallbackIndex);
-      return mix(fallbackIBL, primaryIBL, bestWeight);
-    }
-    return sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, 0);
+    selected[k] = -1;
+    weights[k] = 0.0;
+    priorities[k] = NO_PRIORITY;
   }
-  return sampleProbeIBL(normal, R, roughness, NdotV, f0, albedo, metallic, 0);
+
+  for (int i = 0; i < probeCount; i++)
+  {
+    float w = evaluateProbeWeight(worldPos, u_Probes.probes[i]);
+    if (w <= 0.0) continue;
+
+    // Insertion sort, pushing the displaced entry further down the list
+    int candidateIdx = i;
+    float candidateWeight = w;
+    int candidatePriority = u_Probes.probes[i].priority;
+
+    for (int k = 0; k < MAX_BLENDED_PROBES; k++)
+    {
+      bool outranks = candidatePriority > priorities[k]
+        || (candidatePriority == priorities[k] && candidateWeight > weights[k]);
+      if (!outranks) continue;
+
+      int swapIdx = selected[k];
+      float swapWeight = weights[k];
+      int swapPriority = priorities[k];
+      selected[k] = candidateIdx;
+      weights[k] = candidateWeight;
+      priorities[k] = candidatePriority;
+      candidateIdx = swapIdx;
+      candidateWeight = swapWeight;
+      candidatePriority = swapPriority;
+    }
+  }
+
+  vec3 blendedIrradiance = vec3(0.0);
+  vec3 blendedPrefiltered = vec3(0.0);
+  float remaining = 1.0;
+
+  // Walk the priority levels from the top down, each consuming a share of what is
+  // still unclaimed. A nested probe therefore fades into whatever encloses it,
+  // however many levels deep, and only the final remainder reaches the skybox.
+  int k = 0;
+  while (k < MAX_BLENDED_PROBES && selected[k] >= 0 && remaining > 0.001)
+  {
+    int levelPriority = priorities[k];
+    vec3 levelIrradiance = vec3(0.0);
+    vec3 levelPrefiltered = vec3(0.0);
+    float levelWeight = 0.0;
+
+    while (k < MAX_BLENDED_PROBES && selected[k] >= 0 && priorities[k] == levelPriority)
+    {
+      vec3 irradiance, prefiltered;
+      fetchProbeMaps(normal, R, roughness, u_Probes.probes[selected[k]].arrayIndex,
+        irradiance, prefiltered);
+
+      levelIrradiance += weights[k] * irradiance;
+      levelPrefiltered += weights[k] * prefiltered;
+      levelWeight += weights[k];
+      k++;
+    }
+
+    // Normalised inside the level so overlaps stay continuous, then scaled by how
+    // much of the pixel this level actually covers
+    float share = remaining * min(levelWeight, 1.0);
+    blendedIrradiance += share * levelIrradiance / levelWeight;
+    blendedPrefiltered += share * levelPrefiltered / levelWeight;
+    remaining -= share;
+  }
+
+  if (remaining > 0.001)
+  {
+    vec3 skyIrradiance, skyPrefiltered;
+    fetchProbeMaps(normal, R, roughness, 0, skyIrradiance, skyPrefiltered);
+    blendedIrradiance += remaining * skyIrradiance;
+    blendedPrefiltered += remaining * skyPrefiltered;
+  }
+
+  return shadeIBL(blendedIrradiance, blendedPrefiltered, roughness, NdotV, f0, albedo, metallic);
 }
 
 vec3 computeDirectLighting(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 viewVec,

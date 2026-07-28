@@ -22,6 +22,15 @@ namespace YAEngine
     bool repeat = true;
   };
 
+  // Texture bundled inside a model file (GLB, FBX with embedded media).
+  // Either a compressed image payload (width/height 0) or raw RGBA8 pixels.
+  struct EmbeddedTexture
+  {
+    std::vector<uint8_t> data;
+    uint32_t width = 0;
+    uint32_t height = 0;
+  };
+
   struct CpuMeshData
   {
     std::vector<uint8_t> vertexData;

@@ -141,7 +141,7 @@ namespace YAEngine
           m_Render->m_DeferredLightingPipeline);
         pipeline.Bind(ctx.cmd);
 
-        // set 1: GBuffer textures + NoneTexture as SSAO dummy
+        // set 1: GBuffer textures, SSAO dummy is written once in InitDescriptors
         m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(0,
           gbuffer0.GetView(), gbuffer0.GetSampler(),
           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -171,7 +171,7 @@ namespace YAEngine
 
   void OffscreenRenderer::InitDescriptors()
   {
-    // Deferred lighting set 1: GBuffer textures (3 samplers, matching deferred_lighting.frag)
+    // Deferred lighting set 1: GBuffer textures + SSAO (4 samplers, matching deferred_lighting.frag)
     SetDescription dlGBufferDesc = {
       .set = 1,
       .bindings = {
@@ -179,10 +179,16 @@ namespace YAEngine
           { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
     m_DeferredGBufferDescriptorSet.Init(*m_Ctx, dlGBufferDesc);
+
+    // SSAO is disabled for probe bakes - bind a dummy so the set stays layout-compatible
+    m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(3,
+      m_Render->m_NoneTexture.GetView(), m_Render->m_NoneTexture.GetSampler(),
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     // Light cull set 1: lights SSBO + depth sampler
     SetDescription lcDesc = {

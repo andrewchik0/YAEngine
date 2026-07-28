@@ -93,6 +93,8 @@ namespace YAEngine
         ImGui::DragFloat("SSAO Bias", &context.render->GetSSAOBias(), 0.001f, 0.0f, 0.1f);
       }
       ImGui::Checkbox("SSR", &context.render->GetSSREnabled());
+      if (context.render->GetSSREnabled())
+        ImGui::DragFloat("SSR Intensity", &context.render->GetSSRIntensity(), 0.05f, 0.0f, 20.0f);
       ImGui::Checkbox("TAA", &context.render->GetTAAEnabled());
       if (context.render->GetTAAEnabled())
         ImGui::DragFloat("TAA Clamp Sigma", &context.render->GetTAAClampSigma(), 0.01f, 0.0f, 8.0f);

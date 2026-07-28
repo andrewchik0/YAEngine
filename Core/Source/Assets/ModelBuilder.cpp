@@ -41,9 +41,13 @@ namespace YAEngine
     glm::vec3 rootMinBB( std::numeric_limits<float>::max());
     glm::vec3 rootMaxBB(-std::numeric_limits<float>::max());
 
+    // Meshes sharing a material description share one Material, so editing it in the
+    // inspector affects every mesh that uses it
+    std::unordered_map<uint32_t, MaterialHandle> materialCache;
+
     for (auto& childNode : desc.root.children)
     {
-      Entity child = BuildNode(childNode, rootEntity, desc);
+      Entity child = BuildNode(childNode, rootEntity, desc, materialCache);
       auto& childBounds = m_Scene->GetComponent<LocalBounds>(child);
 
       AccumulateTransformedAABB(childBounds.min, childBounds.max, ComposeNodeLocal(childNode), rootMinBB, rootMaxBB);
@@ -62,7 +66,8 @@ namespace YAEngine
     return rootEntity;
   }
 
-  Entity ModelBuilder::BuildNode(const NodeDescription& node, Entity parent, const ModelDescription& desc)
+  Entity ModelBuilder::BuildNode(const NodeDescription& node, Entity parent, const ModelDescription& desc,
+    std::unordered_map<uint32_t, MaterialHandle>& materialCache)
   {
     Entity entity = m_Scene->CreateEntity(node.name);
 
@@ -89,51 +94,68 @@ namespace YAEngine
 
     if (node.materialIndex.has_value())
     {
-      auto& matDesc = desc.materials[*node.materialIndex];
-      auto materialHandle = m_AssetManager->Materials().Create();
-      auto& mat = m_AssetManager->Materials().Get(materialHandle);
-
-      if (!matDesc.name.empty())
-        mat.name = matDesc.name;
-
-      mat.albedo = matDesc.albedo;
-      mat.emissivity = matDesc.emissivity;
-      mat.roughness = matDesc.roughness;
-      mat.metallic = matDesc.metallic;
-      mat.roughnessFactor = matDesc.roughnessFactor;
-      mat.metallicFactor = matDesc.metallicFactor;
-      mat.specular = matDesc.specular;
-      mat.sg = matDesc.sg;
-      mat.combinedTextures = matDesc.combinedTextures;
-      mat.doubleSided = matDesc.doubleSided;
-      mat.transparent = matDesc.transparent;
-
-      if (!matDesc.baseColorTexture.empty())
+      auto cached = materialCache.find(*node.materialIndex);
+      if (cached != materialCache.end())
       {
-        mat.baseColorTexture = m_AssetManager->Textures().Load(matDesc.baseColorTexture, &mat.hasAlpha);
-        mat.alphaTest = mat.hasAlpha && !mat.transparent;
+        m_Scene->AddComponent<MaterialComponent>(entity, cached->second);
       }
-      if (!matDesc.metallicTexture.empty())
-        mat.metallicTexture = m_AssetManager->Textures().Load(matDesc.metallicTexture, nullptr, true);
-      if (!matDesc.roughnessTexture.empty())
-        mat.roughnessTexture = m_AssetManager->Textures().Load(matDesc.roughnessTexture, nullptr, true);
-      if (!matDesc.specularTexture.empty())
-        mat.specularTexture = m_AssetManager->Textures().Load(matDesc.specularTexture, nullptr, true);
-      if (!matDesc.emissiveTexture.empty())
-        mat.emissiveTexture = m_AssetManager->Textures().Load(matDesc.emissiveTexture);
-      if (!matDesc.normalTexture.empty())
-        mat.normalTexture = m_AssetManager->Textures().Load(matDesc.normalTexture, nullptr, true);
-      if (!matDesc.heightTexture.empty())
-        mat.heightTexture = m_AssetManager->Textures().Load(matDesc.heightTexture, nullptr, true);
+      else
+      {
+        auto& matDesc = desc.materials[*node.materialIndex];
+        auto materialHandle = m_AssetManager->Materials().Create();
+        auto& mat = m_AssetManager->Materials().Get(materialHandle);
 
-      m_Scene->AddComponent<MaterialComponent>(entity, materialHandle);
+        if (!matDesc.name.empty())
+          mat.name = matDesc.name;
+
+        mat.albedo = matDesc.albedo;
+        mat.emissivity = matDesc.emissivity;
+        mat.roughness = matDesc.roughness;
+        mat.metallic = matDesc.metallic;
+        mat.roughnessFactor = matDesc.roughnessFactor;
+        mat.metallicFactor = matDesc.metallicFactor;
+        mat.specular = matDesc.specular;
+        mat.sg = matDesc.sg;
+        mat.combinedTextures = matDesc.combinedTextures;
+        mat.doubleSided = matDesc.doubleSided;
+        mat.transparent = matDesc.transparent;
+
+        auto loadTexture = [&](const std::string& path, bool linear, bool* hasAlpha)
+        {
+          const EmbeddedTexture* embedded = desc.FindEmbedded(path);
+          return embedded != nullptr
+            ? m_AssetManager->Textures().LoadEmbedded(*embedded, path, hasAlpha, linear)
+            : m_AssetManager->Textures().Load(path, hasAlpha, linear);
+        };
+
+        if (!matDesc.baseColorTexture.empty())
+        {
+          mat.baseColorTexture = loadTexture(matDesc.baseColorTexture, false, &mat.hasAlpha);
+          mat.alphaTest = mat.hasAlpha && !mat.transparent;
+        }
+        if (!matDesc.metallicTexture.empty())
+          mat.metallicTexture = loadTexture(matDesc.metallicTexture, true, nullptr);
+        if (!matDesc.roughnessTexture.empty())
+          mat.roughnessTexture = loadTexture(matDesc.roughnessTexture, true, nullptr);
+        if (!matDesc.specularTexture.empty())
+          mat.specularTexture = loadTexture(matDesc.specularTexture, true, nullptr);
+        if (!matDesc.emissiveTexture.empty())
+          mat.emissiveTexture = loadTexture(matDesc.emissiveTexture, false, nullptr);
+        if (!matDesc.normalTexture.empty())
+          mat.normalTexture = loadTexture(matDesc.normalTexture, true, nullptr);
+        if (!matDesc.heightTexture.empty())
+          mat.heightTexture = loadTexture(matDesc.heightTexture, true, nullptr);
+
+        materialCache.emplace(*node.materialIndex, materialHandle);
+        m_Scene->AddComponent<MaterialComponent>(entity, materialHandle);
+      }
     }
 
     Entity prevChild = entt::null;
 
     for (auto& childNode : node.children)
     {
-      Entity child = BuildNode(childNode, entity, desc);
+      Entity child = BuildNode(childNode, entity, desc, materialCache);
       auto& childBounds = m_Scene->GetComponent<LocalBounds>(child);
 
       AccumulateTransformedAABB(childBounds.min, childBounds.max, ComposeNodeLocal(childNode), nodeMinBB, nodeMaxBB);

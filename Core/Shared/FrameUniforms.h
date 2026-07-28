@@ -50,6 +50,7 @@ struct FrameUniforms
   float fogStartDistance;
   float fogMaxOpacity;
   float taaClampSigma;
+  float ssrIntensity;
 };
 
 #ifdef __cplusplus
