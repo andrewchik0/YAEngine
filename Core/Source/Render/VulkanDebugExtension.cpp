@@ -56,21 +56,22 @@ namespace YAEngine
 
   void VulkanDebugExtension::AddLayer(VkInstanceCreateInfo& info)
   {
-    if (!b_Enabled)
-    {
-      info.enabledLayerCount = 0;
-      info.pNext = nullptr;
-      return;
-    };
+    info.enabledLayerCount = 0;
+    info.pNext = nullptr;
 
-    if (!CheckValidationLayerSupport())
+    if (b_ValidationLayers)
     {
-      YA_LOG_ERROR("Render", "Validation layers requested, but not available");
-      throw std::runtime_error("validation layers requested, but not available!");
+      if (!CheckValidationLayerSupport())
+      {
+        YA_LOG_ERROR("Render", "Validation layers requested, but not available");
+        throw std::runtime_error("validation layers requested, but not available!");
+      }
+
+      info.enabledLayerCount = 1;
+      info.ppEnabledLayerNames = &m_LayerName;
     }
 
-    info.enabledLayerCount = 1;
-    info.ppEnabledLayerNames = &m_LayerName;
+    if (!NeedsDebugUtils()) return;
 
     m_DebugCreateInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
     m_DebugCreateInfo.flags = 0;
@@ -83,13 +84,13 @@ namespace YAEngine
 
   void VulkanDebugExtension::AddExtension(std::vector<const char*>& extensions) const
   {
-    if (b_Enabled)
+    if (NeedsDebugUtils())
       extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
   }
 
   void VulkanDebugExtension::SetUpMessenger(VkInstance& instance)
   {
-    if (!b_Enabled) return;
+    if (!NeedsDebugUtils()) return;
 
     VkDebugUtilsMessengerCreateInfoEXT createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT;
@@ -107,7 +108,7 @@ namespace YAEngine
 
   void VulkanDebugExtension::DestroyMessenger(VkInstance& instance)
   {
-    if (b_Enabled)
+    if (NeedsDebugUtils())
     {
       DestroyDebugUtilsMessengerEXT(instance, m_DebugMessenger, nullptr);
     }

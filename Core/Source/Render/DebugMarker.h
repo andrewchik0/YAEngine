@@ -8,9 +8,11 @@ namespace YAEngine
   {
   public:
 
-    static inline void Init(VkInstance instance)
+    static inline void Init(VkInstance instance, bool enabled)
     {
 #ifndef NDEBUG
+      if (!enabled) return;
+
       s_CmdBeginLabel = reinterpret_cast<PFN_vkCmdBeginDebugUtilsLabelEXT>(
         vkGetInstanceProcAddr(instance, "vkCmdBeginDebugUtilsLabelEXT"));
       s_CmdEndLabel = reinterpret_cast<PFN_vkCmdEndDebugUtilsLabelEXT>(
@@ -20,7 +22,7 @@ namespace YAEngine
       s_SetObjectName = reinterpret_cast<PFN_vkSetDebugUtilsObjectNameEXT>(
         vkGetInstanceProcAddr(instance, "vkSetDebugUtilsObjectNameEXT"));
 #else
-      (void)instance;
+      (void)instance; (void)enabled;
 #endif
     }
 

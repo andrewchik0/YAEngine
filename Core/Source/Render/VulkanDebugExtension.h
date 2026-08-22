@@ -9,11 +9,13 @@ namespace YAEngine
   public:
 
     const char* m_LayerName = "VK_LAYER_KHRONOS_validation";
-    bool b_Enabled = false;
+    bool b_ValidationLayers = false;
+    bool b_DebugUtils = false;
 
-    void Enable()
+    void Enable(bool validationLayers, bool debugUtils)
     {
-      b_Enabled = true;
+      b_ValidationLayers = validationLayers;
+      b_DebugUtils = debugUtils;
     }
 
     void AddLayer(VkInstanceCreateInfo& info);
@@ -26,6 +28,9 @@ namespace YAEngine
   private:
     VkDebugUtilsMessengerEXT m_DebugMessenger {};
     VkDebugUtilsMessengerCreateInfoEXT m_DebugCreateInfo {};
+
+    // Validation reports through the messenger, so debug utils must be on for either flag
+    bool NeedsDebugUtils() const { return b_ValidationLayers || b_DebugUtils; }
 
     bool CheckValidationLayerSupport();
   };

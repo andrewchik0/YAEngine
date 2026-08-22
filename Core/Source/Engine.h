@@ -23,7 +23,8 @@ namespace YAEngine
   struct EngineSpecs
   {
     WindowSpecs windowSpecs;
-    bool isDebug = false;
+    bool validationLayers = false;
+    bool debugUtils = false;
   };
 
   class Engine

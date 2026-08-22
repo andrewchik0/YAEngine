@@ -19,10 +19,7 @@ namespace YAEngine
     createInfo.pApplicationInfo = &appInfo;
 
     std::vector<const char*> extensions = GetGLFWExtensions();
-    if (specs.validationLayers)
-    {
-      m_DebugExtension.Enable();
-    }
+    m_DebugExtension.Enable(specs.validationLayers, specs.debugUtils);
     m_DebugExtension.AddExtension(extensions);
 
     extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);

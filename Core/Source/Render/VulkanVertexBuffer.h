@@ -42,9 +42,23 @@ namespace YAEngine
 
   private:
 
+    void CreateWeldedPositions(const RenderContext& ctx,
+      const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices);
+
     VulkanBuffer m_VerticesBuffer;
     VulkanBuffer m_IndicesBuffer;
     size_t m_IndicesCount {};
     VkDeviceSize m_AttribOffset {};
+
+    // Position-only stream with duplicate positions removed. Depth prepass and
+    // shadow passes fetch this instead of the interleaved stream, which carries
+    // one vertex per attribute combination and reuses none of them.
+    // Positions and indices share one allocation: every staged upload costs a
+    // queue submit plus a fence wait, and meshes are uploaded one by one.
+    VulkanBuffer m_PositionsBuffer;
+    VkDeviceSize m_PositionIndexOffset {};
+    size_t m_PositionIndexCount {};
+    VkIndexType m_PositionIndexType = VK_INDEX_TYPE_UINT32;
+    bool b_HasWeldedPositions = false;
   };
 }

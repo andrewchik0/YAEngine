@@ -10,7 +10,7 @@ namespace YAEngine
     m_MaxFramesInFlight = specs.maxFramesInFlight;
 
     m_VulkanInstance.Init(specs);
-    DebugMarker::Init(m_VulkanInstance.Get());
+    DebugMarker::Init(m_VulkanInstance.Get(), specs.debugUtils);
     m_Surface.Init(m_VulkanInstance.Get(), window);
     m_PhysicalDevice.Init(m_VulkanInstance.Get(), m_Surface.Get());
 

@@ -164,6 +164,8 @@ set(SOURCE_FILES
   Source/Utils/SplinePath3D.h
   Source/Utils/RoadMeshGenerator.h
   Source/Utils/RoadMeshGenerator.cpp
+  Source/Utils/PositionWelder.h
+  Source/Utils/PositionWelder.cpp
   Source/Scene/ComponentRegistry.h
   Source/Scene/CoreComponentSerializers.h
   Source/Scene/CoreComponentSerializers.cpp

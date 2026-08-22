@@ -73,7 +73,8 @@ namespace YAEngine
     m_Scheduler.AddSystem<BoundsUpdateSystem>();
 
     RenderSpecs renderSpecs;
-    renderSpecs.validationLayers = specs.isDebug;
+    renderSpecs.validationLayers = specs.validationLayers;
+    renderSpecs.debugUtils = specs.debugUtils;
     renderSpecs.applicationName = specs.windowSpecs.title;
 
     m_Render.Init(m_Window.Get(), renderSpecs);

@@ -17,7 +17,7 @@ namespace YAEngine
     const aiScene* scene =
       importer.ReadFile(path,
                         aiProcess_Triangulate | aiProcess_GenUVCoords | aiProcess_FlipUVs |
-                        aiProcess_GenNormals | aiProcess_CalcTangentSpace);
+                        aiProcess_GenNormals | aiProcess_CalcTangentSpace | aiProcess_JoinIdenticalVertices);
 
     ModelDescription desc;
 

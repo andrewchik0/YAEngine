@@ -53,7 +53,7 @@ namespace YAEngine
     createInfo.enabledExtensionCount = static_cast<uint32_t>(physicalDevice.m_DeviceExtensions.size());
     createInfo.ppEnabledExtensionNames = physicalDevice.m_DeviceExtensions.data();
 
-    if (instance.m_DebugExtension.b_Enabled)
+    if (instance.m_DebugExtension.b_ValidationLayers)
     {
       createInfo.enabledLayerCount = 1;
       createInfo.ppEnabledLayerNames = &instance.m_DebugExtension.m_LayerName;

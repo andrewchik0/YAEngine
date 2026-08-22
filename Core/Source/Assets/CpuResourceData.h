@@ -45,6 +45,10 @@ namespace YAEngine
     size_t vertexCount = 0;
     glm::vec3 minBB { 0.0f };
     glm::vec3 maxBB { 0.0f };
+    // Position-only stream for depth and shadow passes. Welded off the render
+    // thread; left empty when deduplication would not pay for the extra buffers.
+    std::vector<glm::vec3> weldedPositions;
+    std::vector<uint32_t> weldedIndices;
   };
 
   struct CpuCubeMapFace

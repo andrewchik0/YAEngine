@@ -6,7 +6,8 @@ int main()
   YAEngine::EngineSpecs specs;
 
 #ifndef NDEBUG
-  specs.isDebug = true;
+  specs.debugUtils = true;
+  // specs.validationLayers = true;
 #endif
 
   YAEngine::Engine engine(specs);
