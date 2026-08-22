@@ -267,10 +267,15 @@ namespace YAEngine
           uint32_t dstW = std::max(1u, w >> mip);
           uint32_t dstH = std::max(1u, h >> mip);
 
-          struct { int srcMip; int dstWidth; int dstHeight; } pc;
+          uint32_t srcW = (mip == 0) ? w : std::max(1u, w >> (mip - 1));
+          uint32_t srcH = (mip == 0) ? h : std::max(1u, h >> (mip - 1));
+
+          struct { int srcMip; int dstWidth; int dstHeight; int srcWidth; int srcHeight; } pc;
           pc.srcMip = (mip == 0) ? -1 : static_cast<int>(mip - 1);
           pc.dstWidth = static_cast<int>(dstW);
           pc.dstHeight = static_cast<int>(dstH);
+          pc.srcWidth = static_cast<int>(srcW);
+          pc.srcHeight = static_cast<int>(srcH);
 
           hizPipeline.BindDescriptorSets(ctx.cmd, {m_HiZDescriptorSets[mip].Get()}, 0);
           hizPipeline.PushConstants(ctx.cmd, &pc);

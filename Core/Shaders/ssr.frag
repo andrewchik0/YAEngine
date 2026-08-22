@@ -6,6 +6,7 @@ layout(location = 0) out vec4 outColor;
 #include "octahedron.glsl"
 #include "pbr.glsl"
 #include "noise.glsl"
+#include "hiz_trace.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D litColorTexture;
 layout(set = 1, binding = 1) uniform sampler2D depthTexture;
@@ -14,16 +15,21 @@ layout(set = 1, binding = 3) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 4) uniform sampler2D hiZTexture;
 
 // --- Configuration ---
-const int MAX_ITERATIONS = 128;
-const int REFINEMENT_STEPS = 8;
+// The cell-crossing traversal converges long before this; it only bounds runaway rays.
+const int MAX_ITERATIONS = 64;
 const float MAX_RAY_DISTANCE = 30.0;
-const float SELF_INTERSECT_DIST = 0.04;
-const float NORMAL_BIAS = 0.02;
-const float MAX_ROUGHNESS = 0.6;
+const float NORMAL_BIAS = 0.001;
+const float MAX_ROUGHNESS = 0.5;
 const float EDGE_FADE_START = 0.8;
 const float DEPTH_EPSILON = 1.0;
 const float SAME_SURFACE_THRESHOLD = 0.99;
-const float MAX_THICKNESS = 4;
+const float MAX_THICKNESS = 4.0;
+// Rays whose reflection could not blend in more than this weight are not traced at all.
+// The bound below is exact: every other factor in ssrMask only shrinks it further.
+const float MIN_CONTRIBUTION = 0.04;
+// A ray stuck crawling cell-by-cell behind geometry ends as a miss after this many
+// consecutive thickness rejections.
+const int MAX_CONSECUTIVE_REJECTS = 12;
 
 // --- Main ---
 void main()
@@ -124,123 +130,52 @@ void main()
     return;
   }
 
-  float originLinearDepth = linearizeDepth(depth);
-
   // How steeply the reflection leaves the surface (1.0 = perpendicular, 0.0 = grazing)
   float reflNormalDot = abs(dot(reflectDir, viewNormal));
-  int maxMip = u_Frame.hizMipCount - 1;
 
-  // --- Hi-Z Ray March ---
-  bool hit = false;
-  vec2 hitUV = vec2(0.0);
-  float hitT = 0.0;
-  // Stochastic jitter: sub-pixel offset that varies per pixel per frame.
-  float jitterOffset = temporalNoise(gl_FragCoord.xy, u_Frame.time * 7.23, vec2(131.0, 257.0)) / rayScreenLen;
+  vec3 F0 = mix(vec3(0.04), albedo, metallic);
+  float NdotV = clamp(dot(-viewDir, viewNormal), 0.01, 1.0);
+  vec3 F = fresnelSchlickRoughness(NdotV, F0, roughness);
+  float roughnessFade = 1.0 - smoothstep(0.0, MAX_ROUGHNESS, roughness);
 
-  // Cap mip level to limit staircase size at silhouettes
-  int effectiveMaxMip = min(maxMip, 4);
-  int mipLevel = 0;
-  float t = jitterOffset;
-
-  for (int i = 0; i < MAX_ITERATIONS; i++)
-  {
-    t += max(1.0, float(1 << mipLevel)) / rayScreenLen;
-    if (t >= 1.0) break;
-
-    vec2 sampleUV = mix(startScreen, endScreen, t);
-
-    // Screen bounds check
-    if (any(lessThan(sampleUV, vec2(0.0))) || any(greaterThan(sampleUV, vec2(1.0))))
-      break;
-
-    float rayDepth = mix(startDepthNDC, endDepthNDC, t);
-    float cellMinDepth = textureLod(hiZTexture, sampleUV, float(mipLevel)).r;
-
-    if (cellMinDepth >= DEPTH_EPSILON)
-    {
-      mipLevel = min(mipLevel + 1, effectiveMaxMip);
-      continue;
-    }
-
-    if (rayDepth > cellMinDepth)
-    {
-      if (mipLevel == 0)
-      {
-        float sampleLinearDepth = linearizeDepth(cellMinDepth);
-
-        // Reject self-intersection
-        if (abs(sampleLinearDepth - originLinearDepth) < SELF_INTERSECT_DIST)
-          continue;
-
-        // Reject too-thick hits
-        float rayLinearDepth = linearizeDepth(rayDepth);
-        if (rayLinearDepth - sampleLinearDepth > MAX_THICKNESS)
-        {
-          mipLevel = min(mipLevel + 1, effectiveMaxMip);
-          continue;
-        }
-
-        // Reject same-surface hits
-        if (reflNormalDot < 0.5)
-        {
-          vec4 sampleGB1 = texture(gbuffer1Texture, sampleUV);
-          vec3 sampleNormal = octDecode(sampleGB1.rg * 2.0 - 1.0);
-          if (dot(sampleNormal, worldNormal) > SAME_SURFACE_THRESHOLD)
-            continue;
-        }
-
-        hit = true;
-        hitUV = sampleUV;
-        hitT = t;
-        break;
-      }
-      else
-      {
-        // Go finer for more precision
-        mipLevel--;
-        t -= max(1.0, float(1 << (mipLevel + 1))) / rayScreenLen;
-        t = max(t, 0.0);
-      }
-    }
-    else
-    {
-      mipLevel = min(mipLevel + 1, effectiveMaxMip);
-    }
-  }
-
-  if (!hit)
+  // Upper bound of the blend weight this reflection could reach. On this scene's terrain
+  // (uniform roughness ~0.4) most of the frame traces rays whose result is invisible; the
+  // profile showed ~70-90% of all traversal iterations spent under a few percent of weight.
+  float contribution = max(max(F.r, F.g), F.b) * roughnessFade * u_Frame.ssrIntensity;
+  if (contribution < MIN_CONTRIBUTION)
   {
     outColor = vec4(originalColor, 1.0);
     return;
   }
 
-  // Binary refinement in screen space
-  float lo = max(hitT - 2.0 / rayScreenLen, 0.0);
-  float hi = hitT;
+  HiZTraceResult trace = hiZTrace(
+    hiZTexture,
+    ivec2(u_Frame.screenWidth, u_Frame.screenHeight),
+    u_Frame.hizMipCount - 1,
+    MAX_ITERATIONS,
+    vec3(startScreen, startDepthNDC),
+    vec3(endScreen, endDepthNDC),
+    MAX_THICKNESS,
+    MAX_CONSECUTIVE_REJECTS);
 
-  for (int j = 0; j < REFINEMENT_STEPS; j++)
+  if (!trace.hit)
   {
-    float mid = (lo + hi) * 0.5;
-    vec2 midScreen = mix(startScreen, endScreen, mid);
-
-    if (any(lessThan(midScreen, vec2(0.0))) || any(greaterThan(midScreen, vec2(1.0))))
-      break;
-
-    float midRayDepth = mix(startDepthNDC, endDepthNDC, mid);
-    float midSampleDepth = textureLod(hiZTexture, midScreen, 0.0).r;
-
-    if (midSampleDepth >= DEPTH_EPSILON)
-      lo = mid;
-    else if (midRayDepth > midSampleDepth)
-      hi = mid;
-    else
-      lo = mid;
+    outColor = vec4(originalColor, 1.0);
+    return;
   }
 
-  // Final hit position
-  float finalT = (lo + hi) * 0.5;
-  hitUV = mix(startScreen, endScreen, finalT);
-  hitT = finalT;
+  vec2 hitUV = trace.uv;
+  float hitT = trace.t;
+
+  vec3 hitNormal = octDecode(texture(gbuffer1Texture, hitUV).rg * 2.0 - 1.0);
+
+  // A grazing ray skims along its own surface, where nothing in screen space distinguishes a
+  // reflection from the surface the ray started on.
+  if (reflNormalDot < 0.5 && dot(hitNormal, worldNormal) > SAME_SURFACE_THRESHOLD)
+  {
+    outColor = vec4(originalColor, 1.0);
+    return;
+  }
 
   // Silhouette edge detection
   vec2 texelSize = 1.0 / screenSize;
@@ -258,25 +193,21 @@ void main()
 
   vec3 reflectedColor = texture(litColorTexture, hitUV).rgb;
 
-  vec3 F0 = mix(vec3(0.04), albedo, metallic);
-  float NdotV = clamp(dot(-viewDir, viewNormal), 0.01, 1.0);
-  vec3 F = fresnelSchlickRoughness(NdotV, F0, roughness);
-
   vec2 edgeCoords = hitUV * 2.0 - 1.0;
   float edgeFade = (1.0 - smoothstep(EDGE_FADE_START, 1.0, abs(edgeCoords.x)))
                  * (1.0 - smoothstep(EDGE_FADE_START, 1.0, abs(edgeCoords.y)));
 
   float distanceFade = 1.0 - smoothstep(0.0, 1.0, hitT);
 
-  float roughnessFade = 1.0 - smoothstep(0.0, MAX_ROUGHNESS, roughness);
+  // Hide the gate boundary: weights just above the cutoff fade in from zero
+  float gateFade = smoothstep(MIN_CONTRIBUTION, MIN_CONTRIBUTION * 2.0, contribution);
 
   // Back-face rejection: fade hits where the surface faces away from the ray
-  vec3 hitNormal = octDecode(texture(gbuffer1Texture, hitUV).rg * 2.0 - 1.0);
   vec3 reflectDirWorld = mat3(u_Frame.invView) * reflectDir;
   float backfaceFade = 1.0 - smoothstep(-0.17, 0.0, dot(reflectDirWorld, hitNormal));
 
   vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade * silhouetteFade * contactFade * backfaceFade
-                       * u_Frame.ssrIntensity, vec3(0.0), vec3(1.0));
+                       * gateFade * u_Frame.ssrIntensity, vec3(0.0), vec3(1.0));
 
   outColor = vec4(originalColor * (1.0 - ssrMask) + reflectedColor * ssrMask, 1.0);
 }

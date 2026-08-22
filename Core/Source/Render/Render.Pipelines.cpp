@@ -715,7 +715,7 @@ namespace YAEngine
     hizLayoutHelper.Init(ctx, hizSetDesc);
     m_HiZPipeline = m_PSOCache.RegisterCompute(ctx.device, "hiz.comp",
       { hizLayoutHelper.GetLayout() },
-      sizeof(int) * 3,
+      sizeof(int) * 5,
       pipelineCache);
     hizLayoutHelper.Destroy();
 
