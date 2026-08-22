@@ -10,7 +10,6 @@
 #include "DebugMarker.h"
 #include "ImageBarrier.h"
 #include "Utils/Log.h"
-#include "SSAOKernel.h"
 
 #include "Utils/Utils.h"
 #include "TileCullData.h"
@@ -60,57 +59,7 @@ namespace YAEngine
       m_TileLightBuffer.Init(ctx, tileCountX, tileCountY);
     }
 
-    // Generate SSAO noise texture (4x4 random tangent-space rotations)
-    {
-      std::mt19937 rng(42);
-      std::uniform_real_distribution<float> dist(-1.0f, 1.0f);
-
-      // 16 pixels, R32G32B32A32_SFLOAT (16 bytes per pixel)
-      std::array<glm::vec4, 16> noiseData;
-      for (auto& v : noiseData)
-      {
-        v = glm::vec4(dist(rng), dist(rng), 0.0f, 0.0f);
-        v = glm::vec4(glm::normalize(glm::vec2(v.x, v.y)), 0.0f, 0.0f);
-      }
-
-      // Convert to half-float manually via uint16 - use R16G16B16A16_SFLOAT
-      // VulkanTexture::Load expects raw data with pixelSize per pixel
-      // Use R32G32B32A32_SFLOAT for simplicity (16 bytes per pixel)
-      m_SSAONoise.Load(ctx, noiseData.data(), 4, 4, 16, VK_FORMAT_R32G32B32A32_SFLOAT);
-      YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_IMAGE,
-        m_SSAONoise.GetImage(), "SSAO Noise");
-    }
-
-    // Generate SSAO hemisphere kernel
-    {
-      std::mt19937 rng(0);
-      std::uniform_real_distribution<float> dist(0.0f, 1.0f);
-
-      SSAOKernel kernelData;
-
-      for (int i = 0; i < SSAO_KERNEL_SIZE; i++)
-      {
-        glm::vec3 sample(
-          dist(rng) * 2.0f - 1.0f,
-          dist(rng) * 2.0f - 1.0f,
-          dist(rng)
-        );
-        sample = glm::normalize(sample);
-        sample *= dist(rng);
-
-        // Accelerating interpolation - bias samples closer to origin
-        float scale = float(i) / float(SSAO_KERNEL_SIZE);
-        scale = 0.1f + scale * scale * 0.9f;
-        sample *= scale;
-
-        kernelData.samples[i] = glm::vec4(sample, 0.0f);
-      }
-
-      m_SSAOKernelUBO.Create(ctx, sizeof(SSAOKernel));
-      m_SSAOKernelUBO.Update(kernelData);
-      YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_BUFFER,
-        m_SSAOKernelUBO.Get(), "SSAO Kernel UBO");
-    }
+    InitGTAOStaticResources();
 
     m_ShadowManager.Init(ctx);
     m_ProbeAtlas.Init(ctx);
@@ -124,6 +73,7 @@ namespace YAEngine
     ClearHistoryBuffers();
     InitPipelines();
     CreateHiZResources();
+    CreateGTAOResources();
     CreateBloomResources();
 
     m_Backend.InitImGui(window, m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
@@ -187,6 +137,7 @@ namespace YAEngine
 
     DestroyBloomResources();
     DestroyHiZResources();
+    DestroyGTAOResources();
 
     for (auto& fb : m_TAAFramebuffers)
     {
@@ -212,11 +163,11 @@ namespace YAEngine
       set.Destroy();
     for (auto& set : m_SSRPassDescriptorSets)
       set.Destroy();
-    for (auto& set : m_SSAOPassDescriptorSets)
+    for (auto& set : m_GTAOPrefilterDescriptorSets)
       set.Destroy();
-    for (auto& set : m_SSAOBlurHPassDescriptorSets)
+    for (auto& set : m_GTAOPassDescriptorSets)
       set.Destroy();
-    for (auto& set : m_SSAOBlurVPassDescriptorSets)
+    for (auto& set : m_GTAODenoiseDescriptorSets)
       set.Destroy();
     for (auto& set : m_DeferredLightingDescriptorSets)
       set.Destroy();
@@ -238,8 +189,9 @@ namespace YAEngine
     for (auto& buf : m_ParticleInstanceBuffers)
       buf.Destroy(ctx);
 
-    m_SSAONoise.Destroy(ctx);
-    m_SSAOKernelUBO.Destroy(ctx);
+    m_GTAOHilbertLUT.Destroy(ctx);
+    for (auto& ubo : m_GTAOConstantsUBOs)
+      ubo.Destroy(ctx);
     m_InstanceDescriptorSet.Destroy();
     m_InstanceBuffer.Destroy(ctx);
     m_HistogramBuffer.Destroy(ctx);
@@ -275,12 +227,14 @@ namespace YAEngine
 
     DestroyBloomResources();
     DestroyHiZResources();
+    DestroyGTAOResources();
 
     // Resize graph (recreates managed resources and non-external framebuffers)
     m_Graph.Resize(actualExtent);
 
     // Recreate Hi-Z per-mip views and descriptor sets
     CreateHiZResources();
+    CreateGTAOResources();
     CreateBloomResources();
 
     // Resize tile light buffer and update descriptor sets that reference it
@@ -385,10 +339,10 @@ namespace YAEngine
 #endif
     m_FrameUniformBuffer.uniforms.tileCountX = (m_FrameUniformBuffer.uniforms.screenWidth + TILE_SIZE - 1) / TILE_SIZE;
     m_FrameUniformBuffer.uniforms.tileCountY = (m_FrameUniformBuffer.uniforms.screenHeight + TILE_SIZE - 1) / TILE_SIZE;
-    m_FrameUniformBuffer.uniforms.ssaoEnabled = b_SSAOEnabled ? 1 : 0;
-    m_FrameUniformBuffer.uniforms.ssaoRadius = m_SSAORadius;
-    m_FrameUniformBuffer.uniforms.ssaoIntensity = m_SSAOIntensity;
-    m_FrameUniformBuffer.uniforms.ssaoBias = m_SSAOBias;
+    m_FrameUniformBuffer.uniforms.aoEnabled = b_AOEnabled ? 1 : 0;
+    m_FrameUniformBuffer.uniforms.aoStrength = m_AOStrength;
+    m_FrameUniformBuffer.uniforms.aoSpecularStrength = m_AOSpecularStrength;
+    m_FrameUniformBuffer.uniforms.aoMultiBounce = m_AOMultiBounce;
     m_FrameUniformBuffer.uniforms.ssrEnabled = b_SSREnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.ssrIntensity = m_SSRIntensity;
     m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;
@@ -444,6 +398,8 @@ namespace YAEngine
     // Upload per-frame data before executing passes
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     m_FrameUniformBuffer.SetUp(currentFrame);
+    // Reads back the projection and viewport SetUpCamera just wrote, so it has to run after it.
+    UpdateGTAOConstants(currentFrame);
     m_LightBuffer.SetUp(currentFrame, frame.lights);
 
     // Update IBL when skybox changes: upload to atlas slot 0 + update display cubemap

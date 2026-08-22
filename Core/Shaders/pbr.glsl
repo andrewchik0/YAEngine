@@ -77,6 +77,28 @@ float geometrySmith(float k, float NdotV, float NdotL)
   return geometrySchlickGGX(k, NdotV) * geometrySchlickGGX(k, NdotL);
 }
 
+// Diffuse AO is the cosine-weighted average of visibility over the whole hemisphere, so it
+// over-occludes the narrow specular lobe on smooth surfaces and under-occludes it on rough
+// ones. Empirical remap from "Moving Frostbite to PBR" (Lagarde & de Rousiers, 2014) that
+// widens the aperture with roughness and grazing angles.
+float computeSpecularOcclusion(float NdotV, float ao, float roughness)
+{
+  return clamp(pow(NdotV + ao, exp2(-16.0 * roughness - 1.0)) - 1.0 + ao, 0.0, 1.0);
+}
+
+// Pure visibility darkens too much because it ignores light bouncing back out of the
+// occluded region, and how much comes back depends on how bright the surface is. Albedo-fitted
+// polynomial from Jimenez et al., "Practical Real-Time Strategies for Accurate Indirect
+// Occlusion" - the same paper GTAO itself comes from.
+vec3 gtaoMultiBounce(float visibility, vec3 albedo)
+{
+  vec3 a =  2.0404 * albedo - 0.3324;
+  vec3 b = -4.7951 * albedo + 0.6417;
+  vec3 c =  2.7552 * albedo + 0.6903;
+  return clamp(visibility * (a * visibility * visibility + b * visibility + c),
+    vec3(visibility), vec3(1.0));
+}
+
 vec3 evaluateDirectLight(
   vec3 N, vec3 V, vec3 L, vec3 radiance,
   vec3 albedo, float metallic, float roughness, float alpha, vec3 f0, float NdotV)

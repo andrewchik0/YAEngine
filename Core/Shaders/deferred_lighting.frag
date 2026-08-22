@@ -8,7 +8,7 @@ layout(location = 0) out vec4 outColor;
 layout(set = 1, binding = 0) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 1) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 2) uniform sampler2D depthTexture;
-layout(set = 1, binding = 3) uniform sampler2D ssaoTexture;
+layout(set = 1, binding = 3) uniform sampler2D aoTexture;
 
 const float SKY_DEPTH = 0.0;
 const int SHADING_PBR = 0;
@@ -82,7 +82,7 @@ void main()
   vec3 ambient = computeAmbientIBLSplit(worldPos, normal, R, roughness, NdotV,
     f0, albedo, metallic, ambientDiffuse, ambientSpecular);
 
-  // Indirect debug views return the raw diagnostic value and stop here. SSAO, fog,
+  // Indirect debug views return the raw diagnostic value and stop here. AO, fog,
   // tone mapping, exposure and bloom are all downstream of this point, and SSR/TAA
   // are forced off by Render while one of these views is active, so what reaches
   // the screen is exactly what was computed above.
@@ -120,14 +120,25 @@ void main()
     return;
   }
 
-  vec3 Lo = computeDirectLighting(worldPos, viewPos, normal, viewVec, albedo, metallic, roughness, f0, NdotV, ivec2(gl_FragCoord.xy));
-
-  vec3 resultColor = max(ambient + Lo, vec3(0.0));
-
   // AO is applied here, not after tone mapping: it is derived from the jittered depth buffer
   // and changes every frame, so it has to go through TAA or it flickers on fine geometry.
-  if (u_Frame.ssaoEnabled != 0)
-    resultColor *= texture(ssaoTexture, uv).r;
+  // It only modulates the indirect terms. Direct light already carries its own exact
+  // per-direction visibility from the shadow maps, and AO is the hemisphere average of that
+  // same visibility, so multiplying it in there would count the occlusion twice.
+  if (u_Frame.aoEnabled != 0)
+  {
+    float ao = texture(aoTexture, uv).r;
+
+    vec3 diffuseOcclusion = mix(vec3(ao), gtaoMultiBounce(ao, albedo), u_Frame.aoMultiBounce);
+    float specularOcclusion = computeSpecularOcclusion(NdotV, ao, roughness);
+
+    ambientDiffuse *= mix(vec3(1.0), diffuseOcclusion, u_Frame.aoStrength);
+    ambientSpecular *= mix(1.0, specularOcclusion, u_Frame.aoSpecularStrength);
+  }
+
+  vec3 Lo = computeDirectLighting(worldPos, viewPos, normal, viewVec, albedo, metallic, roughness, f0, NdotV, ivec2(gl_FragCoord.xy));
+
+  vec3 resultColor = max(ambientDiffuse + ambientSpecular + Lo, vec3(0.0));
 
   if (u_Frame.fogEnabled != 0)
   {

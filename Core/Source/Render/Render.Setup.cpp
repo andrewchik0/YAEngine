@@ -42,16 +42,26 @@ namespace YAEngine
       .name = "litColor",
       .format = VK_FORMAT_R16G16B16A16_SFLOAT
     });
-    m_SSAOColor = m_Graph.CreateResource({
-      .name = "ssaoColor",
-      .format = VK_FORMAT_R8_UNORM
+    // Linear view depth pyramid GTAO marches. Point filtering is required: interpolating
+    // between neighbouring depths inside a mip invents surfaces that are not there.
+    m_GTAODepth = m_Graph.CreateResource({
+      .name = "gtaoDepth",
+      .format = VK_FORMAT_R16_SFLOAT,
+      .filter = VK_FILTER_NEAREST,
+      .mipLevels = GTAO_DEPTH_MIP_LEVELS
     });
-    m_SSAOBlurIntermediate = m_Graph.CreateResource({
-      .name = "ssaoBlurIntermediate",
-      .format = VK_FORMAT_R8_UNORM
+    m_GTAOWorkingAO = m_Graph.CreateResource({
+      .name = "gtaoWorkingAO",
+      .format = VK_FORMAT_R8_UNORM,
+      .filter = VK_FILTER_NEAREST
     });
-    m_SSAOBlurred = m_Graph.CreateResource({
-      .name = "ssaoBlurred",
+    m_GTAOEdges = m_Graph.CreateResource({
+      .name = "gtaoEdges",
+      .format = VK_FORMAT_R8_UNORM,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_AOFinal = m_Graph.CreateResource({
+      .name = "aoFinal",
       .format = VK_FORMAT_R8_UNORM
     });
     m_SSRColor = m_Graph.CreateResource({
@@ -103,80 +113,86 @@ namespace YAEngine
       }
     });
 
-    m_SSAOPassIndex = m_Graph.AddPass({
-      .name = "SSAOPass",
-      .inputs = {m_MainDepth, m_GBuffer1},
-      .colorOutputs = {m_SSAOColor},
+    // 3. GTAO depth prefilter - the only pass that reads the reversed-Z depth buffer. It
+    // writes positive linear view depth plus four reduced mips, so the sampling passes below
+    // never have to know the projection convention.
+    m_GTAODepthPrefilterPassIndex = m_Graph.AddPass({
+      .name = "GTAODepthPrefilter",
+      .inputs = {m_MainDepth},
+      .storageOutputs = {m_GTAODepth},
+      .isCompute = true,
       .execute = [this](const RGExecuteContext& ctx) {
-        if (!b_SSAOEnabled) return;
+        if (!b_AOEnabled) return;
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+
+        m_GTAOPrefilterDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        auto& pipeline = m_PSOCache.GetCompute(m_GTAOPrefilterPipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_GTAOPrefilterDescriptorSets[currentFrame].Get()}, 1);
+
+        // Each invocation owns a 2x2 block and one 8x8 group covers a 16x16 pixel tile.
+        uint32_t w = m_Graph.GetExtent().width;
+        uint32_t h = m_Graph.GetExtent().height;
+        pipeline.Dispatch(ctx.cmd, (w + 15) / 16, (h + 15) / 16, 1);
+      }
+    });
+
+    // 4. GTAO main pass - horizon search per slice, writing raw visibility and the edge mask
+    // the denoise below needs.
+    m_GTAOPassIndex = m_Graph.AddPass({
+      .name = "GTAOPass",
+      .inputs = {m_GTAODepth, m_GBuffer1},
+      .colorOutputs = {m_GTAOWorkingAO, m_GTAOEdges},
+      .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_AOEnabled) return;
+
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        auto& gtaoDepth = m_Graph.GetResource(m_GTAODepth);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
 
-        auto& pipeline = m_PSOCache.Get(m_SSAOPipeline);
+        auto& pipeline = m_PSOCache.Get(m_GTAOPipeline);
         pipeline.Bind(ctx.cmd);
-        m_SSAOPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
-          mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_SSAOPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+        m_GTAOPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          gtaoDepth.GetView(), gtaoDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_GTAOPassDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
           gbuffer1.GetView(), gbuffer1.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_SSAOPassDescriptorSets[currentFrame].Get()}, 1);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_GTAOPassDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad(ctx.cmd);
       }
     });
 
-    m_SSAOBlurHPassIndex = m_Graph.AddPass({
-      .name = "SSAOBlurHPass",
-      .inputs = {m_SSAOColor, m_MainDepth},
-      .colorOutputs = {m_SSAOBlurIntermediate},
+    // 5. GTAO denoise - edge-aware, driven by the edge mask rather than by depth. A single
+    // pass is enough while TAA is integrating the result; switching denoising off is done
+    // through denoiseBlurBeta, not by skipping this pass.
+    m_GTAODenoisePassIndex = m_Graph.AddPass({
+      .name = "GTAODenoise",
+      .inputs = {m_GTAOWorkingAO, m_GTAOEdges},
+      .colorOutputs = {m_AOFinal},
       .execute = [this](const RGExecuteContext& ctx) {
-        if (!b_SSAOEnabled) return;
+        if (!b_AOEnabled) return;
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
-        auto& ssaoColor = m_Graph.GetResource(m_SSAOColor);
-        auto& depth = m_Graph.GetResource(m_MainDepth);
+        auto& workingAO = m_Graph.GetResource(m_GTAOWorkingAO);
+        auto& edges = m_Graph.GetResource(m_GTAOEdges);
 
-        auto& pipeline = m_PSOCache.Get(m_SSAOBlurHPipeline);
+        auto& pipeline = m_PSOCache.Get(m_GTAODenoisePipeline);
         pipeline.Bind(ctx.cmd);
-        m_SSAOBlurHPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
-          ssaoColor.GetView(), ssaoColor.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_SSAOBlurHPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
-          depth.GetView(), depth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_GTAODenoiseDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          workingAO.GetView(), workingAO.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_GTAODenoiseDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
+          edges.GetView(), edges.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_SSAOBlurHPassDescriptorSets[currentFrame].Get()}, 1);
-        int direction = 0;
-        pipeline.PushConstants(ctx.cmd, &direction);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_GTAODenoiseDescriptorSets[currentFrame].Get()}, 1);
         DrawQuad(ctx.cmd);
       }
     });
 
-    m_SSAOBlurVPassIndex = m_Graph.AddPass({
-      .name = "SSAOBlurVPass",
-      .inputs = {m_SSAOBlurIntermediate, m_MainDepth},
-      .colorOutputs = {m_SSAOBlurred},
-      .execute = [this](const RGExecuteContext& ctx) {
-        if (!b_SSAOEnabled) return;
-
-        auto currentFrame = m_Backend.GetCurrentFrameIndex();
-        auto& intermediate = m_Graph.GetResource(m_SSAOBlurIntermediate);
-        auto& depth = m_Graph.GetResource(m_MainDepth);
-
-        auto& pipeline = m_PSOCache.Get(m_SSAOBlurVPipeline);
-        pipeline.Bind(ctx.cmd);
-        m_SSAOBlurVPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
-          intermediate.GetView(), intermediate.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        m_SSAOBlurVPassDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
-          depth.GetView(), depth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_SSAOBlurVPassDescriptorSets[currentFrame].Get()}, 1);
-        int direction = 1;
-        pipeline.PushConstants(ctx.cmd, &direction);
-        DrawQuad(ctx.cmd);
-      }
-    });
-
-    // 5. Light Cull - tiled light culling (compute)
     m_LightCullPassIndex = m_Graph.AddPass({
       .name = "LightCull",
       .inputs = {m_MainDepth},
@@ -219,7 +235,7 @@ namespace YAEngine
     // 6. Deferred Lighting - fullscreen IBL + analytical lights from G-buffer
     m_DeferredLightingPassIndex = m_Graph.AddPass({
       .name = "DeferredLighting",
-      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_SSAOBlurred},
+      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_AOFinal},
       .colorOutputs = {m_LitColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
@@ -227,7 +243,7 @@ namespace YAEngine
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
-        auto& ssao = m_Graph.GetResource(m_SSAOBlurred);
+        auto& aoFinal = m_Graph.GetResource(m_AOFinal);
 
         auto& pipeline = m_PSOCache.Get(m_DeferredLightingPipeline);
         pipeline.Bind(ctx.cmd);
@@ -238,7 +254,7 @@ namespace YAEngine
         m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
           mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
-          ssao.GetView(), ssao.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          aoFinal.GetView(), aoFinal.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_DeferredLightingDescriptorSets[currentFrame].Get()}, 1);
@@ -622,12 +638,12 @@ namespace YAEngine
 
     m_SceneComposePassIndex = m_Graph.AddPass({
       .name = "SceneComposePass",
-      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor},
+      .inputs = {m_TAAHistory0, m_AOFinal, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor},
       .colorOutputs = {m_SceneColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
         auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
-        auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
+        auto& aoFinal = m_Graph.GetResource(m_AOFinal);
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
         auto& velocity = m_Graph.GetResource(m_MainVelocity);
@@ -639,7 +655,7 @@ namespace YAEngine
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
           historyCurrent.GetView(), historyCurrent.GetSampler(), historyCurrent.GetLayout());
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
-          ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          aoFinal.GetView(), aoFinal.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
           gbuffer0.GetView(), gbuffer0.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(3,
@@ -707,7 +723,7 @@ namespace YAEngine
     // Swapchain pass - production mode: tone mapping + ImGui overlay
     m_SwapchainPassIndex = m_Graph.AddPass({
       .name = "SwapchainPass",
-      .inputs = {m_TAAHistory0, m_SSAOBlurred, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor},
+      .inputs = {m_TAAHistory0, m_AOFinal, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor},
       .colorOutputs = {},
       .externalFramebuffer = true,
       .externalFormat = swapFormat,
@@ -717,7 +733,7 @@ namespace YAEngine
 
         auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
         auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
-        auto& ssaoBlurred = m_Graph.GetResource(m_SSAOBlurred);
+        auto& aoFinal = m_Graph.GetResource(m_AOFinal);
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
         auto& velocity = m_Graph.GetResource(m_MainVelocity);
@@ -729,7 +745,7 @@ namespace YAEngine
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
           historyCurrent.GetView(), historyCurrent.GetSampler(), historyCurrent.GetLayout());
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
-          ssaoBlurred.GetView(), ssaoBlurred.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          aoFinal.GetView(), aoFinal.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(2,
           gbuffer0.GetView(), gbuffer0.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(3,

@@ -1,0 +1,92 @@
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#include "common.glsl"
+#include "utils.glsl"
+#include "gtao_common.glsl"
+
+layout(set = 1, binding = 1) uniform sampler2D depthTexture;
+layout(set = 1, binding = 2, r16f) uniform writeonly image2D outDepthMip0;
+layout(set = 1, binding = 3, r16f) uniform writeonly image2D outDepthMip1;
+layout(set = 1, binding = 4, r16f) uniform writeonly image2D outDepthMip2;
+layout(set = 1, binding = 5, r16f) uniform writeonly image2D outDepthMip3;
+layout(set = 1, binding = 6, r16f) uniform writeonly image2D outDepthMip4;
+
+// Each invocation owns a 2x2 block, so one 8x8 group covers 16x16 pixels and can reduce
+// four mip levels through shared memory without a second dispatch.
+shared float g_ScratchDepths[8][8];
+
+float LoadViewspaceDepth(ivec2 coord, ivec2 maxCoord)
+{
+  float depth = texelFetch(depthTexture, min(coord, maxCoord), 0).r;
+  return clamp(linearizeDepth(depth), 0.0, GTAO_DEPTH_CLAMP);
+}
+
+// The stores below are written out rather than wrapped in a helper: an image cannot be a
+// function parameter. glslang accepts it and emits SPIR-V that only survives while the
+// optimizer is off, then spirv-opt rejects the argument type - so it breaks in Release only.
+//
+// No bounds checks either: the dispatch is rounded up to whole 16x16 tiles, and Vulkan
+// discards an image store whose coordinates fall outside the image.
+
+void main()
+{
+  ivec2 baseCoord = ivec2(gl_GlobalInvocationID.xy);
+  ivec2 pixCoord = baseCoord * 2;
+  ivec2 groupThreadID = ivec2(gl_LocalInvocationID.xy);
+  ivec2 maxCoord = ivec2(u_Frame.screenWidth, u_Frame.screenHeight) - 1;
+
+  // Mip 0 is the only place the reversed-Z depth buffer is read. Everything downstream of
+  // this point works on positive linear view distance, which is what keeps the rest of the
+  // port free of the projection convention the reference assumed.
+  float depth0 = LoadViewspaceDepth(pixCoord + ivec2(0, 0), maxCoord);
+  float depth1 = LoadViewspaceDepth(pixCoord + ivec2(1, 0), maxCoord);
+  float depth2 = LoadViewspaceDepth(pixCoord + ivec2(0, 1), maxCoord);
+  float depth3 = LoadViewspaceDepth(pixCoord + ivec2(1, 1), maxCoord);
+
+  imageStore(outDepthMip0, pixCoord + ivec2(0, 0), vec4(depth0));
+  imageStore(outDepthMip0, pixCoord + ivec2(1, 0), vec4(depth1));
+  imageStore(outDepthMip0, pixCoord + ivec2(0, 1), vec4(depth2));
+  imageStore(outDepthMip0, pixCoord + ivec2(1, 1), vec4(depth3));
+
+  float dm1 = gtaoDepthMipFilter(depth0, depth1, depth2, depth3);
+  imageStore(outDepthMip1, baseCoord, vec4(dm1));
+  g_ScratchDepths[groupThreadID.x][groupThreadID.y] = dm1;
+
+  barrier();
+
+  if (all(equal(groupThreadID % 2, ivec2(0))))
+  {
+    float dm2 = gtaoDepthMipFilter(
+      g_ScratchDepths[groupThreadID.x + 0][groupThreadID.y + 0],
+      g_ScratchDepths[groupThreadID.x + 1][groupThreadID.y + 0],
+      g_ScratchDepths[groupThreadID.x + 0][groupThreadID.y + 1],
+      g_ScratchDepths[groupThreadID.x + 1][groupThreadID.y + 1]);
+    imageStore(outDepthMip2, baseCoord / 2, vec4(dm2));
+    g_ScratchDepths[groupThreadID.x][groupThreadID.y] = dm2;
+  }
+
+  barrier();
+
+  if (all(equal(groupThreadID % 4, ivec2(0))))
+  {
+    float dm3 = gtaoDepthMipFilter(
+      g_ScratchDepths[groupThreadID.x + 0][groupThreadID.y + 0],
+      g_ScratchDepths[groupThreadID.x + 2][groupThreadID.y + 0],
+      g_ScratchDepths[groupThreadID.x + 0][groupThreadID.y + 2],
+      g_ScratchDepths[groupThreadID.x + 2][groupThreadID.y + 2]);
+    imageStore(outDepthMip3, baseCoord / 4, vec4(dm3));
+    g_ScratchDepths[groupThreadID.x][groupThreadID.y] = dm3;
+  }
+
+  barrier();
+
+  if (all(equal(groupThreadID % 8, ivec2(0))))
+  {
+    float dm4 = gtaoDepthMipFilter(
+      g_ScratchDepths[groupThreadID.x + 0][groupThreadID.y + 0],
+      g_ScratchDepths[groupThreadID.x + 4][groupThreadID.y + 0],
+      g_ScratchDepths[groupThreadID.x + 0][groupThreadID.y + 4],
+      g_ScratchDepths[groupThreadID.x + 4][groupThreadID.y + 4]);
+    imageStore(outDepthMip4, baseCoord / 8, vec4(dm4));
+  }
+}

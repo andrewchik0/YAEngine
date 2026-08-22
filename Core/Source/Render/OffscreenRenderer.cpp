@@ -144,7 +144,7 @@ namespace YAEngine
           m_Render->m_DeferredLightingPipeline);
         pipeline.Bind(ctx.cmd);
 
-        // set 1: GBuffer textures, SSAO dummy is written once in InitDescriptors
+        // set 1: GBuffer textures, AO dummy is written once in InitDescriptors
         m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(0,
           gbuffer0.GetView(), gbuffer0.GetSampler(),
           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -174,7 +174,7 @@ namespace YAEngine
 
   void OffscreenRenderer::InitDescriptors()
   {
-    // Deferred lighting set 1: GBuffer textures + SSAO (4 samplers, matching deferred_lighting.frag)
+    // Deferred lighting set 1: GBuffer textures + AO (4 samplers, matching deferred_lighting.frag)
     SetDescription dlGBufferDesc = {
       .set = 1,
       .bindings = {
@@ -188,7 +188,7 @@ namespace YAEngine
     };
     m_DeferredGBufferDescriptorSet.Init(*m_Ctx, dlGBufferDesc);
 
-    // SSAO is disabled for probe bakes - bind a dummy so the set stays layout-compatible
+    // AO is disabled for probe bakes - bind a dummy so the set stays layout-compatible
     m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(3,
       m_Render->m_NoneTexture.GetView(), m_Render->m_NoneTexture.GetSampler(),
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -276,10 +276,10 @@ namespace YAEngine
     // Everything view-dependent is forced off so the capture stays valid from any
     // viewing direction, and every field is assigned so two bakes of an unchanged
     // scene produce byte-identical output.
-    uniforms.ssaoEnabled = 0;
-    uniforms.ssaoRadius = 0.0f;
-    uniforms.ssaoIntensity = 0.0f;
-    uniforms.ssaoBias = 0.0f;
+    uniforms.aoEnabled = 0;
+    uniforms.aoStrength = 0.0f;
+    uniforms.aoSpecularStrength = 0.0f;
+    uniforms.aoMultiBounce = 0.0f;
     uniforms.ssrEnabled = 0;
     uniforms.ssrIntensity = 0.0f;
     uniforms.taaEnabled = 0;

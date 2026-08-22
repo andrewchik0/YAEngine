@@ -430,81 +430,108 @@ namespace YAEngine
     };
     m_TAAPipeline = m_PSOCache.Register(ctx.device, taaRP, taaInfo, pipelineCache);
 
-    // SSAO descriptor sets and pipeline
-    VkRenderPass ssaoRP = m_Graph.GetPassRenderPass(m_SSAOPassIndex);
-
-    m_SSAOPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    // GTAO depth prefilter (compute): frame UBO in set 0, GTAO constants plus the source
+    // depth and one storage view per output mip in set 1.
+    m_GTAOPrefilterDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
     for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
     {
-      SetDescription ssaoDesc = {
+      SetDescription prefilterDesc = {
         .set = 1,
         .bindings = {
           {
-            { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-            { 3, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 5, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
           }
         }
       };
-      m_SSAOPassDescriptorSets[i].Init(ctx, ssaoDesc);
-      // Write static bindings (noise texture + kernel UBO)
-      m_SSAOPassDescriptorSets[i].WriteCombinedImageSampler(2,
-        m_SSAONoise.GetView(), m_SSAONoise.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-      m_SSAOPassDescriptorSets[i].WriteUniformBuffer(3, m_SSAOKernelUBO.Get(), 16 * sizeof(glm::vec4));
+      m_GTAOPrefilterDescriptorSets[i].Init(ctx, prefilterDesc);
+      m_GTAOPrefilterDescriptorSets[i].WriteUniformBuffer(0,
+        m_GTAOConstantsUBOs[i].Get(), sizeof(GTAOConstants));
     }
-    PipelineCreateInfo ssaoInfo = {
-      .fragmentShaderFile = "ssao.frag",
-      .vertexShaderFile = "fullscreen.vert",
-      .depthTesting = false,
-      .vertexInputFormat = "",
-      .sets = std::vector({
-        m_FrameUniformBuffer.GetLayout(),
-        m_SSAOPassDescriptorSets[0].GetLayout(),
-      })
-    };
-    m_SSAOPipeline = m_PSOCache.Register(ctx.device, ssaoRP, ssaoInfo, pipelineCache);
 
-    // SSAO Blur descriptor sets and pipelines (horizontal + vertical)
-    SetDescription ssaoBlurDesc = {
-      .set = 1,
-      .bindings = {
-        {
-          { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+    m_GTAOPrefilterPipeline = m_PSOCache.RegisterCompute(ctx.device, "gtao_depth_prefilter.comp",
+      {
+        m_FrameUniformBuffer.GetLayout(),
+        m_GTAOPrefilterDescriptorSets[0].GetLayout(),
+      },
+      0,
+      pipelineCache);
+
+    // GTAO main pass
+    VkRenderPass gtaoRP = m_Graph.GetPassRenderPass(m_GTAOPassIndex);
+
+    m_GTAOPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      SetDescription gtaoDesc = {
+        .set = 1,
+        .bindings = {
+          {
+            { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          }
         }
-      }
-    };
-
-    m_SSAOBlurHPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
-    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
-    {
-      m_SSAOBlurHPassDescriptorSets[i].Init(ctx, ssaoBlurDesc);
+      };
+      m_GTAOPassDescriptorSets[i].Init(ctx, gtaoDesc);
+      m_GTAOPassDescriptorSets[i].WriteUniformBuffer(0,
+        m_GTAOConstantsUBOs[i].Get(), sizeof(GTAOConstants));
+      m_GTAOPassDescriptorSets[i].WriteCombinedImageSampler(3,
+        m_GTAOHilbertLUT.GetView(), m_GTAOHilbertLUT.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     }
 
-    m_SSAOBlurVPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
-    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
-    {
-      m_SSAOBlurVPassDescriptorSets[i].Init(ctx, ssaoBlurDesc);
-    }
-
-    PipelineCreateInfo ssaoBlurInfo = {
-      .fragmentShaderFile = "ssao_blur.frag",
+    PipelineCreateInfo gtaoInfo = {
+      .fragmentShaderFile = "gtao.frag",
       .vertexShaderFile = "fullscreen.vert",
-      .pushConstantSize = sizeof(int),
+      .depthTesting = false,
+      .colorAttachmentCount = 2,
+      .vertexInputFormat = "",
+      .sets = std::vector({
+        m_FrameUniformBuffer.GetLayout(),
+        m_GTAOPassDescriptorSets[0].GetLayout(),
+      })
+    };
+    m_GTAOPipeline = m_PSOCache.Register(ctx.device, gtaoRP, gtaoInfo, pipelineCache);
+
+    // GTAO denoise
+    VkRenderPass gtaoDenoiseRP = m_Graph.GetPassRenderPass(m_GTAODenoisePassIndex);
+
+    m_GTAODenoiseDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      SetDescription denoiseDesc = {
+        .set = 1,
+        .bindings = {
+          {
+            { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          }
+        }
+      };
+      m_GTAODenoiseDescriptorSets[i].Init(ctx, denoiseDesc);
+      m_GTAODenoiseDescriptorSets[i].WriteUniformBuffer(0,
+        m_GTAOConstantsUBOs[i].Get(), sizeof(GTAOConstants));
+    }
+
+    PipelineCreateInfo gtaoDenoiseInfo = {
+      .fragmentShaderFile = "gtao_denoise.frag",
+      .vertexShaderFile = "fullscreen.vert",
       .depthTesting = false,
       .vertexInputFormat = "",
       .sets = std::vector({
         m_FrameUniformBuffer.GetLayout(),
-        m_SSAOBlurHPassDescriptorSets[0].GetLayout(),
+        m_GTAODenoiseDescriptorSets[0].GetLayout(),
       })
     };
-
-    VkRenderPass ssaoBlurHRP = m_Graph.GetPassRenderPass(m_SSAOBlurHPassIndex);
-    m_SSAOBlurHPipeline = m_PSOCache.Register(ctx.device, ssaoBlurHRP, ssaoBlurInfo, pipelineCache);
-
-    VkRenderPass ssaoBlurVRP = m_Graph.GetPassRenderPass(m_SSAOBlurVPassIndex);
-    m_SSAOBlurVPipeline = m_PSOCache.Register(ctx.device, ssaoBlurVRP, ssaoBlurInfo, pipelineCache);
+    m_GTAODenoisePipeline = m_PSOCache.Register(ctx.device, gtaoDenoiseRP, gtaoDenoiseInfo, pipelineCache);
 
     // SSR descriptor sets and pipeline (5 bindings: litColor, depth, gbuffer1, gbuffer0, hiZ)
     VkRenderPass ssrRP = m_Graph.GetPassRenderPass(m_SSRPassIndex);

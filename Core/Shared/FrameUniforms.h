@@ -47,7 +47,7 @@ struct FrameUniforms
   float fov;
   int screenWidth;
   int screenHeight;
-  int ssaoEnabled;
+  int aoEnabled;
   int ssrEnabled;
   int taaEnabled;
   float jitterX;
@@ -59,9 +59,11 @@ struct FrameUniforms
   mat4 invView;
   int tonemapMode;
   float bloomIntensity;
-  float ssaoRadius;
-  float ssaoIntensity;
-  float ssaoBias;
+  // Artistic fades applied where AO is consumed, not where it is computed: the GTAO
+  // parameters proper live in GTAOConstants.h.
+  float aoStrength;
+  float aoSpecularStrength;
+  float aoMultiBounce;
   int fogEnabled;
   float fogDensity;
   float fogHeightFalloff;

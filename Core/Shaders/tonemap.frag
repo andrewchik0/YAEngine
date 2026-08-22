@@ -5,7 +5,7 @@ layout(location = 0) out vec4 outColor;
 #include "octahedron.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D frame;
-layout(set = 1, binding = 1) uniform sampler2D ssaoTexture;
+layout(set = 1, binding = 1) uniform sampler2D aoTexture;
 layout(set = 1, binding = 2) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 3) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 4) uniform sampler2D velocityTexture;
@@ -41,9 +41,9 @@ void main()
       outColor = vec4(normal * 0.5 + 0.5, 1.0);
     }
     return;
-  case 5: // SSAO
+  case 5: // AO
     {
-      float ao = texture(ssaoTexture, uv).r;
+      float ao = texture(aoTexture, uv).r;
       outColor = vec4(ao, ao, ao, 1.0);
     }
     return;

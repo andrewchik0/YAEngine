@@ -16,6 +16,7 @@
 #include "ReflectionProbeAtlas.h"
 #include "ReflectionProbeStorageBuffer.h"
 #include "IrradianceVolumeStorage.h"
+#include "GTAOConstants.h"
 #include "Assets/Handle.h"
 #include "ParticleInstance.h"
 
@@ -106,10 +107,19 @@ namespace YAEngine
     float& GetExposure() { return m_Exposure; }
     int GetDebugView() const { return m_CurrentTexture; }
     void SetDebugView(int view) { m_CurrentTexture = view; }
-    bool& GetSSAOEnabled() { return b_SSAOEnabled; }
-    float& GetSSAOIntensity() { return m_SSAOIntensity; }
-    float& GetSSAORadius() { return m_SSAORadius; }
-    float& GetSSAOBias() { return m_SSAOBias; }
+    bool& GetAOEnabled() { return b_AOEnabled; }
+    bool& GetAODenoiseEnabled() { return b_AODenoiseEnabled; }
+    int& GetAOQualityLevel() { return m_AOQualityLevel; }
+    float& GetAORadius() { return m_AORadius; }
+    float& GetAOStrength() { return m_AOStrength; }
+    float& GetAOSpecularStrength() { return m_AOSpecularStrength; }
+    float& GetAOMultiBounce() { return m_AOMultiBounce; }
+    float& GetAORadiusMultiplier() { return m_AORadiusMultiplier; }
+    float& GetAOFalloffRange() { return m_AOFalloffRange; }
+    float& GetAOSampleDistributionPower() { return m_AOSampleDistributionPower; }
+    float& GetAOThinOccluderCompensation() { return m_AOThinOccluderCompensation; }
+    float& GetAOFinalValuePower() { return m_AOFinalValuePower; }
+    float& GetAODepthMipSamplingOffset() { return m_AODepthMipSamplingOffset; }
     bool& GetSSREnabled() { return b_SSREnabled; }
     float& GetSSRIntensity() { return m_SSRIntensity; }
     bool& GetTAAEnabled() { return b_TAAEnabled; }
@@ -153,10 +163,22 @@ namespace YAEngine
     float m_Gamma = 2.2f;
     float m_Exposure = 1.0f;
     int m_CurrentTexture = 0;
-    bool b_SSAOEnabled = true;
-    float m_SSAOIntensity = 1.5f;
-    float m_SSAORadius = 0.2f;
-    float m_SSAOBias = 0.025f;
+    bool b_AOEnabled = true;
+    bool b_AODenoiseEnabled = true;
+    int m_AOQualityLevel = GTAO_QUALITY_HIGH;
+    // World space radius of the occlusion sphere, in meters.
+    float m_AORadius = 0.5f;
+    float m_AOStrength = 1.0f;
+    float m_AOSpecularStrength = 1.0f;
+    float m_AOMultiBounce = 1.0f;
+    // Auto-tuned XeGTAO heuristics. The defaults were fitted against a ray traced ground
+    // truth, so they are a starting point rather than taste - see GTAOConstants.h.
+    float m_AORadiusMultiplier = 1.457f;
+    float m_AOFalloffRange = 0.615f;
+    float m_AOSampleDistributionPower = 2.0f;
+    float m_AOThinOccluderCompensation = 0.0f;
+    float m_AOFinalValuePower = 2.2f;
+    float m_AODepthMipSamplingOffset = 3.3f;
     bool b_SSREnabled = true;
     // Artistic multiplier on the SSR mask. Fresnel keeps dielectric reflections near 4%,
     // so values above 1 are the usual way to make them readable.
@@ -225,6 +247,10 @@ namespace YAEngine
     void ClearHistoryBuffers();
     void CreateHiZResources();
     void DestroyHiZResources();
+    void InitGTAOStaticResources();
+    void CreateGTAOResources();
+    void DestroyGTAOResources();
+    void UpdateGTAOConstants(uint32_t frameIndex);
     void CreateBloomResources();
     void DestroyBloomResources();
 
@@ -251,9 +277,10 @@ namespace YAEngine
     RGHandle m_LitColor {};       // R16G16B16A16_SFLOAT: deferred lighting output
     RGHandle m_SSRColor {};
     RGHandle m_HiZResource {};
-    RGHandle m_SSAOColor {};
-    RGHandle m_SSAOBlurIntermediate {};
-    RGHandle m_SSAOBlurred {};
+    RGHandle m_GTAODepth {};      // R16_SFLOAT, GTAO_DEPTH_MIP_LEVELS mips: linear view depth
+    RGHandle m_GTAOWorkingAO {};  // R8_UNORM: raw visibility, scaled down for packing
+    RGHandle m_GTAOEdges {};      // R8_UNORM: 2 bits of edge strength per neighbour
+    RGHandle m_AOFinal {};        // R8_UNORM: denoised occlusion consumed by the lighting pass
     RGHandle m_TAAHistory0 {};
     RGHandle m_TAAHistory1 {};
 
@@ -285,10 +312,10 @@ namespace YAEngine
     // Pass indices
     uint32_t m_DepthPrepassIndex {};
     uint32_t m_GBufferPassIndex {};
-    uint32_t m_SSAOPassIndex {};
+    uint32_t m_GTAODepthPrefilterPassIndex {};
+    uint32_t m_GTAOPassIndex {};
     uint32_t m_HiZPassIndex {};
-    uint32_t m_SSAOBlurHPassIndex {};
-    uint32_t m_SSAOBlurVPassIndex {};
+    uint32_t m_GTAODenoisePassIndex {};
     uint32_t m_LightCullPassIndex {};
     uint32_t m_DeferredLightingPassIndex {};
     uint32_t m_SSRPassIndex {};
@@ -326,9 +353,9 @@ namespace YAEngine
     std::vector<VulkanDescriptorSet> m_SwapChainDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_TAADescriptorSets;
-    std::vector<VulkanDescriptorSet> m_SSAOPassDescriptorSets;
-    std::vector<VulkanDescriptorSet> m_SSAOBlurHPassDescriptorSets;
-    std::vector<VulkanDescriptorSet> m_SSAOBlurVPassDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_GTAOPrefilterDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_GTAOPassDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_GTAODenoiseDescriptorSets;
     std::vector<VulkanDescriptorSet> m_LightCullInputDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingLightDescriptorSets;
@@ -346,9 +373,9 @@ namespace YAEngine
     PipelineHandle m_QuadPipeline {};
     PipelineHandle m_TAAPipeline {};
     PipelineHandle m_SSRPipeline {};
-    PipelineHandle m_SSAOPipeline {};
-    PipelineHandle m_SSAOBlurHPipeline {};
-    PipelineHandle m_SSAOBlurVPipeline {};
+    PipelineHandle m_GTAOPrefilterPipeline {};
+    PipelineHandle m_GTAOPipeline {};
+    PipelineHandle m_GTAODenoisePipeline {};
     PipelineHandle m_HiZPipeline {};
     PipelineHandle m_LightCullPipeline {};
     PipelineHandle m_DeferredLightingPipeline {};
@@ -362,8 +389,9 @@ namespace YAEngine
     VulkanTerrainMaterial m_TerrainMaterial {};
     VulkanTexture m_NoneTexture;
     VulkanImage m_NoneCubeMap;
-    VulkanTexture m_SSAONoise;
-    VulkanUniformBuffer m_SSAOKernelUBO;
+    VulkanTexture m_GTAOHilbertLUT;
+    std::vector<VulkanUniformBuffer> m_GTAOConstantsUBOs;
+    std::vector<VkImageView> m_GTAODepthMipViews;
     CubicTextureResources m_CubicResources;
 
     std::vector<VkImageView> m_HiZMipViews;

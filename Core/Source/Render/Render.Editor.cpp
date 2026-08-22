@@ -62,12 +62,14 @@ namespace YAEngine
 
     DestroyBloomResources();
     DestroyHiZResources();
+    DestroyGTAOResources();
     DestroySceneImGuiDescriptor();
 
     m_Graph.Resize({w, h});
 
     CreateSceneImGuiDescriptor();
     CreateHiZResources();
+    CreateGTAOResources();
     CreateBloomResources();
 
     // Resize tile light buffer and update descriptor sets that reference it

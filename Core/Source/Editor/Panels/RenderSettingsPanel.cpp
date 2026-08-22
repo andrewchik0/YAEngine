@@ -77,7 +77,7 @@ namespace YAEngine
       int debugViewIndex = context.render->GetDebugView();
       // Indices must match the DEBUG_VIEW_* defines in Core/Shared/FrameUniforms.h
       const char* debugViews[] = {
-        "Off", "Albedo", "Metallic", "Roughness", "Normals", "SSAO", "SSR", "Wireframe",
+        "Off", "Albedo", "Metallic", "Roughness", "Normals", "AO", "SSR", "Wireframe",
         "TAA Delta", "Velocity",
         "Ambient Only", "Ambient Diffuse", "Ambient Specular",
         "Reflection Probe Index", "Reflection Probe Fallback", "Volume Coverage"
@@ -88,12 +88,30 @@ namespace YAEngine
 
     if (ImGui::CollapsingHeader(ICON_FA_SLIDERS " Post-Processing", ImGuiTreeNodeFlags_DefaultOpen))
     {
-      ImGui::Checkbox("SSAO", &context.render->GetSSAOEnabled());
-      if (context.render->GetSSAOEnabled())
+      ImGui::Checkbox("GTAO", &context.render->GetAOEnabled());
+      if (context.render->GetAOEnabled())
       {
-        ImGui::DragFloat("SSAO Intensity", &context.render->GetSSAOIntensity(), 0.01f, 0.0f, 50.0f);
-        ImGui::DragFloat("SSAO Radius", &context.render->GetSSAORadius(), 0.005f, 0.01f, 1.0f);
-        ImGui::DragFloat("SSAO Bias", &context.render->GetSSAOBias(), 0.001f, 0.0f, 0.1f);
+        const char* aoQualityLevels[] = { "Low", "Medium", "High", "Ultra" };
+        ImGui::Combo("AO Quality", &context.render->GetAOQualityLevel(),
+          aoQualityLevels, IM_ARRAYSIZE(aoQualityLevels));
+        ImGui::Checkbox("AO Denoise", &context.render->GetAODenoiseEnabled());
+        ImGui::DragFloat("AO Radius", &context.render->GetAORadius(), 0.01f, 0.0f, 20.0f);
+        ImGui::DragFloat("AO Strength", &context.render->GetAOStrength(), 0.01f, 0.0f, 1.0f);
+        ImGui::DragFloat("AO Specular Strength", &context.render->GetAOSpecularStrength(), 0.01f, 0.0f, 1.0f);
+        ImGui::DragFloat("AO Multi Bounce", &context.render->GetAOMultiBounce(), 0.01f, 0.0f, 1.0f);
+
+        // Fitted by Intel against a ray traced ground truth. Worth exposing, not worth
+        // touching without a reference image to compare against.
+        if (ImGui::TreeNode("AO Heuristics"))
+        {
+          ImGui::DragFloat("Radius Multiplier", &context.render->GetAORadiusMultiplier(), 0.01f, 0.3f, 3.0f);
+          ImGui::DragFloat("Falloff Range", &context.render->GetAOFalloffRange(), 0.01f, 0.0f, 1.0f);
+          ImGui::DragFloat("Sample Distribution Power", &context.render->GetAOSampleDistributionPower(), 0.01f, 1.0f, 3.0f);
+          ImGui::DragFloat("Thin Occluder Compensation", &context.render->GetAOThinOccluderCompensation(), 0.01f, 0.0f, 0.7f);
+          ImGui::DragFloat("Final Value Power", &context.render->GetAOFinalValuePower(), 0.01f, 0.5f, 5.0f);
+          ImGui::DragFloat("Depth Mip Sampling Offset", &context.render->GetAODepthMipSamplingOffset(), 0.01f, 0.0f, 30.0f);
+          ImGui::TreePop();
+        }
       }
       ImGui::Checkbox("SSR", &context.render->GetSSREnabled());
       if (context.render->GetSSREnabled())
