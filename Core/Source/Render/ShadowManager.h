@@ -17,9 +17,12 @@ namespace YAEngine
     void Init(const RenderContext& ctx);
     void Destroy(const RenderContext& ctx);
 
+    // cameraFar is the camera's view distance, it only clamps shadowDistance - the
+    // projection itself is reversed-Z with an infinite far plane, so the frustum slices
+    // are built from fov/aspect in view space instead of unprojected from NDC.
     void ComputeCascades(
       const glm::mat4& cameraView,
-      const glm::mat4& cameraProj,
+      float cameraFov, float cameraAspect,
       float cameraNear, float cameraFar,
       float shadowDistance,
       const glm::vec3& lightDirection);
@@ -70,8 +73,9 @@ namespace YAEngine
       const glm::vec3& center, float radius,
       const glm::vec3& lightDir);
     float FitCascadeToFrustum(uint32_t cascadeIndex,
-      const glm::mat4& invViewProj,
-      float nearSplit, float farSplit,
+      const glm::mat4& invView,
+      float fov, float aspect,
+      float nearDist, float farDist,
       const glm::vec3& lightDir);
 
     static constexpr float SPLIT_LAMBDA = 0.75f;

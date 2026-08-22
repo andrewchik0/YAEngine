@@ -8,6 +8,7 @@
 #include "Scene/Components.h"
 
 #include "Utils/Utils.h"
+#include "Utils/Projection.h"
 
 namespace YAEngine
 {
@@ -108,7 +109,7 @@ namespace YAEngine
 
     bool wireframeMode = (m_CurrentTexture == DEBUG_VIEW_WIREFRAME);
     if (wireframeMode)
-      vkCmdSetDepthBias(cmd, -1.0f, 0.0f, -1.0f);
+      vkCmdSetDepthBias(cmd, 1.0f, 0.0f, 1.0f);
 
     uint8_t lastSortKey = UINT8_MAX;
     lastMaterialIndex = UINT32_MAX;
@@ -254,12 +255,7 @@ namespace YAEngine
 
     glm::mat4 view = glm::inverse(world);
 
-    glm::mat4 proj = glm::perspective(
-      cam.fov,
-      cam.aspectRatio,
-      cam.nearPlane,
-      cam.farPlane
-    );
+    glm::mat4 proj = MakeReversedInfinitePerspective(cam.fov, cam.aspectRatio, cam.nearPlane);
 
     proj[1][1] *= -1.0f;
 
@@ -515,7 +511,7 @@ namespace YAEngine
       {
         m_ShadowManager.ComputeCascades(
           m_FrameUniformBuffer.uniforms.view,
-          m_PrevProj,
+          cam.fov, cam.aspectRatio,
           cam.nearPlane, cam.farPlane,
           shadow.shadowDistance,
           shadow.direction);

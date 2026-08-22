@@ -10,7 +10,7 @@ layout(set = 1, binding = 3) uniform sampler2D depthTexture;
 
 #include "variance_clipping.glsl"
 
-const float BACKGROUND_DEPTH = 1.0;
+const float BACKGROUND_DEPTH = 0.0;
 
 // Background pixels are never rasterized, so the velocity buffer still holds its clear value
 // there. Reproject the view ray instead: an infinitely distant sample follows camera rotation
@@ -84,7 +84,7 @@ void main()
   getVarianceClippingBounds(currentYCoCg, frame, screenSpaceUV, u_Frame.taaClampSigma, colorMin, colorMax);
 
   float depth = texture(depthTexture, uv).r;
-  vec2 velocity = depth >= BACKGROUND_DEPTH
+  vec2 velocity = depth <= BACKGROUND_DEPTH
     ? backgroundVelocity(uv * 2.0 - 1.0)
     : texture(velocityTexture, uv).rg;
 

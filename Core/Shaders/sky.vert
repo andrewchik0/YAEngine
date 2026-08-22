@@ -13,5 +13,6 @@ void main()
   outCoord = mat3(pc.camDir) * inPosition;
 
   vec4 pos = pc.proj * vec4(inPosition, 1.0);
-  gl_Position = pos.xyww;
+  // Reversed-Z: infinity is depth 0, which the GEQUAL test accepts only where nothing was drawn.
+  gl_Position = vec4(pos.xy, 0.0, pos.w);
 }

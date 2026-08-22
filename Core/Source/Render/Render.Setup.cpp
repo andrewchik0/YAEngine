@@ -370,7 +370,7 @@ namespace YAEngine
     });
 
     // Forward transparent pass - blends transparent meshes on top of TAA result
-    // using existing MainDepth (LOAD, no write, LEQUAL) so depth match deferred.
+    // using existing MainDepth (LOAD, write, GEQUAL) so depth matches deferred.
     m_ForwardTransparentPassIndex = m_Graph.AddPass({
       .name = "ForwardTransparent",
       .inputs = {m_MainDepth},
@@ -857,7 +857,7 @@ namespace YAEngine
       // initialLayout=UNDEFINED is fine here since we don't need previous contents
       VkClearValue clearValues[2] = {};
       clearValues[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};
-      clearValues[1].depthStencil = {1.0f, 0};
+      clearValues[1].depthStencil = {0.0f, 0};
 
       VkRenderPassBeginInfo rpBegin{};
       rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;

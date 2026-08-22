@@ -20,7 +20,7 @@ void main()
 
   float depth = textureLod(depthTexture, uv, 0.0).r;
 
-  if (depth >= 1.0)
+  if (depth <= 0.0)
   {
     outColor = vec4(1.0);
     return;
@@ -60,7 +60,7 @@ void main()
 
     float sampledDepth = textureLod(depthTexture, sampleUV, 0.0).r;
 
-    float notSky = step(sampledDepth, 0.9999);
+    float notSky = 1.0 - step(sampledDepth, 0.0);
 
     float sampleLinearDepth = linearizeDepth(sampledDepth);
     float expectedLinearDepth = linearizeDepth(clip.z / clip.w);

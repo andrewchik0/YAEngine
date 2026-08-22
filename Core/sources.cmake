@@ -158,6 +158,7 @@ set(SOURCE_FILES
   Source/Utils/MipGenerator.h
   Source/Utils/MipGenerator.cpp
   Source/Utils/SphericalHarmonics.h
+  Source/Utils/Projection.h
   Source/Utils/SphericalHarmonics.cpp
   Source/Utils/IrradianceGrid.h
   Source/Utils/IrradianceGrid.cpp

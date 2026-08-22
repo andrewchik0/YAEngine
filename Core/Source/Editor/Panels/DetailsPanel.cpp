@@ -893,7 +893,7 @@ namespace YAEngine
       ImGui::Text("FOV: %.1f", glm::degrees(cc.fov));
       ImGui::Text("Aspect: %.2f", cc.aspectRatio);
       ImGui::Text("Near: %.3f", cc.nearPlane);
-      ImGui::Text("Far: %.1f", cc.farPlane);
+      ImGui::Text("View distance: %.1f", cc.farPlane);
     }
   }
 

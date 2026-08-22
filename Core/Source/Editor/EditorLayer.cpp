@@ -18,6 +18,7 @@
 
 #include "Assets/AssetManager.h"
 #include "Render/Render.h"
+#include "Utils/Projection.h"
 #include "Scene/SceneSerializer.h"
 #include "Scene/ComponentRegistry.h"
 #include "Utils/ServiceRegistry.h"
@@ -135,7 +136,7 @@ namespace YAEngine
         glm::mat4 world = glm::translate(glm::mat4(1.0f), camTransform.position)
                         * glm::mat4_cast(camTransform.rotation);
         glm::mat4 view = glm::inverse(world);
-        glm::mat4 proj = glm::perspective(cam.fov, cam.aspectRatio, cam.nearPlane, cam.farPlane);
+        glm::mat4 proj = MakeReversedInfinitePerspective(cam.fov, cam.aspectRatio, cam.nearPlane);
 
         viewportRay = ScreenToRay(m_Context.mouseInViewport, glm::inverse(proj), glm::inverse(view));
         hasViewportRay = true;

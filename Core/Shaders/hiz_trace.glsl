@@ -5,14 +5,17 @@
 // maps a 3D line to a line in NDC and keeps NDC depth affine along it, so interpolating all
 // three components with a single t reproduces the view-space ray exactly.
 //
-// The traversal leaves a cell only after proving the ray runs in front of that cell's minimum
+// Depth is reversed-Z (near = 1, infinity = 0): a ray heading away from the camera decreases
+// in NDC depth, and the Hi-Z pyramid stores the per-cell maximum, i.e. the closest surface.
+//
+// The traversal leaves a cell only after proving the ray runs in front of that cell's closest
 // depth for its whole span inside it, and it advances exactly to the cell boundary. No cell is
 // skipped at any mip level, which is what makes coarse mips a pure speedup instead of a
 // quality tradeoff.
 //
 // Cells are indexed as basePixel >> mip, matching how the reduction actually aggregates
 // texels. At a non-power-of-two resolution this differs from uv * mipSize: mip texel (i, j)
-// holds the minimum over base region [i << mip, (i + 1) << mip), not over an equal fraction
+// holds the maximum over base region [i << mip, (i + 1) << mip), not over an equal fraction
 // of the screen, and the mismatch grows with the distance from the origin.
 
 // Nudge past a cell boundary, as a fraction of the cell size at the current mip. Too small and
@@ -87,8 +90,8 @@ HiZTraceResult hiZTrace(sampler2D hiZ, ivec2 baseSize, int maxMip, int maxIterat
   result.uv = rayStart.xy;
 
   HiZRay ray = hiZMakeRay(rayStart, rayEnd, baseSize);
-  bool depthIncreases = ray.delta.z > 1e-8;
-  float invDeltaZ = depthIncreases ? 1.0 / ray.delta.z : 0.0;
+  bool depthDecreases = ray.delta.z < -1e-8;
+  float invDeltaZ = depthDecreases ? 1.0 / ray.delta.z : 0.0;
 
   // The originating pixel's own cell always holds the surface the ray just left, so start past
   // it rather than rejecting the self intersection by a depth threshold afterwards.
@@ -110,14 +113,14 @@ HiZTraceResult hiZTrace(sampler2D hiZ, ivec2 baseSize, int maxMip, int maxIterat
     ivec2 cell;
     float tCross = hiZCellExit(ray, pxAtT, mip, baseSize, cell);
 
-    float cellMinDepth = texelFetch(hiZ, cell, mip).r;
+    float cellMaxDepth = texelFetch(hiZ, cell, mip).r;
     float rayDepth = ray.start.z + ray.delta.z * t;
 
     // Entering the cell already behind its closest surface, or crossing that depth plane
     // before leaving the cell, both mean an intersection may live inside it.
-    bool behind = rayDepth > cellMinDepth;
-    float tPlane = depthIncreases ? (cellMinDepth - ray.start.z) * invDeltaZ : 0.0;
-    bool crossesPlane = depthIncreases && tPlane < tCross;
+    bool behind = rayDepth < cellMaxDepth;
+    float tPlane = depthDecreases ? (cellMaxDepth - ray.start.z) * invDeltaZ : 0.0;
+    bool crossesPlane = depthDecreases && tPlane < tCross;
 
     if (behind || crossesPlane)
     {
@@ -131,7 +134,7 @@ HiZTraceResult hiZTrace(sampler2D hiZ, ivec2 baseSize, int maxMip, int maxIterat
       }
 
       float rayLinearDepth = linearizeDepth(ray.start.z + ray.delta.z * tCandidate);
-      float sampleLinearDepth = linearizeDepth(cellMinDepth);
+      float sampleLinearDepth = linearizeDepth(cellMaxDepth);
 
       // A depth buffer carries no thickness, so a hit far behind the stored surface is a ray
       // that passed under geometry. Step past this cell and keep going, staying at mip 0 - the
@@ -139,7 +142,7 @@ HiZTraceResult hiZTrace(sampler2D hiZ, ivec2 baseSize, int maxMip, int maxIterat
       if (rayLinearDepth - sampleLinearDepth > maxThickness)
       {
         // Behind geometry the traversal degenerates to one cell per iteration (coarser mips
-        // would need a max pyramid to skip safely), so a long crawl is cut as a miss.
+        // would need a farthest-surface pyramid to skip safely), so a long crawl is cut as a miss.
         consecutiveRejects++;
         if (consecutiveRejects >= maxConsecutiveRejects)
           break;

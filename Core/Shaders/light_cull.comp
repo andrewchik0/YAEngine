@@ -54,7 +54,7 @@ void main()
   barrier();
 
   // Read depth and compute linear Z
-  float depth = 1.0;
+  float depth = 0.0;
   if (pixelCoord.x < u_Frame.screenWidth && pixelCoord.y < u_Frame.screenHeight)
   {
     vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(u_Frame.screenWidth, u_Frame.screenHeight);
@@ -62,8 +62,8 @@ void main()
   }
   float linearZ = linearizeDepth(depth);
 
-  // Skip sky pixels for min/max (cleared depth = 1.0)
-  if (depth < 1.0)
+  // Skip sky pixels for min/max (cleared depth = 0.0)
+  if (depth > 0.0)
   {
     atomicMin(s_minDepthBits, floatBitsToUint(linearZ));
     atomicMax(s_maxDepthBits, floatBitsToUint(linearZ));
@@ -90,12 +90,13 @@ void main()
   vec2 tileMin = vec2(tileId) * float(TILE_SIZE) / vec2(u_Frame.screenWidth, u_Frame.screenHeight) * 2.0 - 1.0;
   vec2 tileMax = vec2(tileId + ivec2(1)) * float(TILE_SIZE) / vec2(u_Frame.screenWidth, u_Frame.screenHeight) * 2.0 - 1.0;
 
-  // Reconstruct 4 corner rays in view space at z=1
+  // Reconstruct 4 corner rays in view space through the near plane (NDC z = 1 under reversed-Z;
+  // z = 0 is infinity and unprojects to w = 0)
   vec4 corners[4];
-  corners[0] = u_Frame.invProj * vec4(tileMin.x, tileMin.y, 0.0, 1.0);
-  corners[1] = u_Frame.invProj * vec4(tileMax.x, tileMin.y, 0.0, 1.0);
-  corners[2] = u_Frame.invProj * vec4(tileMax.x, tileMax.y, 0.0, 1.0);
-  corners[3] = u_Frame.invProj * vec4(tileMin.x, tileMax.y, 0.0, 1.0);
+  corners[0] = u_Frame.invProj * vec4(tileMin.x, tileMin.y, 1.0, 1.0);
+  corners[1] = u_Frame.invProj * vec4(tileMax.x, tileMin.y, 1.0, 1.0);
+  corners[2] = u_Frame.invProj * vec4(tileMax.x, tileMax.y, 1.0, 1.0);
+  corners[3] = u_Frame.invProj * vec4(tileMin.x, tileMax.y, 1.0, 1.0);
   for (int i = 0; i < 4; i++)
     corners[i] /= corners[i].w;
 

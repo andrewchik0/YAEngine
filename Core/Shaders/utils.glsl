@@ -1,8 +1,11 @@
 // Requires common.glsl to be included before this file
 
+// Reversed-Z with an infinite far plane: d = near / viewDistance. Sky texels hold exactly
+// 0, so the clamp keeps them a huge finite distance instead of inf (inf - inf is NaN in
+// every depth-difference test downstream).
 float linearizeDepth(float d)
 {
-  return u_Frame.nearPlane * u_Frame.farPlane / (u_Frame.farPlane - d * (u_Frame.farPlane - u_Frame.nearPlane));
+  return u_Frame.nearPlane / max(d, 1e-8);
 }
 
 vec3 reconstructViewPos(vec2 screenUV, float depth)

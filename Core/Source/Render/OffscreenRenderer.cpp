@@ -7,6 +7,7 @@
 #include "ImageBarrier.h"
 #include "DebugMarker.h"
 #include "Utils/Log.h"
+#include "Utils/Projection.h"
 
 namespace YAEngine
 {
@@ -251,7 +252,7 @@ namespace YAEngine
         resolution, m_Resolution);
 
     // Set up camera for this cubemap face
-    glm::mat4 proj = glm::perspective(glm::radians(90.0f), 1.0f, 0.01f, 1000.0f);
+    glm::mat4 proj = MakeReversedInfinitePerspective(glm::radians(90.0f), 1.0f, 0.01f);
     proj[1][1] *= -1.0f;
 
     glm::mat4 view = glm::translate(faceView, -position);

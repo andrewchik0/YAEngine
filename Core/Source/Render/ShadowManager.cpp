@@ -120,34 +120,23 @@ namespace YAEngine
 
   float ShadowManager::FitCascadeToFrustum(
     uint32_t cascadeIndex,
-    const glm::mat4& invViewProj,
-    float nearSplit, float farSplit,
+    const glm::mat4& invView,
+    float fov, float aspect,
+    float nearDist, float farDist,
     const glm::vec3& lightDir)
   {
-    // NDC corners (Vulkan: z in [0,1], y flipped)
-    glm::vec3 ndcCorners[8] = {
-      { -1, -1, 0 }, {  1, -1, 0 }, { -1,  1, 0 }, {  1,  1, 0 },
-      { -1, -1, 1 }, {  1, -1, 1 }, { -1,  1, 1 }, {  1,  1, 1 },
-    };
-
-    // Unproject corners to world space at near and far split
-    // We need to interpolate depth between camera near (z=0) and camera far (z=1)
-    // Convert split distances to NDC z values
-    // For perspective projection in Vulkan: z_ndc = (far * (z - near)) / (z * (far - near))
-    // But it's simpler to get full frustum corners and interpolate
+    // Slice corners straight from the camera geometry in view space: corners 0-3 sit on the
+    // near split plane, 4-7 on the far split plane, looking down -Z.
+    float tanHalfFov = std::tan(fov * 0.5f);
     glm::vec3 worldCorners[8];
     for (uint32_t i = 0; i < 8; i++)
     {
-      glm::vec4 corner = invViewProj * glm::vec4(ndcCorners[i], 1.0f);
-      worldCorners[i] = glm::vec3(corner) / corner.w;
-    }
-
-    // Interpolate between near (0-3) and far (4-7) frustum planes
-    for (uint32_t i = 0; i < 4; i++)
-    {
-      glm::vec3 nearToFar = worldCorners[i + 4] - worldCorners[i];
-      worldCorners[i + 4] = worldCorners[i] + nearToFar * farSplit;
-      worldCorners[i] = worldCorners[i] + nearToFar * nearSplit;
+      float dist = (i < 4) ? nearDist : farDist;
+      float halfH = dist * tanHalfFov;
+      float halfW = halfH * aspect;
+      float sx = (i & 1) ? 1.0f : -1.0f;
+      float sy = (i & 2) ? 1.0f : -1.0f;
+      worldCorners[i] = glm::vec3(invView * glm::vec4(sx * halfW, sy * halfH, -dist, 1.0f));
     }
 
     // Compute bounding sphere center
@@ -206,7 +195,7 @@ namespace YAEngine
 
   void ShadowManager::ComputeCascades(
     const glm::mat4& cameraView,
-    const glm::mat4& cameraProj,
+    float cameraFov, float cameraAspect,
     float cameraNear, float cameraFar,
     float shadowDistance,
     const glm::vec3& lightDirection)
@@ -226,16 +215,12 @@ namespace YAEngine
 
     ComputeCascadeSplits(cameraNear, shadowDistance);
 
-    glm::mat4 invViewProj = glm::inverse(cameraProj * cameraView);
+    glm::mat4 invView = glm::inverse(cameraView);
 
     for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
     {
-      // Normalize split distances against the real camera frustum range so the
-      // frustum corners interpolated from invViewProj remain valid.
-      float nearSplit = (m_CascadeSplits[i] - cameraNear) / (cameraFar - cameraNear);
-      float farSplit = (m_CascadeSplits[i + 1] - cameraNear) / (cameraFar - cameraNear);
-
-      float texelWorldSize = FitCascadeToFrustum(i, invViewProj, nearSplit, farSplit, glm::normalize(lightDirection));
+      float texelWorldSize = FitCascadeToFrustum(i, invView, cameraFov, cameraAspect,
+        m_CascadeSplits[i], m_CascadeSplits[i + 1], glm::normalize(lightDirection));
 
       // Normal bias = 1.5 texels in world space, scales automatically per cascade
       m_ShadowData.cascades[i].splitDepthAndBias = glm::vec4(

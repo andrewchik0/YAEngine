@@ -10,7 +10,7 @@ layout(set = 1, binding = 1) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 2) uniform sampler2D depthTexture;
 layout(set = 1, binding = 3) uniform sampler2D ssaoTexture;
 
-const float DEPTH_EPSILON = 1.0;
+const float SKY_DEPTH = 0.0;
 const int SHADING_PBR = 0;
 const int SHADING_UNLIT = 1;
 
@@ -18,7 +18,7 @@ void main()
 {
   float depth = texture(depthTexture, uv).r;
 
-  if (depth >= DEPTH_EPSILON)
+  if (depth <= SKY_DEPTH)
   {
     // Sky pixels never sample a probe. Black keeps them from reading as coverage;
     // the Ambient views leave the sky visible so the image stays recognisable.

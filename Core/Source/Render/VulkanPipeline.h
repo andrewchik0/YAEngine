@@ -19,7 +19,7 @@ namespace YAEngine
     bool additiveBlend = false;
     bool doubleSided = false;
     uint32_t colorAttachmentCount = 1;
-    VkCompareOp compareOp = VK_COMPARE_OP_LESS;
+    VkCompareOp compareOp = VK_COMPARE_OP_GREATER;
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     VkPolygonMode polygonMode = VK_POLYGON_MODE_FILL;
     bool depthBiasEnable = false;

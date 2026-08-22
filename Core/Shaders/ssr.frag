@@ -21,7 +21,7 @@ const float MAX_RAY_DISTANCE = 30.0;
 const float NORMAL_BIAS = 0.001;
 const float MAX_ROUGHNESS = 0.5;
 const float EDGE_FADE_START = 0.8;
-const float DEPTH_EPSILON = 1.0;
+const float SKY_DEPTH = 0.0;
 const float SAME_SURFACE_THRESHOLD = 0.99;
 const float MAX_THICKNESS = 4.0;
 // Rays whose reflection could not blend in more than this weight are not traced at all.
@@ -50,7 +50,7 @@ void main()
     originalColor = vec3(0.0);
 
   // Early exits
-  if (depth >= DEPTH_EPSILON)
+  if (depth <= SKY_DEPTH)
   {
     outColor = vec4(originalColor, 1.0);
     return;

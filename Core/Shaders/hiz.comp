@@ -27,30 +27,31 @@ void main()
   ivec2 srcMax = srcSize - 1;
   ivec2 base = pos * 2;
 
-  float minDepth = texelFetch(inputMip, min(base, srcMax), pc.srcMip).r;
-  minDepth = min(minDepth, texelFetch(inputMip, min(base + ivec2(1, 0), srcMax), pc.srcMip).r);
-  minDepth = min(minDepth, texelFetch(inputMip, min(base + ivec2(0, 1), srcMax), pc.srcMip).r);
-  minDepth = min(minDepth, texelFetch(inputMip, min(base + ivec2(1, 1), srcMax), pc.srcMip).r);
+  // Reversed-Z: larger depth is closer to the camera, so each cell keeps its maximum.
+  float maxDepth = texelFetch(inputMip, min(base, srcMax), pc.srcMip).r;
+  maxDepth = max(maxDepth, texelFetch(inputMip, min(base + ivec2(1, 0), srcMax), pc.srcMip).r);
+  maxDepth = max(maxDepth, texelFetch(inputMip, min(base + ivec2(0, 1), srcMax), pc.srcMip).r);
+  maxDepth = max(maxDepth, texelFetch(inputMip, min(base + ivec2(1, 1), srcMax), pc.srcMip).r);
 
   // An odd source extent leaves a trailing row/column that a plain 2x2 reduction drops, so the
-  // last destination texel along that axis would not be a true minimum of the region it covers.
-  // The SSR traversal relies on that minimum being conservative: an understated cell reads as
+  // last destination texel along that axis would not be a true maximum of the region it covers.
+  // The SSR traversal relies on that maximum being conservative: an understated cell reads as
   // empty and the ray marches straight past real geometry.
   bool extraX = (pc.srcWidth & 1) != 0 && pos.x == pc.dstWidth - 1;
   bool extraY = (pc.srcHeight & 1) != 0 && pos.y == pc.dstHeight - 1;
 
   if (extraX)
   {
-    minDepth = min(minDepth, texelFetch(inputMip, min(base + ivec2(2, 0), srcMax), pc.srcMip).r);
-    minDepth = min(minDepth, texelFetch(inputMip, min(base + ivec2(2, 1), srcMax), pc.srcMip).r);
+    maxDepth = max(maxDepth, texelFetch(inputMip, min(base + ivec2(2, 0), srcMax), pc.srcMip).r);
+    maxDepth = max(maxDepth, texelFetch(inputMip, min(base + ivec2(2, 1), srcMax), pc.srcMip).r);
   }
   if (extraY)
   {
-    minDepth = min(minDepth, texelFetch(inputMip, min(base + ivec2(0, 2), srcMax), pc.srcMip).r);
-    minDepth = min(minDepth, texelFetch(inputMip, min(base + ivec2(1, 2), srcMax), pc.srcMip).r);
+    maxDepth = max(maxDepth, texelFetch(inputMip, min(base + ivec2(0, 2), srcMax), pc.srcMip).r);
+    maxDepth = max(maxDepth, texelFetch(inputMip, min(base + ivec2(1, 2), srcMax), pc.srcMip).r);
   }
   if (extraX && extraY)
-    minDepth = min(minDepth, texelFetch(inputMip, min(base + ivec2(2, 2), srcMax), pc.srcMip).r);
+    maxDepth = max(maxDepth, texelFetch(inputMip, min(base + ivec2(2, 2), srcMax), pc.srcMip).r);
 
-  imageStore(outputMip, pos, vec4(minDepth));
+  imageStore(outputMip, pos, vec4(maxDepth));
 }

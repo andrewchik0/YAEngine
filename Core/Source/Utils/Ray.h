@@ -16,18 +16,16 @@ namespace YAEngine
     float x = normalizedPos.x * 2.0f - 1.0f;
     float y = 1.0f - normalizedPos.y * 2.0f;
 
-    glm::vec4 clipNear(x, y, 0.0f, 1.0f);
-    glm::vec4 clipFar(x, y, 1.0f, 1.0f);
-
-    glm::vec4 viewNear = invProj * clipNear;
-    glm::vec4 viewFar  = invProj * clipFar;
+    // Reversed-Z puts the near plane at NDC z = 1 and the far plane at infinity, so only
+    // the near point is unprojected. A perspective ray through it also passes through the
+    // view-space origin, which yields the direction without a second finite point.
+    glm::vec4 viewNear = invProj * glm::vec4(x, y, 1.0f, 1.0f);
     viewNear /= viewNear.w;
-    viewFar  /= viewFar.w;
 
     glm::vec3 worldNear = glm::vec3(invView * viewNear);
-    glm::vec3 worldFar  = glm::vec3(invView * viewFar);
+    glm::vec3 worldDir = glm::vec3(invView * glm::vec4(glm::vec3(viewNear), 0.0f));
 
-    return { worldNear, glm::normalize(worldFar - worldNear) };
+    return { worldNear, glm::normalize(worldDir) };
   }
 
   inline std::optional<float> RayAABBIntersect(const Ray& ray, const glm::vec3& min, const glm::vec3& max)

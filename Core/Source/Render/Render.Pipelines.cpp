@@ -109,10 +109,13 @@ namespace YAEngine
     // Shadow pipelines (depth-only with depth bias, using shadow atlas render pass)
     VkRenderPass shadowRP = m_ShadowManager.GetAtlas().GetRenderPass();
     {
+      // Shadow maps stay standard-Z (atlas cleared to 1.0, LESS_OR_EQUAL sampler compare),
+      // so they must not inherit the reversed-Z GREATER default.
       PipelineCreateInfo shadowInfo = {
         .vertexShaderFile = "shadow.vert",
         .pushConstantSize = sizeof(glm::mat4) + sizeof(int) + sizeof(int),
         .colorAttachmentCount = 0,
+        .compareOp = VK_COMPARE_OP_LESS,
         .vertexInputFormat = "f3",
         .sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout() })
       };
@@ -139,6 +142,7 @@ namespace YAEngine
         .pushConstantSize = sizeof(glm::mat4) + sizeof(int) + sizeof(int),
         .doubleSided = true,
         .colorAttachmentCount = 0,
+        .compareOp = VK_COMPARE_OP_LESS,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout(), m_DefaultMaterial.GetLayout() })
       };
@@ -158,7 +162,7 @@ namespace YAEngine
       .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
       .depthWrite = false,
       .colorAttachmentCount = 3,
-      .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+      .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
       .vertexInputFormat = "f3|f2f3f4",
       .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
     };
@@ -191,14 +195,14 @@ namespace YAEngine
         .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
         .depthWrite = false,
         .colorAttachmentCount = 3,
-        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_TerrainMaterial.GetLayout() })
       };
       m_ForwardPipelines[5] = m_PSOCache.Register(ctx.device, mainRP, terrainInfo, pipelineCache);
     }
 
-    // [6] alpha-test non-instanced (depth from prepass - no depth write, LEQUAL)
+    // [6] alpha-test non-instanced (depth from prepass - no depth write, GEQUAL)
     {
       PipelineCreateInfo alphaTestInfo = {
         .fragmentShaderFile = "gbuffer_alphatest.frag",
@@ -207,14 +211,14 @@ namespace YAEngine
         .depthWrite = false,
         .doubleSided = true,
         .colorAttachmentCount = 3,
-        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
       };
       m_ForwardPipelines[6] = m_PSOCache.Register(ctx.device, mainRP, alphaTestInfo, pipelineCache);
     }
 
-    // [7] alpha-test instanced (depth from prepass - no depth write, LEQUAL)
+    // [7] alpha-test instanced (depth from prepass - no depth write, GEQUAL)
     {
       PipelineCreateInfo alphaTestInstInfo = {
         .fragmentShaderFile = "gbuffer_alphatest.frag",
@@ -223,7 +227,7 @@ namespace YAEngine
         .depthWrite = false,
         .doubleSided = true,
         .colorAttachmentCount = 3,
-        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(), m_InstanceDescriptorSet.GetLayout() })
       };
@@ -239,7 +243,7 @@ namespace YAEngine
         .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
         .depthWrite = false,
         .colorAttachmentCount = 3,
-        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
         .vertexInputFormat = "f3|f2f3f4",
@@ -272,7 +276,7 @@ namespace YAEngine
         .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
         .depthWrite = false,
         .colorAttachmentCount = 3,
-        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
         .vertexInputFormat = "f3|f2f3f4",
@@ -288,7 +292,7 @@ namespace YAEngine
         .depthWrite = false,
         .doubleSided = true,
         .colorAttachmentCount = 3,
-        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
         .vertexInputFormat = "f3|f2f3f4",
@@ -309,7 +313,7 @@ namespace YAEngine
         .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
         .depthWrite = false,
         .colorAttachmentCount = 3,
-        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
         .vertexInputFormat = "f3|f2f3f4",
@@ -639,7 +643,7 @@ namespace YAEngine
     m_DeferredLightingPipeline = m_PSOCache.Register(ctx.device, deferredRP, deferredInfo, pipelineCache);
 
     // Forward Transparent pipelines - same lights/IBL/material descriptor sets as deferred,
-    // depth LOAD/write/LEQUAL, src-alpha blending, output to TAAHistory0.
+    // depth LOAD/write/GEQUAL, src-alpha blending, output to TAAHistory0.
     {
       VkRenderPass transparentRP = m_Graph.GetPassRenderPass(m_ForwardTransparentPassIndex);
 
@@ -650,7 +654,7 @@ namespace YAEngine
         .depthWrite = true,
         .blending = true,
         .colorAttachmentCount = 1,
-        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({
           m_FrameUniformBuffer.GetLayout(),
@@ -866,7 +870,7 @@ namespace YAEngine
         .additiveBlend = true,
         .doubleSided = true,
         .colorAttachmentCount = 1,
-        .compareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP,
         .vertexInputFormat = "",
         .sets = std::vector({

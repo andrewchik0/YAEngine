@@ -1,6 +1,7 @@
 #include "Engine.h"
 #include "Render/FrameContext.h"
 #include "Render/FrustumCull.h"
+#include "Utils/Projection.h"
 #include "Scene/SceneSnapshot.h"
 #include "Scene/TransformSystem.h"
 #include "Scene/BoundsUpdateSystem.h"
@@ -177,8 +178,8 @@ namespace YAEngine
       auto& cam = m_Snapshot.camera;
       glm::mat4 world = glm::translate(glm::mat4(1.0f), cam.position) * glm::mat4_cast(cam.rotation);
       glm::mat4 view = glm::inverse(world);
-      glm::mat4 proj = glm::perspective(cam.fov, cam.aspectRatio, cam.nearPlane, cam.farPlane);
-      m_Snapshot.visibleCount = FrustumCull(m_Snapshot.objects, proj * view);
+      glm::mat4 proj = MakeReversedInfinitePerspective(cam.fov, cam.aspectRatio, cam.nearPlane);
+      m_Snapshot.visibleCount = FrustumCull(m_Snapshot.objects, view, proj, cam.farPlane);
 
       auto frame = MakeFrameContext(m_Snapshot);
       m_Render.Draw(frame);

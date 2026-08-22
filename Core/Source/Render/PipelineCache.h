@@ -15,7 +15,7 @@ namespace YAEngine
     bool depthWrite = true;
     bool blending = false;
     bool doubleSided = false;
-    VkCompareOp compareOp = VK_COMPARE_OP_LESS;
+    VkCompareOp compareOp = VK_COMPARE_OP_GREATER;
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     bool depthBiasEnable = false;
     uint32_t colorAttachmentCount = 1;
