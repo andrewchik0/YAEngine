@@ -72,6 +72,10 @@ namespace YAEngine
     m_Context.maxFramesInFlight = m_MaxFramesInFlight;
     m_Context.pipelineCache = m_PipelineCache;
     m_Context.layoutCache = &m_LayoutCache;
+
+    VkPhysicalDeviceProperties limitProps {};
+    vkGetPhysicalDeviceProperties(m_PhysicalDevice.Get(), &limitProps);
+    m_Context.maxImageDimension3D = limitProps.limits.maxImageDimension3D;
   }
 
   void RenderBackend::Destroy()

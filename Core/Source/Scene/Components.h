@@ -108,17 +108,43 @@ namespace YAEngine
     Box
   };
 
-  struct LightProbeComponent
+  struct ReflectionProbeComponent
   {
     ProbeShape shape = ProbeShape::Sphere;
     glm::vec3 extents { 5.0f };
     float fadeDistance = 1.0f;
     int priority = 0;
+    // Must match BakeLimits::PROBE_DEFAULT_CAPTURE_RESOLUTION. Kept as a literal so
+    // this header stays free of render includes; the value is clamped on load.
     uint32_t resolution = 128;
+    // Reproject reflections onto the influence volume. Only correct while the volume
+    // is a decent stand-in for the real geometry, so it stays a per-probe choice.
+    bool parallaxCorrection = false;
     bool baked = false;
     uint32_t atlasSlot = 0;
-    std::string bakedIrradiancePath;
+    // Specular only - the diffuse half of a probe moved to irradiance volumes,
+    // so no irradiance cubemap is baked or stored any more.
     std::string bakedPrefilterPath;
+  };
+
+  // Grid of SH L1 nodes covering a box. Position and orientation come from the
+  // entity WorldTransform (transform scale is ignored, halfExtents define the box).
+  struct IrradianceVolumeComponent
+  {
+    glm::vec3 halfExtents { 5.0f };
+    // Node spacing in meters, uniform on every axis and always one of
+    // IRRADIANCE_SPACINGS (Utils/IrradianceGrid.h). The spacing is exact - the BOX
+    // is snapped to the world lattice, never the other way round. Kept as a float
+    // so the scene format does not change; the value is snapped on load and the
+    // editor only offers valid ones.
+    float spacing = 1.0f;
+    // Cube face resolution used while capturing a node. An L1 fit averages over the
+    // whole hemisphere, so 16-32 is plenty and bake time scales with its square.
+    // Must match BakeLimits::VOLUME_DEFAULT_CAPTURE_RESOLUTION, clamped on load.
+    uint32_t captureResolution = 32;
+    bool baked = false;       // runtime only, reset on load
+    uint32_t atlasSlot = 0;   // runtime only, index in the volume atlas
+    std::string bakedVolumePath;
   };
 
   enum class TerrainNoiseType : uint8_t

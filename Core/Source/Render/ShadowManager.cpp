@@ -164,6 +164,14 @@ namespace YAEngine
       radius = std::max(radius, dist);
     }
 
+    return FitCascadeToSphere(cascadeIndex, center, radius, lightDir);
+  }
+
+  float ShadowManager::FitCascadeToSphere(
+    uint32_t cascadeIndex,
+    const glm::vec3& center, float radius,
+    const glm::vec3& lightDir)
+  {
     // Round up radius to reduce shimmer
     radius = std::ceil(radius * 16.0f) / 16.0f;
 
@@ -230,6 +238,45 @@ namespace YAEngine
       float texelWorldSize = FitCascadeToFrustum(i, invViewProj, nearSplit, farSplit, glm::normalize(lightDirection));
 
       // Normal bias = 1.5 texels in world space, scales automatically per cascade
+      m_ShadowData.cascades[i].splitDepthAndBias = glm::vec4(
+        m_CascadeSplits[i + 1],
+        0.0f,
+        texelWorldSize * 1.5f,
+        0.0f);
+    }
+  }
+
+  void ShadowManager::ComputeCascadesAroundPoint(
+    const glm::vec3& center,
+    float nearPlane,
+    float shadowDistance,
+    const glm::vec3& lightDirection,
+    float volumeRadius)
+  {
+    if (shadowDistance <= nearPlane)
+    {
+      m_ShadowData.shadowsEnabled = 0;
+      return;
+    }
+
+    m_ShadowData.shadowsEnabled = 1;
+
+    ComputeCascadeSplits(nearPlane, shadowDistance);
+
+    glm::vec3 lightDir = glm::normalize(lightDirection);
+
+    for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
+    {
+      // Cascades are picked in the shader by view depth, but a 90 degree cube face
+      // reaches sqrt(3) times its view depth at the frustum corners. Inflating the
+      // sphere by that factor keeps every texel a cascade can be selected for inside
+      // the map it was fitted to.
+      // Capture points spread over a box reach volumeRadius further out than the
+      // center does, so the sphere grows by that much and one atlas serves them all.
+      float radius = m_CascadeSplits[i + 1] * OMNI_CASCADE_SLACK + volumeRadius;
+
+      float texelWorldSize = FitCascadeToSphere(i, center, radius, lightDir);
+
       m_ShadowData.cascades[i].splitDepthAndBias = glm::vec4(
         m_CascadeSplits[i + 1],
         0.0f,

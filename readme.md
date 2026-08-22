@@ -40,7 +40,7 @@ The `YA_EDITOR` flag toggles editor layer. All editor code is `#ifdef`-guarded o
 
 - **Tile-based light culling.** 16х16 tiles, compute pass writes per-tile light list.
 
-- **IBL + light probes.** GPU-baked: cubemap, irradiance convolution, roughness-prefiltered specular.
+- **IBL, irradiance volumes and reflection probes.** Diffuse indirect comes from grids of SH L1 probes, specular from roughness-prefiltered reflection probes, skybox is the fallback for both. GPU-baked: cubemap, irradiance convolution, roughness-prefiltered specular.
 
 **Screen-space effects:**
 - **SSAO** - bilateral blur

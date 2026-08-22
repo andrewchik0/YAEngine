@@ -13,8 +13,9 @@
 #include "LightStorageBuffer.h"
 #include "TileLightBuffer.h"
 #include "ShadowManager.h"
-#include "LightProbeAtlas.h"
-#include "LightProbeStorageBuffer.h"
+#include "ReflectionProbeAtlas.h"
+#include "ReflectionProbeStorageBuffer.h"
+#include "IrradianceVolumeStorage.h"
 #include "Assets/Handle.h"
 #include "ParticleInstance.h"
 
@@ -23,7 +24,8 @@
 #include "Editor/GizmoRenderer.h"
 #include "Editor/ShaderHotReload.h"
 #include "OffscreenRenderer.h"
-#include "LightProbeBaker.h"
+#include "ReflectionProbeBaker.h"
+#include "IrradianceVolumeBaker.h"
 #endif
 
 namespace YAEngine
@@ -35,6 +37,16 @@ namespace YAEngine
     uint32_t vertices = 0;
   };
 
+#ifdef YA_EDITOR
+  // What the baked irradiance volume node gizmos encode in their color.
+  // Indices must match the combo in RenderSettingsPanel.
+  enum class VolumeNodeColorMode : uint8_t
+  {
+    Irradiance = 0, // L0 normalized against the peak of the volume
+    Ringing = 1     // |L1| / L0, flags nodes whose L1 fit goes negative
+  };
+#endif
+
   class Render
   {
   public:
@@ -42,6 +54,10 @@ namespace YAEngine
     static constexpr uint32_t MAX_PARTICLES_PER_FRAME = 8192;
     static constexpr uint32_t MAX_PARTICLE_BATCHES_PER_FRAME = 16;
     static constexpr int32_t DEBUG_VIEW_WIREFRAME = 7;
+    static constexpr int MIN_PROBE_BOUNCES = 1;
+    static constexpr int MAX_PROBE_BOUNCES = 4;
+    static constexpr int MIN_VOLUME_BOUNCES = 1;
+    static constexpr int MAX_VOLUME_BOUNCES = 4;
 
     void Init(GLFWwindow* window, const RenderSpecs &specs);
     void Destroy();
@@ -59,6 +75,12 @@ namespace YAEngine
         set.WriteCombinedImageSampler(2, m_NoneTexture.GetView(), m_NoneTexture.GetSampler());
         set.WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
       }
+      // Unlike the probe buffer, the volume atlas is not rebuilt from the per-frame
+      // snapshot, so a teardown has to clear it explicitly - otherwise the next scene
+      // is lit, and baked, by the previous one's volumes.
+      m_VolumeStorage.Reset(m_Backend.GetContext());
+      m_VolumeUploadDirty = m_Backend.GetContext().maxFramesInFlight;
+      WriteIrradianceVolumeDescriptors();
       m_InstanceBuffer.ResetAllocator();
     }
 
@@ -109,6 +131,15 @@ namespace YAEngine
     glm::vec3& GetFogColor() { return m_FogColor; }
     float& GetFogMaxOpacity() { return m_FogMaxOpacity; }
     float& GetFogStartDistance() { return m_FogStartDistance; }
+    int& GetProbeBounceCount() { return m_ProbeBounceCount; }
+    int& GetVolumeBounceCount() { return m_VolumeBounceCount; }
+    bool& GetIrradianceVolumesEnabled() { return b_IrradianceVolumesEnabled; }
+    float& GetIrradianceNormalBias() { return m_IrradianceNormalBias; }
+
+    // Rebuilds the volume atlas from freshly loaded assets and rewrites the IBL
+    // descriptors. outSlots receives the atlas slot of every input volume.
+    void UploadIrradianceVolumes(const std::vector<IrradianceVolumeFileData>& volumes,
+      std::vector<uint32_t>& outSlots);
 
     const RenderStats& GetStats() const { return m_Stats; }
 
@@ -151,14 +182,43 @@ namespace YAEngine
     glm::vec3 m_FogColor = glm::vec3(0.7f, 0.75f, 0.8f);
     float m_FogMaxOpacity = 1.0f;
     float m_FogStartDistance = 10.0f;
+    // Number of probe bake passes in a bake-all run. Every pass after the first
+    // lets probes pick up the light their neighbours captured in the previous one.
+    int m_ProbeBounceCount = 1;
+    // Same idea for irradiance volumes. Two by default: bake time grows linearly
+    // with the pass count and is the binding constraint here, while a third bounce
+    // adds only a few percent of energy at typical albedo.
+    int m_VolumeBounceCount = 2;
+    bool b_IrradianceVolumesEnabled = true;
+    // The volume UBO is not rebuilt from the per-frame snapshot, so it is uploaded
+    // only when it actually changed - once per frame in flight after each change.
+    bool b_VolumeUniformsEnabled = true;
+    uint32_t m_VolumeUploadDirty = 0;
+    // Distance the diffuse sample point is pushed along the surface normal before
+    // it is looked up in a volume. First-line mitigation against light leaking
+    // through walls thinner than the node spacing.
+    float m_IrradianceNormalBias = 0.25f;
     float m_LastFrameTime = 0.0f;
     float m_DeltaTime = 0.0f;
 
     RenderStats m_Stats {};
 
-    void RenderShadowMaps(FrameContext& frame);
+    // Near plane of the cube faces rendered by OffscreenRenderer::RenderFace
+    static constexpr float PROBE_SHADOW_NEAR_PLANE = 0.01f;
+
+    // probeCenter != nullptr fits the CSM cascades around that point instead of the
+    // camera frustum, so one atlas render covers all six faces of a probe bake.
+    // probeRadius > 0 widens that fit to a box of capture points - an irradiance
+    // volume renders the atlas once for the whole box, never once per node.
+    void RenderShadowMaps(FrameContext& frame, VkCommandBuffer cmd,
+      uint32_t frameIndex, const glm::vec3* probeCenter = nullptr,
+      float probeRadius = 0.0f);
     void SetUpCamera(FrameContext& frame);
     void InitPipelines();
+
+    // Set 3 bindings 5-9. Re-run after every volume atlas rebuild - the image
+    // views change and stale ones would dangle.
+    void WriteIrradianceVolumeDescriptors();
 
     void SetupRenderGraph(uint32_t width, uint32_t height);
     void CreateTAAFramebuffers();
@@ -211,6 +271,10 @@ namespace YAEngine
     GizmoRenderer m_GizmoRenderer;
     bool b_GizmosEnabled = true;
     bool b_ProbeVolumesVisible = true;
+    bool b_IrradianceVolumesVisible = true;
+    bool b_VolumeNodesVisible = false;
+    bool b_VolumeInvalidNodesVisible = false;
+    VolumeNodeColorMode m_VolumeNodeColorMode = VolumeNodeColorMode::Irradiance;
     bool b_CollidersVisible = false;
     bool b_HasSelectedEntity = false;
     glm::vec3 m_SelectedEntityPosition { 0.0f };
@@ -255,8 +319,9 @@ namespace YAEngine
     LightStorageBuffer m_LightBuffer;
     TileLightBuffer m_TileLightBuffer;
     ShadowManager m_ShadowManager;
-    LightProbeAtlas m_ProbeAtlas;
-    LightProbeStorageBuffer m_ProbeBuffer;
+    ReflectionProbeAtlas m_ProbeAtlas;
+    ReflectionProbeStorageBuffer m_ProbeBuffer;
+    IrradianceVolumeStorage m_VolumeStorage;
 
     std::vector<VulkanDescriptorSet> m_SwapChainDescriptorSets;
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
@@ -390,6 +455,10 @@ namespace YAEngine
     uint32_t GetViewportHeight() const { return m_ViewportHeight; }
     bool& GetGizmosEnabled() { return b_GizmosEnabled; }
     bool& GetProbeVolumesVisible() { return b_ProbeVolumesVisible; }
+    bool& GetIrradianceVolumesVisible() { return b_IrradianceVolumesVisible; }
+    bool& GetVolumeNodesVisible() { return b_VolumeNodesVisible; }
+    bool& GetVolumeInvalidNodesVisible() { return b_VolumeInvalidNodesVisible; }
+    VolumeNodeColorMode& GetVolumeNodeColorMode() { return m_VolumeNodeColorMode; }
     bool& GetCollidersVisible() { return b_CollidersVisible; }
     GizmoRenderer& GetGizmoRenderer() { return m_GizmoRenderer; }
     void SetSelectedEntityPosition(const glm::vec3& pos) { b_HasSelectedEntity = true; m_SelectedEntityPosition = pos; }
@@ -397,15 +466,25 @@ namespace YAEngine
     GizmoMode& GetGizmoMode() { return m_GizmoMode; }
     ShaderHotReload& GetShaderHotReload() { return m_ShaderHotReload; }
     void InitShaderHotReload(ThreadPool* threadPool);
-    void BakeProbe(entt::entity entity, class Scene& scene, class AssetManager& assets);
+    // writeToDisk == false updates the atlas only, for intermediate bounce passes
+    void BakeProbe(entt::entity entity, class Scene& scene, class AssetManager& assets,
+      bool writeToDisk = true);
+    void BakeAllProbes(class Scene& scene, class AssetManager& assets);
+    // writeToDisk == false skips the .yaiv write, for intermediate bounce passes.
+    // outData receives the freshly baked volume when it is not null; the caller then
+    // owns refreshing the atlas, which lets a bounce loop avoid a disk round-trip.
+    bool BakeIrradianceVolume(entt::entity entity, class Scene& scene, class AssetManager& assets,
+      bool writeToDisk = true, IrradianceVolumeFileData* outData = nullptr);
+    void BakeAllIrradianceVolumes(class Scene& scene, class AssetManager& assets);
 #endif
 
-    LightProbeAtlas& GetProbeAtlas() { return m_ProbeAtlas; }
+    ReflectionProbeAtlas& GetProbeAtlas() { return m_ProbeAtlas; }
 
   private:
 #ifdef YA_EDITOR
     ShaderHotReload m_ShaderHotReload;
-    LightProbeBaker m_ProbeBaker;
+    ReflectionProbeBaker m_ProbeBaker;
+    IrradianceVolumeBaker m_VolumeBaker;
 #endif
 
     friend class OffscreenRenderer;

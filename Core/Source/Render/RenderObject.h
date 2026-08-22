@@ -2,7 +2,8 @@
 
 #include "Pch.h"
 #include "Assets/Handle.h"
-#include "LightProbeData.h"
+#include "ReflectionProbeData.h"
+#include "Utils/IrradianceGrid.h"
 
 namespace YAEngine
 {
@@ -65,6 +66,15 @@ namespace YAEngine
     std::vector<glm::vec2> roadPolyline;
   };
 
+  // One irradiance volume as the renderer sees it. Carries the full box
+  // description because the same data fills the volume UBO.
+  struct IrradianceVolumeInstance
+  {
+    glm::vec3 center { 0.0f };
+    glm::quat rotation { 1.0f, 0.0f, 0.0f, 0.0f };
+    IrradianceGridLayout grid;
+  };
+
   struct SceneSnapshot
   {
     std::vector<RenderObject> objects;
@@ -74,7 +84,12 @@ namespace YAEngine
     DirectionalShadowData directionalShadow;
     std::vector<SpotShadowRequest> spotShadowRequests;
     std::vector<PointShadowRequest> pointShadowRequests;
-    LightProbeBuffer probeBuffer {};
+    ReflectionProbeBuffer probeBuffer {};
+#ifdef YA_EDITOR
+    // Only the volume bounds gizmo reads this - the shader gets its volume data
+    // from IrradianceVolumeStorage, which is filled at upload time.
+    std::vector<IrradianceVolumeInstance> irradianceVolumes;
+#endif
     TerrainRenderData terrainData {};
   };
 }

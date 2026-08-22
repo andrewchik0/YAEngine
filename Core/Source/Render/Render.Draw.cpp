@@ -269,7 +269,9 @@ namespace YAEngine
     m_PrevView = view;
     m_PrevProj = proj;
 
-    if (b_TAAEnabled)
+    // Jitter without a resolve just makes the image crawl, and the indirect debug
+    // views run with TAA forced off - see the matching block in Render::Draw.
+    if (b_TAAEnabled && !IS_INDIRECT_DEBUG_VIEW(m_CurrentTexture))
     {
       glm::vec2 jitter = GetTAAJitter(m_GlobalFrameIndex);
 
@@ -422,7 +424,8 @@ namespace YAEngine
     }
   }
 
-  void Render::RenderShadowMaps(FrameContext& frame)
+  void Render::RenderShadowMaps(FrameContext& frame, VkCommandBuffer cmd,
+    uint32_t frameIndex, const glm::vec3* probeCenter, float probeRadius)
   {
     // Collect shadow draw commands from ALL objects (not just camera-visible).
     // Objects outside the camera frustum can still cast shadows into the view.
@@ -477,7 +480,7 @@ namespace YAEngine
       MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
       auto& mat = materialManager.Get(matHandle);
       mat.cubemap = skybox;
-      materialManager.GetVulkanMaterial(matHandle).Bind(frame.assets.Textures(), cubeMapManager, frame.cubicResources, mat, m_Backend.GetCurrentFrameIndex(), m_NoneTexture);
+      materialManager.GetVulkanMaterial(matHandle).Bind(frame.assets.Textures(), cubeMapManager, frame.cubicResources, mat, frameIndex, m_NoneTexture);
     }
 
     bool hasDirectionalShadow = b_ShadowsEnabled && frame.snapshot.directionalShadow.castShadow;
@@ -489,7 +492,7 @@ namespace YAEngine
       m_ShadowManager.SetEnabled(false);
       m_ShadowManager.SetSpotShadowCount(0);
       m_ShadowManager.SetPointShadowCount(0);
-      m_ShadowManager.SetUp(m_Backend.GetCurrentFrameIndex());
+      m_ShadowManager.SetUp(frameIndex);
       return;
     }
 
@@ -499,12 +502,29 @@ namespace YAEngine
       auto& cam = frame.snapshot.camera;
       auto& shadow = frame.snapshot.directionalShadow;
       m_ShadowManager.SetEnabled(true);
-      m_ShadowManager.ComputeCascades(
-        m_FrameUniformBuffer.uniforms.view,
-        m_PrevProj,
-        cam.nearPlane, cam.farPlane,
-        shadow.shadowDistance,
-        shadow.direction);
+      if (probeCenter)
+      {
+        m_ShadowManager.ComputeCascadesAroundPoint(
+          *probeCenter,
+          PROBE_SHADOW_NEAR_PLANE,
+          shadow.shadowDistance,
+          shadow.direction,
+          probeRadius);
+      }
+      else
+      {
+        m_ShadowManager.ComputeCascades(
+          m_FrameUniformBuffer.uniforms.view,
+          m_PrevProj,
+          cam.nearPlane, cam.farPlane,
+          shadow.shadowDistance,
+          shadow.direction);
+      }
+
+      // A degenerate shadow distance makes both of them switch shadows off without
+      // writing a single cascade matrix. Rendering the tiles anyway would feed zero
+      // matrices into ExtractFrustumPlanes and divide by a zero-length normal.
+      hasDirectionalShadow = m_ShadowManager.IsEnabled();
     }
     else
     {
@@ -525,10 +545,9 @@ namespace YAEngine
       m_ShadowManager.ComputePointShadow(i, req.position, req.radius);
     }
 
-    auto currentFrame = m_Backend.GetCurrentFrameIndex();
+    auto currentFrame = frameIndex;
     m_ShadowManager.SetUp(currentFrame);
 
-    auto cmd = m_Backend.GetCurrentCommandBuffer();
     auto& atlas = m_ShadowManager.GetAtlas();
 
     // Begin shadow atlas render pass (clears entire atlas)

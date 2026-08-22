@@ -1,5 +1,6 @@
 #include "TextureManager.h"
 
+#include "DdsFile.h"
 #include "Render/RenderContext.h"
 #include "Utils/Log.h"
 #include "Utils/MipGenerator.h"
@@ -51,6 +52,18 @@ namespace YAEngine
       if (hasAlpha != nullptr)
         *hasAlpha = Get(it->second).m_HasAlpha;
       return it->second;
+    }
+
+    // Load() sniffs the signature itself, so this is one open instead of the two
+    // an IsDdsFile() probe followed by a Load() would cost - and every non-DDS
+    // texture in the scene used to pay for the probe as well.
+    if (DdsFile::HasDdsExtension(path))
+    {
+      auto cpuData = DdsFile::Load(path, linear);
+      if (cpuData.width == 0)
+        return {};
+
+      return LoadFromCpuData(std::move(cpuData), hasAlpha, canonical);
     }
 
     auto texture = std::make_unique<Texture>();
@@ -123,8 +136,15 @@ namespace YAEngine
     if (hasAlpha != nullptr)
       *hasAlpha = cpuData.hasAlpha;
 
-    VkFormat format = cpuData.linear ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_SRGB;
-    texture->m_VulkanTexture.LoadFromCpuData(*m_Ctx, cpuData, format);
+    VkFormat format = cpuData.format != VK_FORMAT_UNDEFINED
+      ? cpuData.format
+      : (cpuData.linear ? VK_FORMAT_R8G8B8A8_UNORM : VK_FORMAT_R8G8B8A8_SRGB);
+    if (!texture->m_VulkanTexture.LoadFromCpuData(*m_Ctx, cpuData, format))
+    {
+      // Storing it anyway would hand out a handle whose image is VK_NULL_HANDLE,
+      // and VulkanMaterial::Bind would write that into a combined image sampler.
+      return {};
+    }
 
     auto handle = Store(std::move(texture));
 
@@ -139,6 +159,9 @@ namespace YAEngine
 
   CpuTextureData TextureManager::DecodeToCpu(const std::string& filePath, bool linear)
   {
+    if (DdsFile::IsDdsFile(filePath))
+      return DdsFile::Load(filePath, linear);
+
     int32_t width, height, channels;
 
     void* data = stbi_load(filePath.c_str(), &width, &height, &channels, 4);

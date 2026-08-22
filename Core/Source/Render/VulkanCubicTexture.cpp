@@ -7,7 +7,7 @@
 #include "Utils/Log.h"
 #include "ShaderUtils.h"
 #include "ImageBarrier.h"
-#include "LightProbeAtlas.h"
+#include "ReflectionProbeAtlas.h"
 
 #include <Stb/stb_image.h>
 

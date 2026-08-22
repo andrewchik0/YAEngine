@@ -4,6 +4,23 @@
 
 namespace YAEngine
 {
+  void Render::WriteIrradianceVolumeDescriptors()
+  {
+    for (size_t i = 0; i < m_IBLDescriptorSets.size(); i++)
+    {
+      for (uint32_t channel = 0; channel < 3; channel++)
+      {
+        m_IBLDescriptorSets[i].WriteCombinedImageSampler(5 + channel,
+          m_VolumeStorage.GetCoefficientView(channel),
+          m_VolumeStorage.GetCoefficientSampler(channel));
+      }
+      m_IBLDescriptorSets[i].WriteCombinedImageSampler(8,
+        m_VolumeStorage.GetValidityView(), m_VolumeStorage.GetValiditySampler());
+      m_IBLDescriptorSets[i].WriteUniformBuffer(9,
+        m_VolumeStorage.GetBuffer(uint32_t(i)), sizeof(IrradianceVolumeBuffer));
+    }
+  }
+
   VulkanPipeline& Render::GetForwardPipeline(const DrawCommand& dc)
   {
     return m_PSOCache.Get(m_ForwardPipelines[dc.SortKey()]);
@@ -537,7 +554,8 @@ namespace YAEngine
       m_DeferredLightingDescriptorSets[i].Init(ctx, dlDesc);
     }
 
-    // IBL descriptor set (irradiance array, prefilter array, BRDF LUT, skybox cubemap, probe SSBO)
+    // IBL descriptor set (irradiance array, prefilter array, BRDF LUT, skybox cubemap,
+    // probe SSBO, three SH volume atlases, volume validity, volume UBO)
     SetDescription iblDesc = {
       .set = 3,
       .bindings = {
@@ -547,6 +565,11 @@ namespace YAEngine
           { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 9, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
@@ -569,8 +592,9 @@ namespace YAEngine
         m_ProbeAtlas.GetPrefilterView(), m_ProbeAtlas.GetPrefilterSampler());
       m_IBLDescriptorSets[i].WriteCombinedImageSampler(2, m_NoneTexture.GetView(), m_NoneTexture.GetSampler());
       m_IBLDescriptorSets[i].WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
-      m_IBLDescriptorSets[i].WriteStorageBuffer(4, m_ProbeBuffer.GetBuffer(uint32_t(i)), sizeof(LightProbeBuffer));
+      m_IBLDescriptorSets[i].WriteStorageBuffer(4, m_ProbeBuffer.GetBuffer(uint32_t(i)), sizeof(ReflectionProbeBuffer));
     }
+    WriteIrradianceVolumeDescriptors();
 
     // Deferred lighting set 2: lights SSBO (binding 0) + tile light indices SSBO (binding 1)
     m_DeferredLightingLightDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());

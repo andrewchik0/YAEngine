@@ -1,8 +1,11 @@
 #include "CubemapConvolution.h"
 
+#include <glm/gtc/packing.hpp>
+
 #include "RenderContext.h"
 #include "VulkanCommandBuffer.h"
 #include "VulkanCubicTexture.h"
+#include "VulkanBuffer.h"
 #include "ImageBarrier.h"
 #include "Utils/Log.h"
 
@@ -343,5 +346,111 @@ namespace YAEngine
     vkDestroyDescriptorPool(ctx.device, tempPool, nullptr);
 
     return result;
+  }
+
+  SHL1RGB ProjectCubemapToSH(const RenderContext& ctx, VkImage srcImage, uint32_t resolution,
+    VkImageLayout currentLayout, uint32_t mipLevel, VulkanBuffer* reusableStaging)
+  {
+    if (resolution == 0)
+    {
+      YA_LOG_ERROR("Render", "ProjectCubemapToSH called with zero resolution");
+      return SHL1RGB {};
+    }
+
+    // Four half-float channels per texel
+    constexpr size_t BYTES_PER_TEXEL = 8;
+    size_t faceTexels = size_t(resolution) * size_t(resolution);
+    size_t faceBytes = faceTexels * BYTES_PER_TEXEL;
+
+    const VkDeviceSize readbackSize = faceBytes * 6;
+
+    VulkanBuffer localStaging;
+    if (reusableStaging != nullptr && reusableStaging->GetSize() < readbackSize)
+    {
+      reusableStaging->Destroy(ctx);
+      *reusableStaging = VulkanBuffer::CreateReadback(ctx, readbackSize);
+    }
+    else if (reusableStaging == nullptr)
+    {
+      localStaging = VulkanBuffer::CreateReadback(ctx, readbackSize);
+    }
+
+    VulkanBuffer& staging = reusableStaging != nullptr ? *reusableStaging : localStaging;
+
+    bool needsTransition = currentLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+      && currentLayout != VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
+
+    // UNDEFINED is documented as "already usable as a transfer source, do not
+    // restore", and s_BarrierTable has no UNDEFINED -> TRANSFER_SRC entry, so
+    // transitioning it would emit a barrier with zeroed stage masks.
+    if (needsTransition)
+      TransitionImageLayout(cmd, srcImage, currentLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, mipLevel, 1, 0, 6);
+
+    for (uint32_t face = 0; face < 6; face++)
+    {
+      VkBufferImageCopy region {};
+      region.bufferOffset = faceBytes * face;
+      region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, mipLevel, face, 1 };
+      region.imageExtent = { resolution, resolution, 1 };
+      vkCmdCopyImageToBuffer(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        staging.Get(), 1, &region);
+    }
+
+    if (needsTransition)
+      TransitionImageLayout(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, currentLayout,
+        VK_IMAGE_ASPECT_COLOR_BIT, mipLevel, 1, 0, 6);
+
+    ctx.commandBuffer->EndSingleTimeCommands(cmd);
+
+    const uint16_t* texels = static_cast<const uint16_t*>(staging.GetMapped());
+    if (texels == nullptr)
+    {
+      YA_LOG_ERROR("Render", "ProjectCubemapToSH got an unmapped readback buffer");
+      localStaging.Destroy(ctx);
+      return SHL1RGB {};
+    }
+
+    // The solid angle is face independent, and it costs four atan2 per texel. One
+    // volume bake calls this once per node, so recomputing it six times over would
+    // dominate the CPU half of the bake.
+    std::vector<float> solidAngles(faceTexels);
+    for (uint32_t y = 0; y < resolution; y++)
+    {
+      for (uint32_t x = 0; x < resolution; x++)
+        solidAngles[size_t(y) * resolution + x] = CubeFaceTexelSolidAngle(x, y, resolution);
+    }
+
+    SHL1Accumulator accumulator;
+    for (uint32_t face = 0; face < 6; face++)
+    {
+      for (uint32_t y = 0; y < resolution; y++)
+      {
+        for (uint32_t x = 0; x < resolution; x++)
+        {
+          const uint16_t* texel = texels + (face * faceTexels + size_t(y) * resolution + x) * 4;
+          glm::vec3 color(
+            glm::unpackHalf1x16(texel[0]),
+            glm::unpackHalf1x16(texel[1]),
+            glm::unpackHalf1x16(texel[2]));
+
+          // A single Inf or NaN texel - representable in RGBA16F - would otherwise
+          // poison l0 and spread over everything the volume covers.
+          if (!std::isfinite(color.x) || !std::isfinite(color.y) || !std::isfinite(color.z))
+            continue;
+
+          accumulator.AddSample(color,
+            CubeFaceTexelDirection(face, x, y, resolution),
+            solidAngles[size_t(y) * resolution + x]);
+        }
+      }
+    }
+
+    // Only the local one: a reused buffer belongs to the caller.
+    localStaging.Destroy(ctx);
+
+    return accumulator.Finalize();
   }
 }

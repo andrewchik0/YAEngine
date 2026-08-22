@@ -101,8 +101,18 @@ namespace YAEngine
       float aspectRatio = 1.0f;
     };
 
+    // One entry per instanced wire draw. Layout must match the per-instance
+    // attributes of gizmo_instanced.vert.
+    struct GizmoInstance
+    {
+      glm::mat4 world;
+      glm::vec4 color;
+    };
+
     static GizmoMesh UploadTopology(const RenderContext& ctx, const TopologyData& data);
     static glm::mat4 BuildRotation(const glm::vec3& direction);
+
+    const GizmoMesh* MeshForShape(GizmoShape shape) const;
 
     void LoadGlyphSprite(const RenderContext& ctx, uint32_t codepoint, float pixelHeight);
 
@@ -117,8 +127,17 @@ namespace YAEngine
     GizmoMesh m_SolidScaleArrowMesh;
     GizmoMesh m_SolidRingMesh;
 
+    // Depth-tested wire draws all use the same handful of meshes, and the volume
+    // node overlay can queue tens of thousands of them, so they go through one
+    // instanced draw per shape instead of one draw call per request.
+    static constexpr uint32_t MAX_WIRE_INSTANCES = 32768;
+
+    VulkanBuffer m_InstanceBuffer;
+    std::vector<GizmoInstance> m_InstanceScratch;
+
     PipelineHandle m_WirePipeline;
     PipelineHandle m_WireDepthPipeline;
+    PipelineHandle m_WireDepthInstancedPipeline;
     PipelineHandle m_SolidPipeline;
     PipelineHandle m_SpritePipeline;
     PipelineCache* m_PSOCache = nullptr;

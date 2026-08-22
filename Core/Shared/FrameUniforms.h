@@ -1,6 +1,25 @@
 #define TONEMAP_ACES 0
 #define TONEMAP_AGX  1
 
+// Debug view indices - must match the debugViews[] list in RenderSettingsPanel.cpp.
+// Only the indirect lighting diagnostics need names on both sides; the rest stay positional.
+#define DEBUG_VIEW_AMBIENT_ONLY     10
+#define DEBUG_VIEW_AMBIENT_DIFFUSE  11
+#define DEBUG_VIEW_AMBIENT_SPECULAR 12
+#define DEBUG_VIEW_PROBE_INDEX      13
+#define DEBUG_VIEW_PROBE_FALLBACK   14
+#define DEBUG_VIEW_VOLUME_COVERAGE  15
+
+// Shared by the shaders and by Render, which has to switch off everything that
+// would modify these values on their way to the screen.
+#define IS_INDIRECT_DEBUG_VIEW(view) ( \
+     (view) == DEBUG_VIEW_AMBIENT_ONLY \
+  || (view) == DEBUG_VIEW_AMBIENT_DIFFUSE \
+  || (view) == DEBUG_VIEW_AMBIENT_SPECULAR \
+  || (view) == DEBUG_VIEW_PROBE_INDEX \
+  || (view) == DEBUG_VIEW_PROBE_FALLBACK \
+  || (view) == DEBUG_VIEW_VOLUME_COVERAGE)
+
 #ifdef __cplusplus
 #pragma once
 #define vec2 glm::vec2
@@ -51,6 +70,10 @@ struct FrameUniforms
   float fogMaxOpacity;
   float taaClampSigma;
   float ssrIntensity;
+  // Meters the diffuse sample point is pushed along the normal before it is
+  // looked up in an irradiance volume. Appended at the end so no existing
+  // member offset moves.
+  float irradianceNormalBias;
 };
 
 #ifdef __cplusplus

@@ -25,7 +25,7 @@ void main()
   albedo.rgb = pow(albedo.rgb, vec3(gamma));
 
   float hasNormalMap = float((u_Material.textureMask >> 5) & 1);
-  vec3 n_ts = texture(normalTexture, inTexCoord).rgb * 2.0 - 1.0;
+  vec3 n_ts = sampleMaterialNormal(inTexCoord);
   vec3 normal = mix(normalize(inNormal), normalize(inTBN * n_ts), hasNormalMap);
 
   float hasMetallicTexture = float((u_Material.textureMask >> 1) & 1);

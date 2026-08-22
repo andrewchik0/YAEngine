@@ -443,8 +443,157 @@ namespace YAEngine
     GetInput().SetViewportHovered(m_Context.viewportHovered);
   }
 
+  namespace
+  {
+    // Below this an L0 channel carries no usable light, so a directional term on
+    // top of it counts as full ringing instead of dividing by ~0
+    constexpr float MIN_RINGING_L0 = 1e-4f;
+    // Ratio at which the ringing ramp reaches its hottest color
+    constexpr float MAX_RINGING_RATIO = 2.0f;
+
+    // Brightest L0 channel over the valid nodes. A single scalar for the whole
+    // volume is what keeps the per-node hue intact - normalizing each channel by
+    // its own maximum would pull every bright node toward white.
+    float FindPeakNodeL0(const IrradianceVolumeFileData& data)
+    {
+      float peak = 0.0f;
+      size_t count = data.coefficients.size();
+      for (size_t i = 0; i < count; i++)
+      {
+        if (data.validity[i] == 0)
+          continue;
+
+        const SHL1RGB& sh = data.coefficients[i];
+        peak = std::max({ peak, sh.r.l0, sh.g.l0, sh.b.l0 });
+      }
+      return peak;
+    }
+
+    // irradiance(n) = l0 + dot(l1, n) reaches its minimum at l0 - |l1|, so the
+    // reconstruction goes negative for some normals exactly when this exceeds 1
+    float ChannelRingingRatio(const SHL1Channel& channel)
+    {
+      float l0 = std::max(channel.l0, 0.0f);
+      float l1 = glm::length(glm::vec3(channel.l1x, channel.l1y, channel.l1z));
+      if (l0 <= MIN_RINGING_L0)
+        return l1 <= MIN_RINGING_L0 ? 0.0f : MAX_RINGING_RATIO;
+      return l1 / l0;
+    }
+
+    // Worst channel wins: one channel clamping to zero already distorts the color
+    float NodeRingingRatio(const SHL1RGB& sh)
+    {
+      return std::max({ ChannelRingingRatio(sh.r), ChannelRingingRatio(sh.g), ChannelRingingRatio(sh.b) });
+    }
+
+    // Green to yellow while the fit stays non-negative, then a deliberate break -
+    // opaque red to white-hot - for the nodes the shader clamps to black
+    glm::vec4 RingingNodeColor(float ratio)
+    {
+      if (ratio <= 1.0f)
+      {
+        glm::vec3 safe = glm::mix(glm::vec3(0.05f, 0.65f, 0.15f), glm::vec3(0.85f, 0.85f, 0.1f), ratio);
+        return glm::vec4(safe, 0.3f);
+      }
+
+      float excess = glm::clamp((ratio - 1.0f) / (MAX_RINGING_RATIO - 1.0f), 0.0f, 1.0f);
+      glm::vec3 ringing = glm::mix(glm::vec3(1.0f, 0.05f, 0.05f), glm::vec3(1.0f, 0.9f, 0.85f), excess);
+      return glm::vec4(ringing, 1.0f);
+    }
+  }
+
+  void EditorLayer::DebugDrawIrradianceVolumeNodes()
+  {
+    auto* render = m_Context.render;
+    if (!render || !render->GetVolumeNodesVisible())
+      return;
+
+    Entity selected = m_Context.selectedEntity;
+    if (selected == entt::null || !GetScene().HasComponent<IrradianceVolumeComponent>(selected))
+      return;
+
+    auto& volume = GetScene().GetComponent<IrradianceVolumeComponent>(selected);
+    if (volume.bakedVolumePath.empty())
+    {
+      m_VolumeNodeCachePath.clear();
+      b_VolumeNodeCacheValid = false;
+      m_VolumeNodePeakL0 = 0.0f;
+      return;
+    }
+
+    if (m_VolumeNodeCachePath != volume.bakedVolumePath)
+    {
+      m_VolumeNodeCachePath = volume.bakedVolumePath;
+      std::string resolved = m_Context.assetManager->ResolvePath(volume.bakedVolumePath);
+      b_VolumeNodeCacheValid = IrradianceVolumeFile::Load(resolved, m_VolumeNodeCache);
+      m_VolumeNodePeakL0 = b_VolumeNodeCacheValid ? FindPeakNodeL0(m_VolumeNodeCache) : 0.0f;
+    }
+
+    if (!b_VolumeNodeCacheValid)
+      return;
+
+    const IrradianceVolumeFileData& data = m_VolumeNodeCache;
+    uint32_t nodeCount = uint32_t(data.coefficients.size());
+    if (nodeCount == 0 || data.nodesX == 0 || data.nodesY == 0)
+      return;
+
+    // Every node is a wire box, so a dense grid is drawn sparsely instead of
+    // sinking the frame rate
+    constexpr uint32_t MAX_DRAWN_NODES = 20000;
+    uint32_t stride = std::max(1u, (nodeCount + MAX_DRAWN_NODES - 1) / MAX_DRAWN_NODES);
+
+    auto& gizmo = render->GetGizmoRenderer();
+    bool showRejected = render->GetVolumeInvalidNodesVisible();
+    VolumeNodeColorMode colorMode = render->GetVolumeNodeColorMode();
+
+    glm::vec3 nodeHalfExtents(std::max(0.08f * data.spacing, 0.01f));
+
+    // The lattice stored in the asset is used on purpose: a volume that moved or
+    // was resized since it was baked then visibly disagrees with its bounds gizmo.
+    for (uint32_t index = 0; index < nodeCount; index += stride)
+    {
+      bool valid = data.validity[index] != 0;
+      if (!valid && !showRejected)
+        continue;
+
+      uint32_t x = index % data.nodesX;
+      uint32_t y = (index / data.nodesX) % data.nodesY;
+      uint32_t z = index / (data.nodesX * data.nodesY);
+
+      glm::vec3 world = data.latticeOrigin
+        + glm::vec3(float(x), float(y), float(z)) * data.spacing;
+
+      glm::vec4 color;
+      if (!valid)
+      {
+        color = glm::vec4(1.0f, 0.0f, 1.0f, 0.35f);
+      }
+      else if (colorMode == VolumeNodeColorMode::Ringing)
+      {
+        color = RingingNodeColor(NodeRingingRatio(data.coefficients[index]));
+      }
+      else
+      {
+        const SHL1RGB& sh = data.coefficients[index];
+        glm::vec3 l0 = glm::max(glm::vec3(sh.r.l0, sh.g.l0, sh.b.l0), glm::vec3(0.0f));
+        // Relative to the peak of this volume, so the contrast fills the ramp
+        // whatever the absolute scene brightness is. Gizmos are drawn after the
+        // tonemap pass, so the gamma here is the display encode - and it is also
+        // what lifts shadowed nodes out of a near-black cluster.
+        glm::vec3 normalized = m_VolumeNodePeakL0 > 0.0f
+          ? l0 / m_VolumeNodePeakL0
+          : glm::vec3(0.0f);
+        color = glm::vec4(glm::pow(normalized, glm::vec3(1.0f / 2.2f)), 0.9f);
+      }
+
+      gizmo.DrawWireBoxDepthTested(world, nodeHalfExtents, color);
+    }
+  }
+
   void EditorLayer::DebugDrawGizmos()
   {
+    DebugDrawIrradianceVolumeNodes();
+
     if (!m_Context.render || !m_Context.render->GetCollidersVisible())
       return;
 

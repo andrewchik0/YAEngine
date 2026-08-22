@@ -111,6 +111,8 @@ namespace YAEngine
       auto& normal = textures.GetVulkanTexture(material.normalTexture);
       writer.WriteCombinedImageSampler(6, normal.GetView(), normal.GetSampler());
       textureMask |= (1 << 5);
+      if (IsTwoChannelNormal(normal.GetFormat()))
+        textureMask |= (1 << 9);
     }
     if (textures.Has(material.heightTexture))
     {

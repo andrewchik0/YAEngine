@@ -32,6 +32,15 @@ namespace YAEngine
     deviceFeatures.wideLines = VK_TRUE;
     deviceFeatures.fillModeNonSolid = VK_TRUE;
     deviceFeatures.imageCubeArray = VK_TRUE;
+    deviceFeatures.textureCompressionBC = VK_TRUE;
+
+    VkPhysicalDeviceFeatures supported{};
+    vkGetPhysicalDeviceFeatures(physicalDevice.Get(), &supported);
+    if (supported.textureCompressionBC == VK_FALSE)
+    {
+      YA_LOG_ERROR("Vulkan", "Device reports no BC texture compression support, DDS textures will fail to load");
+      deviceFeatures.textureCompressionBC = VK_FALSE;
+    }
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

@@ -8,6 +8,7 @@
 #include "Assets/MeshManager.h"
 #include "Assets/MaterialManager.h"
 #include "Utils/SplinePath3D.h"
+#include "Utils/Log.h"
 #include "TerrainMaterialUniforms.h"
 
 namespace YAEngine
@@ -108,28 +109,82 @@ namespace YAEngine
       break;
     }
 
-    // Extract light probes
+    // Extract reflection probes
     snapshot.probeBuffer.probeCount = 0;
-    auto probeView = scene.GetView<LightProbeComponent, WorldTransform>();
+    uint32_t skippedProbes = 0;
+    auto probeView = scene.GetView<ReflectionProbeComponent, WorldTransform>();
     for (auto entity : probeView)
     {
-      if (snapshot.probeBuffer.probeCount >= MAX_LIGHT_PROBES) break;
-
-      auto& probe = probeView.get<LightProbeComponent>(entity);
+      auto& probe = probeView.get<ReflectionProbeComponent>(entity);
       if (!probe.baked || probe.atlasSlot == 0) continue;
+
+      if (snapshot.probeBuffer.probeCount >= MAX_REFLECTION_PROBES)
+      {
+        skippedProbes++;
+        continue;
+      }
 
       auto& wt = probeView.get<WorldTransform>(entity);
       glm::vec3 position = glm::vec3(wt.world[3]);
 
+      // Orientation comes from the entity transform, with the basis normalized so
+      // transform scale cannot leak in. Volume size stays ReflectionProbeComponent::extents.
+      glm::mat3 basis(glm::vec3(wt.world[0]), glm::vec3(wt.world[1]), glm::vec3(wt.world[2]));
+      for (int axis = 0; axis < 3; axis++)
+      {
+        float len = glm::length(basis[axis]);
+        if (len > 1e-6f)
+          basis[axis] /= len;
+        else
+          basis[axis] = glm::vec3(axis == 0 ? 1.0f : 0.0f, axis == 1 ? 1.0f : 0.0f, axis == 2 ? 1.0f : 0.0f);
+      }
+      glm::quat rotation = glm::normalize(glm::quat_cast(basis));
+
       auto& info = snapshot.probeBuffer.probes[snapshot.probeBuffer.probeCount];
       info.positionShape = glm::vec4(position, probe.shape == ProbeShape::Box ? 1.0f : 0.0f);
       info.extentsFade = glm::vec4(probe.extents, probe.fadeDistance);
+      info.orientation = glm::vec4(rotation.x, rotation.y, rotation.z, rotation.w);
       info.arrayIndex = probe.atlasSlot;
       info.priority = probe.priority;
+      info.parallaxCorrection = probe.parallaxCorrection ? 1 : 0;
       info._pad0 = 0;
-      info._pad1 = 0;
       snapshot.probeBuffer.probeCount++;
     }
+
+    // Latched: this runs every frame, so it logs only when the skipped count changes.
+    // The limit stays where it is: 16 probes is generous for a specular-only role.
+    static uint32_t s_LastSkippedProbes = 0;
+    if (skippedProbes != s_LastSkippedProbes)
+    {
+      s_LastSkippedProbes = skippedProbes;
+      if (skippedProbes > 0)
+      {
+        YA_LOG_WARN("Render", "Scene has %u reflection probes, only %d fit (MAX_REFLECTION_PROBES); %u skipped",
+          uint32_t(snapshot.probeBuffer.probeCount) + skippedProbes, MAX_REFLECTION_PROBES, skippedProbes);
+      }
+    }
+
+    // Extract irradiance volumes. Position and orientation come from the entity
+    // transform with the basis normalized, exactly like reflection probes above -
+    // halfExtents alone define the box, transform scale is ignored.
+#ifdef YA_EDITOR
+    snapshot.irradianceVolumes.clear();
+    auto volumeView = scene.GetView<IrradianceVolumeComponent, WorldTransform>();
+    for (auto entity : volumeView)
+    {
+      auto& volume = volumeView.get<IrradianceVolumeComponent>(entity);
+      auto& wt = volumeView.get<WorldTransform>(entity);
+
+      glm::vec3 center = glm::vec3(wt.world[3]);
+      glm::quat rotation = ExtractIrradianceBoxRotation(wt.world);
+
+      snapshot.irradianceVolumes.push_back(IrradianceVolumeInstance {
+        .center = center,
+        .rotation = rotation,
+        .grid = ComputeIrradianceGridLayout(center, rotation, volume.halfExtents, volume.spacing),
+      });
+    }
+#endif
 
     // Extract lights
     lights.pointLightCount = 0;

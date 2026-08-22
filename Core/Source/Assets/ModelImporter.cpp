@@ -209,6 +209,16 @@ namespace YAEngine
     else if (!heightTexture.empty())
       matDesc.heightTexture = heightTexture;
 
+    // FBX has no metal-rough slots at all, so exporters smuggle a packed ORM map
+    // through SpecularColor and document the channel layout outside the file. That
+    // cannot be detected, only declared - hence the caller-supplied flag.
+    if (combinedTextures && matDesc.metallicTexture.empty() && matDesc.roughnessTexture.empty()
+      && !specularTexture.empty())
+    {
+      matDesc.metallicTexture = specularTexture;
+      matDesc.roughnessTexture = specularTexture;
+    }
+
     // glTF packs both values into one texture (G = roughness, B = metallic) and assimp
     // reports it in the metalness and roughness slots alike - identical paths mean packed.
     if (!matDesc.metallicTexture.empty() && matDesc.metallicTexture == matDesc.roughnessTexture)

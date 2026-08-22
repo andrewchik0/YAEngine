@@ -115,6 +115,7 @@ namespace YAEngine
     m_ShadowManager.Init(ctx);
     m_ProbeAtlas.Init(ctx);
     m_ProbeBuffer.Init(ctx);
+    m_VolumeStorage.Init(ctx);
 
     SetupRenderGraph(width, height);
     CreateTAAFramebuffers();
@@ -128,7 +129,8 @@ namespace YAEngine
     m_Backend.InitImGui(window, m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
 
 #ifdef YA_EDITOR
-    m_ProbeBaker.Init(*this, 128);
+    m_ProbeBaker.Init(*this, BakeLimits::PROBE_DEFAULT_CAPTURE_RESOLUTION);
+    m_VolumeBaker.Init(*this, BakeLimits::VOLUME_DEFAULT_CAPTURE_RESOLUTION);
     CreateSceneImGuiDescriptor();
     m_ViewportWidth = width;
     m_ViewportHeight = height;
@@ -148,6 +150,19 @@ namespace YAEngine
     vkDeviceWaitIdle(m_Backend.GetContext().device);
   }
 
+  void Render::UploadIrradianceVolumes(const std::vector<IrradianceVolumeFileData>& volumes,
+    std::vector<uint32_t>& outSlots)
+  {
+    m_VolumeStorage.Upload(m_Backend.GetContext(), volumes, outSlots);
+    WriteIrradianceVolumeDescriptors();
+
+    // Frame 0 is what OffscreenRenderer binds, and it is only refreshed by Draw
+    // for the frame currently in flight - prime it so a bake right after a scene
+    // load does not read a stale description.
+    m_VolumeStorage.SetUp(0, m_VolumeStorage.GetBufferData());
+    m_VolumeUploadDirty = uint32_t(m_Backend.GetContext().maxFramesInFlight);
+  }
+
   void Render::Destroy()
   {
     vkDeviceWaitIdle(m_Backend.GetContext().device);
@@ -157,6 +172,7 @@ namespace YAEngine
 #ifdef YA_EDITOR
     m_ShaderHotReload.Destroy();
     m_ProbeBaker.Destroy();
+    m_VolumeBaker.Destroy();
     DestroySceneImGuiDescriptor();
     m_GizmoRenderer.Destroy(ctx);
 #endif
@@ -164,6 +180,7 @@ namespace YAEngine
     m_ShadowManager.Destroy(ctx);
     m_ProbeAtlas.Destroy(ctx);
     m_ProbeBuffer.Destroy(ctx);
+    m_VolumeStorage.Destroy(ctx);
     m_CubicResources.Destroy(ctx);
     m_NoneCubeMap.Destroy(ctx);
     m_NoneTexture.Destroy(ctx);
@@ -376,6 +393,16 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.ssrIntensity = m_SSRIntensity;
     m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaClampSigma = m_TAAClampSigma;
+
+    // The indirect lighting debug views must reach the screen untouched. SSR and TAA
+    // both sit between the lighting pass and tone mapping, and both already pass
+    // through when their flag is zero, so disabling them here needs no extra plumbing.
+    // The camera jitter is handled in SetUpCamera, which runs before this.
+    if (IS_INDIRECT_DEBUG_VIEW(m_CurrentTexture))
+    {
+      m_FrameUniformBuffer.uniforms.ssrEnabled = 0;
+      m_FrameUniformBuffer.uniforms.taaEnabled = 0;
+    }
     m_FrameUniformBuffer.uniforms.hizMipCount = static_cast<int>(m_Graph.GetResourceDesc(m_HiZResource).mipLevels);
     m_FrameUniformBuffer.uniforms.frameIndex = static_cast<int>(m_GlobalFrameIndex);
     m_FrameUniformBuffer.uniforms.tonemapMode = m_TonemapMode;
@@ -386,6 +413,7 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.fogMaxOpacity = m_FogMaxOpacity;
     m_FrameUniformBuffer.uniforms.fogColor = m_FogColor;
     m_FrameUniformBuffer.uniforms.fogStartDistance = m_FogStartDistance;
+    m_FrameUniformBuffer.uniforms.irradianceNormalBias = m_IrradianceNormalBias;
 
     // Configure render graph for this frame (TAA ping-pong + swapchain)
     auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
@@ -434,10 +462,28 @@ namespace YAEngine
       m_BoundSkybox = skybox;
     }
 
-    // Upload probe SSBO
+    // Upload probe SSBO. The descriptor is written once at init and the buffers
+    // are never recreated, so there is nothing to rewrite here per frame.
     m_ProbeBuffer.SetUp(currentFrame, frame.snapshot.probeBuffer);
-    m_IBLDescriptorSets[currentFrame].WriteStorageBuffer(4,
-      m_ProbeBuffer.GetBuffer(currentFrame), sizeof(LightProbeBuffer));
+
+    // Upload irradiance volume UBO. Turning volumes off is the same as having
+    // none - the shader then takes skybox irradiance from atlas slot 0 everywhere.
+    // Unlike the probe buffer this is not rebuilt from the snapshot, so it only
+    // changes on upload or on the toggle: one dirty frame per frame in flight.
+    if (m_VolumeUploadDirty > 0 || b_IrradianceVolumesEnabled != b_VolumeUniformsEnabled)
+    {
+      if (b_IrradianceVolumesEnabled != b_VolumeUniformsEnabled)
+      {
+        b_VolumeUniformsEnabled = b_IrradianceVolumesEnabled;
+        m_VolumeUploadDirty = uint32_t(m_Backend.GetContext().maxFramesInFlight);
+      }
+
+      IrradianceVolumeBuffer volumeData = m_VolumeStorage.GetBufferData();
+      if (!b_IrradianceVolumesEnabled)
+        volumeData.volumeCount = 0;
+      m_VolumeStorage.SetUp(currentFrame, volumeData);
+      m_VolumeUploadDirty--;
+    }
 
 #ifdef YA_EDITOR
     m_GizmoRenderer.Clear();
@@ -471,7 +517,7 @@ namespace YAEngine
         m_GizmoRenderer.DrawArrow(dirLightPos, dirLightDir, 3.0f, glm::vec4(dirCol, 0.85f));
       }
 
-      // Light probe influence volumes
+      // Reflection probe influence volumes
       if (b_ProbeVolumesVisible)
       {
         for (int i = 0; i < frame.snapshot.probeBuffer.probeCount; i++)
@@ -483,9 +529,26 @@ namespace YAEngine
           glm::vec4 col(0.2f, 0.7f, 0.9f, 0.5f);
 
           if (shape < 0.5f)
+          {
             m_GizmoRenderer.DrawWireSphereDepthTested(pos, extents.x, col);
+          }
           else
-            m_GizmoRenderer.DrawWireBoxDepthTested(pos, extents, col);
+          {
+            glm::quat rot(probe.orientation.w, probe.orientation.x,
+              probe.orientation.y, probe.orientation.z);
+            m_GizmoRenderer.DrawWireBoxDepthTested(pos, extents, rot, col);
+          }
+        }
+      }
+
+      // Irradiance volume bounds - warm orange to separate them from the cool
+      // blue of the specular probe volumes above
+      if (b_IrradianceVolumesVisible)
+      {
+        for (const auto& volume : frame.snapshot.irradianceVolumes)
+        {
+          m_GizmoRenderer.DrawWireBoxDepthTested(volume.center, volume.grid.halfExtents,
+            volume.rotation, glm::vec4(1.0f, 0.55f, 0.15f, 0.55f));
         }
       }
 
@@ -506,7 +569,7 @@ namespace YAEngine
 #endif
 
     // Render shadow maps before main passes
-    RenderShadowMaps(frame);
+    RenderShadowMaps(frame, cmd, currentFrame);
 
     // Execute all passes
     m_Graph.Execute(cmd, &frame);
@@ -523,41 +586,44 @@ namespace YAEngine
   }
 
 #ifdef YA_EDITOR
-  void Render::BakeProbe(entt::entity entity, Scene& scene, AssetManager& assets)
+  // Lowest atlas slot not claimed by any probe, or 0 when the atlas is full.
+  // Slot 0 is reserved for the skybox.
+  static uint32_t FindFreeAtlasSlot(Scene& scene)
   {
-    if (!scene.HasComponent<LightProbeComponent>(entity))
+    std::set<uint32_t> usedSlots;
+    auto probeView = scene.GetView<ReflectionProbeComponent>();
+    for (auto e : probeView)
+    {
+      auto& probe = probeView.get<ReflectionProbeComponent>(e);
+      if (probe.atlasSlot > 0)
+        usedSlots.insert(probe.atlasSlot);
+    }
+
+    for (uint32_t s = 1; s <= MAX_REFLECTION_PROBES; s++)
+    {
+      if (!usedSlots.contains(s))
+        return s;
+    }
+    return 0;
+  }
+
+  void Render::BakeProbe(entt::entity entity, Scene& scene, AssetManager& assets, bool writeToDisk)
+  {
+    if (!scene.HasComponent<ReflectionProbeComponent>(entity))
       return;
 
     vkDeviceWaitIdle(m_Backend.GetContext().device);
 
-    auto& ctx = m_Backend.GetContext();
-    auto& lp = scene.GetComponent<LightProbeComponent>(entity);
+    auto& lp = scene.GetComponent<ReflectionProbeComponent>(entity);
     auto& wt = scene.GetWorldTransform(entity);
     glm::vec3 position = glm::vec3(wt.world[3]);
     std::string entityName = scene.GetName(entity);
 
-    // Find next free atlas slot (1..MAX_LIGHT_PROBES, slot 0 = skybox)
+    // Find next free atlas slot (1..MAX_REFLECTION_PROBES, slot 0 = skybox)
     uint32_t atlasSlot = lp.atlasSlot;
     if (atlasSlot == 0)
     {
-      std::set<uint32_t> usedSlots;
-      auto probeView = scene.GetView<LightProbeComponent>();
-      for (auto e : probeView)
-      {
-        auto& probe = probeView.get<LightProbeComponent>(e);
-        if (probe.baked && probe.atlasSlot > 0)
-          usedSlots.insert(probe.atlasSlot);
-      }
-
-      for (uint32_t s = 1; s <= MAX_LIGHT_PROBES; s++)
-      {
-        if (!usedSlots.contains(s))
-        {
-          atlasSlot = s;
-          break;
-        }
-      }
-
+      atlasSlot = FindFreeAtlasSlot(scene);
       if (atlasSlot == 0)
       {
         YA_LOG_ERROR("Render", "No free atlas slots for probe bake");
@@ -565,13 +631,20 @@ namespace YAEngine
       }
     }
 
-    // Compute save paths
-    std::string basePath = assets.GetBasePath();
-    std::string probeDir = basePath + "/Assets/Probes";
-    std::filesystem::create_directories(probeDir);
+    // Compute save path - intermediate bounce passes only refresh the atlas
+    std::string pfPath;
+    if (writeToDisk)
+    {
+      std::string basePath = assets.GetBasePath();
+      std::string probeDir = basePath + "/Assets/Probes";
+      std::filesystem::create_directories(probeDir);
 
-    std::string irrPath = probeDir + "/" + entityName + "_irr.yacm";
-    std::string pfPath = probeDir + "/" + entityName + "_pf.yacm";
+      pfPath = probeDir + "/" + entityName + "_pf.yacm";
+    }
+
+    uint32_t captureResolution = std::clamp(lp.resolution,
+      BakeLimits::PROBE_MIN_CAPTURE_RESOLUTION,
+      BakeLimits::PROBE_MAX_CAPTURE_RESOLUTION);
 
     // Build temporary scene snapshot + light buffer
     SceneSnapshot snapshot;
@@ -584,8 +657,8 @@ namespace YAEngine
       .assets = assets,
       .cubicResources = m_CubicResources,
       .time = 0.0,
-      .windowWidth = lp.resolution,
-      .windowHeight = lp.resolution,
+      .windowWidth = captureResolution,
+      .windowHeight = captureResolution,
     };
 
     // Defer preview invalidation - can't destroy ImGui descriptor sets during
@@ -595,27 +668,126 @@ namespace YAEngine
     // Upload light data to LightStorageBuffer so OffscreenRenderer can use it
     m_LightBuffer.SetUp(0, lights);
 
-    // Zero out probe SSBO so offscreen renderer uses skybox IBL only (no self-illumination)
-    LightProbeBuffer emptyProbes {};
-    emptyProbes.probeCount = 0;
-    m_ProbeBuffer.SetUp(0, emptyProbes);
+    // Neighbouring probes stay visible so their light can bounce into this one.
+    // Only the probe being rebaked is dropped, otherwise it would feed on its own
+    // previous output and drift brighter with every bake.
+    ReflectionProbeBuffer bakeProbes {};
+    bakeProbes.probeCount = 0;
+    for (int i = 0; i < snapshot.probeBuffer.probeCount; i++)
+    {
+      const auto& src = snapshot.probeBuffer.probes[i];
+      if (src.arrayIndex == int(atlasSlot))
+        continue;
+      bakeProbes.probes[bakeProbes.probeCount++] = src;
+    }
+    m_ProbeBuffer.SetUp(0, bakeProbes);
 
-    // Upload shadow data (shadowsEnabled=0 since we don't render shadow maps for probes)
-    m_ShadowManager.SetEnabled(false);
-    m_ShadowManager.SetSpotShadowCount(0);
-    m_ShadowManager.SetPointShadowCount(0);
-    m_ShadowManager.SetUp(0);
+    // Irradiance volumes are switched off for the capture. They are fed by the
+    // very probes being rebaked, so leaving them on would close a feedback loop:
+    // every bake pass would read the previous one back in and drift brighter.
+    // Frame 0 is the slot OffscreenRenderer binds.
+    {
+      IrradianceVolumeBuffer noVolumes {};
+      noVolumes.atlasInvSize = m_VolumeStorage.GetBufferData().atlasInvSize;
+      noVolumes.volumeCount = 0;
+      m_VolumeStorage.SetUp(0, noVolumes);
+    }
+
+    // One shadow atlas render per probe: the cascades are fitted around the probe
+    // position instead of a camera frustum, so all six cube faces share them.
+    // Frame index 0 matches the shadow UBO and atlas view OffscreenRenderer binds.
+    {
+      VkCommandBuffer shadowCmd = m_Backend.GetCommandBuffer().BeginSingleTimeCommands();
+      RenderShadowMaps(frame, shadowCmd, 0, &position);
+      m_Backend.GetCommandBuffer().EndSingleTimeCommands(shadowCmd);
+
+      if (m_ShadowManager.IsEnabled())
+        YA_LOG_INFO("Render", "Probe '%s': shadow atlas rendered once for all 6 faces",
+          entityName.c_str());
+    }
 
     m_ProbeBaker.Bake(m_CubicResources, frame, m_ProbeAtlas,
-      position, lp.resolution, atlasSlot, irrPath, pfPath);
+      position, captureResolution, atlasSlot, pfPath);
 
     // Update component
     lp.baked = true;
     lp.atlasSlot = atlasSlot;
-    lp.bakedIrradiancePath = assets.MakeRelative(irrPath);
-    lp.bakedPrefilterPath = assets.MakeRelative(pfPath);
+    if (writeToDisk)
+      lp.bakedPrefilterPath = assets.MakeRelative(pfPath);
+
+    // Restore the real volume description for the next frame
+    m_VolumeStorage.SetUp(0, m_VolumeStorage.GetBufferData());
 
     YA_LOG_INFO("Render", "Probe '%s' baked -> slot %u", entityName.c_str(), atlasSlot);
+  }
+
+  void Render::BakeAllProbes(Scene& scene, AssetManager& assets)
+  {
+    // Snapshot the entity list first - BuildSceneSnapshot inside BakeProbe can add
+    // components and invalidate a live view
+    std::vector<entt::entity> probes;
+    {
+      auto probeView = scene.GetView<ReflectionProbeComponent>();
+      for (auto e : probeView)
+        probes.push_back(e);
+    }
+
+    if (probes.empty())
+    {
+      YA_LOG_WARN("Render", "Bake all probes: scene has no reflection probes");
+      return;
+    }
+
+    // Grouped by capture resolution: EnsureResolution tears down and rebuilds the
+    // whole offscreen graph whenever it changes, so entity order over a scene with
+    // mixed resolutions would rebuild it once per probe per bounce.
+    std::sort(probes.begin(), probes.end(), [&scene](entt::entity a, entt::entity b)
+    {
+      return scene.GetComponent<ReflectionProbeComponent>(a).resolution
+        < scene.GetComponent<ReflectionProbeComponent>(b).resolution;
+    });
+
+    // Atlas slots are handed out once, before the first pass. Reassigning them
+    // between passes would move probes inside the atlas and break the neighbour
+    // lookups the later bounces are built on.
+    for (auto e : probes)
+    {
+      auto& lp = scene.GetComponent<ReflectionProbeComponent>(e);
+      if (lp.atlasSlot != 0)
+        continue;
+
+      uint32_t slot = FindFreeAtlasSlot(scene);
+      if (slot == 0)
+      {
+        YA_LOG_WARN("Render", "No free atlas slot for probe '%s' - skipped",
+          scene.GetName(e).c_str());
+        continue;
+      }
+      lp.atlasSlot = slot;
+    }
+
+    int bounces = std::clamp(m_ProbeBounceCount, MIN_PROBE_BOUNCES, MAX_PROBE_BOUNCES);
+    uint32_t probeCount = uint32_t(probes.size());
+
+    YA_LOG_INFO("Render", "Baking all probes: %u probes x %d bounce(s)",
+      probeCount, bounces);
+
+    for (int pass = 0; pass < bounces; pass++)
+    {
+      bool finalPass = (pass == bounces - 1);
+      YA_LOG_INFO("Render", "Probe bounce %d/%d", pass + 1, bounces);
+
+      for (auto e : probes)
+      {
+        auto& lp = scene.GetComponent<ReflectionProbeComponent>(e);
+        if (lp.atlasSlot == 0)
+          continue;
+        BakeProbe(e, scene, assets, finalPass);
+      }
+    }
+
+    YA_LOG_INFO("Render", "Baking all probes done (%u probes, %d bounce(s))",
+      probeCount, bounces);
   }
 #endif
 }

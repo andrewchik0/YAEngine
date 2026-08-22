@@ -5,6 +5,7 @@
 #include "VulkanCommandBuffer.h"
 #include "ImageBarrier.h"
 #include "Assets/CpuResourceData.h"
+#include "Utils/Log.h"
 #include "Utils/MipGenerator.h"
 
 namespace YAEngine
@@ -178,9 +179,29 @@ namespace YAEngine
     }
   }
 
-  void VulkanTexture::LoadFromCpuData(const RenderContext& ctx, const CpuTextureData& cpuData, VkFormat format)
+  bool VulkanTexture::LoadFromCpuData(const RenderContext& ctx, const CpuTextureData& cpuData, VkFormat format)
   {
-    uint32_t mipLevels = static_cast<uint32_t>(std::floor(std::log2(std::max(cpuData.width, cpuData.height)))) + 1;
+    // Public entry point: the non-mips branch below indexes mips[0] directly.
+    if (cpuData.mips.empty() || cpuData.width == 0 || cpuData.height == 0)
+    {
+      YA_LOG_ERROR("Render", "Texture has no pixel data (%ux%u, %zu mips)",
+        cpuData.width, cpuData.height, cpuData.mips.size());
+      return false;
+    }
+
+    const bool useCpuMips = cpuData.hasCpuMips && !cpuData.mips.empty();
+
+    // Block formats cannot go through the blit chain below, so a compressed payload
+    // without its own mips has nowhere to get them from.
+    if (cpuData.compressed && !useCpuMips)
+    {
+      YA_LOG_ERROR("Render", "Compressed texture has no mip chain, cannot generate one for a block format");
+      return false;
+    }
+
+    uint32_t mipLevels = useCpuMips
+      ? static_cast<uint32_t>(cpuData.mips.size())
+      : static_cast<uint32_t>(std::floor(std::log2(std::max(cpuData.width, cpuData.height)))) + 1;
 
     ImageDesc desc;
     desc.width = cpuData.width;
@@ -200,19 +221,18 @@ namespace YAEngine
 
     m_Image.Init(ctx, desc, &sampler);
 
-    if (cpuData.hasCpuMips && cpuData.mips.size() == mipLevels)
+    if (useCpuMips)
     {
       VkDeviceSize totalSize = 0;
       for (auto& mip : cpuData.mips)
-        totalSize += static_cast<VkDeviceSize>(mip.width) * mip.height * cpuData.pixelSize;
+        totalSize += static_cast<VkDeviceSize>(mip.data.size());
 
       VulkanBuffer staging = VulkanBuffer::CreateMapped(ctx, totalSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
       VkDeviceSize offset = 0;
       for (auto& mip : cpuData.mips)
       {
-        uint32_t mipSize = mip.width * mip.height * cpuData.pixelSize;
-        staging.Update(static_cast<uint32_t>(offset), mip.data.data(), mipSize);
-        offset += mipSize;
+        staging.Update(static_cast<uint32_t>(offset), mip.data.data(), static_cast<uint32_t>(mip.data.size()));
+        offset += mip.data.size();
       }
 
       VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
@@ -235,7 +255,7 @@ namespace YAEngine
         vkCmdCopyBufferToImage(cmd, staging.Get(), m_Image.GetImage(),
           VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &region);
 
-        offset += static_cast<VkDeviceSize>(cpuData.mips[m].width) * cpuData.mips[m].height * cpuData.pixelSize;
+        offset += static_cast<VkDeviceSize>(cpuData.mips[m].data.size());
       }
 
       TransitionImageLayout(cmd, m_Image.GetImage(),
@@ -247,7 +267,9 @@ namespace YAEngine
     }
     else
     {
-      VkDeviceSize imageSize = static_cast<VkDeviceSize>(cpuData.width) * cpuData.height * cpuData.pixelSize;
+      // Sized from the payload, not from width * height * pixelSize: the two
+      // disagreeing would over-read the source vector.
+      VkDeviceSize imageSize = static_cast<VkDeviceSize>(cpuData.mips[0].data.size());
       VulkanBuffer staging = VulkanBuffer::CreateMapped(ctx, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
       staging.Update(0, cpuData.mips[0].data.data(), static_cast<uint32_t>(imageSize));
 
@@ -339,6 +361,8 @@ namespace YAEngine
       ctx.commandBuffer->EndSingleTimeCommands(cmd);
       staging.Destroy(ctx);
     }
+
+    return true;
   }
 
   void VulkanTexture::Destroy(const RenderContext& ctx)

@@ -1,3 +1,5 @@
+#ifdef YA_EDITOR
+
 #include "OffscreenRenderer.h"
 
 #include "Render.h"
@@ -241,6 +243,13 @@ namespace YAEngine
   VulkanImage& OffscreenRenderer::RenderFace(FrameContext& frame,
     const glm::vec3& position, const glm::mat4& faceView, uint32_t resolution)
   {
+    // The graph, its images and the tile light buffer are all sized at Init. A
+    // mismatch here means the caller skipped the rebuild, which silently corrupts
+    // the capture and makes the light cull shader index past the tile buffer.
+    if (resolution != m_Resolution)
+      YA_LOG_ERROR("Render", "OffscreenRenderer::RenderFace asked for %u but the graph is %u - rebuild it first",
+        resolution, m_Resolution);
+
     // Set up camera for this cubemap face
     glm::mat4 proj = glm::perspective(glm::radians(90.0f), 1.0f, 0.01f, 1000.0f);
     proj[1][1] *= -1.0f;
@@ -263,9 +272,17 @@ namespace YAEngine
     uniforms.screenHeight = int(resolution);
     uniforms.tileCountX = (int(resolution) + TILE_SIZE - 1) / TILE_SIZE;
     uniforms.tileCountY = (int(resolution) + TILE_SIZE - 1) / TILE_SIZE;
+    // Everything view-dependent is forced off so the capture stays valid from any
+    // viewing direction, and every field is assigned so two bakes of an unchanged
+    // scene produce byte-identical output.
     uniforms.ssaoEnabled = 0;
+    uniforms.ssaoRadius = 0.0f;
+    uniforms.ssaoIntensity = 0.0f;
+    uniforms.ssaoBias = 0.0f;
     uniforms.ssrEnabled = 0;
+    uniforms.ssrIntensity = 0.0f;
     uniforms.taaEnabled = 0;
+    uniforms.taaClampSigma = 0.0f;
     uniforms.hizMipCount = 0;
     uniforms.frameIndex = 0;
     uniforms.jitterX = 0.0f;
@@ -276,11 +293,21 @@ namespace YAEngine
     uniforms.currentTexture = 0;
     uniforms.tonemapMode = 0;
     uniforms.bloomIntensity = 0.0f;
+    // Fog is integrated along the camera ray and re-applied at runtime - baking it
+    // would double it up and tie the probe to the fog settings at bake time.
+    uniforms.fogEnabled = 0;
+    uniforms.fogDensity = 0.0f;
+    uniforms.fogHeightFalloff = 0.0f;
+    uniforms.fogColor = glm::vec3(0.0f);
+    uniforms.fogStartDistance = 0.0f;
+    uniforms.fogMaxOpacity = 0.0f;
+    // Volumes are switched off for every capture, so the offset has nothing to bias
+    uniforms.irradianceNormalBias = 0.0f;
 
     m_FrameUBO.SetUp(0);
 
     // Reset layout tracking so barriers are correct after external transitions
-    // (LightProbeBaker copies LitColor between faces, changing layouts outside the graph)
+    // (ReflectionProbeBaker copies LitColor between faces, changing layouts outside the graph)
     m_Graph.SetResourceLayout(m_GBuffer0, VK_IMAGE_LAYOUT_UNDEFINED);
     m_Graph.SetResourceLayout(m_GBuffer1, VK_IMAGE_LAYOUT_UNDEFINED);
     m_Graph.SetResourceLayout(m_MainDepth, VK_IMAGE_LAYOUT_UNDEFINED);
@@ -294,3 +321,5 @@ namespace YAEngine
     return m_Graph.GetResource(m_LitColor);
   }
 }
+
+#endif

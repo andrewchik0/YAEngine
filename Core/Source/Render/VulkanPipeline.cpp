@@ -301,6 +301,11 @@ namespace YAEngine
 
       auto segment = vertexInput.substr(segStart, segEnd - segStart);
 
+      // A leading '*' marks the whole binding as per-instance
+      bool perInstance = !segment.empty() && segment[0] == '*';
+      if (perInstance)
+        segment = segment.substr(1);
+
       if (!segment.empty())
       {
         uint32_t offset = 0;
@@ -322,7 +327,9 @@ namespace YAEngine
         VkVertexInputBindingDescription binding {};
         binding.binding = bindingIndex;
         binding.stride = offset;
-        binding.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+        binding.inputRate = perInstance
+          ? VK_VERTEX_INPUT_RATE_INSTANCE
+          : VK_VERTEX_INPUT_RATE_VERTEX;
         bindings.push_back(binding);
 
         bindingIndex++;

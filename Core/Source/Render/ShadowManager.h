@@ -24,6 +24,19 @@ namespace YAEngine
       float shadowDistance,
       const glm::vec3& lightDirection);
 
+    // Cascades fitted to concentric spheres around a point instead of a camera
+    // frustum. A reflection probe looks in all six directions, so one omnidirectional
+    // fit serves every cube face and the atlas is rendered once per probe.
+    // volumeRadius inflates every cascade sphere by that amount so a whole BOX of
+    // capture points shares one fit - an irradiance volume renders the atlas once
+    // for all its nodes instead of once per node. Zero reproduces the point fit.
+    void ComputeCascadesAroundPoint(
+      const glm::vec3& center,
+      float nearPlane,
+      float shadowDistance,
+      const glm::vec3& lightDirection,
+      float volumeRadius = 0.0f);
+
     void ComputeSpotShadow(uint32_t spotIndex,
       const glm::vec3& position,
       const glm::vec3& direction,
@@ -53,6 +66,9 @@ namespace YAEngine
   private:
 
     void ComputeCascadeSplits(float nearPlane, float shadowDistance);
+    float FitCascadeToSphere(uint32_t cascadeIndex,
+      const glm::vec3& center, float radius,
+      const glm::vec3& lightDir);
     float FitCascadeToFrustum(uint32_t cascadeIndex,
       const glm::mat4& invViewProj,
       float nearSplit, float farSplit,
@@ -61,6 +77,8 @@ namespace YAEngine
     static constexpr float SPLIT_LAMBDA = 0.75f;
     static constexpr uint32_t CASCADE_TILE_SIZE = SHADOW_CASCADE_SIZE;
     static constexpr float SHADOW_NEAR_PLANE = 0.01f;
+    // sqrt(3): the corner-to-forward ratio of a 90 degree cube face
+    static constexpr float OMNI_CASCADE_SLACK = 1.7320508f;
 
     ShadowAtlas m_Atlas;
     ShadowBuffer m_ShadowData {};

@@ -1,4 +1,5 @@
 #include "../Shared/TerrainMaterialUniforms.h"
+#include "normal_map.glsl"
 layout(set = 1, binding = 0) uniform TerrainMaterialBlock { TerrainMaterialUniforms u_Terrain; };
 
 layout(set = 1, binding = 1) uniform sampler2D layer0AlbedoTexture;
@@ -30,7 +31,9 @@ LayerSample sampleLayer0(vec2 uv) {
   s.albedo = vec4(u_Terrain.layer0Albedo, 1.0) * aTex;
 
   float hasN = float((u_Terrain.textureMask >> 1) & 1);
-  s.normalTS = mix(vec3(0.0, 0.0, 1.0), texture(layer0NormalTexture, uv).rgb * 2.0 - 1.0, hasN);
+  s.normalTS = mix(vec3(0.0, 0.0, 1.0),
+    decodeNormalMap(texture(layer0NormalTexture, uv).rgb,
+      float((u_Terrain.textureMask >> 12) & 1)), hasN);
 
   float hasR = float((u_Terrain.textureMask >> 2) & 1);
   s.roughness = u_Terrain.layer0Roughness * mix(1.0, texture(layer0RoughnessTexture, uv).r, hasR);
@@ -47,7 +50,9 @@ LayerSample sampleLayer1(vec2 uv) {
   s.albedo = vec4(u_Terrain.layer1Albedo, 1.0) * aTex;
 
   float hasN = float((u_Terrain.textureMask >> 5) & 1);
-  s.normalTS = mix(vec3(0.0, 0.0, 1.0), texture(layer1NormalTexture, uv).rgb * 2.0 - 1.0, hasN);
+  s.normalTS = mix(vec3(0.0, 0.0, 1.0),
+    decodeNormalMap(texture(layer1NormalTexture, uv).rgb,
+      float((u_Terrain.textureMask >> 13) & 1)), hasN);
 
   float hasR = float((u_Terrain.textureMask >> 6) & 1);
   s.roughness = u_Terrain.layer1Roughness * mix(1.0, texture(layer1RoughnessTexture, uv).r, hasR);
@@ -64,7 +69,9 @@ LayerSample sampleLayer2(vec2 uv) {
   s.albedo = vec4(u_Terrain.layer2Albedo, 1.0) * aTex;
 
   float hasN = float((u_Terrain.textureMask >> 9) & 1);
-  s.normalTS = mix(vec3(0.0, 0.0, 1.0), texture(layer2NormalTexture, uv).rgb * 2.0 - 1.0, hasN);
+  s.normalTS = mix(vec3(0.0, 0.0, 1.0),
+    decodeNormalMap(texture(layer2NormalTexture, uv).rgb,
+      float((u_Terrain.textureMask >> 14) & 1)), hasN);
 
   float hasR = float((u_Terrain.textureMask >> 10) & 1);
   s.roughness = u_Terrain.layer2Roughness * mix(1.0, texture(layer2RoughnessTexture, uv).r, hasR);

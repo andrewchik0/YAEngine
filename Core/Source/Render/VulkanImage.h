@@ -10,11 +10,15 @@ namespace YAEngine
   {
     uint32_t width = 1;
     uint32_t height = 1;
+    // Only read for VK_IMAGE_TYPE_3D. Vulkan has no 3D texture arrays, so a 3D
+    // image always has arrayLayers == 1 and packs several sub-volumes side by side.
+    uint32_t depth = 1;
     VkFormat format = VK_FORMAT_R8G8B8A8_SRGB;
     VkImageUsageFlags usage = VK_IMAGE_USAGE_SAMPLED_BIT;
     uint32_t mipLevels = 1;
     uint32_t arrayLayers = 1;
     VkImageCreateFlags flags = 0;
+    VkImageType imageType = VK_IMAGE_TYPE_2D;
     VkImageViewType viewType = VK_IMAGE_VIEW_TYPE_2D;
     VkImageAspectFlags aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
   };

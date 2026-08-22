@@ -10,13 +10,20 @@ namespace YAEngine
     m_Format = desc.format;
     m_AspectMask = desc.aspectMask;
 
+    if (desc.imageType == VK_IMAGE_TYPE_3D && desc.arrayLayers != 1)
+    {
+      YA_LOG_ERROR("Render", "3D image cannot have %u array layers - Vulkan has no 3D texture arrays",
+        desc.arrayLayers);
+      throw std::runtime_error("3D image with more than one array layer!");
+    }
+
     VkImageCreateInfo imageInfo{};
     imageInfo.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
     imageInfo.flags = desc.flags;
-    imageInfo.imageType = VK_IMAGE_TYPE_2D;
+    imageInfo.imageType = desc.imageType;
     imageInfo.extent.width = desc.width;
     imageInfo.extent.height = desc.height;
-    imageInfo.extent.depth = 1;
+    imageInfo.extent.depth = desc.imageType == VK_IMAGE_TYPE_3D ? desc.depth : 1;
     imageInfo.mipLevels = desc.mipLevels;
     imageInfo.arrayLayers = desc.arrayLayers;
     imageInfo.format = desc.format;

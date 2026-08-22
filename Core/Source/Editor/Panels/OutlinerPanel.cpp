@@ -173,17 +173,28 @@ namespace YAEngine
     if (scene.HasComponent<Name>(entity))
       name = scene.GetName(entity);
 
+    // More specific components come first: terrain, road and scatter entities also
+    // carry a MeshComponent, and a generic mesh icon would hide what they are.
+    // Icons match the ones DetailsPanel uses for the same components.
     const char* icon = " ";
     if (scene.HasComponent<CameraComponent>(entity))
       icon = ICON_FA_VIDEO;
-    else if (scene.HasComponent<MeshComponent>(entity))
-      icon = ICON_FA_DRAW_POLYGON;
     else if (scene.HasComponent<LightComponent>(entity))
       icon = ICON_FA_LIGHTBULB;
-    else if (scene.HasComponent<LightProbeComponent>(entity))
+    else if (scene.HasComponent<ReflectionProbeComponent>(entity))
       icon = ICON_FA_GLOBE;
+    else if (scene.HasComponent<IrradianceVolumeComponent>(entity))
+      icon = ICON_FA_CUBES;
     else if (scene.HasComponent<TerrainComponent>(entity))
       icon = ICON_FA_MOUNTAIN;
+    else if (scene.HasComponent<RoadComponent>(entity))
+      icon = ICON_FA_ROAD;
+    else if (scene.HasComponent<ScatterComponent>(entity))
+      icon = ICON_FA_SEEDLING;
+    else if (scene.HasComponent<MeshComponent>(entity))
+      icon = ICON_FA_DRAW_POLYGON;
+    else if (scene.HasComponent<ColliderComponent>(entity))
+      icon = ICON_FA_CUBE;
 
     char label[512];
     snprintf(label, sizeof(label), "%s %s", icon, name.c_str());
@@ -288,16 +299,22 @@ namespace YAEngine
             scene.AddComponent<LightComponent>(entity, LightType::Directional);
         }
 
-        if (!scene.HasComponent<LightProbeComponent>(entity))
+        if (!scene.HasComponent<ReflectionProbeComponent>(entity))
         {
-          if (ImGui::MenuItem(ICON_FA_GLOBE " Light Probe"))
-            scene.AddComponent<LightProbeComponent>(entity);
+          if (ImGui::MenuItem(ICON_FA_GLOBE " Reflection Probe"))
+            scene.AddComponent<ReflectionProbeComponent>(entity);
         }
 
         if (!scene.HasComponent<CameraComponent>(entity))
         {
           if (ImGui::MenuItem(ICON_FA_VIDEO " Camera"))
             scene.AddComponent<CameraComponent>(entity);
+        }
+
+        if (!scene.HasComponent<IrradianceVolumeComponent>(entity))
+        {
+          if (ImGui::MenuItem(ICON_FA_CUBES " Irradiance Volume"))
+            scene.AddComponent<IrradianceVolumeComponent>(entity);
         }
 
         if (!scene.HasComponent<TerrainComponent>(entity))

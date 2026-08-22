@@ -4,6 +4,7 @@
 #include "Editor/EditorContext.h"
 #include "Editor/IEditorPanel.h"
 #include "Editor/Utils/EditorTextureCache.h"
+#include "Assets/IrradianceVolumeFile.h"
 #include "Scene/ComponentRegistry.h"
 #include "Utils/Ray.h"
 
@@ -33,6 +34,7 @@ namespace YAEngine
     void LoadSceneDeferred(const std::string& path);
     void EnsureBasePath(const std::string& scenePath);
     void SyncEditorCameraState();
+    void DebugDrawIrradianceVolumeNodes();
 
     EditorContext m_Context;
     std::string m_CurrentScenePath;
@@ -44,6 +46,15 @@ namespace YAEngine
     bool b_ResetLayout = false;
     uint32_t m_LastViewportWidth = 0;
     uint32_t m_LastViewportHeight = 0;
+
+    // Parsed .yaiv of the selected volume, so the node gizmos never re-read the
+    // file per frame
+    std::string m_VolumeNodeCachePath;
+    IrradianceVolumeFileData m_VolumeNodeCache;
+    bool b_VolumeNodeCacheValid = false;
+    // Brightest L0 channel over all valid nodes of the cached volume. Scanned
+    // once when the cache is filled - the node draw runs every frame.
+    float m_VolumeNodePeakL0 = 0.0f;
 
     // Gizmo drag state
     bool b_DragActive = false;

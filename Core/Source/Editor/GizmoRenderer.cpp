@@ -131,6 +131,30 @@ namespace YAEngine
     };
     m_WireDepthPipeline = psoCache.Register(ctx.device, renderPass, wireDepthInfo, ctx.pipelineCache);
 
+    // Same state, but the world matrix and color come from a per-instance vertex
+    // binding ('*' marks the binding as per-instance) instead of push constants.
+    PipelineCreateInfo wireDepthInstancedInfo = {
+      .fragmentShaderFile = "gizmo.frag",
+      .vertexShaderFile = "gizmo_instanced.vert",
+      .pushConstantSize = 0,
+      .depthTesting = true,
+      .depthWrite = false,
+      .blending = true,
+      .doubleSided = true,
+      .topology = VK_PRIMITIVE_TOPOLOGY_LINE_LIST,
+      .vertexInputFormat = "f3|*f4f4f4f4f4",
+      .sets = std::vector({ frameLayout })
+    };
+    m_WireDepthInstancedPipeline = psoCache.Register(ctx.device, renderPass,
+      wireDepthInstancedInfo, ctx.pipelineCache);
+
+    // Allocated once: the whole point of the instanced path is that a frame with
+    // twenty thousand node boxes does not allocate anything.
+    m_InstanceBuffer = VulkanBuffer::CreateMapped(ctx,
+      VkDeviceSize(MAX_WIRE_INSTANCES) * sizeof(GizmoInstance),
+      VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+    m_InstanceScratch.reserve(MAX_WIRE_INSTANCES);
+
     // Solid pipeline (TRIANGLE_LIST)
     PipelineCreateInfo solidInfo = {
       .fragmentShaderFile = "gizmo.frag",
@@ -197,6 +221,8 @@ namespace YAEngine
     m_SolidScaleArrowMesh.indexBuffer.Destroy(ctx);
     m_SolidRingMesh.vertexBuffer.Destroy(ctx);
     m_SolidRingMesh.indexBuffer.Destroy(ctx);
+
+    m_InstanceBuffer.Destroy(ctx);
 
     for (auto& [cp, entry] : m_SpriteEntries)
     {
@@ -451,41 +477,69 @@ namespace YAEngine
     }
   }
 
+  const GizmoRenderer::GizmoMesh* GizmoRenderer::MeshForShape(GizmoShape shape) const
+  {
+    switch (shape)
+    {
+      case GizmoShape::Sphere: return &m_SphereMesh;
+      case GizmoShape::Box:    return &m_BoxMesh;
+      case GizmoShape::Cone:   return &m_ConeMesh;
+      case GizmoShape::Arrow:  return &m_ArrowMesh;
+      default:                 return nullptr;
+    }
+  }
+
   void GizmoRenderer::FlushDepthTested(VkCommandBuffer cmd, VkDescriptorSet frameDescriptor)
   {
+    // Grouped by shape: four wire meshes cover every depth-tested request, so the
+    // whole overlay is at most four instanced draws no matter how many nodes the
+    // selected irradiance volume has.
+    static constexpr GizmoShape SHAPES[] = {
+      GizmoShape::Sphere, GizmoShape::Box, GizmoShape::Cone, GizmoShape::Arrow
+    };
+
     bool bound = false;
-    for (auto& req : m_Requests)
+    uint32_t instanceBase = 0;
+
+    for (GizmoShape shape : SHAPES)
     {
-      if (req.mode != GizmoRenderMode::WireDepthTested) continue;
+      const GizmoMesh* mesh = MeshForShape(shape);
+      if (mesh == nullptr || mesh->indexCount == 0)
+        continue;
+
+      m_InstanceScratch.clear();
+      for (const auto& req : m_Requests)
+      {
+        if (req.mode != GizmoRenderMode::WireDepthTested || req.shape != shape)
+          continue;
+        if (instanceBase + m_InstanceScratch.size() >= MAX_WIRE_INSTANCES)
+          break;
+        m_InstanceScratch.push_back(GizmoInstance { req.transform, req.color });
+      }
+
+      if (m_InstanceScratch.empty())
+        continue;
+
+      const uint32_t byteOffset = instanceBase * uint32_t(sizeof(GizmoInstance));
+      const uint32_t byteCount = uint32_t(m_InstanceScratch.size() * sizeof(GizmoInstance));
+      m_InstanceBuffer.Update(byteOffset, m_InstanceScratch.data(), byteCount);
 
       if (!bound)
       {
-        auto& pipeline = m_PSOCache->Get(m_WireDepthPipeline);
+        auto& pipeline = m_PSOCache->Get(m_WireDepthInstancedPipeline);
         pipeline.Bind(cmd);
         vkCmdSetLineWidth(cmd, 2.0f);
         pipeline.BindDescriptorSets(cmd, { frameDescriptor }, 0);
         bound = true;
       }
 
-      GizmoMesh* mesh = nullptr;
-      switch (req.shape)
-      {
-        case GizmoShape::Sphere: mesh = &m_SphereMesh; break;
-        case GizmoShape::Box:    mesh = &m_BoxMesh; break;
-        case GizmoShape::Cone:   mesh = &m_ConeMesh; break;
-        case GizmoShape::Arrow:  mesh = &m_ArrowMesh; break;
-        default: continue;
-      }
-
-      auto& pipeline = m_PSOCache->Get(m_WireDepthPipeline);
-      GizmoPushConstants pc { req.transform, req.color };
-      pipeline.PushConstants(cmd, &pc);
-
-      VkBuffer vb = mesh->vertexBuffer.Get();
-      VkDeviceSize offset = 0;
-      vkCmdBindVertexBuffers(cmd, 0, 1, &vb, &offset);
+      VkBuffer buffers[2] = { mesh->vertexBuffer.Get(), m_InstanceBuffer.Get() };
+      VkDeviceSize offsets[2] = { 0, VkDeviceSize(byteOffset) };
+      vkCmdBindVertexBuffers(cmd, 0, 2, buffers, offsets);
       vkCmdBindIndexBuffer(cmd, mesh->indexBuffer.Get(), 0, VK_INDEX_TYPE_UINT32);
-      vkCmdDrawIndexed(cmd, mesh->indexCount, 1, 0, 0, 0);
+      vkCmdDrawIndexed(cmd, mesh->indexCount, uint32_t(m_InstanceScratch.size()), 0, 0, 0);
+
+      instanceBase += uint32_t(m_InstanceScratch.size());
     }
   }
 

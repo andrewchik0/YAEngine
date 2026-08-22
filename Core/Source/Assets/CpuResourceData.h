@@ -16,10 +16,16 @@ namespace YAEngine
     uint32_t width = 0;
     uint32_t height = 0;
     uint32_t pixelSize = 4;
+    // Set only by loaders that carry a format of their own (DDS). Left undefined
+    // for decoded RGBA8 data, where linear picks between UNORM and SRGB instead.
+    VkFormat format = VK_FORMAT_UNDEFINED;
     bool linear = false;
     bool hasAlpha = false;
     bool hasCpuMips = false;
     bool repeat = true;
+    // Block-compressed payload: mip sizes come from the block layout, not from
+    // width * height * pixelSize, and mips can never be generated on the GPU.
+    bool compressed = false;
   };
 
   // Texture bundled inside a model file (GLB, FBX with embedded media).

@@ -75,6 +75,16 @@ void main()
       outColor = vec4(abs(velocity) * 200.0, 0.0, 1.0);
     }
     return;
+  case DEBUG_VIEW_AMBIENT_ONLY:     // raw linear ambient term, no direct light
+  case DEBUG_VIEW_AMBIENT_DIFFUSE:  // diffuse half of it - irradiance volumes
+  case DEBUG_VIEW_AMBIENT_SPECULAR: // specular half of it - reflection probes
+  case DEBUG_VIEW_PROBE_INDEX:      // one color per dominant probe, black = no local probe
+  case DEBUG_VIEW_PROBE_FALLBACK:   // heat ramp of the skybox fallback share
+  case DEBUG_VIEW_VOLUME_COVERAGE:  // one color per irradiance volume, black = skybox
+    // deferred_lighting.frag already wrote the final value, and Render forces SSR
+    // and TAA off for these views, so `frame` still holds it unmodified.
+    outColor = vec4(texture(frame, uv).rgb, 1.0);
+    return;
   }
 
   // Default: tone-mapped final image

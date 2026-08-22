@@ -43,14 +43,14 @@ set(SOURCE_FILES
   Source/Render/FrameUniformBuffer.cpp
   Source/Render/LightStorageBuffer.h
   Source/Render/LightStorageBuffer.cpp
-  Source/Render/LightProbeStorageBuffer.h
-  Source/Render/LightProbeStorageBuffer.cpp
-  Source/Render/LightProbeAtlas.h
-  Source/Render/LightProbeAtlas.cpp
-  Source/Render/LightProbeBaker.h
-  Source/Render/LightProbeBaker.cpp
-  Source/Render/OffscreenRenderer.h
-  Source/Render/OffscreenRenderer.cpp
+  Source/Render/ReflectionProbeStorageBuffer.h
+  Source/Render/ReflectionProbeStorageBuffer.cpp
+  Source/Render/ReflectionProbeAtlas.h
+  Source/Render/ReflectionProbeAtlas.cpp
+  Source/Render/IrradianceVolumeStorage.h
+  Source/Render/IrradianceVolumeStorage.cpp
+  Source/Render/BakeLimits.h
+  Source/Render/ReflectionProbeBaker.h
   Source/Render/TileLightBuffer.h
   Source/Render/TileLightBuffer.cpp
   Source/Render/VulkanDescriptorSet.cpp
@@ -80,7 +80,6 @@ set(SOURCE_FILES
   Source/Assets/IAssetManager.h
   Source/Assets/Handle.h
   Source/Assets/SlotMap.h
-  Source/Utils/Random.h
   Source/Assets/TextureManager.cpp
   Source/Assets/TextureManager.h
   Source/Assets/MaterialManager.cpp
@@ -97,8 +96,6 @@ set(SOURCE_FILES
   Source/Assets/ModelManager.h
   Source/Utils/Log.h
   Source/Utils/KeyCodes.h
-  Source/Input/InputActionSystem.h
-  Source/Input/InputActionSystem.cpp
   Source/Utils/ServiceRegistry.h
   Source/LayerManager.h
   Source/Input/InputSystem.cpp
@@ -115,8 +112,10 @@ set(SOURCE_FILES
   Source/Assets/CubeMapManager.h
   Source/Assets/CubeMapFile.cpp
   Source/Assets/CubeMapFile.h
-  Source/Render/SkyBox.cpp
-  Source/Render/SkyBox.h
+  Source/Assets/IrradianceVolumeFile.cpp
+  Source/Assets/IrradianceVolumeFile.h
+  Source/Assets/DdsFile.cpp
+  Source/Assets/DdsFile.h
   Source/Utils/Utils.h
   Source/Render/VulkanStorageBuffer.cpp
   Source/Render/VulkanStorageBuffer.h
@@ -129,8 +128,6 @@ set(SOURCE_FILES
   Source/Render/DebugMarker.h
   Source/Render/VulkanBuffer.cpp
   Source/Render/VulkanBuffer.h
-  Source/Render/StagingBatchUploader.cpp
-  Source/Render/StagingBatchUploader.h
   Source/Render/VulkanImage.cpp
   Source/Render/VulkanImage.h
   Source/Render/RenderBackend.cpp
@@ -160,6 +157,10 @@ set(SOURCE_FILES
   Source/Utils/HeightmapLoader.cpp
   Source/Utils/MipGenerator.h
   Source/Utils/MipGenerator.cpp
+  Source/Utils/SphericalHarmonics.h
+  Source/Utils/SphericalHarmonics.cpp
+  Source/Utils/IrradianceGrid.h
+  Source/Utils/IrradianceGrid.cpp
   Source/Utils/SplinePath3D.h
   Source/Utils/RoadMeshGenerator.h
   Source/Utils/RoadMeshGenerator.cpp
@@ -184,6 +185,11 @@ set(SOURCE_FILES
 if(YA_EDITOR)
   list(APPEND SOURCE_FILES
     Source/Render/Render.Editor.cpp
+    Source/Render/OffscreenRenderer.h
+    Source/Render/OffscreenRenderer.cpp
+    Source/Render/ReflectionProbeBaker.cpp
+    Source/Render/IrradianceVolumeBaker.h
+    Source/Render/IrradianceVolumeBaker.cpp
     Source/Editor/EditorLayer.cpp
     Source/Editor/EditorLayer.h
     Source/Editor/IEditorPanel.h

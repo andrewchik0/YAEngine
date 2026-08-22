@@ -11,6 +11,8 @@
 #include "Scene/Components.h"
 #include "Assets/AssetManager.h"
 #include "Render/Render.h"
+#include "Render/BakeLimits.h"
+#include "Utils/IrradianceGrid.h"
 
 namespace YAEngine
 {
@@ -229,10 +231,10 @@ namespace YAEngine
     return false;
   }
 
-  static bool DrawLightProbe(EditorContext& context, LightProbeComponent& lp)
+  static bool DrawReflectionProbe(EditorContext& context, ReflectionProbeComponent& lp)
   {
-    ImGui::PushID("LightProbe");
-    bool open = ImGui::CollapsingHeader(ICON_FA_GLOBE " Light Probe", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+    ImGui::PushID("ReflectionProbe");
+    bool open = ImGui::CollapsingHeader(ICON_FA_GLOBE " Reflection Probe", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 
     ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
     ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
@@ -262,26 +264,40 @@ namespace YAEngine
       else
       {
         ImGui::DragFloat3("Extents", &lp.extents.x, 0.1f, 0.1f, 1000.0f);
+        ImGui::TextDisabled("Rotation comes from the entity transform (rotate gizmo, key 2).");
+        ImGui::TextDisabled("Transform scale is ignored - extents define the volume.");
       }
 
       ImGui::DragFloat("Fade Distance", &lp.fadeDistance, 0.1f, 0.0f, 100.0f);
       ImGui::DragInt("Priority", &lp.priority, 1, -100, 100);
 
-      int res = static_cast<int>(lp.resolution);
-      const char* resOptions[] = { "64", "128", "256", "512" };
-      int resValues[] = { 64, 128, 256, 512 };
-      int resIdx = 1;
-      for (int i = 0; i < 4; i++)
-        if (resValues[i] == res) resIdx = i;
+      ImGui::Checkbox("Parallax Correction", &lp.parallaxCorrection);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Reproject reflections onto the influence volume.\nOnly correct while the volume matches the real geometry.");
 
-      if (ImGui::Combo("Resolution", &resIdx, resOptions, IM_ARRAYSIZE(resOptions)))
-        lp.resolution = static_cast<uint32_t>(resValues[resIdx]);
+      // Options come from the baker range, so the combo can never offer a value
+      // the bake path would clamp away.
+      if (ImGui::BeginCombo("Resolution", std::to_string(lp.resolution).c_str()))
+      {
+        for (uint32_t option = BakeLimits::PROBE_MIN_CAPTURE_RESOLUTION;
+             option <= BakeLimits::PROBE_MAX_CAPTURE_RESOLUTION; option *= 2)
+        {
+          bool isSelected = (lp.resolution == option);
+          if (ImGui::Selectable(std::to_string(option).c_str(), isSelected))
+            lp.resolution = option;
+
+          if (isSelected)
+            ImGui::SetItemDefaultFocus();
+        }
+
+        ImGui::EndCombo();
+      }
 
       if (lp.baked)
       {
         ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.3f, 1.0f), "Baked (slot %u)", lp.atlasSlot);
-        if (!lp.bakedIrradiancePath.empty())
-          ImGui::TextDisabled("%s", lp.bakedIrradiancePath.c_str());
+        if (!lp.bakedPrefilterPath.empty())
+          ImGui::TextDisabled("%s", lp.bakedPrefilterPath.c_str());
 
         static bool s_ProbePreviewOpen = false;
         static uint32_t s_ProbePreviewSlot = 0;
@@ -295,7 +311,7 @@ namespace YAEngine
         if (s_ProbePreviewOpen && s_ProbePreviewSlot == lp.atlasSlot)
         {
           ImGui::SetNextWindowSize(ImVec2(440, 380), ImGuiCond_FirstUseEver);
-          if (ImGui::Begin("Probe Preview", &s_ProbePreviewOpen))
+          if (ImGui::Begin("Reflection Probe Preview", &s_ProbePreviewOpen))
           {
             auto& atlas = context.render->GetProbeAtlas();
             auto& ctx = context.render->GetContext();
@@ -316,21 +332,6 @@ namespace YAEngine
                 ImGui::EndGroup();
               }
             }
-
-            ImGui::SeparatorText("Irradiance");
-            for (uint32_t row = 0; row < 2; row++)
-            {
-              for (uint32_t col = 0; col < 3; col++)
-              {
-                uint32_t face = row * 3 + col;
-                VkDescriptorSet ds = atlas.GetIrradianceFacePreview(ctx, lp.atlasSlot, face);
-                if (col > 0) ImGui::SameLine();
-                ImGui::BeginGroup();
-                ImGui::Image((ImTextureID)ds, ImVec2(imageSize, imageSize));
-                ImGui::TextDisabled("%s", faceLabels[face]);
-                ImGui::EndGroup();
-              }
-            }
           }
           ImGui::End();
         }
@@ -344,6 +345,177 @@ namespace YAEngine
       {
         context.render->BakeProbe(context.selectedEntity, *context.scene, *context.assetManager);
       }
+    }
+
+    ImGui::PopID();
+    return false;
+  }
+
+  // Overlapping volumes share nodes on the world lattice, and a shared node is
+  // only really shared when both bakes captured it the same way. A different
+  // capture resolution means a different SH projection error, so the two volumes
+  // disagree by that error exactly where they are supposed to agree. Warn, never
+  // block - the artist may well want a cheap outer volume anyway.
+  static void DrawVolumeResolutionConflicts(EditorContext& context,
+    const IrradianceVolumeComponent& iv, const glm::vec3& center, const glm::quat& rotation)
+  {
+    glm::vec3 half = ComputeRotatedBoxAabbHalfExtents(rotation, iv.halfExtents);
+    glm::vec3 selfMin = center - half;
+    glm::vec3 selfMax = center + half;
+
+    auto view = context.scene->GetView<IrradianceVolumeComponent, WorldTransform>();
+    for (auto entity : view)
+    {
+      if (entity == context.selectedEntity) continue;
+
+      auto& other = view.get<IrradianceVolumeComponent>(entity);
+      if (other.captureResolution == iv.captureResolution) continue;
+
+      auto& wt = view.get<WorldTransform>(entity);
+      glm::vec3 otherCenter = glm::vec3(wt.world[3]);
+      glm::vec3 otherHalf = ComputeRotatedBoxAabbHalfExtents(
+        ExtractIrradianceBoxRotation(wt.world), other.halfExtents);
+
+      glm::vec3 otherMin = otherCenter - otherHalf;
+      glm::vec3 otherMax = otherCenter + otherHalf;
+      if (glm::any(glm::greaterThan(selfMin, otherMax))) continue;
+      if (glm::any(glm::greaterThan(otherMin, selfMax))) continue;
+
+      ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f),
+        "Overlaps '%s' at capture resolution %u, not %u -\nshared nodes will not match. Use the same resolution.",
+        context.scene->GetName(entity).c_str(), other.captureResolution, iv.captureResolution);
+    }
+  }
+
+  static bool DrawIrradianceVolume(EditorContext& context, IrradianceVolumeComponent& iv)
+  {
+    // Node counts that make bake time explode. One node is six offscreen renders,
+    // so the count, not memory, is what has to stay in check.
+    constexpr uint32_t WARN_NODE_COUNT = 8192;
+    constexpr uint32_t MAX_NODE_COUNT = BakeLimits::VOLUME_MAX_NODE_COUNT;
+    constexpr const char* GRID_COST_TOOLTIP =
+      "16x8x16 = 2048 nodes = 12288 face renders - tens of seconds, fine.\n"
+      "64x32x64 = 131072 nodes - hours. Raise the spacing instead.";
+
+    ImGui::PushID("IrradianceVolume");
+    bool open = ImGui::CollapsingHeader(ICON_FA_CUBES " Irradiance Volume", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
+
+    ImGui::SameLine(ImGui::GetContentRegionAvail().x + ImGui::GetCursorPosX() - ImGui::GetFrameHeight());
+    ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.7f, 0.2f, 0.2f, 1.0f));
+    ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.5f, 0.1f, 0.1f, 1.0f));
+    if (ImGui::Button(ICON_FA_XMARK "##RemoveVolume", ImVec2(ImGui::GetFrameHeight(), ImGui::GetFrameHeight())))
+    {
+      ImGui::PopStyleColor(3);
+      ImGui::PopID();
+      return true;
+    }
+    ImGui::PopStyleColor(3);
+
+    if (open)
+    {
+      // AlwaysClamp: without it Ctrl+Click text entry ignores the range, and the
+      // node count is derived from these.
+      ImGui::DragFloat3("Half Extents", &iv.halfExtents.x, 0.1f, 0.1f, 1000.0f,
+        "%.3f", ImGuiSliderFlags_AlwaysClamp);
+      ImGui::TextDisabled("Position and rotation come from the entity transform.");
+      ImGui::TextDisabled("Transform scale is ignored - half extents define the box.");
+
+      // Only powers of two, and only from the shared set - that is what makes the
+      // nodes of a coarse volume a subset of a finer one on the world lattice.
+      const char* spacingOptions[] = { "0.25", "0.5", "1", "2", "4" };
+      static_assert(IM_ARRAYSIZE(spacingOptions) == IRRADIANCE_SPACINGS.size(),
+        "Spacing combo labels must match IRRADIANCE_SPACINGS");
+      // A value from a hand-edited scene or from code is pulled onto the set here,
+      // so what the combo shows is also what gets saved.
+      iv.spacing = SnapIrradianceSpacing(iv.spacing);
+      int spacingIdx = 0;
+      for (int i = 0; i < IM_ARRAYSIZE(spacingOptions); i++)
+        if (IRRADIANCE_SPACINGS[i] == iv.spacing) spacingIdx = i;
+      if (ImGui::Combo("Spacing", &spacingIdx, spacingOptions, IM_ARRAYSIZE(spacingOptions)))
+        iv.spacing = IRRADIANCE_SPACINGS[spacingIdx];
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Node spacing in meters, exact and never recomputed.\n"
+          "Nodes sit on one world lattice shared by every volume, so the box is\n"
+          "snapped to the spacing instead. Overlapping volumes then agree.");
+
+      const char* resOptions[] = { "16", "32", "64" };
+      uint32_t resValues[] = { 16, 32, 64 };
+      int resIdx = -1;
+      for (int i = 0; i < 3; i++)
+        if (resValues[i] == iv.captureResolution) resIdx = i;
+
+      // Snapped instead of silently displayed as something else: a value outside
+      // the three options would otherwise show as "32" while the component kept
+      // the original, and the resolution conflict warning compares the raw values.
+      if (resIdx < 0)
+      {
+        resIdx = 1;
+        iv.captureResolution = resValues[resIdx];
+      }
+      if (ImGui::Combo("Capture Resolution", &resIdx, resOptions, IM_ARRAYSIZE(resOptions)))
+        iv.captureResolution = resValues[resIdx];
+
+      // Node count is shown BEFORE baking - it is the only warning the user gets
+      // before committing to minutes of offscreen rendering. The lattice covers
+      // the world-space AABB of the rotated box, so the entity transform is part
+      // of the count and has to be fed in the same way the baker feeds it.
+      const glm::mat4& volumeWorld = context.scene->GetWorldTransform(context.selectedEntity).world;
+      glm::vec3 center = glm::vec3(volumeWorld[3]);
+      glm::quat rotation = ExtractIrradianceBoxRotation(volumeWorld);
+
+      IrradianceGridLayout layout = ComputeIrradianceGridLayout(center, rotation,
+        iv.halfExtents, iv.spacing);
+      uint32_t nodeCount = layout.GetNodeCount();
+
+      ImGui::Separator();
+      if (nodeCount > WARN_NODE_COUNT)
+      {
+        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Grid: %ux%ux%u = %u nodes (%u face renders)",
+          layout.nodeCounts.x, layout.nodeCounts.y, layout.nodeCounts.z,
+          nodeCount, layout.GetFaceRenderCount());
+        // Tooltip attached here, before the second line: IsItemHovered() refers to
+        // the last item, so putting it after the warning bound it to the wrong one.
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("%s", GRID_COST_TOOLTIP);
+        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Warning: bake will take many minutes");
+      }
+      else
+      {
+        ImGui::Text("Grid: %ux%ux%u = %u nodes (%u face renders)",
+          layout.nodeCounts.x, layout.nodeCounts.y, layout.nodeCounts.z,
+          nodeCount, layout.GetFaceRenderCount());
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("%s", GRID_COST_TOOLTIP);
+      }
+
+      // A rotated box costs nodes: the lattice is world axis aligned, so it has to
+      // cover the AABB. Roughly twice as many at 45 degrees around one axis.
+      if (std::abs(rotation.w) < 0.9999f)
+        ImGui::TextDisabled("Box is rotated - the lattice covers its world AABB, so\nthere are more nodes than an unrotated box would need.");
+
+      DrawVolumeResolutionConflicts(context, iv, center, rotation);
+
+      if (iv.baked)
+      {
+        ImGui::TextColored(ImVec4(0.3f, 0.8f, 0.3f, 1.0f), "Baked");
+        if (!iv.bakedVolumePath.empty())
+          ImGui::TextDisabled("%s", iv.bakedVolumePath.c_str());
+      }
+      else
+      {
+        ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.3f, 1.0f), "Not baked");
+      }
+
+      bool tooDense = nodeCount > MAX_NODE_COUNT;
+      ImGui::BeginDisabled(tooDense);
+      if (ImGui::Button(ICON_FA_CIRCLE_PLAY " Bake", ImVec2(-1, 0)))
+        context.render->BakeIrradianceVolume(context.selectedEntity, *context.scene, *context.assetManager);
+      ImGui::EndDisabled();
+
+      if (tooDense)
+        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
+          "Grid above %u nodes - raise the spacing to bake", MAX_NODE_COUNT);
     }
 
     ImGui::PopID();
@@ -955,10 +1127,16 @@ namespace YAEngine
         scene.RemoveComponent<LightComponent>(entity);
     }
 
-    if (scene.HasComponent<LightProbeComponent>(entity))
+    if (scene.HasComponent<ReflectionProbeComponent>(entity))
     {
-      if (DrawLightProbe(context, scene.GetComponent<LightProbeComponent>(entity)))
-        scene.RemoveComponent<LightProbeComponent>(entity);
+      if (DrawReflectionProbe(context, scene.GetComponent<ReflectionProbeComponent>(entity)))
+        scene.RemoveComponent<ReflectionProbeComponent>(entity);
+    }
+
+    if (scene.HasComponent<IrradianceVolumeComponent>(entity))
+    {
+      if (DrawIrradianceVolume(context, scene.GetComponent<IrradianceVolumeComponent>(entity)))
+        scene.RemoveComponent<IrradianceVolumeComponent>(entity);
     }
 
     if (scene.HasComponent<TerrainComponent>(entity))
@@ -1071,10 +1249,16 @@ namespace YAEngine
           scene.AddComponent<LightComponent>(entity);
       }
 
-      if (!scene.HasComponent<LightProbeComponent>(entity))
+      if (!scene.HasComponent<ReflectionProbeComponent>(entity))
       {
-        if (ImGui::MenuItem(ICON_FA_GLOBE " Light Probe"))
-          scene.AddComponent<LightProbeComponent>(entity);
+        if (ImGui::MenuItem(ICON_FA_GLOBE " Reflection Probe"))
+          scene.AddComponent<ReflectionProbeComponent>(entity);
+      }
+
+      if (!scene.HasComponent<IrradianceVolumeComponent>(entity))
+      {
+        if (ImGui::MenuItem(ICON_FA_CUBES " Irradiance Volume"))
+          scene.AddComponent<IrradianceVolumeComponent>(entity);
       }
 
       if (!scene.HasComponent<TerrainComponent>(entity))

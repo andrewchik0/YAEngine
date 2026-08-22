@@ -4,6 +4,8 @@
 #include "Components.h"
 #include "YamlUtils.h"
 #include "Assets/AssetManager.h"
+#include "Render/BakeLimits.h"
+#include "Utils/IrradianceGrid.h"
 
 namespace YAEngine
 {
@@ -278,40 +280,86 @@ namespace YAEngine
       }
     );
 
-    // LightProbeComponent
-    registry.Register<LightProbeComponent>("lightProbe",
+    // ReflectionProbeComponent
+    auto deserializeReflectionProbe = [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
+      ReflectionProbeComponent lp;
+      if (n["shape"])
+      {
+        auto s = n["shape"].as<std::string>();
+        lp.shape = (s == "box") ? ProbeShape::Box : ProbeShape::Sphere;
+      }
+      if (n["extents"]) lp.extents = DeserializeVec3(n["extents"]);
+      if (n["fadeDistance"]) lp.fadeDistance = n["fadeDistance"].as<float>();
+      if (n["priority"]) lp.priority = n["priority"].as<int>();
+      // A scene written with an out-of-range value would otherwise re-poison
+      // every bake on every machine that opens it.
+      if (n["resolution"])
+        lp.resolution = std::clamp(n["resolution"].as<uint32_t>(),
+          BakeLimits::PROBE_MIN_CAPTURE_RESOLUTION,
+          BakeLimits::PROBE_MAX_CAPTURE_RESOLUTION);
+      if (n["parallaxCorrection"]) lp.parallaxCorrection = n["parallaxCorrection"].as<bool>();
+      // "bakedIrradiance" is present in every pre-volume scene and is ignored
+      // on purpose - the key is dead, but warning about it on every probe of
+      // every old scene would be noise.
+      if (n["bakedPrefilter"])
+        lp.bakedPrefilterPath = n["bakedPrefilter"].as<std::string>();
+      lp.baked = false;
+      reg.emplace_or_replace<ReflectionProbeComponent>(e, lp);
+    };
+
+    registry.Register<ReflectionProbeComponent>("reflectionProbe",
       [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
-        auto& lp = reg.get<LightProbeComponent>(e);
+        auto& lp = reg.get<ReflectionProbeComponent>(e);
         YAML::Node n;
         n["shape"] = (lp.shape == ProbeShape::Box) ? "box" : "sphere";
         n["extents"] = SerializeVec3(lp.extents);
         n["fadeDistance"] = lp.fadeDistance;
         n["priority"] = lp.priority;
         n["resolution"] = lp.resolution;
-        if (lp.baked && !lp.bakedIrradiancePath.empty())
-        {
-          n["bakedIrradiance"] = lp.bakedIrradiancePath;
+        n["parallaxCorrection"] = lp.parallaxCorrection;
+        // Not gated on lp.baked: that flag is false whenever the .yacm failed to
+        // load or the atlas was full, and dropping the path there would erase
+        // authored data on the next save.
+        if (!lp.bakedPrefilterPath.empty())
           n["bakedPrefilter"] = lp.bakedPrefilterPath;
-        }
+        return n;
+      },
+      deserializeReflectionProbe
+    );
+
+    // Every scene written before the Light Probe -> Reflection Probe rename stores
+    // the component under "lightProbe". Read-only, so a resave migrates the scene
+    // to the new key and the old one is never written again.
+    registry.RegisterAlias("lightProbe", deserializeReflectionProbe);
+
+    // IrradianceVolumeComponent
+    registry.Register<IrradianceVolumeComponent>("irradianceVolume",
+      [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
+        auto& iv = reg.get<IrradianceVolumeComponent>(e);
+        YAML::Node n;
+        n["halfExtents"] = SerializeVec3(iv.halfExtents);
+        n["spacing"] = iv.spacing;
+        n["captureResolution"] = iv.captureResolution;
+        if (!iv.bakedVolumePath.empty())
+          n["bakedVolume"] = iv.bakedVolumePath;
         return n;
       },
       [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
-        LightProbeComponent lp;
-        if (n["shape"])
+        IrradianceVolumeComponent iv;
+        if (n["halfExtents"]) iv.halfExtents = DeserializeVec3(n["halfExtents"]);
+        // Snapped on read so a scene written before the world lattice, or edited
+        // by hand, still lands on a lattice the other volumes share.
+        if (n["spacing"]) iv.spacing = SnapIrradianceSpacing(n["spacing"].as<float>());
+        // Clamped like the probe resolution above, so a hand-edited scene cannot
+        // put a value in the component that the UI combo silently misreports.
+        if (n["captureResolution"])
         {
-          auto s = n["shape"].as<std::string>();
-          lp.shape = (s == "box") ? ProbeShape::Box : ProbeShape::Sphere;
+          iv.captureResolution = std::clamp(n["captureResolution"].as<uint32_t>(),
+            BakeLimits::VOLUME_MIN_CAPTURE_RESOLUTION, BakeLimits::VOLUME_MAX_CAPTURE_RESOLUTION);
         }
-        if (n["extents"]) lp.extents = DeserializeVec3(n["extents"]);
-        if (n["fadeDistance"]) lp.fadeDistance = n["fadeDistance"].as<float>();
-        if (n["priority"]) lp.priority = n["priority"].as<int>();
-        if (n["resolution"]) lp.resolution = n["resolution"].as<uint32_t>();
-        if (n["bakedIrradiance"])
-          lp.bakedIrradiancePath = n["bakedIrradiance"].as<std::string>();
-        if (n["bakedPrefilter"])
-          lp.bakedPrefilterPath = n["bakedPrefilter"].as<std::string>();
-        lp.baked = false;
-        reg.emplace_or_replace<LightProbeComponent>(e, lp);
+        if (n["bakedVolume"]) iv.bakedVolumePath = n["bakedVolume"].as<std::string>();
+        iv.baked = false;
+        reg.emplace_or_replace<IrradianceVolumeComponent>(e, iv);
       }
     );
 

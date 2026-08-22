@@ -1,4 +1,5 @@
 #include "SceneSerializer.h"
+#include "Scene/TransformSystem.h"
 
 #include "Scene.h"
 #include "Components.h"
@@ -6,9 +7,10 @@
 #include "YamlUtils.h"
 #include "Assets/AssetManager.h"
 #include "Assets/CubeMapFile.h"
+#include "Assets/IrradianceVolumeFile.h"
 #include "Assets/ModelImporter.h"
 #include "Render/Render.h"
-#include "Render/LightProbeAtlas.h"
+#include "Render/ReflectionProbeAtlas.h"
 #include "Utils/Log.h"
 #include "Utils/ThreadPool.h"
 
@@ -126,6 +128,10 @@ namespace YAEngine
     settings["fogColor"] = SerializeVec3(render.GetFogColor());
     settings["fogMaxOpacity"] = render.GetFogMaxOpacity();
     settings["fogStartDistance"] = render.GetFogStartDistance();
+    settings["probeBounces"] = render.GetProbeBounceCount();
+    settings["volumeBounces"] = render.GetVolumeBounceCount();
+    settings["irradianceVolumes"] = render.GetIrradianceVolumesEnabled();
+    settings["irradianceNormalBias"] = render.GetIrradianceNormalBias();
 
     root["settings"] = settings;
 
@@ -212,53 +218,149 @@ namespace YAEngine
     if (settings["fogColor"]) render.GetFogColor() = DeserializeVec3(settings["fogColor"]);
     if (settings["fogMaxOpacity"]) render.GetFogMaxOpacity() = settings["fogMaxOpacity"].as<float>();
     if (settings["fogStartDistance"]) render.GetFogStartDistance() = settings["fogStartDistance"].as<float>();
+    if (settings["probeBounces"])
+    {
+      render.GetProbeBounceCount() = std::clamp(settings["probeBounces"].as<int>(),
+        Render::MIN_PROBE_BOUNCES, Render::MAX_PROBE_BOUNCES);
+    }
+    if (settings["volumeBounces"])
+    {
+      render.GetVolumeBounceCount() = std::clamp(settings["volumeBounces"].as<int>(),
+        Render::MIN_VOLUME_BOUNCES, Render::MAX_VOLUME_BOUNCES);
+    }
+    if (settings["irradianceVolumes"])
+      render.GetIrradianceVolumesEnabled() = settings["irradianceVolumes"].as<bool>();
+    if (settings["irradianceNormalBias"])
+    {
+      // Clamped to the range the UI offers - a negative bias pulls the diffuse
+      // sample point INTO the geometry, which is the leak this exists to prevent.
+      render.GetIrradianceNormalBias() = std::clamp(
+        settings["irradianceNormalBias"].as<float>(), 0.0f, 1.0f);
+    }
   }
 
-  // Shared: load light probes (Pass 4)
-  static void LoadLightProbes(Scene& scene, AssetManager& assets, Render& render)
+  // Shared: load reflection probes (Pass 4)
+  static void LoadReflectionProbes(Scene& scene, AssetManager& assets, Render& render)
   {
     auto& ctx = render.GetContext();
     uint32_t nextSlot = 1;
-    auto probeView = scene.GetView<LightProbeComponent>();
+    auto probeView = scene.GetView<ReflectionProbeComponent>();
     for (auto entity : probeView)
     {
-      auto& lp = scene.GetComponent<LightProbeComponent>(entity);
-      if (lp.bakedIrradiancePath.empty() || lp.bakedPrefilterPath.empty())
+      auto& lp = scene.GetComponent<ReflectionProbeComponent>(entity);
+      if (lp.bakedPrefilterPath.empty())
         continue;
 
-      std::string irrAbsPath = assets.ResolvePath(lp.bakedIrradiancePath);
       std::string pfAbsPath = assets.ResolvePath(lp.bakedPrefilterPath);
 
-      CubeMapFileData irrData, pfData;
-      if (!CubeMapFile::Load(irrAbsPath, irrData))
-      {
-        YA_LOG_WARN("Scene", "Failed to load probe irradiance: %s", irrAbsPath.c_str());
-        continue;
-      }
+      CubeMapFileData pfData;
       if (!CubeMapFile::Load(pfAbsPath, pfData))
       {
         YA_LOG_WARN("Scene", "Failed to load probe prefilter: %s", pfAbsPath.c_str());
         continue;
       }
 
-      uint32_t slot = nextSlot++;
-      if (slot >= render.GetProbeAtlas().GetMaxSlots())
+      if (nextSlot >= render.GetProbeAtlas().GetMaxSlots())
       {
         YA_LOG_WARN("Scene", "No atlas slots left for probe '%s'",
           scene.GetName(entity).c_str());
-        break;
+        continue;
       }
+      if (!render.GetProbeAtlas().UploadPrefilterFromData(ctx, nextSlot, pfData))
+        continue;
 
-      render.GetProbeAtlas().UploadSlotFromData(ctx, slot,
-        irrData.pixels.data(), irrData.width,
-        pfData.pixels.data(), pfData.width, pfData.mipLevels,
-        pfData.bytesPerPixel);
-
+      uint32_t slot = nextSlot++;
       lp.atlasSlot = slot;
       lp.baked = true;
 
       YA_LOG_INFO("Scene", "Loaded probe '%s' -> atlas slot %u",
         scene.GetName(entity).c_str(), slot);
+    }
+  }
+
+  // Shared: load irradiance volumes (Pass 5)
+  void SceneSerializer::LoadIrradianceVolumes(Scene& scene, AssetManager& assets, Render& render)
+  {
+    std::vector<entt::entity> entities;
+    std::vector<IrradianceVolumeFileData> volumes;
+
+    auto volumeView = scene.GetView<IrradianceVolumeComponent>();
+    for (auto entity : volumeView)
+    {
+      auto& volume = scene.GetComponent<IrradianceVolumeComponent>(entity);
+      volume.baked = false;
+      volume.atlasSlot = 0;
+
+      if (volume.bakedVolumePath.empty())
+        continue;
+
+      std::string absPath = assets.ResolvePath(volume.bakedVolumePath);
+      IrradianceVolumeFileData data;
+      if (!IrradianceVolumeFile::Load(absPath, data))
+      {
+        YA_LOG_WARN("Scene", "Failed to load irradiance volume: %s", absPath.c_str());
+        continue;
+      }
+
+      // The baked coefficients only describe the box they were captured in, so the
+      // asset transform is authoritative. A moved or resized entity keeps rendering
+      // with the old box until it is rebaked - warn instead of silently drifting.
+      auto& wt = scene.GetWorldTransform(entity);
+      glm::vec3 entityPos = glm::vec3(wt.world[3]);
+      float scale = glm::max(glm::length(data.halfExtents), 1e-3f);
+      bool positionMoved = glm::length(entityPos - data.position) > 0.01f * scale;
+      bool sizeChanged = glm::length(volume.halfExtents - data.halfExtents) > 0.01f * scale;
+      if (positionMoved || sizeChanged)
+      {
+        YA_LOG_WARN("Scene", "Irradiance volume '%s' no longer matches its baked box - rebake it",
+          scene.GetName(entity).c_str());
+      }
+
+      entities.push_back(entity);
+      volumes.push_back(std::move(data));
+    }
+
+    ApplyIrradianceVolumes(scene, render, entities, volumes);
+  }
+
+  void SceneSerializer::ApplyIrradianceVolumes(Scene& scene, Render& render,
+    const std::vector<entt::entity>& entities,
+    const std::vector<IrradianceVolumeFileData>& volumes)
+  {
+    // Public, so the precondition is checked rather than assumed: the loop below
+    // walks entities and indexes slots, which Upload sizes from volumes.
+    if (entities.size() != volumes.size())
+    {
+      YA_LOG_ERROR("Scene", "ApplyIrradianceVolumes got %zu entities for %zu volumes",
+        entities.size(), volumes.size());
+      return;
+    }
+
+    // Always called, even with nothing to upload - a previous scene may have left
+    // volumes in the atlas and they have to go away with it.
+    std::vector<uint32_t> slots;
+    render.UploadIrradianceVolumes(volumes, slots);
+
+    for (size_t i = 0; i < entities.size(); i++)
+    {
+      auto& volume = scene.GetComponent<IrradianceVolumeComponent>(entities[i]);
+      if (slots[i] == IrradianceVolumeStorage::INVALID_SLOT)
+      {
+        // Cleared, not just skipped: Upload reassigns every slot, so a leftover
+        // baked + atlasSlot would now point at somebody else's texels and the
+        // next bake would drop the wrong volume from its capture.
+        volume.baked = false;
+        volume.atlasSlot = 0;
+        YA_LOG_WARN("Scene", "Irradiance volume '%s' did not fit into the atlas and is inactive",
+          scene.GetName(entities[i]).c_str());
+        continue;
+      }
+
+      volume.atlasSlot = slots[i];
+      volume.baked = true;
+
+      YA_LOG_INFO("Scene", "Loaded irradiance volume '%s' -> slot %u",
+        scene.GetName(entities[i]).c_str(), slots[i]);
     }
   }
 
@@ -348,7 +450,15 @@ namespace YAEngine
     else
       LoadSync(root, entities, scene, assets, registry, render);
 
-    LoadLightProbes(scene, assets, render);
+    // Pass 5 compares the baked box of a volume against its entity transform, and
+    // nothing has run TransformSystem yet at this point - every WorldTransform is
+    // still the identity the entity was created with, so every volume off the world
+    // origin would report as moved.
+    TransformSystem transforms;
+    transforms.Update(scene.GetRegistry(), 0.0);
+
+    LoadReflectionProbes(scene, assets, render);
+    LoadIrradianceVolumes(scene, assets, render);
 
     scene.SetScenePath(path);
     YA_LOG_INFO("Scene", "Scene loaded: %s", path.c_str());

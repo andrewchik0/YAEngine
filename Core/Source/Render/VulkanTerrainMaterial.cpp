@@ -89,6 +89,10 @@ namespace YAEngine
       auto& tex = textures.GetVulkanTexture(layer0.normalTexture);
       writer.WriteCombinedImageSampler(2, tex.GetView(), tex.GetSampler());
       textureMask |= (1 << 1);
+      // Bits 12-14 mark a two-channel normal map per layer, matching bit 9 of the
+      // mesh material mask. Bits 0-11 are the per-layer texture presence flags.
+      if (IsTwoChannelNormal(tex.GetFormat()))
+        textureMask |= (1 << 12);
     }
     if (textures.Has(layer0.roughnessTexture))
     {
@@ -115,6 +119,8 @@ namespace YAEngine
       auto& tex = textures.GetVulkanTexture(layer1.layer1Normal);
       writer.WriteCombinedImageSampler(6, tex.GetView(), tex.GetSampler());
       textureMask |= (1 << 5);
+      if (IsTwoChannelNormal(tex.GetFormat()))
+        textureMask |= (1 << 13);
     }
     if (textures.Has(layer1.layer1Roughness))
     {
@@ -141,6 +147,8 @@ namespace YAEngine
       auto& tex = textures.GetVulkanTexture(layer1.layer2Normal);
       writer.WriteCombinedImageSampler(10, tex.GetView(), tex.GetSampler());
       textureMask |= (1 << 9);
+      if (IsTwoChannelNormal(tex.GetFormat()))
+        textureMask |= (1 << 14);
     }
     if (textures.Has(layer1.layer2Roughness))
     {
