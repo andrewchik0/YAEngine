@@ -98,6 +98,8 @@ set(SOURCE_FILES
   Source/Assets/ModelTemplate.cpp
   Source/Assets/ModelTemplate.h
   Source/Utils/Log.h
+  Source/Utils/ProfilerStorage.h
+  Source/Utils/ProfilerStorage.cpp
   Source/Utils/KeyCodes.h
   Source/Utils/ServiceRegistry.h
   Source/LayerManager.h
@@ -193,6 +195,8 @@ set(SOURCE_FILES
 if(YA_EDITOR)
   list(APPEND SOURCE_FILES
     Source/Render/Render.Editor.cpp
+    Source/Render/GpuProfiler.h
+    Source/Render/GpuProfiler.cpp
     Source/Render/OffscreenRenderer.h
     Source/Render/OffscreenRenderer.cpp
     Source/Render/BackfaceRatioSampler.h

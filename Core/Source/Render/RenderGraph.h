@@ -6,6 +6,9 @@
 namespace YAEngine
 {
   struct RenderContext;
+#ifdef YA_EDITOR
+  class GpuProfiler;
+#endif
 
   using RGHandle = uint32_t;
   static constexpr RGHandle RG_INVALID_HANDLE = UINT32_MAX;
@@ -68,6 +71,9 @@ namespace YAEngine
     void SetPassColorOutput(uint32_t pass, uint32_t slot, RGHandle resource);
 
     void Execute(VkCommandBuffer cmd, void* userData = nullptr);
+#ifdef YA_EDITOR
+    void SetGpuProfiler(GpuProfiler* profiler) { m_GpuProfiler = profiler; }
+#endif
     void Resize(VkExtent2D newExtent);
 
     VulkanImage& GetResource(RGHandle handle);
@@ -118,5 +124,9 @@ namespace YAEngine
     std::vector<VkImageLayout> m_CurrentLayouts;
 
     bool m_Compiled = false;
+
+#ifdef YA_EDITOR
+    GpuProfiler* m_GpuProfiler = nullptr;
+#endif
   };
 }

@@ -10,6 +10,7 @@
 #include "Scene/ScatterSystem.h"
 #include "Scene/ModelColliderSystem.h"
 #include "Scene/CoreComponentSerializers.h"
+#include "Utils/ProfilerStorage.h"
 
 #include <imgui.h>
 
@@ -121,9 +122,16 @@ namespace YAEngine
     while (m_Window.IsOpen())
     {
       double frameStartTime = glfwGetTime();
+      YA_PROFILE_FRAME_BEGIN();
 
-      m_InputSystem.ProcessEvents();
-      m_Dispatcher.ProcessAll();
+      {
+        YA_PROFILE_CPU("Events");
+        m_InputSystem.ProcessEvents();
+      }
+      {
+        YA_PROFILE_CPU("Dispatcher");
+        m_Dispatcher.ProcessAll();
+      }
 
       if (m_Window.WasResized())
       {
@@ -143,6 +151,10 @@ namespace YAEngine
 
       if (m_Window.GetWidth() == 0 || m_Window.GetHeight() == 0)
       {
+        // Close the column even though nothing was drawn. Skipping the total would
+        // freeze the domain's newest frame while the counter keeps running, and the
+        // panel would shrink its window by every iteration spent minimised.
+        YA_PROFILE_FRAME_TOTAL(float((glfwGetTime() - frameStartTime) * 1000.0));
         glfwWaitEvents();
         continue;
       }
@@ -150,39 +162,61 @@ namespace YAEngine
       m_Timer.Step();
 
       double frameDt = m_Timer.GetDeltaTime();
-      if (b_ReelPlaybackMode)
       {
-        frameDt = FIXED_DT;
-        m_LayerManager.CallFixedUpdate(FIXED_DT);
-      }
-      else
-      {
-        m_Accumulator += frameDt;
-        if (m_Accumulator > FIXED_DT * MAX_FIXED_STEPS)
-          m_Accumulator = FIXED_DT * MAX_FIXED_STEPS;
-        while (m_Accumulator >= FIXED_DT)
+        YA_PROFILE_CPU("FixedUpdate");
+        if (b_ReelPlaybackMode)
         {
+          frameDt = FIXED_DT;
           m_LayerManager.CallFixedUpdate(FIXED_DT);
-          m_Accumulator -= FIXED_DT;
+        }
+        else
+        {
+          m_Accumulator += frameDt;
+          if (m_Accumulator > FIXED_DT * MAX_FIXED_STEPS)
+            m_Accumulator = FIXED_DT * MAX_FIXED_STEPS;
+          while (m_Accumulator >= FIXED_DT)
+          {
+            m_LayerManager.CallFixedUpdate(FIXED_DT);
+            m_Accumulator -= FIXED_DT;
+          }
         }
       }
 
-      m_Scheduler.Run(m_Scene.GetRegistry(), frameDt);
-      m_LayerManager.CallUpdate(frameDt);
-      m_LayerManager.CallLateUpdate(frameDt);
+      {
+        YA_PROFILE_CPU("Systems");
+        m_Scheduler.Run(m_Scene.GetRegistry(), frameDt);
+      }
+      {
+        YA_PROFILE_CPU("Update");
+        m_LayerManager.CallUpdate(frameDt);
+      }
+      {
+        YA_PROFILE_CPU("LateUpdate");
+        m_LayerManager.CallLateUpdate(frameDt);
+      }
       m_InputSystem.EndFrame();
 
-      BuildSceneSnapshot(m_Snapshot, m_LightData, m_Scene, m_AssetManager.Meshes(), m_AssetManager.Materials());
+      {
+        YA_PROFILE_CPU("Snapshot");
+        BuildSceneSnapshot(m_Snapshot, m_LightData, m_Scene, m_AssetManager.Meshes(), m_AssetManager.Materials());
+      }
 
-      // Frustum cull: compute viewProj from camera data, partition visible objects to front
-      auto& cam = m_Snapshot.camera;
-      glm::mat4 world = glm::translate(glm::mat4(1.0f), cam.position) * glm::mat4_cast(cam.rotation);
-      glm::mat4 view = glm::inverse(world);
-      glm::mat4 proj = MakeReversedInfinitePerspective(cam.fov, cam.aspectRatio, cam.nearPlane);
-      m_Snapshot.visibleCount = FrustumCull(m_Snapshot.objects, view, proj, cam.farPlane);
+      {
+        YA_PROFILE_CPU("FrustumCull");
+        // Frustum cull: compute viewProj from camera data, partition visible objects to front
+        auto& cam = m_Snapshot.camera;
+        glm::mat4 world = glm::translate(glm::mat4(1.0f), cam.position) * glm::mat4_cast(cam.rotation);
+        glm::mat4 view = glm::inverse(world);
+        glm::mat4 proj = MakeReversedInfinitePerspective(cam.fov, cam.aspectRatio, cam.nearPlane);
+        m_Snapshot.visibleCount = FrustumCull(m_Snapshot.objects, view, proj, cam.farPlane);
+      }
 
       auto frame = MakeFrameContext(m_Snapshot);
+      // Render::Draw marks its own zones: waiting on the GPU dominates it and has to
+      // be separated from the cost of actually recording the frame.
       m_Render.Draw(frame);
+
+      YA_PROFILE_FRAME_TOTAL(float((glfwGetTime() - frameStartTime) * 1000.0));
 
       if (b_ReelPlaybackMode)
       {

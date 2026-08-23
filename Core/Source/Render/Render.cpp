@@ -11,6 +11,7 @@
 #include "ImageBarrier.h"
 #include "Utils/Log.h"
 
+#include "Utils/ProfilerStorage.h"
 #include "Utils/Utils.h"
 #include "TileCullData.h"
 
@@ -20,6 +21,11 @@ namespace YAEngine
   {
     m_Backend.Init(window, specs);
     auto& ctx = m_Backend.GetContext();
+
+#ifdef YA_EDITOR
+    m_GpuProfiler.Init(ctx);
+    m_Graph.SetGpuProfiler(&m_GpuProfiler);
+#endif
 
     int width, height;
     glfwGetWindowSize(window, &width, &height);
@@ -121,6 +127,7 @@ namespace YAEngine
     auto& ctx = m_Backend.GetContext();
 
 #ifdef YA_EDITOR
+    m_GpuProfiler.Destroy(ctx);
     m_ShaderHotReload.Destroy();
     m_ProbeBaker.Destroy();
     m_VolumeBaker.Destroy();
@@ -285,19 +292,26 @@ namespace YAEngine
     {
       if (m_PendingViewportWidth > 0 && m_PendingViewportHeight > 0)
       {
+        YA_PROFILE_CPU("ViewportResize");
         ResizeViewport();
       }
     }
 
-    m_ShaderHotReload.Update(frame.time);
+    {
+      YA_PROFILE_CPU("ShaderPoll");
+      m_ShaderHotReload.Update(frame.time);
+    }
 
     if (m_PendingInvalidateSlot > 0)
     {
+      YA_PROFILE_CPU("ProbeInvalidate");
       vkDeviceWaitIdle(m_Backend.GetContext().device);
       m_ProbeAtlas.InvalidateSlotPreview(m_Backend.GetContext(), m_PendingInvalidateSlot);
       m_PendingInvalidateSlot = 0;
     }
 #endif
+
+    YA_PROFILE_CPU_BEGIN(setup, "FrameSetup");
 
     if (b_ResetTAAPending)
     {
@@ -312,7 +326,14 @@ namespace YAEngine
       b_ResetAutoExposurePending = false;
     }
 
+    YA_PROFILE_CPU_END(setup);
+
+    // BeginFrame blocks on the fence of the frame slot it is about to reuse, so this
+    // zone is time spent waiting for the GPU, not work. Kept apart from RecordCmd.
+    YA_PROFILE_CPU_BEGIN(wait, "WaitFrame");
     auto imageIndex = m_Backend.BeginFrame();
+    YA_PROFILE_CPU_END(wait);
+
     if (!imageIndex)
     {
       Resize();
@@ -329,6 +350,13 @@ namespace YAEngine
     m_Stats = {};
 
     auto cmd = m_Backend.GetCurrentCommandBuffer();
+
+    YA_PROFILE_CPU_BEGIN(record, "RecordCmd");
+
+#ifdef YA_EDITOR
+    m_GpuProfiler.BeginFrame(m_Backend.GetContext(), cmd, m_Backend.GetCurrentFrameIndex(),
+      ProfilerStorage::Get().GetRecordingFrame());
+#endif
 
     SetUpCamera(frame);
     float currentTime = (float)frame.time;
@@ -534,17 +562,33 @@ namespace YAEngine
 #endif
 
     // Render shadow maps before main passes
-    RenderShadowMaps(frame, cmd, currentFrame);
+    {
+#ifdef YA_EDITOR
+      // Scoped here and not inside RenderShadowMaps: the probe bakers call it with
+      // their own command buffer, which has no query pool of this frame to write into.
+      GpuZoneScope shadowZone(&m_GpuProfiler, cmd, "Shadows");
+#endif
+      RenderShadowMaps(frame, cmd, currentFrame);
+    }
 
     // Execute all passes
     m_Graph.Execute(cmd, &frame);
 
-    if (!m_Backend.EndFrame(*imageIndex, b_Resized))
+    YA_PROFILE_CPU_END(record);
+
+    YA_PROFILE_CPU_BEGIN(present, "Present");
+    bool presented = m_Backend.EndFrame(*imageIndex, b_Resized);
+    YA_PROFILE_CPU_END(present);
+
+    if (!presented)
     {
       Resize();
     }
 
-    CaptureFrame();
+    {
+      YA_PROFILE_CPU("Capture");
+      CaptureFrame();
+    }
 
     m_TAAIndex = (m_TAAIndex + 1) % 2;
     m_GlobalFrameIndex++;

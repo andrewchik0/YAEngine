@@ -75,3 +75,22 @@ target_include_directories(imgui PUBLIC
   ${imgui_SOURCE_DIR}
   ${imgui_SOURCE_DIR}/backends
 )
+# ImPlot is only used by the editor performance panel, so non-editor builds
+# neither fetch nor compile it.
+if(YA_EDITOR)
+  FetchContent_Declare(implot
+    GIT_REPOSITORY https://github.com/epezent/implot
+    GIT_TAG v1.0
+    GIT_SHALLOW ON
+    EXCLUDE_FROM_ALL
+    SYSTEM)
+  FetchContent_MakeAvailable(implot)
+
+  # implot_demo.cpp is not built: it is a large translation unit we never call into.
+  add_library(implot STATIC
+    ${implot_SOURCE_DIR}/implot.cpp
+    ${implot_SOURCE_DIR}/implot_items.cpp
+  )
+  target_include_directories(implot PUBLIC ${implot_SOURCE_DIR})
+  target_link_libraries(implot PUBLIC imgui)
+endif()

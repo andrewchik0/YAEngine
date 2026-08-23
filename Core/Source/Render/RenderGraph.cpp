@@ -5,6 +5,10 @@
 #include "ImageBarrier.h"
 #include "Utils/Log.h"
 
+#ifdef YA_EDITOR
+#include "GpuProfiler.h"
+#endif
+
 #include <queue>
 
 namespace YAEngine
@@ -664,6 +668,11 @@ namespace YAEngine
       VkExtent2D passExtent = (pass.overrideExtent.width > 0 && pass.overrideExtent.height > 0)
         ? pass.overrideExtent : pass.extent;
       ctx.extent = passExtent;
+
+#ifdef YA_EDITOR
+      // Declared before the barriers so the wait a pass causes is charged to that pass.
+      GpuZoneScope gpuZone(m_GpuProfiler, cmd, pass.info.name.c_str());
+#endif
 
       // Insert barriers for inputs (and storage outputs for compute)
       InsertBarriers(cmd, passIndex);

@@ -22,6 +22,7 @@
 
 #ifdef YA_EDITOR
 #include <entt/fwd.hpp>
+#include "GpuProfiler.h"
 #include "Editor/GizmoRenderer.h"
 #include "Editor/ShaderHotReload.h"
 #include "OffscreenRenderer.h"
@@ -267,6 +268,10 @@ namespace YAEngine
 
     RenderBackend m_Backend;
     RenderGraph m_Graph;
+
+#ifdef YA_EDITOR
+    GpuProfiler m_GpuProfiler;
+#endif
 
     std::string m_CaptureDir;
     int m_CaptureWarmup = 90;

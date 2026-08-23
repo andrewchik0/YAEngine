@@ -78,6 +78,7 @@ if(YA_EDITOR)
     SHADER_PERMUTATIONS_FILE="${SHADER_PERMUTATIONS_FILE}"
   )
   target_link_libraries(Core PRIVATE nfd)
+  target_link_libraries(Core PRIVATE implot)
 endif()
 
 # Match VS filters to folder tree

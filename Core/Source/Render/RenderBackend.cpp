@@ -76,6 +76,21 @@ namespace YAEngine
     VkPhysicalDeviceProperties limitProps {};
     vkGetPhysicalDeviceProperties(m_PhysicalDevice.Get(), &limitProps);
     m_Context.maxImageDimension3D = limitProps.limits.maxImageDimension3D;
+    m_Context.timestampPeriod = limitProps.limits.timestampPeriod;
+
+    // timestampComputeAndGraphics only promises a non-zero bit count. The actual
+    // count is per queue family, and the bits above it hold undefined garbage.
+    auto families = VulkanPhysicalDevice::FindQueueFamilies(m_PhysicalDevice.Get(), m_Surface.Get());
+    uint32_t familyCount = 0;
+    vkGetPhysicalDeviceQueueFamilyProperties(m_PhysicalDevice.Get(), &familyCount, nullptr);
+    std::vector<VkQueueFamilyProperties> familyProps(familyCount);
+    vkGetPhysicalDeviceQueueFamilyProperties(m_PhysicalDevice.Get(), &familyCount, familyProps.data());
+
+    uint32_t graphicsFamily = families.graphicsFamily.value_or(0);
+    m_Context.timestampValidBits = graphicsFamily < familyCount
+      ? familyProps[graphicsFamily].timestampValidBits : 0;
+    m_Context.timestampsSupported = limitProps.limits.timestampComputeAndGraphics == VK_TRUE
+      && m_Context.timestampValidBits > 0;
   }
 
   void RenderBackend::Destroy()
