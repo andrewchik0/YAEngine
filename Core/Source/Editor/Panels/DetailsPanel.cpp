@@ -399,7 +399,9 @@ namespace YAEngine
     constexpr uint32_t MAX_NODE_COUNT = BakeLimits::VOLUME_MAX_NODE_COUNT;
     constexpr const char* GRID_COST_TOOLTIP =
       "16x8x16 = 2048 nodes = 12288 face renders - tens of seconds, fine.\n"
-      "64x32x64 = 131072 nodes - hours. Raise the spacing instead.";
+      "64x32x64 = 131072 nodes - the cap, and only affordable because\n"
+      "classification skips the captures of everything it rejects.\n"
+      "The face render count above assumes NO node is rejected.";
 
     ImGui::PushID("IrradianceVolume");
     bool open = ImGui::CollapsingHeader(ICON_FA_CUBES " Irradiance Volume", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
@@ -459,6 +461,15 @@ namespace YAEngine
       }
       if (ImGui::Combo("Capture Resolution", &resIdx, resOptions, IM_ARRAYSIZE(resOptions)))
         iv.captureResolution = resValues[resIdx];
+
+      ImGui::DragFloat("Backface Threshold", &iv.backfaceRatioThreshold, 0.01f,
+        BakeLimits::VOLUME_MIN_BACKFACE_THRESHOLD, BakeLimits::VOLUME_MAX_BACKFACE_THRESHOLD,
+        "%.2f", ImGuiSliderFlags_AlwaysClamp);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("How much of the sphere a node may see from the inside\n"
+          "before the bake rejects it as buried behind a wall or under the ground.\n"
+          "Rejected nodes inherit their nearest valid neighbour, so rejecting is cheap.\n"
+          "Lower catches more leaks, higher keeps more nodes. 1.00 switches the test off.");
 
       // Node count is shown BEFORE baking - it is the only warning the user gets
       // before committing to minutes of offscreen rendering. The lattice covers

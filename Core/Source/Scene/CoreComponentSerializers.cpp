@@ -364,6 +364,7 @@ namespace YAEngine
         n["halfExtents"] = SerializeVec3(iv.halfExtents);
         n["spacing"] = iv.spacing;
         n["captureResolution"] = iv.captureResolution;
+        n["backfaceRatioThreshold"] = iv.backfaceRatioThreshold;
         if (!iv.bakedVolumePath.empty())
           n["bakedVolume"] = iv.bakedVolumePath;
         return n;
@@ -380,6 +381,13 @@ namespace YAEngine
         {
           iv.captureResolution = std::clamp(n["captureResolution"].as<uint32_t>(),
             BakeLimits::VOLUME_MIN_CAPTURE_RESOLUTION, BakeLimits::VOLUME_MAX_CAPTURE_RESOLUTION);
+        }
+        // Absent in scenes written before node classification existed; those keep the
+        // component default rather than silently baking with the test switched off.
+        if (n["backfaceRatioThreshold"])
+        {
+          iv.backfaceRatioThreshold = std::clamp(n["backfaceRatioThreshold"].as<float>(),
+            BakeLimits::VOLUME_MIN_BACKFACE_THRESHOLD, BakeLimits::VOLUME_MAX_BACKFACE_THRESHOLD);
         }
         if (n["bakedVolume"]) iv.bakedVolumePath = n["bakedVolume"].as<std::string>();
         iv.baked = false;

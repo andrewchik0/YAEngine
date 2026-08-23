@@ -2,6 +2,7 @@
 
 #include "VulkanImage.h"
 #include "OffscreenRenderer.h"
+#include "BackfaceRatioSampler.h"
 #include "BakeLimits.h"
 #include "Utils/IrradianceGrid.h"
 
@@ -20,6 +21,9 @@ namespace YAEngine
     uint32_t captureResolution = 32;
     // Collider layers that count as solid geometry a node can be buried in
     uint32_t colliderMask = ~0u;
+    // Fraction of the sphere a node may see from the inside before it is rejected.
+    // See BakeLimits::VOLUME_DEFAULT_BACKFACE_THRESHOLD.
+    float backfaceRatioThreshold = BakeLimits::VOLUME_DEFAULT_BACKFACE_THRESHOLD;
     const char* volumeName = "";
   };
 
@@ -27,6 +31,11 @@ namespace YAEngine
   {
     uint32_t nodeCount = 0;
     uint32_t rejectedCount = 0;
+    // The two tests split out, because only the split says whether the backface
+    // classification is doing anything: the collider test alone cannot tell a node
+    // standing behind a wall from one standing in front of it.
+    uint32_t rejectedByColliderCount = 0;
+    uint32_t rejectedByBackfaceCount = 0;
     bool anyValid = false;
   };
 
@@ -54,6 +63,10 @@ namespace YAEngine
     Render* m_Render = nullptr;
     const RenderContext* m_Ctx = nullptr;
     OffscreenRenderer m_OffscreenRenderer;
+    // Fixed resolution, so unlike the lighting capture this one is never rebuilt and
+    // its render pass lives for the whole session - which is what lets the mask
+    // pipelines be registered once, in Init.
+    BackfaceRatioSampler m_BackfaceSampler;
     uint32_t m_Resolution = 0;
   };
 }

@@ -453,4 +453,100 @@ namespace YAEngine
 
     return accumulator.Finalize();
   }
+
+  float ComputeCubemapBackfaceRatio(const RenderContext& ctx, VkImage srcImage,
+    uint32_t resolution, VkImageLayout currentLayout, VulkanBuffer* reusableStaging)
+  {
+    if (resolution == 0)
+    {
+      YA_LOG_ERROR("Render", "ComputeCubemapBackfaceRatio called with zero resolution");
+      return 0.0f;
+    }
+
+    size_t faceTexels = size_t(resolution) * size_t(resolution);
+    const VkDeviceSize readbackSize = faceTexels * 6;
+
+    VulkanBuffer localStaging;
+    if (reusableStaging != nullptr && reusableStaging->GetSize() < readbackSize)
+    {
+      reusableStaging->Destroy(ctx);
+      *reusableStaging = VulkanBuffer::CreateReadback(ctx, readbackSize);
+    }
+    else if (reusableStaging == nullptr)
+    {
+      localStaging = VulkanBuffer::CreateReadback(ctx, readbackSize);
+    }
+
+    VulkanBuffer& staging = reusableStaging != nullptr ? *reusableStaging : localStaging;
+
+    bool needsTransition = currentLayout != VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL
+      && currentLayout != VK_IMAGE_LAYOUT_UNDEFINED;
+
+    VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
+
+    if (needsTransition)
+      TransitionImageLayout(cmd, srcImage, currentLayout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
+
+    for (uint32_t face = 0; face < 6; face++)
+    {
+      VkBufferImageCopy region {};
+      region.bufferOffset = faceTexels * face;
+      region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, face, 1 };
+      region.imageExtent = { resolution, resolution, 1 };
+      vkCmdCopyImageToBuffer(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+        staging.Get(), 1, &region);
+    }
+
+    if (needsTransition)
+      TransitionImageLayout(cmd, srcImage, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, currentLayout,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
+
+    ctx.commandBuffer->EndSingleTimeCommands(cmd);
+
+    const uint8_t* texels = static_cast<const uint8_t*>(staging.GetMapped());
+    if (texels == nullptr)
+    {
+      YA_LOG_ERROR("Render", "ComputeCubemapBackfaceRatio got an unmapped readback buffer");
+      localStaging.Destroy(ctx);
+      return 0.0f;
+    }
+
+    // Same reason as in ProjectCubemapToSH: four atan2 per texel, recomputed six
+    // times over would dominate the CPU half of the bake.
+    std::vector<float> solidAngles(faceTexels);
+    float faceSolidAngle = 0.0f;
+    for (uint32_t y = 0; y < resolution; y++)
+    {
+      for (uint32_t x = 0; x < resolution; x++)
+      {
+        float sa = CubeFaceTexelSolidAngle(x, y, resolution);
+        solidAngles[size_t(y) * resolution + x] = sa;
+        faceSolidAngle += sa;
+      }
+    }
+
+    // The mask is a vertically flipped view of the face, because the capture keeps
+    // the Vulkan projection flip. A face's texel solid angles are symmetric about
+    // its center on both axes, so the flip cannot change the sum and the readback
+    // needs no unflipping blit.
+    float backfaceSolidAngle = 0.0f;
+    for (uint32_t face = 0; face < 6; face++)
+    {
+      const uint8_t* faceTexelData = texels + face * faceTexels;
+      for (size_t i = 0; i < faceTexels; i++)
+      {
+        if (faceTexelData[i] >= 128)
+          backfaceSolidAngle += solidAngles[i];
+      }
+    }
+
+    localStaging.Destroy(ctx);
+
+    float totalSolidAngle = faceSolidAngle * 6.0f;
+    if (totalSolidAngle <= 0.0f)
+      return 0.0f;
+
+    return backfaceSolidAngle / totalSolidAngle;
+  }
 }

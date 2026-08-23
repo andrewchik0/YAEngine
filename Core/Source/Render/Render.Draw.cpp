@@ -546,6 +546,87 @@ namespace YAEngine
         vb.DrawPositionOnly(cmd, instanceCount);
     }
   }
+
+  void Render::DrawMeshesBackfaceMask(VkCommandBuffer cmd, FrameContext& frame,
+    VkDescriptorSet frameUBO)
+  {
+    auto& meshManager = frame.assets.Meshes();
+
+    // Only closed opaque geometry may declare a node buried. Alpha-test and
+    // double-sided surfaces are excluded because "inside" is meaningless for them:
+    // a leaf card has no interior, and walking behind a foliage billboard must not
+    // cost a node its capture. That also removes the alpha-test pipeline variants
+    // and the material binding this pass would otherwise need.
+    m_BackfaceDrawCommands.clear();
+    m_BackfaceDrawCommands.reserve(frame.snapshot.visibleCount);
+    for (uint32_t i = 0; i < frame.snapshot.visibleCount; i++)
+    {
+      auto& obj = frame.snapshot.objects[i];
+      if (obj.noShading) continue;
+      if (obj.isTransparent) continue;
+      if (obj.isAlphaTest) continue;
+      if (obj.doubleSided) continue;
+
+      m_BackfaceDrawCommands.push_back({
+        .instanced = (obj.instanceData != nullptr),
+        .doubleSided = false,
+        .noShading = false,
+        .isAlphaTest = false,
+        .materialIndex = obj.material.index,
+        .materialGeneration = obj.material.generation,
+        .meshIndex = obj.mesh.index,
+        .meshGeneration = obj.mesh.generation,
+        .worldTransform = obj.worldTransform,
+        .instanceData = obj.instanceData,
+        .instanceOffset = obj.instanceOffset,
+      });
+    }
+
+    // Only the instanced bit picks a pipeline here, so sorting on it is enough to
+    // keep the bind count at two for the whole pass.
+    std::sort(m_BackfaceDrawCommands.begin(), m_BackfaceDrawCommands.end(),
+      [](const DrawCommand& a, const DrawCommand& b)
+      {
+        if (a.instanced != b.instanced) return b.instanced;
+        return a.meshIndex < b.meshIndex;
+      });
+
+    VulkanPipeline* currentPipeline = nullptr;
+    const VulkanPipeline* lastBound = nullptr;
+
+    for (auto& dc : m_BackfaceDrawCommands)
+    {
+      MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
+
+      currentPipeline = &m_PSOCache.Get(m_BackfaceMaskPipelines[dc.instanced ? 1 : 0]);
+      if (currentPipeline != lastBound)
+      {
+        currentPipeline->Bind(cmd);
+        currentPipeline->BindDescriptorSets(cmd, { frameUBO }, 0);
+        lastBound = currentPipeline;
+      }
+
+      struct
+      {
+        glm::mat4 model;
+        int offset = 0;
+      } data;
+      data.model = dc.worldTransform;
+      data.offset = dc.instanceOffset / sizeof(glm::mat4);
+      currentPipeline->PushConstants(cmd, &data);
+
+      uint32_t instanceCount = 1;
+      if (dc.instanced)
+      {
+        instanceCount = uint32_t(dc.instanceData->size());
+        currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 1);
+        m_InstanceBuffer.Update(dc.instanceOffset, dc.instanceData->data(),
+          uint32_t(instanceCount * sizeof(glm::mat4)));
+      }
+
+      meshManager.GetVertexBuffer(meshHandle).DrawPositionOnly(cmd, instanceCount);
+    }
+  }
 #endif
 
   void Render::RenderShadowMaps(FrameContext& frame, VkCommandBuffer cmd,

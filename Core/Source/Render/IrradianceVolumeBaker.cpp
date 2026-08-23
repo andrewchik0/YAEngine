@@ -18,6 +18,7 @@ namespace YAEngine
     m_Render = &render;
     m_Ctx = &render.GetContext();
     m_OffscreenRenderer.Init(render, resolution);
+    m_BackfaceSampler.Init(render, BakeLimits::VOLUME_BACKFACE_RESOLUTION);
     m_Resolution = resolution;
   }
 
@@ -25,6 +26,7 @@ namespace YAEngine
   {
     if (!m_Ctx) return;
 
+    m_BackfaceSampler.Destroy();
     m_OffscreenRenderer.Destroy();
     m_Ctx = nullptr;
     m_Render = nullptr;
@@ -108,6 +110,46 @@ namespace YAEngine
       ~ReadbackScope() { buffer.Destroy(ctx); }
     } readbackScope { readback, *m_Ctx };
 
+    float backfaceThreshold = std::clamp(desc.backfaceRatioThreshold,
+      BakeLimits::VOLUME_MIN_BACKFACE_THRESHOLD, BakeLimits::VOLUME_MAX_BACKFACE_THRESHOLD);
+    bool classifyBackfaces = backfaceThreshold < BakeLimits::VOLUME_MAX_BACKFACE_THRESHOLD;
+    uint32_t maskResolution = m_BackfaceSampler.GetResolution();
+
+    // Companion of the capture cubemap for the classification pass. Never sampled,
+    // only copied out, so it gets no sampler. Left uninitialized when the
+    // classification is switched off; Destroy is a no-op on an empty image.
+    VulkanImage maskCubemap;
+    struct MaskCubemapScope
+    {
+      VulkanImage& image;
+      const RenderContext& ctx;
+      ~MaskCubemapScope() { image.Destroy(ctx); }
+    } maskCubemapScope { maskCubemap, *m_Ctx };
+
+    if (classifyBackfaces)
+    {
+      ImageDesc maskDesc {
+        .width = maskResolution,
+        .height = maskResolution,
+        .format = VK_FORMAT_R8_UNORM,
+        .usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+        .arrayLayers = 6,
+        .flags = VK_IMAGE_CREATE_CUBE_COMPATIBLE_BIT,
+        .viewType = VK_IMAGE_VIEW_TYPE_CUBE,
+      };
+      maskCubemap.Init(*m_Ctx, maskDesc);
+    }
+
+    // Separate from `readback`: R8 faces are an eighth of the size of RGBA16F ones,
+    // and sharing one buffer would make every SH projection regrow it.
+    VulkanBuffer maskReadback;
+    struct MaskReadbackScope
+    {
+      VulkanBuffer& buffer;
+      const RenderContext& ctx;
+      ~MaskReadbackScope() { buffer.Destroy(ctx); }
+    } maskReadbackScope { maskReadback, *m_Ctx };
+
     CollisionQueryService collisionQuery(scene);
 
     // Small probe box around the node center. A quarter of the spacing keeps it
@@ -130,11 +172,70 @@ namespace YAEngine
           if (processed % progressStep == 0)
             YA_LOG_INFO("Render", "Volume '%s': node %u/%u", desc.volumeName, processed, nodeCount);
 
-          // Nodes buried in geometry are left invalid and their six renders are
+          // First of the two rejection tests, and by far the cheaper one: no render
+          // at all. Nodes it rejects are left invalid and their six captures are
           // skipped entirely - this is where most of the bake time is saved.
           if (!collisionQuery.OverlapAABB(worldPosition - queryHalfExtents,
                 worldPosition + queryHalfExtents, desc.colliderMask).empty())
+          {
+            result.rejectedByColliderCount++;
             continue;
+          }
+
+          // Second test, for what the first one structurally cannot see. The overlap
+          // probe only asks whether the node sits INSIDE a collider, so a node in the
+          // empty air behind a wall, or a hand's width under the terrain, passes it.
+          // Such a node then captures open sky - back faces are culled, so the very
+          // surface hiding it is invisible from where it stands - and its L1 fit goes
+          // on to blacken the wall it is behind and light up whatever drives over it.
+          if (classifyBackfaces)
+          {
+            VkCommandBuffer maskCmd = m_Ctx->commandBuffer->BeginSingleTimeCommands();
+            TransitionImageLayout(maskCmd, maskCubemap.GetImage(),
+              VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+              VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
+            m_Ctx->commandBuffer->EndSingleTimeCommands(maskCmd);
+
+            for (uint32_t face = 0; face < 6; face++)
+            {
+              VulkanImage& mask = m_BackfaceSampler.RenderFace(frame, worldPosition,
+                cubicRes.views[face]);
+
+              maskCmd = m_Ctx->commandBuffer->BeginSingleTimeCommands();
+
+              TransitionImageLayout(maskCmd, mask.GetImage(),
+                VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+              // A copy, not the Y-flip blit the lighting capture needs: the flip only
+              // matters to something that reads directions out of the cube, and a sum
+              // of texel solid angles is symmetric about the face center anyway.
+              VkImageCopy copyRegion {};
+              copyRegion.srcSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+              copyRegion.dstSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, face, 1 };
+              copyRegion.extent = { maskResolution, maskResolution, 1 };
+              vkCmdCopyImage(maskCmd,
+                mask.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+                maskCubemap.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                1, &copyRegion);
+
+              m_Ctx->commandBuffer->EndSingleTimeCommands(maskCmd);
+            }
+
+            maskCmd = m_Ctx->commandBuffer->BeginSingleTimeCommands();
+            TransitionImageLayout(maskCmd, maskCubemap.GetImage(),
+              VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
+              VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
+            m_Ctx->commandBuffer->EndSingleTimeCommands(maskCmd);
+
+            float backfaceRatio = ComputeCubemapBackfaceRatio(*m_Ctx, maskCubemap.GetImage(),
+              maskResolution, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, &maskReadback);
+
+            if (backfaceRatio > backfaceThreshold)
+            {
+              result.rejectedByBackfaceCount++;
+              continue;
+            }
+          }
 
           VkCommandBuffer cmd = m_Ctx->commandBuffer->BeginSingleTimeCommands();
           TransitionImageLayout(cmd, cubemap.GetImage(),

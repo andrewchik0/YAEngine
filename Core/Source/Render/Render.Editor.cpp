@@ -341,6 +341,7 @@ namespace YAEngine
       .layout = &layout,
       .captureResolution = captureResolution,
       .colliderMask = ~0u,
+      .backfaceRatioThreshold = volume.backfaceRatioThreshold,
       .volumeName = entityName.c_str(),
     };
 
@@ -391,8 +392,10 @@ namespace YAEngine
     }
 
     timer.Step();
-    YA_LOG_INFO("Render", "Volume '%s' baked: %u nodes, %u rejected, %.2f s",
-      entityName.c_str(), nodeCount, bakeResult.rejectedCount, timer.GetDeltaTime());
+    YA_LOG_INFO("Render", "Volume '%s' baked: %u nodes, %u rejected (%u in colliders, %u buried), %.2f s",
+      entityName.c_str(), nodeCount, bakeResult.rejectedCount,
+      bakeResult.rejectedByColliderCount, bakeResult.rejectedByBackfaceCount,
+      timer.GetDeltaTime());
 
     if (outData)
     {

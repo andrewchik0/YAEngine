@@ -341,6 +341,15 @@ namespace YAEngine
     void DrawPickIds(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame);
     void CopyPickId(VkCommandBuffer cmd);
     void LatchPickResult();
+
+    // Backface mask pipelines for the irradiance volume node classification. Their
+    // render pass belongs to BackfaceRatioSampler, which is built lazily when a bake
+    // first needs it, so they cannot be registered from InitPipelines like the rest.
+    // [0] non-instanced, [1] instanced.
+    PipelineHandle m_BackfaceMaskPipelines[2] {};
+    void InitBackfaceMaskPipelines(VkRenderPass renderPass);
+    void DrawMeshesBackfaceMask(VkCommandBuffer cmd, FrameContext& frame,
+      VkDescriptorSet frameUBO);
 #endif
 
     // Pass indices
@@ -483,6 +492,7 @@ namespace YAEngine
     std::vector<DrawCommand> m_DepthDrawCommands;
 #ifdef YA_EDITOR
     std::vector<DrawCommand> m_PickDrawCommands;
+    std::vector<DrawCommand> m_BackfaceDrawCommands;
 #endif
     std::vector<DrawCommand> m_ShadowDrawCommands;
     std::vector<DrawCommand> m_TransparentDrawCommands;
@@ -572,5 +582,6 @@ namespace YAEngine
 #endif
 
     friend class OffscreenRenderer;
+    friend class BackfaceRatioSampler;
   };
 }

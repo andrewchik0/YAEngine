@@ -33,4 +33,16 @@ namespace YAEngine
   SHL1RGB ProjectCubemapToSH(const RenderContext& ctx, VkImage srcImage, uint32_t resolution,
     VkImageLayout currentLayout, uint32_t mipLevel = 0,
     VulkanBuffer* reusableStaging = nullptr);
+
+  // Fraction of the sphere a BackfaceRatioSampler cube says is covered by geometry
+  // turned inside out towards the capture point - one for a fully enclosed point,
+  // zero for one in open space. Weighted by texel solid angle, so the corners of a
+  // cube face do not count for more than its center.
+  //
+  // srcImage must be a six layer R8_UNORM cube. Readback and layout handling follow
+  // ProjectCubemapToSH exactly, including reusableStaging, but the two cannot share
+  // one buffer: the formats and therefore the sizes differ.
+  float ComputeCubemapBackfaceRatio(const RenderContext& ctx, VkImage srcImage,
+    uint32_t resolution, VkImageLayout currentLayout,
+    VulkanBuffer* reusableStaging = nullptr);
 }

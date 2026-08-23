@@ -163,6 +163,11 @@ namespace YAEngine
     // whole hemisphere, so 16-32 is plenty and bake time scales with its square.
     // Must match BakeLimits::VOLUME_DEFAULT_CAPTURE_RESOLUTION, clamped on load.
     uint32_t captureResolution = 32;
+    // How much of the sphere a node may see from the inside before the bake rejects
+    // it as buried. Per volume because the right value is a property of the scene:
+    // a dense interior needs a different one from an open landscape.
+    // Must match BakeLimits::VOLUME_DEFAULT_BACKFACE_THRESHOLD, clamped on load.
+    float backfaceRatioThreshold = 0.25f;
     bool baked = false;       // runtime only, reset on load
     uint32_t atlasSlot = 0;   // runtime only, index in the volume atlas
     std::string bakedVolumePath;

@@ -983,4 +983,31 @@ namespace YAEngine
     }
 #endif
   }
+
+#ifdef YA_EDITOR
+  void Render::InitBackfaceMaskPipelines(VkRenderPass renderPass)
+  {
+    auto& ctx = m_Backend.GetContext();
+
+    // doubleSided means VK_CULL_MODE_NONE here, and that is the whole point: with
+    // back faces culled a node behind a wall never sees the wall at all, which is
+    // exactly the case the classification has to catch. Depth write plus the usual
+    // reversed-Z GREATER leaves the nearest surface in the mask, front or back.
+    PipelineCreateInfo maskInfo = {
+      .fragmentShaderFile = "backface_mask.frag",
+      .vertexShaderFile = "mesh_depth.vert",
+      .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
+      .doubleSided = true,
+      .vertexInputFormat = "f3",
+      .sets = std::vector({ m_FrameUniformBuffer.GetLayout() })
+    };
+    m_BackfaceMaskPipelines[0] = m_PSOCache.Register(ctx.device, renderPass, maskInfo,
+      ctx.pipelineCache);
+
+    maskInfo.vertexShaderFile = "mesh_instanced_depth.vert";
+    maskInfo.sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_InstanceDescriptorSet.GetLayout() });
+    m_BackfaceMaskPipelines[1] = m_PSOCache.Register(ctx.device, renderPass, maskInfo,
+      ctx.pipelineCache);
+  }
+#endif
 }

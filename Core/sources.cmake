@@ -195,6 +195,8 @@ if(YA_EDITOR)
     Source/Render/Render.Editor.cpp
     Source/Render/OffscreenRenderer.h
     Source/Render/OffscreenRenderer.cpp
+    Source/Render/BackfaceRatioSampler.h
+    Source/Render/BackfaceRatioSampler.cpp
     Source/Render/ReflectionProbeBaker.cpp
     Source/Render/IrradianceVolumeBaker.h
     Source/Render/IrradianceVolumeBaker.cpp
