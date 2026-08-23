@@ -25,6 +25,10 @@ public:
   InputOverride m_InputOverride;
   bool b_StaticLookAt = false;
 
+  // Scenes without a terrain (bistro) pin the car to a constant plane instead of sampling heights
+  bool b_FixedGround = false;
+  double m_GroundY = 0.0;
+
   void OnSceneReady() override
   {
     m_Camera = GetScene().CreateEntity("camera");

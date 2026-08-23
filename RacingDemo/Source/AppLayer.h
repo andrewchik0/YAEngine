@@ -20,7 +20,8 @@
 #endif
 
 // #define TEST
-#define SPONZA
+// #define BISTRO
+#define BISTRO_RACING
 
 class AppLayer : public YAEngine::Layer
 {
@@ -30,7 +31,9 @@ public:
   void OnAttach() override
   {
     GetWindow().Maximize();
-#if !defined(TEST) && !defined(SPONZA)
+#if defined(BISTRO_RACING)
+    GetLayerManager().PushLayer<ControlsLayer>();
+#elif !defined(TEST) && !defined(BISTRO)
     GetLayerManager().PushLayer<ReelPlaybackLayer>();
     GetLayerManager().PushLayer<ControlsLayer>();
 #endif
@@ -58,11 +61,19 @@ public:
     camState.yaw = glm::radians(180.0f);
 #endif
 
-#elif defined(SPONZA)
+#elif defined(BISTRO)
     YAEngine::SceneSerializer::Load(
       APP_WORKING_DIR "/Assets/Scenes/cafe.scene",
       GetScene(), GetAssets(), registry, GetRender(),
       APP_WORKING_DIR, &threadPool);
+
+#elif defined(BISTRO_RACING)
+    YAEngine::SceneSerializer::Load(
+      APP_WORKING_DIR "/Assets/Scenes/cafe.scene",
+      GetScene(), GetAssets(), registry, GetRender(),
+      APP_WORKING_DIR, &threadPool);
+
+    SpawnDrivableCar();
 
 #else
     YAEngine::SceneSerializer::Load(
@@ -176,6 +187,72 @@ public:
   }
 
 private:
+#ifdef BISTRO_RACING
+  // BistroExterior has no terrain, so the car rides a constant plane. kAsphaltY is the wet
+  // cobblestone roadway level in front of the bistro (the pedestrian pavement sits at 0.37);
+  // the wheel offset drops the model so the tires - lowest point at 0.0039 in model space -
+  // land exactly on it.
+  static constexpr double kAsphaltY = 0.32;
+  static constexpr double kCarScale = 1.2;
+  static constexpr double kWheelBottomLocalY = 0.0039;
+
+  void SpawnDrivableCar()
+  {
+    auto* controls = GetLayerManager().GetLayer<ControlsLayer>();
+    if (controls == nullptr)
+      return;
+
+    auto modelHandle = GetAssets().Models().Load(
+      GetAssets().ResolvePath("Assets/Models/nissan/nissan.gltf"), true);
+    if (!modelHandle)
+      return;
+
+    auto car = GetAssets().Models().Get(modelHandle).rootEntity;
+    double carY = kAsphaltY - kWheelBottomLocalY * kCarScale;
+
+    auto& transform = GetScene().GetTransform(car);
+    transform.position = glm::dvec3(-7.0, carY, 10.0);
+    transform.rotation = glm::angleAxis(glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
+    transform.scale = glm::vec3(float(kCarScale));
+    GetScene().MarkDirty(car);
+
+    // Spawned at runtime, so keep it out of cafe.scene if the editor saves
+    GetScene().AddComponent<YAEngine::NoSerializeTag>(car);
+
+    GetScene().AddComponent<YAEngine::ColliderComponent>(car,
+      YAEngine::ColliderComponent {
+        .localOffset = { 0.0f, 0.4f, -0.02f },
+        .halfExtents = { 0.55f, 0.4f, 1.39f },
+        .isStatic = false,
+        .layer = 2u
+      });
+
+    GetScene().AddComponent<VehicleComponent>(car);
+
+    auto wheels = std::array<YAEngine::Entity, 4> {
+      GetScene().GetChildByName(car, "wheel-left-front"),
+      GetScene().GetChildByName(car, "wheel-right-front"),
+      GetScene().GetChildByName(car, "wheel-left-rear"),
+      GetScene().GetChildByName(car, "wheel-right-rear")
+    };
+
+    for (int i = 0; i < 4; i++)
+    {
+      if (wheels[i] == entt::null) continue;
+      auto baseRot = GetScene().GetTransform(wheels[i]).rotation;
+      GetScene().AddComponent<WheelComponent>(wheels[i],
+        WheelComponent {
+          .baseRot = baseRot,
+          .isFront = (i < 2)
+        });
+    }
+
+    controls->b_FixedGround = true;
+    controls->m_GroundY = carY;
+    controls->SetTarget(car);
+  }
+#endif
+
 #ifdef TEST
   YAEngine::Entity m_TestSparkEmitter = entt::null;
   SparkPool m_TestSparkPool;

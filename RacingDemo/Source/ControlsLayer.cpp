@@ -103,6 +103,8 @@ void ControlsLayer::Update(double dt)
       p.y = static_cast<double>(m_TerrainSystem->SampleCachedHeight(
         static_cast<uint32_t>(m_TerrainEntity),
         static_cast<float>(p.x), static_cast<float>(p.z)));
+    else if (b_FixedGround)
+      p.y = m_GroundY;
     return p;
   };
 
@@ -302,7 +304,8 @@ void ControlsLayer::Update(double dt)
 
   glm::dquat rotation = vehicle->tilt * yawRot;
 
-  GetScene().GetTransform(car).position = position + glm::dvec3(0,0.05,0);
+  // The terrain lift keeps the body clear of the sampled heightfield; a fixed plane needs no slack
+  GetScene().GetTransform(car).position = position + glm::dvec3(0, b_FixedGround ? 0.0 : 0.05, 0);
   GetScene().GetTransform(car).rotation = rotation;
   GetScene().MarkDirty(car);
 
