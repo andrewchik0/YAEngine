@@ -102,6 +102,7 @@ namespace YAEngine
       .name = material.name,
       .albedo = material.albedo,
       .emissivity = material.emissivity,
+      .emissiveIntensity = material.emissiveIntensity,
       .roughness = material.roughness,
       .metallic = material.metallic,
       .roughnessFactor = material.roughnessFactor,
@@ -111,6 +112,7 @@ namespace YAEngine
       .hasAlpha = material.hasAlpha,
       .alphaTest = material.alphaTest,
       .combinedTextures = material.combinedTextures,
+      .emissive = material.emissive,
       .doubleSided = material.doubleSided,
       .transparent = material.transparent,
       .opacity = material.opacity,
@@ -130,6 +132,7 @@ namespace YAEngine
     material.name = snapshot.name;
     material.albedo = snapshot.albedo;
     material.emissivity = snapshot.emissivity;
+    material.emissiveIntensity = snapshot.emissiveIntensity;
     material.roughness = snapshot.roughness;
     material.metallic = snapshot.metallic;
     material.roughnessFactor = snapshot.roughnessFactor;
@@ -139,6 +142,7 @@ namespace YAEngine
     material.hasAlpha = snapshot.hasAlpha;
     material.alphaTest = snapshot.alphaTest;
     material.combinedTextures = snapshot.combinedTextures;
+    material.emissive = snapshot.emissive;
     material.doubleSided = snapshot.doubleSided;
     material.transparent = snapshot.transparent;
     material.opacity = snapshot.opacity;

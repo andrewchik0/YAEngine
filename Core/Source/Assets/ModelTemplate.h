@@ -37,6 +37,7 @@ namespace YAEngine
     std::string name;
     glm::vec3 albedo { 1.0f };
     glm::vec3 emissivity { 0.0f };
+    float emissiveIntensity = 1.0f;
     float roughness = 0.5f;
     float metallic = 0.0f;
     float roughnessFactor = 1.0f;
@@ -46,6 +47,7 @@ namespace YAEngine
     bool hasAlpha = false;
     bool alphaTest = false;
     bool combinedTextures = false;
+    bool emissive = false;
     bool doubleSided = false;
     bool transparent = false;
     float opacity = 1.0f;

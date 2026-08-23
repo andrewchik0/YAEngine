@@ -184,6 +184,9 @@ namespace YAEngine
           mat.shadingModel = unlit ? ShadingModel::Unlit : ShadingModel::Lit;
           mat.MarkChanged();
         }
+
+        if (ImGui::Checkbox("Emissive", &mat.emissive))
+          mat.MarkChanged();
       }
 
     }

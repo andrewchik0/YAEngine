@@ -97,7 +97,12 @@ namespace YAEngine
       changed |= ImGui::SliderFloat("Roughness", &mat.roughness, 0.0f, 1.0f);
       changed |= ImGui::SliderFloat("Metallic", &mat.metallic, 0.0f, 1.0f);
       changed |= ImGui::SliderFloat("Specular", &mat.specular, 0.0f, 1.0f);
-      changed |= ImGui::ColorEdit3("Emissivity", &mat.emissivity.x);
+      // HDR + Float: emissive colour is not confined to [0,1], and the default widget
+      // would clamp an authored value the moment anyone touched it.
+      changed |= ImGui::ColorEdit3("Emissivity", &mat.emissivity.x,
+        ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
+      changed |= ImGui::DragFloat("Emissive Intensity", &mat.emissiveIntensity, 0.1f, 0.0f, 1000.0f);
+      changed |= ImGui::Checkbox("Emissive", &mat.emissive);
       changed |= ImGui::Checkbox("Has Alpha", &mat.hasAlpha);
       changed |= ImGui::Checkbox("Alpha Test", &mat.alphaTest);
       changed |= ImGui::Checkbox("Transparent", &mat.transparent);

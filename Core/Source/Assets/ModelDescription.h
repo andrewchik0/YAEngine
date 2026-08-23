@@ -23,6 +23,7 @@ namespace YAEngine
     std::string name;
     glm::vec3 albedo {};
     glm::vec3 emissivity {};
+    float emissiveIntensity = 1.0f;
     float roughness = -1.0f;
     float metallic = -1.0f;
     float roughnessFactor = 1.0f;

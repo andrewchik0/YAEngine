@@ -21,6 +21,8 @@ namespace YAEngine
     dst.name = src.name + " (Copy)";
     dst.albedo = src.albedo;
     dst.emissivity = src.emissivity;
+    dst.emissiveIntensity = src.emissiveIntensity;
+    dst.emissive = src.emissive;
     dst.roughness = src.roughness;
     dst.metallic = src.metallic;
     dst.roughnessFactor = src.roughnessFactor;

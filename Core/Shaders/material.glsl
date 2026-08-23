@@ -19,3 +19,18 @@ vec3 sampleMaterialNormal(vec2 uv)
   return decodeNormalMap(texture(normalTexture, uv).rgb,
     float((u_Material.textureMask >> 9) & 1));
 }
+
+// glTF semantics: emissiveFactor * emissiveTexture. emissivity already carries the
+// KHR_materials_emissive_strength multiplier, folded in on the CPU side.
+vec3 materialEmissive(vec2 uv)
+{
+  float hasEmissive = float((u_Material.textureMask >> 4) & 1);
+  return u_Material.emissivity * mix(vec3(1.0), texture(emissiveTexture, uv).rgb, hasEmissive);
+}
+
+// Bit 10 opts the material into emissive shading: bright texels drop their PBR response
+// and are written to the G-buffer as pure emission instead.
+bool materialEmissiveShading()
+{
+  return ((u_Material.textureMask >> 10) & 1) != 0;
+}

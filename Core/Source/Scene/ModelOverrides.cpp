@@ -133,6 +133,8 @@ namespace YAEngine::ModelOverrides
     if (material.name != pristine.name) n["name"] = material.name;
     if (material.albedo != pristine.albedo) n["albedo"] = SerializeVec3(material.albedo);
     if (material.emissivity != pristine.emissivity) n["emissivity"] = SerializeVec3(material.emissivity);
+    if (material.emissiveIntensity != pristine.emissiveIntensity) n["emissiveIntensity"] = material.emissiveIntensity;
+    if (material.emissive != pristine.emissive) n["emissive"] = material.emissive;
     if (material.roughness != pristine.roughness) n["roughness"] = material.roughness;
     if (material.metallic != pristine.metallic) n["metallic"] = material.metallic;
     if (material.roughnessFactor != pristine.roughnessFactor) n["roughnessFactor"] = material.roughnessFactor;
@@ -188,6 +190,8 @@ namespace YAEngine::ModelOverrides
     if (n["name"]) material.name = n["name"].as<std::string>();
     if (n["albedo"]) material.albedo = DeserializeVec3(n["albedo"]);
     if (n["emissivity"]) material.emissivity = DeserializeVec3(n["emissivity"]);
+    if (n["emissiveIntensity"]) material.emissiveIntensity = n["emissiveIntensity"].as<float>();
+    if (n["emissive"]) material.emissive = n["emissive"].as<bool>();
     if (n["roughness"]) material.roughness = n["roughness"].as<float>();
     if (n["metallic"]) material.metallic = n["metallic"].as<float>();
     if (n["roughnessFactor"]) material.roughnessFactor = n["roughnessFactor"].as<float>();

@@ -130,12 +130,16 @@ namespace YAEngine
       textureMask |= (1 << 7);
     }
     textureMask |= (material.combinedTextures << 8);
+    // Bit 10: emissive shading. Bits 0-7 mark texture presence, 8-9 sampling modes.
+    textureMask |= (material.emissive << 10);
 
     uniforms.albedo = material.albedo;
     uniforms.specular = material.specular;
     uniforms.metallic = material.metallic;
     uniforms.roughness = material.roughness;
-    uniforms.emissivity = material.emissivity;
+    // glTF keeps the emissive factor and its strength apart so both survive a round trip;
+    // no shader ever needs them separately, so they are folded together here.
+    uniforms.emissivity = material.emissivity * material.emissiveIntensity;
     uniforms.textureMask = textureMask;
     uniforms.sg = material.sg;
     uniforms.opacity = material.opacity;

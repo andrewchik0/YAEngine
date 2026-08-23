@@ -189,6 +189,10 @@ namespace YAEngine
 
         if (mat.emissivity != glm::vec3(0))
           n["emissivity"] = SerializeVec3(mat.emissivity);
+        if (mat.emissiveIntensity != 1.0f)
+          n["emissiveIntensity"] = mat.emissiveIntensity;
+        if (mat.emissive)
+          n["emissive"] = true;
         if (mat.specular != 0.5f)
           n["specular"] = mat.specular;
         if (mat.roughnessFactor != 1.0f)
@@ -233,6 +237,8 @@ namespace YAEngine
         if (n["roughness"]) mat.roughness = n["roughness"].as<float>();
         if (n["metallic"]) mat.metallic = n["metallic"].as<float>();
         if (n["emissivity"]) mat.emissivity = DeserializeVec3(n["emissivity"]);
+        if (n["emissiveIntensity"]) mat.emissiveIntensity = n["emissiveIntensity"].as<float>();
+        if (n["emissive"]) mat.emissive = n["emissive"].as<bool>();
         if (n["specular"]) mat.specular = n["specular"].as<float>();
         if (n["roughnessFactor"]) mat.roughnessFactor = n["roughnessFactor"].as<float>();
         if (n["metallicFactor"]) mat.metallicFactor = n["metallicFactor"].as<float>();

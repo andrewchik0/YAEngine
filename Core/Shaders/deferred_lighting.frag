@@ -11,8 +11,6 @@ layout(set = 1, binding = 2) uniform sampler2D depthTexture;
 layout(set = 1, binding = 3) uniform sampler2D aoTexture;
 
 const float SKY_DEPTH = 0.0;
-const int SHADING_PBR = 0;
-const int SHADING_UNLIT = 1;
 
 void main()
 {
@@ -54,7 +52,7 @@ void main()
 
   vec3 normal = octDecode(gb1.rg * 2.0 - 1.0);
   float roughness = gb1.b;
-  int shadingModel = int(gb1.a * 3.0 + 0.5);
+  int shadingModel = decodeShadingModel(gb1.a);
 
   if (shadingModel == SHADING_UNLIT)
   {
@@ -71,6 +69,31 @@ void main()
 
   vec3 viewPos = reconstructViewPos(uv, depth);
   vec3 worldPos = (u_Frame.invView * vec4(viewPos, 1.0)).xyz;
+
+  if (shadingModel == SHADING_EMISSIVE)
+  {
+    // Emission has no indirect term of its own, so every indirect view reads black here
+    if (isIndirectDebugView(u_Frame.currentTexture))
+    {
+      outColor = vec4(0.0, 0.0, 0.0, 1.0);
+      return;
+    }
+
+    // Fog still applies, unlike Unlit: a distant sign has to sit behind the same haze as
+    // the wall it is bolted to, or it punches a hole through the depth cue.
+    vec3 emissive = decodeEmissive(gb0);
+
+    if (u_Frame.fogEnabled != 0)
+    {
+      vec3 toPixel = worldPos - u_Frame.cameraPosition;
+      float rayLength = length(toPixel);
+      float fogAmount = computeHeightFog(u_Frame.cameraPosition, toPixel / rayLength, rayLength);
+      emissive = mix(emissive, u_Frame.fogColor, fogAmount);
+    }
+
+    outColor = vec4(emissive, 1.0);
+    return;
+  }
 
   vec3 viewVec = normalize(u_Frame.cameraPosition - worldPos);
   float NdotV = clamp(abs(dot(normal, viewVec)), 0.01, 0.99);

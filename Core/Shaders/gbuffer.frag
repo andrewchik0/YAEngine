@@ -50,13 +50,27 @@ void main() {
 
   vec2 velocity = computeVelocity(inCurClipPos, inPrevClipPos);
 
-  // GBuffer0: albedo.rgb + metallic
-  outGBuffer0 = vec4(albedo.rgb, metallic);
-
   // GBuffer1: octahedron-encoded normal (10+10 bit) + roughness (10 bit) + shadingModel (2 bit)
   vec2 octNorm = octEncode(normal) * 0.5 + 0.5;
-  float shadingModelPBR = 0.0;
-  outGBuffer1 = vec4(octNorm, roughness, shadingModelPBR);
+
+  // The emissive decision is per texel, not per material: a sign is one mesh whose plate
+  // stays PBR while its lettering emits, and splitting it into two materials to express
+  // that would mean re-authoring every imported asset.
+  vec3 emissive = materialEmissiveShading() ? materialEmissive(inTexCoord) : vec3(0.0);
+
+  if (luminance(emissive) > EMISSIVE_SHADING_CUTOFF)
+  {
+    // Emission takes GBuffer0 whole, so metallic is gone. Roughness is forced to 1 to keep
+    // SSR from tracing rays out of a self-lit texel - it rejects anything above MAX_ROUGHNESS.
+    outGBuffer0 = encodeEmissive(emissive);
+    outGBuffer1 = vec4(octNorm, 1.0, SHADING_MODEL_EMISSIVE);
+  }
+  else
+  {
+    // GBuffer0: albedo.rgb + metallic
+    outGBuffer0 = vec4(albedo.rgb, metallic);
+    outGBuffer1 = vec4(octNorm, roughness, SHADING_MODEL_PBR);
+  }
 
   outVelocity = velocity;
 }

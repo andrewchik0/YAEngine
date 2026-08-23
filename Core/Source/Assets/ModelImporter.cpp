@@ -150,10 +150,13 @@ namespace YAEngine
     aiColor3D emissive(-1.0f);
     float roughness = -1.0f;
     float metallic = -1.0f;
+    float emissiveIntensity = 1.0f;
 
     material->Get(AI_MATKEY_COLOR_DIFFUSE, diffuse);
     material->Get(AI_MATKEY_COLOR_SPECULAR, specular);
     material->Get(AI_MATKEY_COLOR_EMISSIVE, emissive);
+    // KHR_materials_emissive_strength; absent everywhere except glTF, hence the default
+    material->Get(AI_MATKEY_EMISSIVE_INTENSITY, emissiveIntensity);
     material->Get(AI_MATKEY_ROUGHNESS_FACTOR, roughness);
     material->Get(AI_MATKEY_METALLIC_FACTOR, metallic);
 
@@ -161,7 +164,12 @@ namespace YAEngine
     material->Get(AI_MATKEY_GLTF_PBRSPECULARGLOSSINESS, hasSG);
 
     matDesc.albedo = glm::vec3(diffuse.r, diffuse.g, diffuse.b);
-    matDesc.emissivity = glm::vec3(emissive.r, emissive.g, emissive.b);
+    // The sentinel survives when the file carries no emissive factor. glTF defines that
+    // as no emission, and letting -1 through would subtract light in every shader downstream.
+    matDesc.emissivity = (emissive.r >= 0.0f)
+      ? glm::vec3(emissive.r, emissive.g, emissive.b)
+      : glm::vec3(0.0f);
+    matDesc.emissiveIntensity = emissiveIntensity;
     matDesc.roughness = (roughness >= 0.0f) ? roughness : 1.0f;
     matDesc.metallic = (metallic >= 0.0f) ? metallic : 0.0f;
     matDesc.roughnessFactor = (roughness >= 0.0f) ? roughness : 1.0f;

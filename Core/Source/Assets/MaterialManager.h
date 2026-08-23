@@ -24,6 +24,10 @@ namespace YAEngine
 
     glm::vec3 albedo{1.0f, 1.0f, 1.0f};
     glm::vec3 emissivity{0.0f, 0.0f, 0.0f};
+    // KHR_materials_emissive_strength. Kept apart from emissivity so the colour stays a
+    // colour in the editor and the glTF pair survives a round trip; the two are folded
+    // together on the way into the material UBO.
+    float emissiveIntensity{1.0f};
     float roughness{0.5f};
     float metallic{0.0f};
     float roughnessFactor{1.0f};
@@ -33,6 +37,8 @@ namespace YAEngine
     bool hasAlpha{false};
     bool alphaTest{false};
     bool combinedTextures{false};
+    // Opt-in: without it an imported emissive map only tints the surface, exactly as before
+    bool emissive{false};
     bool doubleSided{false};
     bool transparent{false};
     float opacity{1.0f};

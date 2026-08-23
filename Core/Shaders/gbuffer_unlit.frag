@@ -32,8 +32,7 @@ void main() {
     outGBuffer0 = vec4(albedo.rgb, 0.0);
 
     vec2 octNorm = octEncode(inNormal) * 0.5 + 0.5;
-    float shadingModelUnlit = 1.0 / 3.0;
-    outGBuffer1 = vec4(octNorm, 1.0, shadingModelUnlit);
+    outGBuffer1 = vec4(octNorm, 1.0, SHADING_MODEL_UNLIT);
 
     outVelocity = velocity;
   }

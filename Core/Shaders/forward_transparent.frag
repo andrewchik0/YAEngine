@@ -51,10 +51,7 @@ void main()
   vec3 ambient = computeAmbientIBL(worldPos, normal, R, roughness, NdotV, f0, albedo.rgb, metallic);
   vec3 Lo = computeDirectLighting(worldPos, viewPos, normal, viewVec, albedo.rgb, metallic, roughness, f0, NdotV, ivec2(gl_FragCoord.xy));
 
-  float hasEmissive = float((u_Material.textureMask >> 4) & 1);
-  vec3 emissive = u_Material.emissivity + texture(emissiveTexture, inTexCoord).rgb * hasEmissive;
-
-  vec3 resultColor = max(ambient + Lo + emissive, vec3(0.0));
+  vec3 resultColor = max(ambient + Lo + materialEmissive(inTexCoord), vec3(0.0));
 
   if (u_Frame.fogEnabled != 0)
   {
