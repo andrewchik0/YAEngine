@@ -28,7 +28,17 @@ namespace YAEngine
 
     void SetImGuiFiltering(bool enabled) { b_ImGuiFiltering = enabled; }
     void SetViewportHovered(bool hovered) { b_ViewportHovered = hovered; }
+#ifdef YA_EDITOR
+    // A captured cursor is nowhere near the viewport as far as ImGui is concerned, but
+    // the drag that captured it started there and has to keep receiving input.
+    bool IsViewportHovered() const { return b_ViewportHovered || b_MouseCaptured; }
+
+    // Look mode: hides and locks the cursor, then puts it back where it was grabbed.
+    void SetMouseCaptured(bool captured);
+    bool IsMouseCaptured() const { return b_MouseCaptured; }
+#else
     bool IsViewportHovered() const { return b_ViewportHovered; }
+#endif
 
     void SetGizmoDragging(bool dragging) { b_GizmoDragging = dragging; }
     bool IsGizmoDragging() const { return b_GizmoDragging; }
@@ -52,5 +62,9 @@ namespace YAEngine
     bool b_ImGuiFiltering = false;
     bool b_ViewportHovered = false;
     bool b_GizmoDragging = false;
+#ifdef YA_EDITOR
+    bool b_MouseCaptured = false;
+    double m_CaptureRestoreX = 0.0, m_CaptureRestoreY = 0.0;
+#endif
   };
 }

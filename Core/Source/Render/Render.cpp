@@ -82,6 +82,7 @@ namespace YAEngine
     m_ProbeBaker.Init(*this, BakeLimits::PROBE_DEFAULT_CAPTURE_RESOLUTION);
     m_VolumeBaker.Init(*this, BakeLimits::VOLUME_DEFAULT_CAPTURE_RESOLUTION);
     CreateSceneImGuiDescriptor();
+    CreatePickResources();
     m_ViewportWidth = width;
     m_ViewportHeight = height;
     m_PendingViewportWidth = width;
@@ -124,6 +125,7 @@ namespace YAEngine
     m_ProbeBaker.Destroy();
     m_VolumeBaker.Destroy();
     DestroySceneImGuiDescriptor();
+    DestroyPickResources();
     m_GizmoRenderer.Destroy(ctx);
 #endif
 
@@ -317,6 +319,13 @@ namespace YAEngine
       return;
     }
 
+#ifdef YA_EDITOR
+    // BeginFrame waited on this slot's fence, so a pick queued into it earlier has
+    // landed and can be read without stalling.
+    LatchPickResult();
+    BeginPickFrame();
+#endif
+
     m_Stats = {};
 
     auto cmd = m_Backend.GetCurrentCommandBuffer();
@@ -449,7 +458,7 @@ namespace YAEngine
       {
         glm::vec3 pos(frame.lights.pointLights[i].positionRadius);
         glm::vec3 col(frame.lights.pointLights[i].colorIntensity);
-        m_GizmoRenderer.DrawSprite(pos, 0.5f, 0xf0eb, glm::vec4(col, 0.85f));
+        m_GizmoRenderer.DrawSprite(pos, EditorIcon::WORLD_SIZE, EditorIcon::LIGHT_BULB, glm::vec4(col, 0.85f));
       }
 
       for (int i = 0; i < frame.lights.spotLightCount; i++)
@@ -459,7 +468,7 @@ namespace YAEngine
         glm::vec3 col(frame.lights.spotLights[i].colorOuterCone);
         float outerCos = std::clamp(frame.lights.spotLights[i].colorOuterCone.w, -1.0f, 1.0f);
         float angle = std::acos(outerCos);
-        m_GizmoRenderer.DrawSprite(pos, 0.5f, 0xf0eb, glm::vec4(col, 0.85f));
+        m_GizmoRenderer.DrawSprite(pos, EditorIcon::WORLD_SIZE, EditorIcon::LIGHT_BULB, glm::vec4(col, 0.85f));
         m_GizmoRenderer.DrawWireCone(pos, dir, 2.0f, angle, glm::vec4(col, 0.85f));
       }
 
@@ -469,7 +478,7 @@ namespace YAEngine
       float dirIntensity = frame.lights.directional.directionIntensity.w;
       if (dirIntensity > 0.0f)
       {
-        m_GizmoRenderer.DrawSprite(dirLightPos, 0.5f, 0xf185, glm::vec4(dirCol, 0.85f));
+        m_GizmoRenderer.DrawSprite(dirLightPos, EditorIcon::WORLD_SIZE, EditorIcon::SUN, glm::vec4(dirCol, 0.85f));
         m_GizmoRenderer.DrawArrow(dirLightPos, dirLightDir, 3.0f, glm::vec4(dirCol, 0.85f));
       }
 

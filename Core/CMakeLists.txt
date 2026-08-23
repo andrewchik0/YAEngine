@@ -60,6 +60,16 @@ target_compile_definitions(Core PRIVATE
 
 if(YA_EDITOR)
   target_compile_definitions(Core PUBLIC YA_EDITOR)
+
+  # mesh.vert permutations for the editor pick pass
+  add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+    mesh.vert mesh_pick.vert.spv -DDEPTH_ONLY -DPICK_ID)
+  add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+    mesh.vert mesh_instanced_pick.vert.spv -DINSTANCED -DDEPTH_ONLY -DPICK_ID)
+  add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+    mesh.vert mesh_pick_alphatest.vert.spv -DDEPTH_ONLY -DALPHA_TEST -DPICK_ID)
+  add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+    mesh.vert mesh_instanced_pick_alphatest.vert.spv -DINSTANCED -DDEPTH_ONLY -DALPHA_TEST -DPICK_ID)
   target_compile_definitions(Core PRIVATE
     COMPILE_SHADERS_EXE="$<TARGET_FILE:CompileShaders>"
     SHADER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Shaders"

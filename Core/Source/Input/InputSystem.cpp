@@ -8,7 +8,10 @@ namespace YAEngine
     const auto& windowEventStack = m_Window.PollEvents();
 
     ImGuiIO* io = b_ImGuiFiltering ? &ImGui::GetIO() : nullptr;
-    bool passThrough = b_ViewportHovered;
+    // IsViewportHovered, not the raw flag: a captured cursor leaves the viewport as far
+    // as ImGui is concerned, and with keyboard nav enabled it claims the keyboard, so
+    // WASD would be filtered away for the whole duration of a look.
+    bool passThrough = IsViewportHovered();
 
     for (const auto& windowEvent : windowEventStack)
     {
@@ -63,6 +66,38 @@ namespace YAEngine
       }
     }
   }
+
+#ifdef YA_EDITOR
+  void InputSystem::SetMouseCaptured(bool captured)
+  {
+    if (captured == b_MouseCaptured)
+      return;
+
+    b_MouseCaptured = captured;
+    GLFWwindow* window = m_Window.Get();
+
+    if (captured)
+    {
+      glfwGetCursorPos(window, &m_CaptureRestoreX, &m_CaptureRestoreY);
+      glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_DISABLED);
+      // Skips the pointer acceleration curve the OS applies to a visible cursor, which
+      // is what makes a captured look feel 1:1 with the hand instead of sluggish
+      if (glfwRawMouseMotionSupported())
+        glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_TRUE);
+    }
+    else
+    {
+      if (glfwRawMouseMotionSupported())
+        glfwSetInputMode(window, GLFW_RAW_MOUSE_MOTION, GLFW_FALSE);
+      glfwSetInputMode(window, GLFW_CURSOR, GLFW_CURSOR_NORMAL);
+      glfwSetCursorPos(window, m_CaptureRestoreX, m_CaptureRestoreY);
+    }
+
+    // Both transitions teleport the reported position. Without this the jump arrives as
+    // one enormous delta and throws the camera across the scene.
+    b_FirstMouseMove = true;
+  }
+#endif
 
   void InputSystem::EndFrame()
   {

@@ -21,6 +21,11 @@ namespace YAEngine
     bool isTerrain = false;
     bool isAlphaTest = false;
     bool isTransparent = false;
+#ifdef YA_EDITOR
+    // Raw entt handle of the owning entity, written into the pick buffer by the editor's
+    // ID pass. Stored as a plain integer so the render layer stays free of entt.
+    uint32_t entityId = 0;
+#endif
   };
 
   struct CameraData

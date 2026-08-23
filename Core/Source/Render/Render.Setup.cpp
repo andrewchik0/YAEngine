@@ -629,6 +629,45 @@ namespace YAEngine
     });
 
 #ifdef YA_EDITOR
+    // Entity ids for picking. One texel per pixel, cleared to zero, so the pass stores
+    // id + 1 and a zero always reads back as "nothing here".
+    m_PickId = m_Graph.CreateResource({
+      .name = "pickId",
+      .format = VK_FORMAT_R32_UINT,
+      .filter = VK_FILTER_NEAREST
+    });
+
+    // Pick ID pass - rasterizes entity ids using the depth the passes above already
+    // produced (no depth write, GEQUAL), which resolves occlusion for free. It has to run
+    // after ForwardTransparent and before the gizmo passes: GizmoPass clears MainDepth,
+    // and past that point the buffer no longer holds scene depth. Declaring MainDepth as
+    // a depth output pins the pass into the write chain and fixes that order. The body
+    // runs only on frames that serve a pick request, and clips to the clicked pixel.
+    m_PickIdPassIndex = m_Graph.AddPass({
+      .name = "PickIdPass",
+      .colorOutputs = {m_PickId},
+      .depthOutput = m_MainDepth,
+      .clearColor = true,
+      .clearDepth = false,
+      .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_PickThisFrame) return;
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
+        DrawPickIds(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame);
+      }
+    });
+
+    // Pulls the clicked texel into a readback buffer. Compute-flagged because transfer
+    // commands cannot be recorded inside a render pass.
+    m_PickCopyPassIndex = m_Graph.AddPass({
+      .name = "PickIdCopy",
+      .inputs = {m_PickId},
+      .isCompute = true,
+      .execute = [this](const RGExecuteContext& ctx) {
+        if (!b_PickThisFrame) return;
+        CopyPickId(ctx.cmd);
+      }
+    });
+
     // Scene compose pass - tone mapping to offscreen texture for editor viewport
     m_SceneColor = m_Graph.CreateResource({
       .name = "sceneColor",

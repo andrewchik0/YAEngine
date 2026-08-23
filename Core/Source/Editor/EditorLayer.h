@@ -7,6 +7,7 @@
 #include "Assets/IrradianceVolumeFile.h"
 #include "Scene/ComponentRegistry.h"
 #include "Utils/Ray.h"
+#include "Render/Render.h"
 
 namespace YAEngine
 {
@@ -36,6 +37,13 @@ namespace YAEngine
     void SyncEditorCameraState();
     void DebugDrawIrradianceVolumeNodes();
 
+    // Picking, most specific first: overlay icons, then the entity id the renderer
+    // rasterized into the clicked pixel, then the ray test for what has no geometry.
+    Entity PickIconEntity(const Ray& ray, const glm::mat4& view);
+    Entity PickByRay(const Ray& ray);
+    Entity FindSelectionRoot(Entity entity);
+    void ApplyPickResult(const PickResult& result);
+
     EditorContext m_Context;
     std::string m_CurrentScenePath;
     std::string m_PendingScenePath;
@@ -55,6 +63,12 @@ namespace YAEngine
     // Brightest L0 channel over all valid nodes of the cached volume. Scanned
     // once when the cache is filled - the node draw runs every frame.
     float m_VolumeNodePeakL0 = 0.0f;
+
+    // An id pick is answered a few frames after the click, so what the click meant has
+    // to be remembered until then.
+    bool b_PickRequestActive = false;
+    bool b_PickRequestExact = false; // Ctrl was held: select the exact mesh, not its root
+    Ray m_PickFallbackRay {};
 
     // Gizmo drag state
     bool b_DragActive = false;

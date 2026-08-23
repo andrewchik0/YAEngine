@@ -46,6 +46,13 @@ namespace YAEngine
     Irradiance = 0, // L0 normalized against the peak of the volume
     Ringing = 1     // |L1| / L0, flags nodes whose L1 fit goes negative
   };
+
+  // Outcome of one ID-buffer pick.
+  struct PickResult
+  {
+    bool hit = false;      // false means nothing was rasterized into the clicked pixel
+    uint32_t entityId = 0; // raw entt handle, only meaningful when hit is set
+  };
 #endif
 
   class Render
@@ -307,6 +314,33 @@ namespace YAEngine
     glm::vec3 m_SelectedEntityPosition { 0.0f };
     GizmoMode m_GizmoMode = GizmoMode::Translate;
     uint32_t m_PendingInvalidateSlot = 0;
+
+    // ID pick readback. The pass renders entity ids into the clicked pixel and the copy
+    // lands in a per-frame slot, read only once that slot's fence has been waited on, so
+    // the CPU never blocks on the GPU. Both run only on frames that serve a request.
+    struct PickSlot
+    {
+      VulkanBuffer buffer;
+      uint32_t pixelX = 0;
+      uint32_t pixelY = 0;
+      bool pending = false;
+    };
+    std::vector<PickSlot> m_PickSlots;
+    RGHandle m_PickId {};
+    uint32_t m_PickIdPassIndex {};
+    uint32_t m_PickCopyPassIndex {};
+    PipelineHandle m_PickPipelines[6] {};
+    glm::vec2 m_PickRequestPos { 0.0f };
+    bool b_PickRequested = false; // set by the editor, consumed at the start of the frame
+    bool b_PickThisFrame = false; // this frame renders and copies the pick
+    PickResult m_PickResult;
+    bool b_PickResultReady = false;
+    void CreatePickResources();
+    void DestroyPickResources();
+    void BeginPickFrame();
+    void DrawPickIds(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame);
+    void CopyPickId(VkCommandBuffer cmd);
+    void LatchPickResult();
 #endif
 
     // Pass indices
@@ -431,6 +465,9 @@ namespace YAEngine
       std::vector<glm::mat4>* instanceData;
       uint32_t instanceOffset;
       float cameraDistanceSq = 0.0f;
+#ifdef YA_EDITOR
+      uint32_t entityId = 0;
+#endif
 
       uint8_t SortKey() const
       {
@@ -444,6 +481,9 @@ namespace YAEngine
 
     std::vector<DrawCommand> m_DrawCommands;
     std::vector<DrawCommand> m_DepthDrawCommands;
+#ifdef YA_EDITOR
+    std::vector<DrawCommand> m_PickDrawCommands;
+#endif
     std::vector<DrawCommand> m_ShadowDrawCommands;
     std::vector<DrawCommand> m_TransparentDrawCommands;
 
@@ -465,6 +505,9 @@ namespace YAEngine
     VulkanPipeline& GetWireframePipeline(const DrawCommand& dc);
     VulkanPipeline& GetWireframeTransparentPipeline(const DrawCommand& dc);
     VulkanPipeline& GetDepthPipeline(const DrawCommand& dc);
+#ifdef YA_EDITOR
+    VulkanPipeline& GetPickPipeline(const DrawCommand& dc);
+#endif
 
     void DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame);
 
@@ -491,6 +534,19 @@ namespace YAEngine
     GizmoRenderer& GetGizmoRenderer() { return m_GizmoRenderer; }
     void SetSelectedEntityPosition(const glm::vec3& pos) { b_HasSelectedEntity = true; m_SelectedEntityPosition = pos; }
     void ClearSelectedEntity() { b_HasSelectedEntity = false; }
+    // Asks for the entity under a normalized [0,1] viewport position. The ID pass renders
+    // during the next Draw and the answer lands a few frames later.
+    void RequestPick(const glm::vec2& normalizedPos);
+    // True once per completed request; the result is dropped after it is taken.
+    bool ConsumePickResult(PickResult& outResult)
+    {
+      if (!b_PickResultReady)
+        return false;
+
+      b_PickResultReady = false;
+      outResult = m_PickResult;
+      return true;
+    }
     GizmoMode& GetGizmoMode() { return m_GizmoMode; }
     ShaderHotReload& GetShaderHotReload() { return m_ShaderHotReload; }
     void InitShaderHotReload(ThreadPool* threadPool);

@@ -46,6 +46,125 @@ namespace YAEngine
     m_ShaderHotReload.Init(&m_PSOCache, m_Backend.GetContext().device, threadPool);
   }
 
+  namespace
+  {
+    // Deliberately not using TransitionImageLayout: the image arrives in whatever layout
+    // the graph left it in, and the pick copy has to hand it back unchanged so the
+    // graph's own layout tracking stays truthful.
+    void PickCopyBarrier(VkCommandBuffer cmd, VkImage image,
+                         VkImageLayout oldLayout, VkImageLayout newLayout)
+    {
+      VkImageMemoryBarrier barrier{};
+      barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+      barrier.oldLayout = oldLayout;
+      barrier.newLayout = newLayout;
+      barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+      barrier.image = image;
+      barrier.subresourceRange = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 1 };
+      barrier.srcAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+      barrier.dstAccessMask = VK_ACCESS_MEMORY_WRITE_BIT | VK_ACCESS_MEMORY_READ_BIT;
+
+      vkCmdPipelineBarrier(cmd,
+        VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT,
+        0, 0, nullptr, 0, nullptr, 1, &barrier);
+    }
+  }
+
+  void Render::CreatePickResources()
+  {
+    auto& ctx = m_Backend.GetContext();
+    m_PickSlots.resize(ctx.maxFramesInFlight);
+    for (auto& slot : m_PickSlots)
+      slot.buffer = VulkanBuffer::CreateReadback(ctx, sizeof(uint32_t));
+  }
+
+  void Render::DestroyPickResources()
+  {
+    auto& ctx = m_Backend.GetContext();
+    for (auto& slot : m_PickSlots)
+      slot.buffer.Destroy(ctx);
+    m_PickSlots.clear();
+  }
+
+  void Render::RequestPick(const glm::vec2& normalizedPos)
+  {
+    m_PickRequestPos = normalizedPos;
+    b_PickRequested = true;
+
+    // Only the newest click may answer. A result still sitting from an older request, or
+    // one whose copy is still in flight, would otherwise be handed to this click - two
+    // clicks a couple of frames apart are enough for that to happen.
+    b_PickResultReady = false;
+    for (auto& slot : m_PickSlots)
+      slot.pending = false;
+  }
+
+  void Render::BeginPickFrame()
+  {
+    b_PickThisFrame = false;
+
+    if (!b_PickRequested)
+      return;
+
+    b_PickRequested = false;
+
+    VkExtent2D extent = m_Graph.GetExtent();
+    if (extent.width == 0 || extent.height == 0)
+      return;
+
+    auto& slot = m_PickSlots[m_Backend.GetCurrentFrameIndex()];
+    float u = std::clamp(m_PickRequestPos.x, 0.0f, 1.0f);
+    float v = std::clamp(m_PickRequestPos.y, 0.0f, 1.0f);
+    slot.pixelX = std::min(uint32_t(u * float(extent.width)), extent.width - 1);
+    slot.pixelY = std::min(uint32_t(v * float(extent.height)), extent.height - 1);
+    slot.pending = true;
+    b_PickThisFrame = true;
+  }
+
+  void Render::CopyPickId(VkCommandBuffer cmd)
+  {
+    auto& slot = m_PickSlots[m_Backend.GetCurrentFrameIndex()];
+    auto& image = m_Graph.GetResource(m_PickId);
+
+    VkImageLayout original = image.GetLayout();
+    if (original == VK_IMAGE_LAYOUT_UNDEFINED)
+      return;
+
+    PickCopyBarrier(cmd, image.GetImage(), original, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+    VkBufferImageCopy region{};
+    region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    region.imageOffset = { int32_t(slot.pixelX), int32_t(slot.pixelY), 0 };
+    region.imageExtent = { 1, 1, 1 };
+    vkCmdCopyImageToBuffer(cmd, image.GetImage(),
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, slot.buffer.Get(), 1, &region);
+
+    PickCopyBarrier(cmd, image.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, original);
+  }
+
+  void Render::LatchPickResult()
+  {
+    auto& slot = m_PickSlots[m_Backend.GetCurrentFrameIndex()];
+    if (!slot.pending)
+      return;
+
+    slot.pending = false;
+
+    uint32_t raw = 0;
+    std::memcpy(&raw, slot.buffer.GetMapped(), sizeof(uint32_t));
+
+    // The target is cleared to zero and the pass stores id + 1, so zero is unambiguously
+    // "nothing was rasterized into that pixel"
+    m_PickResult = {};
+    if (raw != 0)
+    {
+      m_PickResult.hit = true;
+      m_PickResult.entityId = raw - 1;
+    }
+    b_PickResultReady = true;
+  }
+
   void Render::ResizeViewport()
   {
     auto& ctx = m_Backend.GetContext();

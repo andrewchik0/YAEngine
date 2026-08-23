@@ -67,6 +67,9 @@ namespace YAEngine
         .isTerrain = hasTerrain,
         .isAlphaTest = mat.alphaTest,
         .isTransparent = mat.transparent,
+#ifdef YA_EDITOR
+        .entityId = static_cast<uint32_t>(entity),
+#endif
       };
 
       if (hasTerrain)

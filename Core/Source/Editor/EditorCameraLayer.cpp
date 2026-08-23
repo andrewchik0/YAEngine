@@ -32,15 +32,24 @@ namespace YAEngine
 
   void EditorCameraLayer::Update(double deltaTime)
   {
-    if (GetScene().GetActiveCamera() != m_Camera) return;
-
     auto& input = GetInput();
+
+    // Releasing the cursor is handled before every early-out below: a release that lands
+    // outside the viewport, or one that arrives after the active camera changed, would
+    // otherwise leave the cursor captured with no way to get it back. Testing the button
+    // state rather than the release edge also covers a release lost to focus change.
+    if (input.IsMouseCaptured() && !input.IsMouseDown(MouseButton::Right))
+      input.SetMouseCaptured(false);
+
+    if (GetScene().GetActiveCamera() != m_Camera) return;
 
     if (!input.IsViewportHovered() || input.IsGizmoDragging())
       return;
 
     if (input.IsMouseDown(MouseButton::Right))
     {
+      input.SetMouseCaptured(true);
+
       auto delta = input.GetMouseDelta();
 
       m_Yaw   -= delta.x * .0015f;

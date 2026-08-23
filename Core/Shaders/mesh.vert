@@ -5,6 +5,12 @@ layout(location = 1) in vec2 inTexCoord;
 layout(location = 0) out vec2 outTexCoord;
 #endif
 
+#ifdef PICK_ID
+// Location 1 is free in every pick permutation: the extra outputs below belong to the
+// full permutation, which never defines PICK_ID.
+layout(location = 1) flat out uint outPickId;
+#endif
+
 #ifndef DEPTH_ONLY
 layout(location = 2) in vec3 inNormal;
 layout(location = 3) in vec4 inTangent;
@@ -37,6 +43,9 @@ layout(push_constant) uniform PushConstants
 {
   mat4 world;
   int offset;
+#ifdef PICK_ID
+  uint pickId;
+#endif
 } pc;
 
 void main() {
@@ -51,6 +60,10 @@ void main() {
 
 #if !defined(DEPTH_ONLY) || defined(ALPHA_TEST)
   outTexCoord = inTexCoord;
+#endif
+
+#ifdef PICK_ID
+  outPickId = pc.pickId;
 #endif
 
 #ifndef DEPTH_ONLY

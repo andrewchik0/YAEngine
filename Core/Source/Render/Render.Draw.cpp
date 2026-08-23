@@ -420,6 +420,134 @@ namespace YAEngine
     }
   }
 
+#ifdef YA_EDITOR
+  void Render::DrawPickIds(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame)
+  {
+    auto& slot = m_PickSlots[frameIndex];
+
+    // Only the clicked texel is ever read back, so rasterization is clipped to it. The
+    // vertex work still runs for everything visible, which is why the pass renders only
+    // on frames that serve a request.
+    VkRect2D scissor { { int32_t(slot.pixelX), int32_t(slot.pixelY) }, { 1, 1 } };
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+    auto& meshManager = frame.assets.Meshes();
+    auto& materialManager = frame.assets.Materials();
+    auto& cubeMapManager = frame.assets.CubeMaps();
+    auto skybox = frame.snapshot.skybox;
+    VkDescriptorSet frameUBO = m_FrameUniformBuffer.GetDescriptorSet(frameIndex);
+
+    m_PickDrawCommands.clear();
+    m_PickDrawCommands.reserve(frame.snapshot.visibleCount);
+    for (uint32_t i = 0; i < frame.snapshot.visibleCount; i++)
+    {
+      auto& obj = frame.snapshot.objects[i];
+
+      m_PickDrawCommands.push_back({
+        .instanced = (obj.instanceData != nullptr),
+        .doubleSided = obj.doubleSided,
+        .noShading = obj.noShading,
+        .isTerrain = obj.isTerrain,
+        .isAlphaTest = obj.isAlphaTest,
+        .isTransparent = obj.isTransparent,
+        .materialIndex = obj.material.index,
+        .materialGeneration = obj.material.generation,
+        .meshIndex = obj.mesh.index,
+        .meshGeneration = obj.mesh.generation,
+        .worldTransform = obj.worldTransform,
+        .instanceData = obj.instanceData,
+        .instanceOffset = obj.instanceOffset,
+        .entityId = obj.entityId,
+      });
+    }
+
+    // Same order the visible passes used. Depth writes are off here, so more than one
+    // surface can pass GEQUAL at a pixel - an unlit object in front of opaque geometry,
+    // a transparent surface over both - and the last one drawn is the one on screen.
+    std::sort(m_PickDrawCommands.begin(), m_PickDrawCommands.end(),
+      [](const DrawCommand& a, const DrawCommand& b)
+      {
+        uint8_t ka = a.SortKey(), kb = b.SortKey();
+        if (ka != kb) return ka < kb;
+        if (a.materialIndex != b.materialIndex) return a.materialIndex < b.materialIndex;
+        return a.meshIndex < b.meshIndex;
+      });
+
+    // Pre-bind materials needed by the alpha-test variants
+    uint32_t lastMaterialIndex = UINT32_MAX;
+    uint32_t lastMaterialGeneration = UINT32_MAX;
+    for (auto& dc : m_PickDrawCommands)
+    {
+      if (!dc.isAlphaTest) continue;
+      if (dc.materialIndex == lastMaterialIndex && dc.materialGeneration == lastMaterialGeneration) continue;
+      lastMaterialIndex = dc.materialIndex;
+      lastMaterialGeneration = dc.materialGeneration;
+
+      MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+      auto& mat = materialManager.Get(matHandle);
+      mat.cubemap = skybox;
+      materialManager.GetVulkanMaterial(matHandle).Bind(frame.assets.Textures(), cubeMapManager,
+        frame.cubicResources, mat, frameIndex, m_NoneTexture);
+    }
+
+    VulkanPipeline* currentPipeline = nullptr;
+    const VulkanPipeline* lastBound = nullptr;
+    lastMaterialIndex = UINT32_MAX;
+    lastMaterialGeneration = UINT32_MAX;
+
+    for (auto& dc : m_PickDrawCommands)
+    {
+      MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
+
+      currentPipeline = &GetPickPipeline(dc);
+      if (currentPipeline != lastBound)
+      {
+        currentPipeline->Bind(cmd);
+        currentPipeline->BindDescriptorSets(cmd, {frameUBO}, 0);
+        lastBound = currentPipeline;
+        lastMaterialIndex = UINT32_MAX;
+        lastMaterialGeneration = UINT32_MAX;
+      }
+
+      if (dc.isAlphaTest && (dc.materialIndex != lastMaterialIndex || dc.materialGeneration != lastMaterialGeneration))
+      {
+        MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
+        currentPipeline->BindDescriptorSets(cmd,
+          {materialManager.GetVulkanMaterial(matHandle).GetDescriptorSet(frameIndex)}, 1);
+        lastMaterialIndex = dc.materialIndex;
+        lastMaterialGeneration = dc.materialGeneration;
+      }
+
+      struct
+      {
+        glm::mat4 model;
+        int offset = 0;
+        uint32_t pickId = 0;
+      } data;
+      data.model = dc.worldTransform;
+      data.offset = dc.instanceOffset / sizeof(glm::mat4);
+      // Zero is a valid entity handle and also the value the target is cleared to
+      data.pickId = dc.entityId + 1;
+      currentPipeline->PushConstants(cmd, &data);
+
+      uint32_t instanceCount = 1;
+      if (dc.instanced)
+      {
+        instanceCount = uint32_t(dc.instanceData->size());
+        uint32_t instanceSetIndex = dc.isAlphaTest ? 2 : 1;
+        currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, instanceSetIndex);
+        m_InstanceBuffer.Update(dc.instanceOffset, dc.instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
+      }
+
+      auto& vb = meshManager.GetVertexBuffer(meshHandle);
+      if (dc.isAlphaTest)
+        vb.Draw(cmd, instanceCount);
+      else
+        vb.DrawPositionOnly(cmd, instanceCount);
+    }
+  }
+#endif
+
   void Render::RenderShadowMaps(FrameContext& frame, VkCommandBuffer cmd,
     uint32_t frameIndex, const glm::vec3* probeCenter, float probeRadius)
   {

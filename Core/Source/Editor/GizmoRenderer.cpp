@@ -200,8 +200,9 @@ namespace YAEngine
     m_SpritePipeline = psoCache.Register(ctx.device, renderPass, spriteInfo, ctx.pipelineCache);
 
     // Pre-rasterize glyph sprites
-    LoadGlyphSprite(ctx, 0xf0eb, 128); // lightbulb
-    LoadGlyphSprite(ctx, 0xf185, 128); // sun
+    LoadGlyphSprite(ctx, EditorIcon::LIGHT_BULB, 128);
+    LoadGlyphSprite(ctx, EditorIcon::SUN, 128);
+    LoadGlyphSprite(ctx, EditorIcon::PROBE, 128);
   }
 
   void GizmoRenderer::Destroy(const RenderContext& ctx)
@@ -349,6 +350,12 @@ namespace YAEngine
   void GizmoRenderer::DrawSprite(const glm::vec3& position, float size, uint32_t codepoint, const glm::vec4& color)
   {
     m_SpriteRequests.push_back({ position, size, codepoint, color });
+  }
+
+  float GizmoRenderer::GetSpriteAspect(uint32_t codepoint) const
+  {
+    auto it = m_SpriteEntries.find(codepoint);
+    return it != m_SpriteEntries.end() ? it->second.aspectRatio : 1.0f;
   }
 
   void GizmoRenderer::DrawTranslateGizmo(const glm::vec3& position, const glm::vec3& cameraPos)

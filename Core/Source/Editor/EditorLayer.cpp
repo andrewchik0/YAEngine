@@ -111,6 +111,16 @@ namespace YAEngine
     }
 
     auto& input = GetInput();
+
+    // While the cursor is captured its reported position runs off into the distance, and
+    // ImGui would light up panels under a pointer that is not there. The GLFW backend
+    // leaves the cursor itself alone in this mode, so only the position needs suppressing.
+    ImGuiIO& io = ImGui::GetIO();
+    if (input.IsMouseCaptured())
+      io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
+    else
+      io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+
     auto& gizmo = m_Context.render->GetGizmoRenderer();
 
     // Gizmo mode switching (1/2/3) - blocked during drag
@@ -121,8 +131,20 @@ namespace YAEngine
       if (input.IsKeyPressed(Key::D3)) m_Context.render->GetGizmoMode() = GizmoMode::Scale;
     }
 
+    // Id picks are answered a few frames after the click was sent to the renderer
+    if (b_PickRequestActive)
+    {
+      PickResult pickResult {};
+      if (m_Context.render->ConsumePickResult(pickResult))
+      {
+        b_PickRequestActive = false;
+        ApplyPickResult(pickResult);
+      }
+    }
+
     // Build viewport ray
     Ray viewportRay {};
+    glm::mat4 viewportView { 1.0f };
     bool hasViewportRay = false;
 
     if (m_Context.mouseInViewportValid)
@@ -139,6 +161,7 @@ namespace YAEngine
         glm::mat4 proj = MakeReversedInfinitePerspective(cam.fov, cam.aspectRatio, cam.nearPlane);
 
         viewportRay = ScreenToRay(m_Context.mouseInViewport, glm::inverse(proj), glm::inverse(view));
+        viewportView = view;
         hasViewportRay = true;
       }
     }
@@ -290,41 +313,26 @@ namespace YAEngine
         }
         else
         {
-          // Entity picking
-          Entity closest = entt::null;
-          float closestDist = std::numeric_limits<float>::max();
-
-          for (auto [entity, wt] : GetScene().GetView<WorldTransform>().each())
+          // Icons first - they are drawn as an unoccluded overlay and never reach the id
+          // buffer, so anything else winning over them would make a visible icon
+          // unclickable. An icon always selects its own entity, with no root walk.
+          Entity icon = PickIconEntity(viewportRay, viewportView);
+          if (icon != entt::null)
           {
-            if (GetScene().HasComponent<EditorOnlyTag>(entity))
-              continue;
-
-            std::optional<float> hit;
-
-            if (GetScene().HasComponent<WorldBounds>(entity))
-            {
-              auto& bounds = GetScene().GetComponent<WorldBounds>(entity);
-              if (bounds.min != bounds.max)
-                hit = RayAABBIntersect(viewportRay, bounds.min, bounds.max);
-            }
-
-            if (!hit)
-            {
-              glm::vec3 center(wt.world[3]);
-              hit = RaySphereIntersect(viewportRay, center, 0.5f);
-            }
-
-            if (hit && *hit < closestDist)
-            {
-              closestDist = *hit;
-              closest = entity;
-            }
+            b_PickRequestActive = false;
+            m_Context.SelectEntity(icon);
           }
-
-          if (closest != entt::null)
-            m_Context.SelectEntity(closest);
           else
-            m_Context.ClearSelection();
+          {
+            // Geometry goes through the id buffer. The renderer rasterizes entity ids
+            // into this pixel and the answer comes back a few frames later, so what the
+            // click meant is stored until then - the modifier especially, it will long
+            // have been released by the time the result lands.
+            m_Context.render->RequestPick(m_Context.mouseInViewport);
+            b_PickRequestActive = true;
+            b_PickRequestExact = input.IsKeyDown(Key::LeftControl) || input.IsKeyDown(Key::RightControl);
+            m_PickFallbackRay = viewportRay;
+          }
         }
       }
     }
@@ -591,9 +599,157 @@ namespace YAEngine
     }
   }
 
+  // Light and probe icons are camera-facing quads drawn in the overlay pass with no depth
+  // test, so picking has to reproduce that quad exactly - same size, same glyph aspect,
+  // same camera basis as gizmo_sprite.vert - or the clickable area drifts off the pixels
+  // that are actually on screen.
+  Entity EditorLayer::PickIconEntity(const Ray& ray, const glm::mat4& view)
+  {
+    if (!m_Context.render->GetGizmosEnabled())
+      return entt::null;
+
+    auto& gizmo = m_Context.render->GetGizmoRenderer();
+    glm::vec3 right(view[0][0], view[1][0], view[2][0]);
+    glm::vec3 up(view[0][1], view[1][1], view[2][1]);
+    glm::vec3 normal = glm::cross(right, up);
+
+    Entity closest = entt::null;
+    float closestDist = std::numeric_limits<float>::max();
+
+    auto testIcon = [&](Entity entity, const glm::vec3& center, uint32_t codepoint) {
+      auto hit = RayPlaneIntersect(ray, center, normal);
+      if (!hit || *hit >= closestDist)
+        return;
+
+      glm::vec3 offset = ray.origin + *hit * ray.direction - center;
+      float halfWidth = EditorIcon::WORLD_SIZE * 0.5f * gizmo.GetSpriteAspect(codepoint);
+      float halfHeight = EditorIcon::WORLD_SIZE * 0.5f;
+      if (std::abs(glm::dot(offset, right)) > halfWidth ||
+          std::abs(glm::dot(offset, up)) > halfHeight)
+        return;
+
+      closestDist = *hit;
+      closest = entity;
+    };
+
+    // Mirrors how Render queues the light icons, buffer caps and all: a light that draws
+    // no icon must not catch clicks either.
+    int pointCount = 0;
+    int spotCount = 0;
+    bool hasDirectional = false;
+    for (auto [entity, light, wt] : GetScene().GetView<LightComponent, WorldTransform>().each())
+    {
+      glm::vec3 position(wt.world[3]);
+      switch (light.type)
+      {
+        case LightType::Point:
+          if (pointCount++ < MAX_POINT_LIGHTS)
+            testIcon(entity, position, EditorIcon::LIGHT_BULB);
+          break;
+        case LightType::Spot:
+          if (spotCount++ < MAX_SPOT_LIGHTS)
+            testIcon(entity, position, EditorIcon::LIGHT_BULB);
+          break;
+        case LightType::Directional:
+          // Only the first directional light reaches the snapshot, and it draws an icon
+          // only while it contributes anything
+          if (!hasDirectional)
+          {
+            hasDirectional = true;
+            if (light.intensity > 0.0f)
+              testIcon(entity, position, EditorIcon::SUN);
+          }
+          break;
+      }
+    }
+
+    for (auto [entity, probe, wt] : GetScene().GetView<ReflectionProbeComponent, WorldTransform>().each())
+      testIcon(entity, glm::vec3(wt.world[3]), EditorIcon::PROBE);
+
+    return closest;
+  }
+
+  // Walks up to the outermost ancestor. A model imported as forty meshes is one object to
+  // work with, so a plain click selects that object and Ctrl drills into the exact mesh
+  // the pixel belongs to.
+  Entity EditorLayer::FindSelectionRoot(Entity entity)
+  {
+    Entity root = entity;
+    while (GetScene().HasComponent<HierarchyComponent>(root))
+    {
+      Entity parent = GetScene().GetHierarchy(root).parent;
+      if (parent == entt::null || !GetScene().GetRegistry().valid(parent))
+        break;
+
+      root = parent;
+    }
+    return root;
+  }
+
+  void EditorLayer::ApplyPickResult(const PickResult& result)
+  {
+    if (result.hit)
+    {
+      Entity entity = static_cast<Entity>(result.entityId);
+      // The frames between the click and the answer are enough to delete an object
+      if (GetScene().GetRegistry().valid(entity))
+      {
+        m_Context.SelectEntity(b_PickRequestExact ? entity : FindSelectionRoot(entity));
+        return;
+      }
+    }
+
+    // Nothing was rasterized there. Entities without geometry never appear in the id
+    // buffer at all, so they get their chance here before the selection is dropped.
+    Entity fallback = PickByRay(m_PickFallbackRay);
+    if (fallback != entt::null)
+      m_Context.SelectEntity(fallback);
+    else
+      m_Context.ClearSelection();
+  }
+
+  // Entities without geometry - cameras, empties, irradiance volumes - never show up in
+  // the id buffer, so a small sphere around the pivot stays the only way to reach them.
+  // Anything that does have bounds is geometry and belongs to the id pass, which is why
+  // the AABB test that used to live here is gone: guessing from bounds is exactly what
+  // made nested objects unpickable.
+  Entity EditorLayer::PickByRay(const Ray& ray)
+  {
+    Entity closest = entt::null;
+    float closestDist = std::numeric_limits<float>::max();
+
+    for (auto [entity, wt] : GetScene().GetView<WorldTransform>().each())
+    {
+      if (GetScene().HasComponent<WorldBounds>(entity))
+        continue;
+      if (GetScene().HasComponent<EditorOnlyTag>(entity) || GetScene().HasComponent<HiddenTag>(entity))
+        continue;
+
+      auto hit = RaySphereIntersect(ray, glm::vec3(wt.world[3]), EditorIcon::WORLD_SIZE);
+      if (hit && *hit < closestDist)
+      {
+        closestDist = *hit;
+        closest = entity;
+      }
+    }
+
+    return closest;
+  }
+
   void EditorLayer::DebugDrawGizmos()
   {
     DebugDrawIrradianceVolumeNodes();
+
+    // Reflection probe icons. Queued from the scene rather than from the snapshot the
+    // renderer draws the influence volumes from: that snapshot skips unbaked probes, and
+    // with the volumes hidden such a probe would have nothing on screen at all.
+    if (m_Context.render)
+    {
+      auto& probeGizmo = m_Context.render->GetGizmoRenderer();
+      for (auto [entity, probe, wt] : GetScene().GetView<ReflectionProbeComponent, WorldTransform>().each())
+        probeGizmo.DrawSprite(glm::vec3(wt.world[3]), EditorIcon::WORLD_SIZE, EditorIcon::PROBE,
+          glm::vec4(0.2f, 0.7f, 0.9f, 0.85f));
+    }
 
     if (!m_Context.render || !m_Context.render->GetCollidersVisible())
       return;

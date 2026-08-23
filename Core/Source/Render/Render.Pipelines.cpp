@@ -43,6 +43,22 @@ namespace YAEngine
     return m_PSOCache.Get(m_WireframeTransparentPipelines[idx]);
   }
 
+#ifdef YA_EDITOR
+  VulkanPipeline& Render::GetPickPipeline(const DrawCommand& dc)
+  {
+    // Cull mode has to match what the object was drawn with, or a back face that is
+    // visible on screen would leave a hole in the id buffer. Alpha-test and unlit are
+    // both rendered double-sided.
+    uint32_t idx;
+    if (dc.isAlphaTest)
+      idx = dc.instanced ? 5 : 4;
+    else
+      idx = (dc.instanced ? 2 : 0) + ((dc.doubleSided || dc.noShading) ? 1 : 0);
+
+    return m_PSOCache.Get(m_PickPipelines[idx]);
+  }
+#endif
+
   VulkanPipeline& Render::GetDepthPipeline(const DrawCommand& dc)
   {
     assert(!dc.noShading && "Depth pipeline not available for noShading draw commands");
@@ -911,5 +927,60 @@ namespace YAEngine
       m_PendingParticleBatches.reserve(MAX_PARTICLE_BATCHES_PER_FRAME);
     }
 
+#ifdef YA_EDITOR
+    // Pick id pipelines - the depth-only set plus the entity id in the push constant.
+    // Depth comes from the passes that already ran (no write, GEQUAL), so occlusion is
+    // resolved for free. Alpha-test still needs a real discard: a punched-out fragment
+    // in front of whatever wrote the depth would otherwise pass the test and claim the
+    // pixel, hence the dedicated variants [4] and [5].
+    {
+      VkRenderPass pickRP = m_Graph.GetPassRenderPass(m_PickIdPassIndex);
+      constexpr uint32_t pickPushConstantSize = sizeof(glm::mat4) + sizeof(int) + sizeof(uint32_t);
+
+      PipelineCreateInfo pickInfo = {
+        .fragmentShaderFile = "pick_id.frag",
+        .vertexShaderFile = "mesh_pick.vert",
+        .pushConstantSize = pickPushConstantSize,
+        .depthWrite = false,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
+        .vertexInputFormat = "f3",
+        .sets = std::vector({ m_FrameUniformBuffer.GetLayout() })
+      };
+
+      // [0] normal, [1] doubleSided
+      m_PickPipelines[0] = m_PSOCache.Register(ctx.device, pickRP, pickInfo, pipelineCache);
+      pickInfo.doubleSided = true;
+      m_PickPipelines[1] = m_PSOCache.Register(ctx.device, pickRP, pickInfo, pipelineCache);
+
+      // [2] instanced, [3] instanced+doubleSided
+      pickInfo.doubleSided = false;
+      pickInfo.vertexShaderFile = "mesh_instanced_pick.vert";
+      pickInfo.sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_InstanceDescriptorSet.GetLayout() });
+      m_PickPipelines[2] = m_PSOCache.Register(ctx.device, pickRP, pickInfo, pipelineCache);
+      pickInfo.doubleSided = true;
+      m_PickPipelines[3] = m_PSOCache.Register(ctx.device, pickRP, pickInfo, pipelineCache);
+
+      // [4] alpha-test, [5] alpha-test instanced
+      PipelineCreateInfo pickAlphaInfo = {
+        .fragmentShaderFile = "pick_id_alphatest.frag",
+        .vertexShaderFile = "mesh_pick_alphatest.vert",
+        .pushConstantSize = pickPushConstantSize,
+        .depthWrite = false,
+        .doubleSided = true,
+        .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
+        .vertexInputFormat = "f3|f2f3f4",
+        .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
+      };
+      m_PickPipelines[4] = m_PSOCache.Register(ctx.device, pickRP, pickAlphaInfo, pipelineCache);
+
+      pickAlphaInfo.vertexShaderFile = "mesh_instanced_pick_alphatest.vert";
+      pickAlphaInfo.sets = std::vector({
+        m_FrameUniformBuffer.GetLayout(),
+        m_DefaultMaterial.GetLayout(),
+        m_InstanceDescriptorSet.GetLayout()
+      });
+      m_PickPipelines[5] = m_PSOCache.Register(ctx.device, pickRP, pickAlphaInfo, pipelineCache);
+    }
+#endif
   }
 }

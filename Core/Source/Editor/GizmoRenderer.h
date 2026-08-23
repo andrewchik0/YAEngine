@@ -14,6 +14,17 @@ namespace YAEngine
 {
   struct RenderContext;
 
+  // Billboard icons for entities with no geometry of their own. Editor picking rebuilds
+  // the same quad from these, so the icon the user sees and the icon that catches the
+  // click cannot drift apart.
+  namespace EditorIcon
+  {
+    constexpr float WORLD_SIZE = 0.5f;
+    constexpr uint32_t LIGHT_BULB = 0xf0eb;
+    constexpr uint32_t SUN = 0xf185;
+    constexpr uint32_t PROBE = 0xf0ac;
+  }
+
   enum class GizmoShape : uint8_t
   {
     Sphere,
@@ -55,6 +66,9 @@ namespace YAEngine
     void DrawSolidRing(const glm::vec3& center, const glm::vec3& normal, float radius, const glm::vec4& color);
 
     void DrawSprite(const glm::vec3& position, float size, uint32_t codepoint, const glm::vec4& color);
+    // Width/height of the rasterized glyph, the same factor gizmo_sprite.vert applies to
+    // the quad. Picking has to reproduce the billboard exactly, so it needs this too.
+    float GetSpriteAspect(uint32_t codepoint) const;
 
     void DrawTranslateGizmo(const glm::vec3& position, const glm::vec3& cameraPos);
     void DrawRotateGizmo(const glm::vec3& position, const glm::vec3& cameraPos);
