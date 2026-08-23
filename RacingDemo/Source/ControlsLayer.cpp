@@ -46,23 +46,26 @@ void ControlsLayer::Update(double dt)
     vehicle->yawInitialized = true;
   }
 
+  if (!b_AxleGeometryResolved)
+  {
+    glm::dquat currentYawRot = glm::angleAxis(vehicle->yaw, glm::dvec3(0, 1, 0));
+    ResolveAxleGeometry(currentYawRot * glm::dvec3(0, 0, 1), position);
+  }
+
   bool arrowLeft  = m_InputOverride.active ? m_InputOverride.left  : input.IsKeyDown(YAEngine::Key::Left);
   bool arrowRight = m_InputOverride.active ? m_InputOverride.right : input.IsKeyDown(YAEngine::Key::Right);
   bool arrowUp    = m_InputOverride.active ? m_InputOverride.up    : input.IsKeyDown(YAEngine::Key::Up);
   bool arrowDown  = m_InputOverride.active ? m_InputOverride.down  : input.IsKeyDown(YAEngine::Key::Down);
 
   if (arrowLeft)
-  {
-    vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer + 0.1 * dt, 0.0, 0.03);
-  }
+    vehicle->wheelsSteer = glm::min(vehicle->wheelsSteer + vehicle->steerRate * dt, vehicle->maxSteerAngle);
   if (arrowRight)
-  {
-    vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer - 0.1 * dt, -0.03, 0.0);
-  }
+    vehicle->wheelsSteer = glm::max(vehicle->wheelsSteer - vehicle->steerRate * dt, -vehicle->maxSteerAngle);
   if (!arrowLeft && !arrowRight)
   {
-    if (vehicle->wheelsSteer > 0.0) vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer - 0.2 * dt, 0.0, 0.03);
-    if (vehicle->wheelsSteer < 0.0) vehicle->wheelsSteer = glm::clamp(vehicle->wheelsSteer + 0.2 * dt, -0.03, 0.0);
+    double recenter = vehicle->steerReturnRate * dt;
+    if (vehicle->wheelsSteer > 0.0) vehicle->wheelsSteer = glm::max(vehicle->wheelsSteer - recenter, 0.0);
+    else if (vehicle->wheelsSteer < 0.0) vehicle->wheelsSteer = glm::min(vehicle->wheelsSteer + recenter, 0.0);
   }
 
   if (arrowUp)
@@ -81,17 +84,26 @@ void ControlsLayer::Update(double dt)
 
   vehicle->speed = glm::clamp(vehicle->speed, -vehicle->maxSpeedBack, vehicle->maxSpeed);
 
-  double turnSpeed = glm::radians(260.0 - vehicle->speed / vehicle->maxSpeed * 160.0);
-  double turn = vehicle->wheelsSteer * (1.0 / 0.03) * turnSpeed * dt * (vehicle->speed / vehicle->maxSpeed);
+  // Kinematic bicycle model: the rear axle rolls along the body heading while the front axle
+  // follows the steered direction, so the yaw rate is dictated by geometry rather than a tuned
+  // curve. Yaw vanishes with speed, which removes the pivot-in-place slide at a crawl.
+  double yawRate = vehicle->speed * std::tan(vehicle->wheelsSteer) / m_WheelBase;
 
   double prevYaw = vehicle->yaw;
-  vehicle->yaw += turn;
+  vehicle->yaw += yawRate * dt;
   glm::dquat yawRot = glm::angleAxis(vehicle->yaw, glm::dvec3(0, 1, 0));
   glm::dquat prevYawRot = glm::angleAxis(prevYaw, glm::dvec3(0, 1, 0));
 
   glm::dvec3 forward = yawRot * glm::dvec3(0, 0, 1);
+  glm::dvec3 prevForward = prevYawRot * glm::dvec3(0, 0, 1);
+  // Midpoint heading keeps the traced arc accurate when a frame covers a large yaw step
+  glm::dvec3 midForward = glm::angleAxis(prevYaw + yawRate * dt * 0.5, glm::dvec3(0, 1, 0))
+    * glm::dvec3(0, 0, 1);
+
   glm::dvec3 prevPosition = position;
-  glm::dvec3 deltaXZ = forward * vehicle->speed * dt;
+  glm::dvec3 rearAxle = prevPosition + prevForward * m_RearAxleOffset
+    + midForward * vehicle->speed * dt;
+  glm::dvec3 deltaXZ = rearAxle - forward * m_RearAxleOffset - prevPosition;
   deltaXZ.y = 0.0;
 
   bool hasTerrainCache = (m_TerrainEntity != entt::null
@@ -354,7 +366,7 @@ void ControlsLayer::Update(double dt)
       camRot = glm::slerp(camRot, targetRot, t);
       camTc.rotation = camRot;
 
-      double normSpeed = glm::clamp(vehicle->speed / vehicle->maxSpeed, 0.0, 1.0);
+      double normSpeed = 0;//glm::clamp(vehicle->speed / vehicle->maxSpeed, 0.0, 1.0);
       double backFactor = glm::smoothstep(0.5, 1.0, normSpeed);
 
       glm::dvec3 dynamicOffset = follow.offset;
@@ -390,7 +402,7 @@ void ControlsLayer::Update(double dt)
     glm::quat steerRot = glm::identity<glm::quat>();
     if (wc.isFront)
     {
-      steerRot = glm::angleAxis(vehicle->wheelsSteer * 10.0f, glm::dvec3(0,0,1));
+      steerRot = glm::angleAxis(vehicle->wheelsSteer, glm::dvec3(0,0,1));
     }
 
     glm::quat spinRot = glm::angleAxis(wc.spinAngle, glm::dvec3(1,0,0));
@@ -406,4 +418,39 @@ void ControlsLayer::Update(double dt)
     if (!m_SparkInstances.empty())
       GetRender().SubmitParticles(m_SparkInstances, m_SparkTexture);
   }
+}
+
+void ControlsLayer::ResolveAxleGeometry(const glm::dvec3& forwardXZ, const glm::dvec3& carPos)
+{
+  glm::dvec3 frontSum(0.0);
+  glm::dvec3 rearSum(0.0);
+  int frontCount = 0;
+  int rearCount = 0;
+
+  auto wheelView = GetScene().GetView<WheelComponent, YAEngine::WorldTransform>();
+  for (auto wheelEntity : wheelView)
+  {
+    auto& wc = GetScene().GetComponent<WheelComponent>(wheelEntity);
+    auto& wt = GetScene().GetComponent<YAEngine::WorldTransform>(wheelEntity);
+    glm::dvec3 wheelPos = glm::dvec3(glm::vec3(wt.world[3]));
+
+    if (wc.isFront) { frontSum += wheelPos; frontCount++; }
+    else            { rearSum  += wheelPos; rearCount++; }
+  }
+
+  if (frontCount == 0 || rearCount == 0) return;
+
+  glm::dvec3 frontMid = frontSum / static_cast<double>(frontCount);
+  glm::dvec3 rearMid = rearSum / static_cast<double>(rearCount);
+
+  double wheelBase = glm::dot(frontMid - rearMid, forwardXZ);
+  // World transforms are still identity until the hierarchy is first evaluated
+  if (wheelBase < 0.1) return;
+
+  m_WheelBase = wheelBase;
+  m_RearAxleOffset = glm::dot(rearMid - carPos, forwardXZ);
+  b_AxleGeometryResolved = true;
+
+  YA_LOG_INFO("Physics", "Car axle geometry resolved: wheelBase=%.3f rearAxleOffset=%.3f",
+    m_WheelBase, m_RearAxleOffset);
 }

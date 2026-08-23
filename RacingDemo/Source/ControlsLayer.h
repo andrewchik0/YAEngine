@@ -52,9 +52,17 @@ public:
   void Update(double deltaTime) override;
 
 private:
+  void ResolveAxleGeometry(const glm::dvec3& forwardXZ, const glm::dvec3& carPos);
+
   YAEngine::TerrainSystem* m_TerrainSystem = nullptr;
   YAEngine::CollisionQueryService* m_CollisionService = nullptr;
   YAEngine::Entity m_TerrainEntity = entt::null;
+
+  // Bicycle model geometry, measured from the wheel entities on the first frame they have
+  // a world transform. Defaults cover the frames before that.
+  double m_WheelBase = 2.5;
+  double m_RearAxleOffset = -1.2;
+  bool b_AxleGeometryResolved = false;
 
   SparkPool m_SparkPool;
   YAEngine::TextureHandle m_SparkTexture;

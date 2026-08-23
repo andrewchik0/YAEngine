@@ -203,7 +203,7 @@ private:
       return;
 
     auto modelHandle = GetAssets().Models().Load(
-      GetAssets().ResolvePath("Assets/Models/nissan/nissan.gltf"), true);
+      GetAssets().ResolvePath("Assets/Models/porsche/rose_porsche.glb"), true);
     if (!modelHandle)
       return;
 
