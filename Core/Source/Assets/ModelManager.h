@@ -16,6 +16,12 @@ namespace YAEngine
     std::vector<glm::mat4> modelMatrices;
     uint32_t offset = 0;
 
+    // Imported state of the model. Kept alive for the lifetime of the instance so the
+    // scene serializer can diff authored changes against it.
+    std::shared_ptr<ModelTemplate> modelTemplate;
+    std::vector<MaterialHandle> slotMaterials;
+    std::vector<MaterialSnapshot> pristineMaterials;
+
     friend class ModelManager;
   };
 
@@ -39,6 +45,10 @@ namespace YAEngine
     ModelHandle LoadFromDescription(ModelDescription&& desc, const std::string& sourcePath, bool combinedTextures);
     ModelHandle LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances, bool combinedTextures = false);
 
+    // Model asset behind a scene entity, or nullptr when the entity is not a model root
+    // or the asset is gone. The serializer and the editor both need this lookup.
+    Model* FindByRoot(const Scene& scene, Entity rootEntity);
+
     void Destroy(ModelHandle handle);
     void DestroyAll() override;
 
@@ -49,6 +59,7 @@ namespace YAEngine
     ModelBuilder m_Builder {};
     std::function<uint32_t(uint32_t)> m_AllocateInstanceData;
 
+    ModelHandle BuildAndStore(const ModelDescription& desc, const std::string& sourcePath, bool combinedTextures);
     void DestroyEntityAssets(Entity entity);
     void TraverseInstanceData(Entity entity, std::vector<glm::mat4>* instanceData, uint32_t offset);
   };

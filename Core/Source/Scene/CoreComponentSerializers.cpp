@@ -10,12 +10,22 @@
 namespace YAEngine
 {
 
-  static void SerializeTextureField(YAML::Node& node, const std::string& key,
+  // ModelImporter keys textures embedded in a model file as "<sourcePath>*<reference>".
+  // No path on disk can contain '*', so this is unambiguous.
+  bool IsEmbeddedTexturePath(const std::string& path)
+  {
+    return path.find('*') != std::string::npos;
+  }
+
+  void SerializeTextureField(YAML::Node& node, const std::string& key,
     TextureHandle handle, TextureManager& textures, AssetManager& assets)
   {
     if (!handle) return;
     auto info = textures.GetPath(handle);
     if (info.path.empty()) return;
+    // An embedded texture only exists inside its model file. Writing its synthetic key
+    // would produce a path the loader cannot open, silently dropping the texture.
+    if (IsEmbeddedTexturePath(info.path)) return;
     YAML::Node texNode;
     texNode["path"] = assets.MakeRelative(info.path);
     if (info.linear)
@@ -23,8 +33,8 @@ namespace YAEngine
     node[key] = texNode;
   }
 
-  static TextureHandle DeserializeTextureField(const YAML::Node& node, const std::string& key,
-    AssetManager& assets, bool* hasAlpha = nullptr)
+  TextureHandle DeserializeTextureField(const YAML::Node& node, const std::string& key,
+    AssetManager& assets, bool* hasAlpha)
   {
     if (!node[key]) return {};
     auto texNode = node[key];
@@ -187,6 +197,12 @@ namespace YAEngine
           n["metallicFactor"] = mat.metallicFactor;
         if (mat.doubleSided)
           n["doubleSided"] = true;
+        // Both come from the model file and change how the G-buffer samples the
+        // material, so a material edited on a model node has to carry them
+        if (mat.sg)
+          n["sg"] = true;
+        if (mat.combinedTextures)
+          n["combinedTextures"] = true;
         if (mat.shadingModel != ShadingModel::Lit)
           n["shadingModel"] = "unlit";
 
@@ -221,6 +237,8 @@ namespace YAEngine
         if (n["roughnessFactor"]) mat.roughnessFactor = n["roughnessFactor"].as<float>();
         if (n["metallicFactor"]) mat.metallicFactor = n["metallicFactor"].as<float>();
         if (n["doubleSided"]) mat.doubleSided = n["doubleSided"].as<bool>();
+        if (n["sg"]) mat.sg = n["sg"].as<bool>();
+        if (n["combinedTextures"]) mat.combinedTextures = n["combinedTextures"].as<bool>();
         if (n["transparent"]) mat.transparent = n["transparent"].as<bool>();
         if (n["opacity"]) mat.opacity = n["opacity"].as<float>();
         if (n["shadingModel"])

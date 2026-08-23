@@ -13,13 +13,7 @@ namespace YAEngine
       return {};
     }
 
-    auto model = std::make_unique<Model>();
-    model->rootEntity = m_Builder.Build(desc);
-
-    m_Scene->AddComponent<ModelSourceComponent>(model->rootEntity,
-      ModelSourceComponent { .path = path, .combinedTextures = combinedTextures });
-
-    return Store(std::move(model));
+    return BuildAndStore(desc, path, combinedTextures);
   }
 
   ModelHandle ModelManager::LoadFromDescription(ModelDescription&& desc, const std::string& sourcePath, bool combinedTextures)
@@ -27,13 +21,37 @@ namespace YAEngine
     if (desc.root.children.empty())
       return {};
 
+    return BuildAndStore(desc, sourcePath, combinedTextures);
+  }
+
+  ModelHandle ModelManager::BuildAndStore(const ModelDescription& desc, const std::string& sourcePath, bool combinedTextures)
+  {
     auto model = std::make_unique<Model>();
-    model->rootEntity = m_Builder.Build(desc);
 
-    m_Scene->AddComponent<ModelSourceComponent>(model->rootEntity,
+    model->modelTemplate = std::make_shared<ModelTemplate>(BuildModelTemplate(desc));
+    model->modelTemplate->sourcePath = sourcePath;
+
+    auto built = m_Builder.Build(desc, *model->modelTemplate);
+    model->rootEntity = built.rootEntity;
+    model->slotMaterials = std::move(built.slotMaterials);
+    model->pristineMaterials = std::move(built.pristineMaterials);
+
+    Entity rootEntity = model->rootEntity;
+    auto handle = Store(std::move(model));
+
+    auto& source = m_Scene->AddComponent<ModelSourceComponent>(rootEntity,
       ModelSourceComponent { .path = sourcePath, .combinedTextures = combinedTextures });
+    source.handle = handle;
 
-    return Store(std::move(model));
+    return handle;
+  }
+
+  Model* ModelManager::FindByRoot(const Scene& scene, Entity rootEntity)
+  {
+    if (rootEntity == entt::null || !scene.HasComponent<ModelSourceComponent>(rootEntity))
+      return nullptr;
+
+    return TryGet(scene.GetComponent<ModelSourceComponent>(rootEntity).handle);
   }
 
   ModelHandle ModelManager::LoadInstanced(const std::string& path, const std::vector<glm::mat4>& instances, bool combinedTextures)

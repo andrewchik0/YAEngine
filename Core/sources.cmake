@@ -95,6 +95,8 @@ set(SOURCE_FILES
   Source/Assets/ModelBuilder.h
   Source/Assets/ModelManager.cpp
   Source/Assets/ModelManager.h
+  Source/Assets/ModelTemplate.cpp
+  Source/Assets/ModelTemplate.h
   Source/Utils/Log.h
   Source/Utils/KeyCodes.h
   Source/Utils/ServiceRegistry.h
@@ -173,6 +175,8 @@ set(SOURCE_FILES
   Source/Scene/CoreComponentSerializers.cpp
   Source/Scene/SceneSerializer.h
   Source/Scene/SceneSerializer.cpp
+  Source/Scene/ModelOverrides.h
+  Source/Scene/ModelOverrides.cpp
   Source/Scene/YamlUtils.h
   Source/Scene/TerrainSystem.h
   Source/Scene/TerrainSystem.cpp

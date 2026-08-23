@@ -7,6 +7,7 @@
 #include "ControlsLayer.h"
 #include "ReelPlaybackLayer.h"
 #include "GameComponents.h"
+#include "GameComponentSerializers.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
 #include "Scene/SceneSerializer.h"
@@ -44,6 +45,8 @@ public:
     auto& registry = m_Registry->Get<YAEngine::ComponentRegistry>();
     auto& threadPool = m_Registry->Get<YAEngine::ThreadPool>();
 
+    RegisterGameComponentSerializers(registry);
+
 #ifdef TEST
     YAEngine::SceneSerializer::Load(
       APP_WORKING_DIR "/Assets/Scenes/test.scene",
@@ -73,7 +76,7 @@ public:
       GetScene(), GetAssets(), registry, GetRender(),
       APP_WORKING_DIR, &threadPool);
 
-    SpawnDrivableCar();
+    SetupDrivableCar();
 
 #else
     YAEngine::SceneSerializer::Load(
@@ -196,16 +199,40 @@ private:
   static constexpr double kCarScale = 1.2;
   static constexpr double kWheelBottomLocalY = 0.0039;
 
-  void SpawnDrivableCar()
+  void SetupDrivableCar()
   {
     auto* controls = GetLayerManager().GetLayer<ControlsLayer>();
     if (controls == nullptr)
       return;
 
+    YAEngine::Entity car = entt::null;
+    for (auto e : GetScene().GetView<VehicleComponent>())
+    {
+      car = e;
+      break;
+    }
+
+    if (car == entt::null)
+      car = BootstrapDrivableCar();
+
+    if (car == entt::null)
+      return;
+
+    AttachWheels(car);
+
+    controls->b_FixedGround = true;
+    controls->m_GroundY = GetScene().GetTransform(car).position.y;
+    controls->SetTarget(car);
+  }
+
+  // Fallback for a scene that predates the car entry. The car is spawned without
+  // NoSerializeTag, so the next editor save moves it into cafe.scene for good.
+  YAEngine::Entity BootstrapDrivableCar()
+  {
     auto modelHandle = GetAssets().Models().Load(
       GetAssets().ResolvePath("Assets/Models/porsche/rose_porsche.glb"), true);
     if (!modelHandle)
-      return;
+      return entt::null;
 
     auto car = GetAssets().Models().Get(modelHandle).rootEntity;
     double carY = kAsphaltY - kWheelBottomLocalY * kCarScale;
@@ -215,9 +242,6 @@ private:
     transform.rotation = glm::angleAxis(glm::radians(45.0f), glm::vec3(0.0f, 1.0f, 0.0f));
     transform.scale = glm::vec3(float(kCarScale));
     GetScene().MarkDirty(car);
-
-    // Spawned at runtime, so keep it out of cafe.scene if the editor saves
-    GetScene().AddComponent<YAEngine::NoSerializeTag>(car);
 
     GetScene().AddComponent<YAEngine::ColliderComponent>(car,
       YAEngine::ColliderComponent {
@@ -229,6 +253,13 @@ private:
 
     GetScene().AddComponent<VehicleComponent>(car);
 
+    return car;
+  }
+
+  // Wheels loaded from the scene already carry the component; only a bootstrapped car
+  // needs them attached here.
+  void AttachWheels(YAEngine::Entity car)
+  {
     auto wheels = std::array<YAEngine::Entity, 4> {
       GetScene().GetChildByName(car, "wheel-left-front"),
       GetScene().GetChildByName(car, "wheel-right-front"),
@@ -239,6 +270,8 @@ private:
     for (int i = 0; i < 4; i++)
     {
       if (wheels[i] == entt::null) continue;
+      if (GetScene().HasComponent<WheelComponent>(wheels[i])) continue;
+
       auto baseRot = GetScene().GetTransform(wheels[i]).rotation;
       GetScene().AddComponent<WheelComponent>(wheels[i],
         WheelComponent {
@@ -246,10 +279,6 @@ private:
           .isFront = (i < 2)
         });
     }
-
-    controls->b_FixedGround = true;
-    controls->m_GroundY = carY;
-    controls->SetTarget(car);
   }
 #endif
 

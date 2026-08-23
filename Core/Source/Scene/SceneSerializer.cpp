@@ -9,6 +9,7 @@
 #include "Assets/CubeMapFile.h"
 #include "Assets/IrradianceVolumeFile.h"
 #include "Assets/ModelImporter.h"
+#include "ModelOverrides.h"
 #include "Render/Render.h"
 #include "Render/ReflectionProbeAtlas.h"
 #include "Utils/Log.h"
@@ -24,8 +25,30 @@ namespace YAEngine
            t.scale == glm::vec3(1);
   }
 
+  static void SerializeEntity(YAML::Node& entities, Scene& scene, AssetManager& assets,
+    const ComponentRegistry& registry, Entity entity);
+
+  // Entities a user created inside a model subtree are regular entities: they carry no
+  // ModelNodeComponent, so they are written out with a qualified parent reference
+  static void SerializeModelUserEntities(YAML::Node& entities, Scene& scene, AssetManager& assets,
+    const ComponentRegistry& registry, Entity entity)
+  {
+    Entity child = scene.GetHierarchy(entity).firstChild;
+    while (child != entt::null)
+    {
+      Entity next = scene.GetHierarchy(child).nextSibling;
+
+      if (scene.HasComponent<ModelNodeComponent>(child))
+        SerializeModelUserEntities(entities, scene, assets, registry, child);
+      else
+        SerializeEntity(entities, scene, assets, registry, child);
+
+      child = next;
+    }
+  }
+
   // Recursive walk: serialize entity and its children in hierarchy order
-  static void SerializeEntity(YAML::Node& entities, Scene& scene,
+  static void SerializeEntity(YAML::Node& entities, Scene& scene, AssetManager& assets,
     const ComponentRegistry& registry, Entity entity)
   {
     // Skip runtime-generated entities
@@ -38,6 +61,14 @@ namespace YAEngine
       return;
 #endif
 
+    // Model nodes are owned by the override layer of their model, even if one was
+    // reparented out of the subtree - writing it here too would duplicate it
+    if (scene.HasComponent<ModelNodeComponent>(entity)
+      && scene.GetComponent<ModelNodeComponent>(entity).nodeIndex != 0)
+    {
+      return;
+    }
+
     bool isModelRoot = scene.HasComponent<ModelSourceComponent>(entity);
 
     YAML::Node entityNode;
@@ -49,7 +80,7 @@ namespace YAEngine
 #ifdef YA_EDITOR
       if (!scene.HasComponent<EditorOnlyTag>(hc.parent))
 #endif
-        entityNode["parent"] = scene.GetName(hc.parent);
+        entityNode["parent"] = ModelOverrides::MakeEntityReference(scene, assets, hc.parent);
     }
 
     auto& t = scene.GetTransform(entity);
@@ -74,16 +105,26 @@ namespace YAEngine
       entityNode[key] = it->second;
     }
 
+    // Children of a model root come from the model file; only the delta is written
+    if (isModelRoot)
+    {
+      auto overrides = ModelOverrides::Serialize(scene, assets, registry, entity);
+      if (!overrides.IsNull())
+        entityNode["modelOverrides"] = overrides;
+    }
+
     entities.push_back(entityNode);
 
-    // If this is a model root, skip serializing children (they come from the model file)
     if (isModelRoot)
+    {
+      SerializeModelUserEntities(entities, scene, assets, registry, entity);
       return;
+    }
 
     Entity child = hc.firstChild;
     while (child != entt::null)
     {
-      SerializeEntity(entities, scene, registry, child);
+      SerializeEntity(entities, scene, assets, registry, child);
       child = scene.GetHierarchy(child).nextSibling;
     }
   }
@@ -166,7 +207,7 @@ namespace YAEngine
       if (scene.HasComponent<EditorOnlyTag>(e))
         continue;
 #endif
-      SerializeEntity(entities, scene, registry, e);
+      SerializeEntity(entities, scene, assets, registry, e);
     }
     root["entities"] = entities;
 
@@ -415,7 +456,8 @@ namespace YAEngine
 
   // Shared: apply model entity from YAML node (transform override + extra components)
   static void ApplyModelEntityOverrides(const YAML::Node& entityNode, const std::string& name,
-    Entity rootEntity, Scene& scene, const ComponentRegistry& registry)
+    Entity rootEntity, Scene& scene, AssetManager& assets, const ComponentRegistry& registry,
+    std::vector<std::pair<Entity, std::string>>& parentRequests)
   {
     if (entityNode["transform"])
     {
@@ -430,10 +472,50 @@ namespace YAEngine
     for (auto it = entityNode.begin(); it != entityNode.end(); ++it)
     {
       auto key = it->first.as<std::string>();
-      if (key == "name" || key == "parent" || key == "transform" || key == "model")
+      if (key == "name" || key == "parent" || key == "transform" || key == "model" || key == "modelOverrides")
         continue;
       if (!registry.Deserialize(key, scene.GetRegistry(), rootEntity, it->second))
         YA_LOG_WARN("Scene", "Unknown component '%s' on entity '%s'", key.c_str(), name.c_str());
+    }
+
+    if (!entityNode["modelOverrides"])
+      return;
+
+    auto nodeParents = ModelOverrides::Apply(entityNode["modelOverrides"], scene, assets, registry, rootEntity);
+    parentRequests.insert(parentRequests.end(), nodeParents.begin(), nodeParents.end());
+  }
+
+  // Shared: pass 3, resolve parent references. A reference may address a node inside a
+  // model subtree, which is not present in the name map.
+  static void ResolveParentRequests(Scene& scene, AssetManager& assets,
+    const std::unordered_map<std::string, Entity>& nameMap,
+    const std::vector<std::pair<Entity, std::string>>& parentRequests)
+  {
+    for (auto& [entity, parentName] : parentRequests)
+    {
+      std::string rootName;
+      std::string nodePath;
+
+      if (ModelOverrides::SplitEntityReference(parentName, rootName, nodePath))
+      {
+        auto it = nameMap.find(rootName);
+        Entity target = it != nameMap.end()
+          ? ModelOverrides::ResolveNodeReference(scene, assets, it->second, nodePath)
+          : Entity(entt::null);
+
+        if (target != entt::null)
+          scene.SetParent(entity, target);
+        else
+          YA_LOG_WARN("Scene", "Parent node '%s' not found", parentName.c_str());
+
+        continue;
+      }
+
+      auto it = nameMap.find(parentName);
+      if (it != nameMap.end())
+        scene.SetParent(entity, it->second);
+      else
+        YA_LOG_WARN("Scene", "Parent '%s' not found", parentName.c_str());
     }
   }
 
@@ -513,7 +595,7 @@ namespace YAEngine
         auto& model = assets.Models().Get(modelHandle);
         Entity rootEntity = model.rootEntity;
 
-        ApplyModelEntityOverrides(entityNode, name, rootEntity, scene, registry);
+        ApplyModelEntityOverrides(entityNode, name, rootEntity, scene, assets, registry, parentRequests);
 
         if (nameMap.contains(name))
           YA_LOG_WARN("Scene", "Duplicate entity name '%s' - parent references may be incorrect", name.c_str());
@@ -536,14 +618,7 @@ namespace YAEngine
     }
 
     // Pass 3: Establish hierarchy
-    for (auto& [entity, parentName] : parentRequests)
-    {
-      auto it = nameMap.find(parentName);
-      if (it != nameMap.end())
-        scene.SetParent(entity, it->second);
-      else
-        YA_LOG_WARN("Scene", "Parent '%s' not found", parentName.c_str());
-    }
+    ResolveParentRequests(scene, assets, nameMap, parentRequests);
   }
 
   void SceneSerializer::LoadParallel(const YAML::Node& root, const YAML::Node& entities,
@@ -692,7 +767,7 @@ namespace YAEngine
         auto& model = assets.Models().Get(modelHandle);
         Entity rootEntity = model.rootEntity;
 
-        ApplyModelEntityOverrides(entityNode, name, rootEntity, scene, registry);
+        ApplyModelEntityOverrides(entityNode, name, rootEntity, scene, assets, registry, parentRequests);
 
         if (nameMap.contains(name))
           YA_LOG_WARN("Scene", "Duplicate entity name '%s' - parent references may be incorrect", name.c_str());
@@ -715,13 +790,6 @@ namespace YAEngine
     }
 
     // Pass 3: Establish hierarchy
-    for (auto& [entity, parentName] : parentRequests)
-    {
-      auto it = nameMap.find(parentName);
-      if (it != nameMap.end())
-        scene.SetParent(entity, it->second);
-      else
-        YA_LOG_WARN("Scene", "Parent '%s' not found", parentName.c_str());
-    }
+    ResolveParentRequests(scene, assets, nameMap, parentRequests);
   }
 }

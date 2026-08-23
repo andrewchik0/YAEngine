@@ -6,6 +6,7 @@
 #include "Editor/Utils/EditorIcons.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
+#include "Scene/ModelOverrides.h"
 #include "Assets/AssetManager.h"
 #include "Editor/Utils/FileDialog.h"
 
@@ -196,8 +197,12 @@ namespace YAEngine
     else if (scene.HasComponent<ColliderComponent>(entity))
       icon = ICON_FA_CUBE;
 
+    // Covers this node only - a collapsed parent does not report overrides in its subtree
+    bool overridden = context.componentRegistry != nullptr && context.assetManager != nullptr
+      && ModelOverrides::IsNodeOverridden(scene, *context.assetManager, *context.componentRegistry, entity);
+
     char label[512];
-    snprintf(label, sizeof(label), "%s %s", icon, name.c_str());
+    snprintf(label, sizeof(label), "%s %s%s", icon, name.c_str(), overridden ? "  *" : "");
 
     ImGuiTreeNodeFlags flags =
       ImGuiTreeNodeFlags_OpenOnArrow |
@@ -333,6 +338,9 @@ namespace YAEngine
 
       ImGui::Separator();
 
+      bool isModelNode = scene.HasComponent<ModelNodeComponent>(entity)
+        && scene.GetComponent<ModelNodeComponent>(entity).nodeIndex != 0;
+
       if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete"))
       {
         if (context.selectedEntity == entity)
@@ -344,6 +352,9 @@ namespace YAEngine
           ImGui::TreePop();
         return;
       }
+
+      if (isModelNode && ImGui::IsItemHovered())
+        ImGui::SetTooltip("Recorded as a model override and reapplied on load");
 
       ImGui::EndPopup();
     }

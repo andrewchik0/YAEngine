@@ -4,6 +4,8 @@ set(SOURCES
   Source/ControlsLayer.cpp
   Source/AppLayer.h
   Source/GameComponents.h
+  Source/GameComponentSerializers.h
+  Source/GameComponentSerializers.cpp
   Source/ReelFormat.h
   Source/ReelFormat.cpp
   Source/ReelPlaybackLayer.h

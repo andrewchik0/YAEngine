@@ -98,9 +98,30 @@ namespace YAEngine
     bool colliderIsStatic = true;
     uint32_t colliderLayer = 1u;
     uint32_t colliderMask = ~0u;
+
+    // Runtime link to the loaded model asset, set by ModelManager. Not serialized -
+    // it is what lets the serializer reach the ModelTemplate from a scene entity.
+    ModelHandle handle {};
   };
 
   struct ModelColliderDirty {};
+
+  // Links an entity of a model subtree back to its node in the source ModelTemplate.
+  // Derived data: ModelBuilder rebuilds it on every load, so it is never serialized.
+  struct ModelNodeComponent
+  {
+    entt::entity modelRoot { entt::null };
+    uint32_t nodeIndex = 0;
+  };
+
+  // Override patches that failed to resolve against the current model file, kept as raw
+  // YAML so a bad re-export cannot silently destroy authored data. Written back on save.
+  struct ModelOverridesComponent
+  {
+    std::vector<std::string> unresolvedNodes;
+    std::vector<std::string> unresolvedMaterials;
+    std::vector<std::string> unresolvedRemoved;
+  };
 
   enum class ProbeShape : uint8_t
   {

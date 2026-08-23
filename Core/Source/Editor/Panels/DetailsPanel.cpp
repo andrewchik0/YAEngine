@@ -9,6 +9,7 @@
 #include "Editor/Utils/SplinePathEditor.h"
 #include "Scene/Scene.h"
 #include "Scene/Components.h"
+#include "Scene/ModelOverrides.h"
 #include "Assets/AssetManager.h"
 #include "Render/Render.h"
 #include "Render/BakeLimits.h"
@@ -1086,6 +1087,45 @@ namespace YAEngine
     return false;
   }
 
+  // Model subtree entities are rebuilt from the model file on every load, so anything
+  // authored on them is stored as an override. Surface that state and let it be undone.
+  static void DrawModelNode(EditorContext& context, Entity entity)
+  {
+    auto& scene = *context.scene;
+
+    if (context.componentRegistry == nullptr || !scene.HasComponent<ModelNodeComponent>(entity))
+      return;
+    if (scene.GetComponent<ModelNodeComponent>(entity).nodeIndex == 0)
+      return;
+
+    auto& assets = *context.assetManager;
+    auto& registry = *context.componentRegistry;
+
+    bool nodeOverridden = ModelOverrides::IsNodeOverridden(scene, assets, registry, entity);
+    bool materialOverridden = ModelOverrides::IsMaterialOverridden(scene, assets, entity);
+
+    ImGui::TextDisabled(ICON_FA_CUBES " Model node");
+    ImGui::SameLine();
+    if (nodeOverridden)
+      ImGui::TextColored(ImVec4(1.0f, 0.72f, 0.2f, 1.0f), "overridden");
+    else
+      ImGui::TextDisabled("matches source");
+
+    ImGui::BeginDisabled(!nodeOverridden);
+    if (ImGui::Button(ICON_FA_ROTATE_LEFT " Revert node"))
+      ModelOverrides::RevertNode(scene, assets, registry, entity);
+    ImGui::EndDisabled();
+
+    ImGui::SameLine();
+
+    ImGui::BeginDisabled(!materialOverridden);
+    if (ImGui::Button(ICON_FA_ROTATE_LEFT " Revert material"))
+      ModelOverrides::RevertMaterial(scene, assets, entity);
+    ImGui::EndDisabled();
+
+    ImGui::Separator();
+  }
+
   void DetailsPanel::OnRender(EditorContext& context)
   {
     if (!ImGui::Begin("Details"))
@@ -1111,6 +1151,8 @@ namespace YAEngine
       ImGui::Text("Entity %d", (int)entity);
 
     ImGui::Separator();
+
+    DrawModelNode(context, entity);
 
     if (scene.HasComponent<LocalTransform>(entity))
       DrawTransform(context, scene.GetComponent<LocalTransform>(entity));

@@ -12,6 +12,7 @@ namespace YAEngine
     using SerializeFn = std::function<YAML::Node(const entt::registry&, entt::entity)>;
     using DeserializeFn = std::function<void(entt::registry&, entt::entity, const YAML::Node&)>;
     using HasFn = std::function<bool(const entt::registry&, entt::entity)>;
+    using RemoveFn = std::function<void(entt::registry&, entt::entity)>;
 
     struct Entry
     {
@@ -19,6 +20,7 @@ namespace YAEngine
       SerializeFn serialize;
       DeserializeFn deserialize;
       HasFn has;
+      RemoveFn remove;
     };
 
     template<typename T>
@@ -30,6 +32,10 @@ namespace YAEngine
       entry.deserialize = std::move(deserialize);
       entry.has = [](const entt::registry& reg, entt::entity e) {
         return reg.all_of<T>(e);
+      };
+      entry.remove = [](entt::registry& reg, entt::entity e) {
+        if (reg.all_of<T>(e))
+          reg.remove<T>(e);
       };
       m_Entries[name] = std::move(entry);
     }
@@ -44,6 +50,7 @@ namespace YAEngine
       entry.serialize = [](const entt::registry&, entt::entity) { return YAML::Node {}; };
       entry.deserialize = std::move(deserialize);
       entry.has = [](const entt::registry&, entt::entity) { return false; };
+      entry.remove = [](entt::registry&, entt::entity) {};
       m_Entries[name] = std::move(entry);
     }
 
@@ -61,6 +68,15 @@ namespace YAEngine
       if (it == m_Entries.end())
         return false;
       it->second.deserialize(reg, e, node);
+      return true;
+    }
+
+    bool Remove(const std::string& name, entt::registry& reg, entt::entity e) const
+    {
+      auto it = m_Entries.find(name);
+      if (it == m_Entries.end())
+        return false;
+      it->second.remove(reg, e);
       return true;
     }
 
