@@ -72,6 +72,7 @@ namespace YAEngine
     m_Context.maxFramesInFlight = m_MaxFramesInFlight;
     m_Context.pipelineCache = m_PipelineCache;
     m_Context.layoutCache = &m_LayoutCache;
+    m_Context.depthClampSupported = m_Device.IsDepthClampSupported();
 
     VkPhysicalDeviceProperties limitProps {};
     vkGetPhysicalDeviceProperties(m_PhysicalDevice.Get(), &limitProps);

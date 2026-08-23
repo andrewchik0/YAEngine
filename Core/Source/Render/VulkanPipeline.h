@@ -23,6 +23,8 @@ namespace YAEngine
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     VkPolygonMode polygonMode = VK_POLYGON_MODE_FILL;
     bool depthBiasEnable = false;
+    // Disables near/far clipping as well, clamping fragment depth to the viewport range.
+    bool depthClampEnable = false;
 
     // Compact vertex attribute format string: each pair is type + component count.
     // Types: f = float, i = int, u = uint.

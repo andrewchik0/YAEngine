@@ -33,6 +33,9 @@ namespace YAEngine
     deviceFeatures.fillModeNonSolid = VK_TRUE;
     deviceFeatures.imageCubeArray = VK_TRUE;
     deviceFeatures.textureCompressionBC = VK_TRUE;
+    // Shadow pipelines clamp depth instead of clipping it: a caster sitting in front of
+    // a cascade near plane still has to occlude, not disappear from the shadow map.
+    deviceFeatures.depthClamp = VK_TRUE;
 
     VkPhysicalDeviceFeatures supported{};
     vkGetPhysicalDeviceFeatures(physicalDevice.Get(), &supported);
@@ -41,6 +44,12 @@ namespace YAEngine
       YA_LOG_ERROR("Vulkan", "Device reports no BC texture compression support, DDS textures will fail to load");
       deviceFeatures.textureCompressionBC = VK_FALSE;
     }
+    if (supported.depthClamp == VK_FALSE)
+    {
+      YA_LOG_WARN("Vulkan", "Device reports no depth clamp support, shadow casters in front of a cascade near plane will be clipped away");
+      deviceFeatures.depthClamp = VK_FALSE;
+    }
+    b_DepthClampSupported = deviceFeatures.depthClamp == VK_TRUE;
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

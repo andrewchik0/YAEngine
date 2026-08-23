@@ -18,6 +18,7 @@ namespace YAEngine
     VkCompareOp compareOp = VK_COMPARE_OP_GREATER;
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     bool depthBiasEnable = false;
+    bool depthClampEnable = false;
     uint32_t colorAttachmentCount = 1;
     uint32_t pushConstantSize = 0;
     std::string vertexInputFormat;

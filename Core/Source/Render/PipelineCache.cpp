@@ -18,6 +18,7 @@ namespace YAEngine
     if (compareOp != other.compareOp) return false;
     if (topology != other.topology) return false;
     if (depthBiasEnable != other.depthBiasEnable) return false;
+    if (depthClampEnable != other.depthClampEnable) return false;
     if (colorAttachmentCount != other.colorAttachmentCount) return false;
     if (pushConstantSize != other.pushConstantSize) return false;
     if (vertexInputFormat != other.vertexInputFormat) return false;
@@ -47,6 +48,7 @@ namespace YAEngine
     combine(std::hash<uint32_t>{}(static_cast<uint32_t>(key.compareOp)));
     combine(std::hash<uint32_t>{}(static_cast<uint32_t>(key.topology)));
     combine(std::hash<bool>{}(key.depthBiasEnable));
+    combine(std::hash<bool>{}(key.depthClampEnable));
     combine(std::hash<uint32_t>{}(key.colorAttachmentCount));
     combine(std::hash<uint32_t>{}(key.pushConstantSize));
     combine(std::hash<std::string>{}(key.vertexInputFormat));
@@ -101,6 +103,7 @@ namespace YAEngine
       .compareOp = info.compareOp,
       .topology = info.topology,
       .depthBiasEnable = info.depthBiasEnable,
+      .depthClampEnable = info.depthClampEnable,
       .colorAttachmentCount = info.colorAttachmentCount,
       .pushConstantSize = info.pushConstantSize,
       .vertexInputFormat = info.vertexInputFormat,

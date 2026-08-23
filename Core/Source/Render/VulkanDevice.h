@@ -20,8 +20,14 @@ namespace YAEngine
       return m_Device;
     }
 
+    bool IsDepthClampSupported() const
+    {
+      return b_DepthClampSupported;
+    }
+
   private:
 
     VkDevice m_Device {};
+    bool b_DepthClampSupported = false;
   };
 }

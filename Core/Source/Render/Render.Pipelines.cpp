@@ -136,6 +136,9 @@ namespace YAEngine
         .sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout() })
       };
       shadowInfo.depthBiasEnable = true;
+      // Casters above a cascade near plane are kept out of the CPU cull on purpose
+      // (RenderShadowMaps skips that plane), so the rasterizer must not clip them either.
+      shadowInfo.depthClampEnable = ctx.depthClampSupported;
 
       // [0] normal, [1] doubleSided
       m_ShadowPipelines[0] = m_PSOCache.Register(ctx.device, shadowRP, shadowInfo, pipelineCache);
@@ -163,6 +166,7 @@ namespace YAEngine
         .sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout(), m_DefaultMaterial.GetLayout() })
       };
       shadowAlphaInfo.depthBiasEnable = true;
+      shadowAlphaInfo.depthClampEnable = ctx.depthClampSupported;
       m_ShadowPipelines[6] = m_PSOCache.Register(ctx.device, shadowRP, shadowAlphaInfo, pipelineCache);
 
       shadowAlphaInfo.vertexShaderFile = "shadow_instanced_alphatest.vert";

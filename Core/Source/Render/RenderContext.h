@@ -26,5 +26,8 @@ namespace YAEngine
     float timestampPeriod {};
     uint32_t timestampValidBits {};
     bool timestampsSupported {};
+    // Shadow pipelines drop near/far clipping in favour of depth clamping, which needs
+    // this optional device feature.
+    bool depthClampSupported {};
   };
 }
