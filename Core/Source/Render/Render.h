@@ -151,6 +151,7 @@ namespace YAEngine
     float& GetTAAClampSigma() { return m_TAAClampSigma; }
     bool& GetShadowsEnabled() { return b_ShadowsEnabled; }
     bool& GetShadowIndirectEnabled() { return b_ShadowIndirectEnabled; }
+    bool& GetShadowQuantizedPositionsEnabled() { return b_ShadowQuantizedPositions; }
     bool& GetShadowLodEnabled() { return b_ShadowLodEnabled; }
     int* GetShadowCascadeLods() { return m_ShadowCascadeLods; }
     int& GetTonemapMode() { return m_TonemapMode; }
@@ -226,6 +227,10 @@ namespace YAEngine
     // A/B switch rather than a build flag: the legacy per-draw path is the
     // reference the indirect output is compared against.
     bool b_ShadowIndirectEnabled = true;
+    // Feeds the indirect path 8-byte quantized positions instead of the exact 12-byte
+    // ones, with the restoring transform folded into the model matrix. Only that path
+    // may read them: the depth prepass has to stay bit-identical to the G-buffer.
+    bool b_ShadowQuantizedPositions = true;
     // Distant cascades cover so much world per texel that a simplified silhouette is
     // indistinguishable from the original, so they draw a cheaper index stream.
     // Only the CSM tiles use this: spot and point tiles are small and fit their
@@ -566,6 +571,13 @@ namespace YAEngine
       uint32_t instanceCount = 0;
       int32_t vertexOffset = 0;
       MeshLodRange lods[MeshSimplifier::LOD_COUNT] {};
+      // Which of the arena's two index buffers this mesh draws from. Commands are
+      // grouped by it, because one bind serves a whole contiguous range.
+      VkIndexType indexType = VK_INDEX_TYPE_UINT32;
+      // Restores the mesh's quantized positions to its local space. Folded into the
+      // model matrices below, so the shader never sees it.
+      glm::vec3 dequantScale { 1.0f };
+      glm::vec3 dequantBias { 0.0f };
       // False for alpha-test casters and for meshes the arena could not accept; both
       // fall through to the legacy per-draw loop inside the indirect path.
       bool batchable = false;
@@ -595,6 +607,9 @@ namespace YAEngine
     // [0] cull on, [1] cull off. Kept apart from m_ShadowPipelines so the legacy path
     // stays intact and the toggle can switch between them without a rebuild.
     PipelineHandle m_ShadowIndirectPipelines[2] {};
+    // The same pair reading the quantized position stream. Every other state matches
+    // the exact-stream pair, so the two stay directly comparable.
+    PipelineHandle m_ShadowIndirectQuantizedPipelines[2] {};
     bool b_ShadowModelOverflowReported = false;
     bool b_ShadowIndirectOverflowReported = false;
     bool b_ShadowIndirectCountSplitReported = false;

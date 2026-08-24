@@ -249,6 +249,17 @@ namespace YAEngine
           throw std::runtime_error("failed to parse vertex input!");
         }
           break;
+      case 'n':
+        switch (count)
+        {
+        // Only the four-component form exists on purpose: the three-component 16-bit
+        // format is not one Vulkan requires, and 8 bytes keep the vertex aligned.
+        case '4': return VK_FORMAT_R16G16B16A16_UNORM;
+        default:
+          YA_LOG_ERROR("Render", "Failed to parse vertex input: invalid normalized short component count '%c'", count);
+          throw std::runtime_error("failed to parse vertex input!");
+        }
+        break;
       case 'i':
         switch (count)
         {
@@ -276,6 +287,7 @@ namespace YAEngine
       case VK_FORMAT_R32G32_SFLOAT:
       case VK_FORMAT_R32G32_UINT:
       case VK_FORMAT_R32G32_SINT:
+      case VK_FORMAT_R16G16B16A16_UNORM:
         return 8;
       case VK_FORMAT_R32G32B32_SFLOAT:
       case VK_FORMAT_R32G32B32_UINT:

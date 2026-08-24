@@ -22,18 +22,33 @@ namespace YAEngine
   void GeometryArena::Init(const RenderContext& ctx)
   {
     m_Positions = VulkanBuffer::CreateGpuOnly(ctx, POSITION_INITIAL_BYTES, POSITION_USAGE);
-    m_Indices = VulkanBuffer::CreateGpuOnly(ctx, INDEX_INITIAL_BYTES, INDEX_USAGE);
+    m_ShadowPositions = VulkanBuffer::CreateGpuOnly(ctx, SHADOW_POSITION_INITIAL_BYTES, POSITION_USAGE);
+    m_Indices16 = VulkanBuffer::CreateGpuOnly(ctx, NARROW_INDEX_INITIAL_BYTES, INDEX_USAGE);
+    m_Indices32 = VulkanBuffer::CreateGpuOnly(ctx, WIDE_INDEX_INITIAL_BYTES, INDEX_USAGE);
 
-    YA_LOG_INFO("Render", "Geometry arena created: positions %llu MB, indices %llu MB",
+    YA_LOG_INFO("Render",
+      "Geometry arena created: positions %llu MB, shadow positions %llu MB, 16-bit indices %llu MB, 32-bit indices %llu MB",
       (unsigned long long)(POSITION_INITIAL_BYTES / (1024 * 1024)),
-      (unsigned long long)(INDEX_INITIAL_BYTES / (1024 * 1024)));
+      (unsigned long long)(SHADOW_POSITION_INITIAL_BYTES / (1024 * 1024)),
+      (unsigned long long)(NARROW_INDEX_INITIAL_BYTES / (1024 * 1024)),
+      (unsigned long long)(WIDE_INDEX_INITIAL_BYTES / (1024 * 1024)));
   }
 
   void GeometryArena::Destroy(const RenderContext& ctx)
   {
     LogUsage("shutdown");
     m_Positions.Destroy(ctx);
-    m_Indices.Destroy(ctx);
+    m_ShadowPositions.Destroy(ctx);
+    m_Indices16.Destroy(ctx);
+    m_Indices32.Destroy(ctx);
+  }
+
+  void GeometryArena::NarrowIndices(const uint32_t* indices, size_t indexCount,
+    std::vector<uint16_t>& out)
+  {
+    out.resize(indexCount);
+    for (size_t i = 0; i < indexCount; i++)
+      out[i] = static_cast<uint16_t>(indices[i]);
   }
 
   uint32_t GeometryArena::GetPositionUsedBytes() const
@@ -41,28 +56,52 @@ namespace YAEngine
     return m_Positions.GetAllocatorFrontier() - m_Positions.GetAllocatorFreeBytes();
   }
 
-  uint32_t GeometryArena::GetIndexUsedBytes() const
+  uint32_t GeometryArena::GetShadowPositionUsedBytes() const
   {
-    return m_Indices.GetAllocatorFrontier() - m_Indices.GetAllocatorFreeBytes();
+    return m_ShadowPositions.GetAllocatorFrontier() - m_ShadowPositions.GetAllocatorFreeBytes();
+  }
+
+  uint32_t GeometryArena::GetIndexUsedBytes(VkIndexType indexType) const
+  {
+    const VulkanBuffer& buffer = IndexBuffer(indexType);
+    return buffer.GetAllocatorFrontier() - buffer.GetAllocatorFreeBytes();
   }
 
   void GeometryArena::LogUsage(const char* reason) const
   {
     YA_LOG_INFO("Render",
-      "Geometry arena (%s): positions %u/%llu KB used, high water %u KB, %zu free blocks; "
-      "indices %u/%llu KB used, high water %u KB, %zu free blocks",
+      "Geometry arena (%s): positions %u/%llu KB used, high water %u KB, %zu free blocks",
       reason,
       GetPositionUsedBytes() / 1024, (unsigned long long)(GetPositionCapacityBytes() / 1024),
-      m_PositionHighWater / 1024, GetPositionFreeBlockCount(),
-      GetIndexUsedBytes() / 1024, (unsigned long long)(GetIndexCapacityBytes() / 1024),
-      m_IndexHighWater / 1024, GetIndexFreeBlockCount());
+      m_PositionHighWater / 1024, GetPositionFreeBlockCount());
 
-    YA_LOG_INFO("Render", "Geometry arena index width cost: %llu KB uploaded as 32-bit, %llu KB more than 16-bit would have taken",
+    YA_LOG_INFO("Render",
+      "Geometry arena (%s): shadow positions %u/%llu KB used, high water %u KB, %zu free blocks",
+      reason,
+      GetShadowPositionUsedBytes() / 1024,
+      (unsigned long long)(GetShadowPositionCapacityBytes() / 1024),
+      m_ShadowPositionHighWater / 1024, GetShadowPositionFreeBlockCount());
+
+    YA_LOG_INFO("Render",
+      "Geometry arena (%s) indices: 16-bit %u/%llu KB used, high water %u KB, %zu free blocks; "
+      "32-bit %u/%llu KB used, high water %u KB, %zu free blocks",
+      reason,
+      GetIndexUsedBytes(VK_INDEX_TYPE_UINT16) / 1024,
+      (unsigned long long)(GetIndexCapacityBytes(VK_INDEX_TYPE_UINT16) / 1024),
+      m_IndexHighWater16 / 1024, GetIndexFreeBlockCount(VK_INDEX_TYPE_UINT16),
+      GetIndexUsedBytes(VK_INDEX_TYPE_UINT32) / 1024,
+      (unsigned long long)(GetIndexCapacityBytes(VK_INDEX_TYPE_UINT32) / 1024),
+      m_IndexHighWater32 / 1024, GetIndexFreeBlockCount(VK_INDEX_TYPE_UINT32));
+
+    YA_LOG_INFO("Render", "Geometry arena index width: %llu KB uploaded, %llu KB saved against 32-bit everywhere",
       (unsigned long long)(m_IndexBytes / 1024),
-      (unsigned long long)(GetIndexWideningBytes() / 1024));
+      (unsigned long long)(GetIndexSavedBytes() / 1024));
 
     YA_LOG_INFO("Render", "Geometry arena shadow LOD cost: %llu KB of index memory",
       (unsigned long long)(m_LodIndexBytes / 1024));
+
+    YA_LOG_INFO("Render", "Geometry arena quantization: worst position error %.3f cm on a mesh %.1f m across",
+      m_MaxQuantizeError * 100.0f, m_MaxQuantizeErrorExtent);
   }
 
   uint32_t GeometryArena::AllocateGrowing(const RenderContext& ctx, VulkanBuffer& buffer,
@@ -170,15 +209,21 @@ namespace YAEngine
 
   GeometryArenaAllocation GeometryArena::Upload(const RenderContext& ctx,
     const glm::vec3* positions, size_t positionCount,
-    const uint32_t* indices, size_t indexCount)
+    const uint32_t* indices, size_t indexCount,
+    const QuantizedPositions& quantized)
   {
     GeometryArenaAllocation result {};
 
     if (positions == nullptr || positionCount == 0 || indices == nullptr || indexCount == 0)
       return result;
 
+    bool narrow = positionCount <= NARROW_INDEX_VERTEX_LIMIT;
+    VkIndexType indexType = narrow ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
+    uint32_t indexStride = IndexStride(indexType);
+    const char* indexBufferName = narrow ? "16-bit indices" : "32-bit indices";
+
     size_t positionBytes = positionCount * POSITION_STRIDE;
-    size_t indexBytes = indexCount * INDEX_STRIDE;
+    size_t indexBytes = indexCount * indexStride;
 
     if (positionBytes > ARENA_MAX_BYTES || indexBytes > ARENA_MAX_BYTES)
     {
@@ -190,7 +235,7 @@ namespace YAEngine
     // Rounding every allocation keeps every offset a multiple of the stride, so the
     // byte offset -> element offset conversions below are always exact.
     uint32_t positionAllocSize = RoundUp(uint32_t(positionBytes), POSITION_STRIDE);
-    uint32_t indexAllocSize = RoundUp(uint32_t(indexBytes), INDEX_STRIDE);
+    uint32_t indexAllocSize = RoundUp(uint32_t(indexBytes), indexStride);
 
     uint32_t positionOffset = AllocateGrowing(ctx, m_Positions, positionAllocSize, POSITION_USAGE, "positions");
     if (positionOffset == UINT32_MAX)
@@ -203,7 +248,8 @@ namespace YAEngine
       return result;
     }
 
-    uint32_t indexOffset = AllocateGrowing(ctx, m_Indices, indexAllocSize, INDEX_USAGE, "indices");
+    VulkanBuffer& indexBuffer = IndexBuffer(indexType);
+    uint32_t indexOffset = AllocateGrowing(ctx, indexBuffer, indexAllocSize, INDEX_USAGE, indexBufferName);
     if (indexOffset == UINT32_MAX)
     {
       m_Positions.Free(positionOffset, positionAllocSize);
@@ -215,77 +261,147 @@ namespace YAEngine
       return result;
     }
 
-    if (positionOffset % POSITION_STRIDE != 0 || indexOffset % INDEX_STRIDE != 0)
+    if (positionOffset % POSITION_STRIDE != 0 || indexOffset % indexStride != 0)
     {
       YA_LOG_ERROR("Render",
         "Geometry arena produced misaligned offsets: positions %u (stride %u), indices %u (stride %u)",
-        positionOffset, POSITION_STRIDE, indexOffset, INDEX_STRIDE);
+        positionOffset, POSITION_STRIDE, indexOffset, indexStride);
       m_Positions.Free(positionOffset, positionAllocSize);
-      m_Indices.Free(indexOffset, indexAllocSize);
+      indexBuffer.Free(indexOffset, indexAllocSize);
       return result;
     }
 
-    const StagedCopy copies[] = {
-      { positions, positionBytes, m_Positions.Get(), positionOffset },
-      { indices, indexBytes, m_Indices.Get(), indexOffset },
-    };
-    StageCopies(ctx, copies, std::size(copies));
+    // Optional third stream: failing to place it only costs the mesh its seat in the
+    // quantized shadow path, so nothing allocated above is rolled back for it.
+    size_t shadowBytes = quantized.data.size() * sizeof(uint16_t);
+    uint32_t shadowOffset = UINT32_MAX;
+    uint32_t shadowAllocSize = 0;
+    if (quantized.data.size() == positionCount * 4 && shadowBytes <= ARENA_MAX_BYTES)
+    {
+      shadowAllocSize = RoundUp(uint32_t(shadowBytes), SHADOW_POSITION_STRIDE);
+      shadowOffset = AllocateGrowing(ctx, m_ShadowPositions, shadowAllocSize, POSITION_USAGE,
+        "shadow positions");
+
+      if (shadowOffset != UINT32_MAX && shadowOffset % SHADOW_POSITION_STRIDE != 0)
+      {
+        YA_LOG_ERROR("Render",
+          "Geometry arena produced a misaligned shadow position offset: %u (stride %u)",
+          shadowOffset, SHADOW_POSITION_STRIDE);
+        m_ShadowPositions.Free(shadowOffset, shadowAllocSize);
+        shadowOffset = UINT32_MAX;
+      }
+
+      if (shadowOffset == UINT32_MAX && !b_ShadowExhaustionReported)
+      {
+        b_ShadowExhaustionReported = true;
+        YA_LOG_WARN("Render",
+          "Geometry arena shadow position allocation failed, the mesh falls out of the quantized shadow path");
+      }
+    }
+
+    std::vector<uint16_t> narrowIndices;
+    if (narrow)
+      NarrowIndices(indices, indexCount, narrowIndices);
+
+    const void* indexData = narrow
+      ? static_cast<const void*>(narrowIndices.data())
+      : static_cast<const void*>(indices);
+
+    StagedCopy copies[3] {};
+    size_t copyCount = 0;
+    copies[copyCount++] = { positions, positionBytes, m_Positions.Get(), positionOffset };
+    copies[copyCount++] = { indexData, indexBytes, indexBuffer.Get(), indexOffset };
+    if (shadowOffset != UINT32_MAX)
+      copies[copyCount++] = { quantized.data.data(), shadowBytes, m_ShadowPositions.Get(), shadowOffset };
+    StageCopies(ctx, copies, copyCount);
 
     result.positionByteOffset = positionOffset;
     result.positionByteSize = positionAllocSize;
     result.indexByteOffset = indexOffset;
     result.indexByteSize = indexAllocSize;
     result.vertexOffset = positionOffset / POSITION_STRIDE;
-    result.firstIndex = indexOffset / INDEX_STRIDE;
+    result.firstIndex = indexOffset / indexStride;
     result.indexCount = uint32_t(indexCount);
-    result.indexType = VK_INDEX_TYPE_UINT32;
+    result.indexType = indexType;
     result.resident = true;
 
+    if (shadowOffset != UINT32_MAX)
+    {
+      result.shadowPositionByteOffset = shadowOffset;
+      result.shadowPositionByteSize = shadowAllocSize;
+      result.shadowVertexOffset = shadowOffset / SHADOW_POSITION_STRIDE;
+      result.dequantScale = quantized.scale;
+      result.dequantBias = quantized.bias;
+      result.shadowPositionsResident = true;
+
+      m_ShadowPositionHighWater = std::max(m_ShadowPositionHighWater,
+        m_ShadowPositions.GetAllocatorFrontier());
+
+      if (quantized.maxError > m_MaxQuantizeError)
+      {
+        m_MaxQuantizeError = quantized.maxError;
+        m_MaxQuantizeErrorExtent = std::max({ quantized.scale.x, quantized.scale.y, quantized.scale.z });
+      }
+    }
+
     m_PositionHighWater = std::max(m_PositionHighWater, m_Positions.GetAllocatorFrontier());
-    m_IndexHighWater = std::max(m_IndexHighWater, m_Indices.GetAllocatorFrontier());
+    uint32_t& indexHighWater = narrow ? m_IndexHighWater16 : m_IndexHighWater32;
+    indexHighWater = std::max(indexHighWater, indexBuffer.GetAllocatorFrontier());
     m_IndexBytes += indexBytes;
-    m_NarrowIndexBytes += indexCount * (positionCount <= 65536 ? sizeof(uint16_t) : sizeof(uint32_t));
+    m_WideIndexBytes += indexCount * sizeof(uint32_t);
 
     return result;
   }
 
   GeometryArenaIndexRange GeometryArena::UploadIndices(const RenderContext& ctx,
-    const uint32_t* indices, size_t indexCount)
+    const uint32_t* indices, size_t indexCount, VkIndexType indexType)
   {
     GeometryArenaIndexRange result {};
 
     if (indices == nullptr || indexCount == 0)
       return result;
 
-    size_t indexBytes = indexCount * INDEX_STRIDE;
+    bool narrow = indexType == VK_INDEX_TYPE_UINT16;
+    uint32_t indexStride = IndexStride(indexType);
+
+    size_t indexBytes = indexCount * indexStride;
     if (indexBytes > ARENA_MAX_BYTES)
       return result;
 
-    uint32_t indexAllocSize = RoundUp(uint32_t(indexBytes), INDEX_STRIDE);
-    uint32_t indexOffset = AllocateGrowing(ctx, m_Indices, indexAllocSize, INDEX_USAGE, "indices");
+    VulkanBuffer& indexBuffer = IndexBuffer(indexType);
+    uint32_t indexAllocSize = RoundUp(uint32_t(indexBytes), indexStride);
+    uint32_t indexOffset = AllocateGrowing(ctx, indexBuffer, indexAllocSize, INDEX_USAGE,
+      narrow ? "16-bit indices" : "32-bit indices");
     if (indexOffset == UINT32_MAX)
       return result;
 
-    if (indexOffset % INDEX_STRIDE != 0)
+    if (indexOffset % indexStride != 0)
     {
       YA_LOG_ERROR("Render", "Geometry arena produced a misaligned index offset: %u (stride %u)",
-        indexOffset, INDEX_STRIDE);
-      m_Indices.Free(indexOffset, indexAllocSize);
+        indexOffset, indexStride);
+      indexBuffer.Free(indexOffset, indexAllocSize);
       return result;
     }
 
+    std::vector<uint16_t> narrowIndices;
+    if (narrow)
+      NarrowIndices(indices, indexCount, narrowIndices);
+
     const StagedCopy copies[] = {
-      { indices, indexBytes, m_Indices.Get(), indexOffset },
+      { narrow ? static_cast<const void*>(narrowIndices.data()) : static_cast<const void*>(indices),
+        indexBytes, indexBuffer.Get(), indexOffset },
     };
     StageCopies(ctx, copies, std::size(copies));
 
     result.byteOffset = indexOffset;
     result.byteSize = indexAllocSize;
-    result.firstIndex = indexOffset / INDEX_STRIDE;
+    result.firstIndex = indexOffset / indexStride;
     result.indexCount = uint32_t(indexCount);
+    result.indexType = indexType;
     result.resident = true;
 
-    m_IndexHighWater = std::max(m_IndexHighWater, m_Indices.GetAllocatorFrontier());
+    uint32_t& indexHighWater = narrow ? m_IndexHighWater16 : m_IndexHighWater32;
+    indexHighWater = std::max(indexHighWater, indexBuffer.GetAllocatorFrontier());
     m_LodIndexBytes += indexBytes;
 
     return result;
@@ -297,7 +413,9 @@ namespace YAEngine
       return;
 
     m_Positions.Free(allocation.positionByteOffset, allocation.positionByteSize);
-    m_Indices.Free(allocation.indexByteOffset, allocation.indexByteSize);
+    IndexBuffer(allocation.indexType).Free(allocation.indexByteOffset, allocation.indexByteSize);
+    if (allocation.shadowPositionsResident)
+      m_ShadowPositions.Free(allocation.shadowPositionByteOffset, allocation.shadowPositionByteSize);
     allocation = {};
   }
 
@@ -306,8 +424,8 @@ namespace YAEngine
     if (!range.resident)
       return;
 
-    m_Indices.Free(range.byteOffset, range.byteSize);
-    m_LodIndexBytes -= size_t(range.indexCount) * INDEX_STRIDE;
+    IndexBuffer(range.indexType).Free(range.byteOffset, range.byteSize);
+    m_LodIndexBytes -= size_t(range.indexCount) * IndexStride(range.indexType);
     range = {};
   }
 }

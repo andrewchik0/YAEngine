@@ -38,6 +38,7 @@ namespace YAEngine
     // pick the model matrix out of a shared array.
     bool multiDrawIndirectSupported {};
     bool drawIndirectFirstInstanceSupported {};
+    bool unorm16VertexSupported {};
     uint32_t maxDrawIndirectCount {};
   };
 }

@@ -296,16 +296,39 @@ namespace YAEngine
         ImGui::Text("Arena pos  %u / %llu KB",
           arena->GetPositionUsedBytes() / 1024,
           (unsigned long long)(arena->GetPositionCapacityBytes() / 1024));
-        ImGui::Text("Arena idx  %u / %llu KB",
-          arena->GetIndexUsedBytes() / 1024,
-          (unsigned long long)(arena->GetIndexCapacityBytes() / 1024));
+        ImGui::Text("Arena qpos %u / %llu KB",
+          arena->GetShadowPositionUsedBytes() / 1024,
+          (unsigned long long)(arena->GetShadowPositionCapacityBytes() / 1024));
+        if (ImGui::IsItemHovered())
+        {
+          ImGui::SetTooltip("Quantized positions for the indirect shadow path.\n"
+            "High water: %u KB, free blocks: %zu.\n"
+            "Worst quantization error: %.3f cm on a mesh %.1f m across.",
+            arena->GetShadowPositionHighWaterBytes() / 1024,
+            arena->GetShadowPositionFreeBlockCount(),
+            arena->GetMaxQuantizeError() * 100.0f,
+            arena->GetMaxQuantizeErrorExtent());
+        }
+        ImGui::Text("Arena i16  %u / %llu KB",
+          arena->GetIndexUsedBytes(VK_INDEX_TYPE_UINT16) / 1024,
+          (unsigned long long)(arena->GetIndexCapacityBytes(VK_INDEX_TYPE_UINT16) / 1024));
+        ImGui::Text("Arena i32  %u / %llu KB",
+          arena->GetIndexUsedBytes(VK_INDEX_TYPE_UINT32) / 1024,
+          (unsigned long long)(arena->GetIndexCapacityBytes(VK_INDEX_TYPE_UINT32) / 1024));
         if (ImGui::IsItemHovered())
         {
           ImGui::SetTooltip("Shared position and index storage for every mesh.\n"
-            "High water: %u / %u KB, free blocks: %zu / %zu.\n"
+            "High water: %u pos / %u i16 / %u i32 KB,\n"
+            "free blocks: %zu / %zu / %zu.\n"
+            "16-bit indices save %llu KB against 32-bit everywhere.\n"
             "Usage that keeps climbing across regenerations is a leak.",
-            arena->GetPositionHighWaterBytes() / 1024, arena->GetIndexHighWaterBytes() / 1024,
-            arena->GetPositionFreeBlockCount(), arena->GetIndexFreeBlockCount());
+            arena->GetPositionHighWaterBytes() / 1024,
+            arena->GetIndexHighWaterBytes(VK_INDEX_TYPE_UINT16) / 1024,
+            arena->GetIndexHighWaterBytes(VK_INDEX_TYPE_UINT32) / 1024,
+            arena->GetPositionFreeBlockCount(),
+            arena->GetIndexFreeBlockCount(VK_INDEX_TYPE_UINT16),
+            arena->GetIndexFreeBlockCount(VK_INDEX_TYPE_UINT32),
+            (unsigned long long)(arena->GetIndexSavedBytes() / 1024));
         }
       }
     }

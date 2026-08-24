@@ -164,6 +164,7 @@ namespace YAEngine
     settings["taaClampSigma"] = render.GetTAAClampSigma();
     settings["shadows"] = render.GetShadowsEnabled();
     settings["shadowIndirect"] = render.GetShadowIndirectEnabled();
+    settings["shadowQuantizedPositions"] = render.GetShadowQuantizedPositionsEnabled();
     settings["shadowLod"] = render.GetShadowLodEnabled();
     {
       YAML::Node cascadeLods(YAML::NodeType::Sequence);
@@ -277,6 +278,8 @@ namespace YAEngine
     // Absent in scenes written before the indirect shadow path existed. Leaving the
     // member default (on) is deliberate: those scenes should pick up the new path.
     if (settings["shadowIndirect"]) render.GetShadowIndirectEnabled() = settings["shadowIndirect"].as<bool>();
+    if (settings["shadowQuantizedPositions"])
+      render.GetShadowQuantizedPositionsEnabled() = settings["shadowQuantizedPositions"].as<bool>();
     if (settings["shadowLod"]) render.GetShadowLodEnabled() = settings["shadowLod"].as<bool>();
     if (settings["shadowCascadeLods"])
     {

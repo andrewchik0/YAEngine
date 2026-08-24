@@ -2,6 +2,7 @@
 
 #include "Pch.h"
 #include "VulkanBuffer.h"
+#include "Utils/PositionQuantizer.h"
 
 namespace YAEngine
 {
@@ -23,6 +24,17 @@ namespace YAEngine
     // arena can be added later without touching every draw.
     VkIndexType indexType = VK_INDEX_TYPE_UINT32;
     bool resident = false;
+
+    // The same vertices in the quantized shadow stream. It has its own allocator, so
+    // it has its own vertex offset; the index ranges above serve both streams.
+    uint32_t shadowPositionByteOffset = 0;
+    uint32_t shadowPositionByteSize = 0;
+    uint32_t shadowVertexOffset = 0;
+    // Restores a quantized position to mesh local space. Meant to be folded into the
+    // model matrix on the CPU, never applied in the shader.
+    glm::vec3 dequantScale { 1.0f };
+    glm::vec3 dequantBias { 0.0f };
+    bool shadowPositionsResident = false;
   };
 
   // An extra index range over the vertices of an existing allocation. A shadow LOD
@@ -34,6 +46,10 @@ namespace YAEngine
     uint32_t byteSize = 0;
     uint32_t firstIndex = 0;
     uint32_t indexCount = 0;
+    // Always the index type of the mesh the range belongs to. A level that landed in
+    // the other index buffer would split the contiguous indirect command range its
+    // tile draws from, so the caller must never mix the two.
+    VkIndexType indexType = VK_INDEX_TYPE_UINT32;
     bool resident = false;
   };
 
@@ -47,16 +63,20 @@ namespace YAEngine
     void Destroy(const RenderContext& ctx);
 
     // Copies one mesh into the arena. Returns a non-resident allocation when the
-    // arena cannot grow far enough; the caller then keeps its own buffers.
+    // arena cannot grow far enough; the caller then keeps its own buffers. An empty
+    // quantized stream, or one the shadow buffer has no room for, only costs the mesh
+    // its place in the quantized shadow path - the rest of the allocation stands.
     GeometryArenaAllocation Upload(const RenderContext& ctx,
       const glm::vec3* positions, size_t positionCount,
-      const uint32_t* indices, size_t indexCount);
+      const uint32_t* indices, size_t indexCount,
+      const QuantizedPositions& quantized);
 
     // Copies one more index stream for a mesh whose positions are already resident.
-    // Returns a non-resident range when the index arena cannot grow far enough; the
-    // caller then simply has one LOD level fewer.
+    // indexType must be the one the mesh itself was uploaded with. Returns a
+    // non-resident range when the index arena cannot grow far enough; the caller then
+    // simply has one LOD level fewer.
     GeometryArenaIndexRange UploadIndices(const RenderContext& ctx,
-      const uint32_t* indices, size_t indexCount);
+      const uint32_t* indices, size_t indexCount, VkIndexType indexType);
 
     void Free(GeometryArenaAllocation& allocation);
 
@@ -64,37 +84,68 @@ namespace YAEngine
 
     VkBuffer GetPositionBuffer() const { return m_Positions.Get(); }
 
+    // Quantized positions, read by the indirect shadow path only. Never bind this in
+    // the depth prepass: the prepass writes the depth the G-buffer then tests with
+    // GREATER_OR_EQUAL, and any deviation from the exact stream punches holes in it.
+    VkBuffer GetShadowPositionBuffer() const { return m_ShadowPositions.Get(); }
+
     VkBuffer GetIndexBuffer(VkIndexType indexType) const
     {
-      if (indexType != VK_INDEX_TYPE_UINT32)
-        return VK_NULL_HANDLE;
-      return m_Indices.Get();
+      return IndexBuffer(indexType).Get();
     }
 
     uint32_t GetPositionUsedBytes() const;
-    uint32_t GetIndexUsedBytes() const;
+    uint32_t GetShadowPositionUsedBytes() const;
+    uint32_t GetIndexUsedBytes(VkIndexType indexType) const;
     VkDeviceSize GetPositionCapacityBytes() const { return m_Positions.GetSize(); }
-    VkDeviceSize GetIndexCapacityBytes() const { return m_Indices.GetSize(); }
+    VkDeviceSize GetShadowPositionCapacityBytes() const { return m_ShadowPositions.GetSize(); }
+    uint32_t GetShadowPositionHighWaterBytes() const { return m_ShadowPositionHighWater; }
+    size_t GetShadowPositionFreeBlockCount() const { return m_ShadowPositions.GetAllocatorFreeBlockCount(); }
+    // Worst position error any resident mesh pays for quantization, and the size of
+    // the mesh that pays it. The pair is what tells whether 16 bits still suffice.
+    float GetMaxQuantizeError() const { return m_MaxQuantizeError; }
+    float GetMaxQuantizeErrorExtent() const { return m_MaxQuantizeErrorExtent; }
+    VkDeviceSize GetIndexCapacityBytes(VkIndexType indexType) const { return IndexBuffer(indexType).GetSize(); }
     size_t GetPositionFreeBlockCount() const { return m_Positions.GetAllocatorFreeBlockCount(); }
-    size_t GetIndexFreeBlockCount() const { return m_Indices.GetAllocatorFreeBlockCount(); }
+    size_t GetIndexFreeBlockCount(VkIndexType indexType) const { return IndexBuffer(indexType).GetAllocatorFreeBlockCount(); }
     uint32_t GetPositionHighWaterBytes() const { return m_PositionHighWater; }
-    uint32_t GetIndexHighWaterBytes() const { return m_IndexHighWater; }
-    uint64_t GetIndexWideningBytes() const { return m_IndexBytes - m_NarrowIndexBytes; }
+    uint32_t GetIndexHighWaterBytes(VkIndexType indexType) const
+    {
+      return indexType == VK_INDEX_TYPE_UINT16 ? m_IndexHighWater16 : m_IndexHighWater32;
+    }
+    // What the narrow buffer saves against the single 32-bit buffer this arena used
+    // to bind for every mesh, so the price of the split stays visible.
+    uint64_t GetIndexSavedBytes() const { return m_WideIndexBytes - m_IndexBytes; }
     uint64_t GetLodIndexBytes() const { return m_LodIndexBytes; }
 
     void LogUsage(const char* reason) const;
 
     static constexpr uint32_t POSITION_STRIDE = uint32_t(sizeof(glm::vec3));
-    static constexpr uint32_t INDEX_STRIDE = uint32_t(sizeof(uint32_t));
+    static constexpr uint32_t SHADOW_POSITION_STRIDE = PositionQuantizer::STRIDE;
+
+    // A mesh at or below this many vertices indexes its triangles with 16 bits. The
+    // index is local to the mesh - vkCmdDrawIndexed adds vertexOffset after the fetch -
+    // so where the mesh sits in the shared buffer never narrows the limit. Primitive
+    // restart is disabled everywhere, which keeps 0xFFFF a valid index.
+    static constexpr size_t NARROW_INDEX_VERTEX_LIMIT = 65536;
+
+    static constexpr uint32_t IndexStride(VkIndexType indexType)
+    {
+      return indexType == VK_INDEX_TYPE_UINT16 ? uint32_t(sizeof(uint16_t)) : uint32_t(sizeof(uint32_t));
+    }
 
   private:
 
     // Sized from the measured high-water of the cafe scene (1632 meshes): 26 MB of
-    // positions against 37 MB of 32-bit indices. Indices dominate because a welded
-    // position stream is 12 bytes per vertex while a triangle costs 12 bytes of
-    // indices on its own, so the index arena gets the larger reservation.
+    // positions against 37 MB of indices when every mesh was forced to 32 bits.
+    // Almost every mesh fits the narrow limit, so the 16-bit buffer inherits most of
+    // that reservation and the 32-bit one keeps only what the few large meshes need.
     static constexpr VkDeviceSize POSITION_INITIAL_BYTES = 32ull * 1024 * 1024;
-    static constexpr VkDeviceSize INDEX_INITIAL_BYTES = 48ull * 1024 * 1024;
+    static constexpr VkDeviceSize NARROW_INDEX_INITIAL_BYTES = 24ull * 1024 * 1024;
+    static constexpr VkDeviceSize WIDE_INDEX_INITIAL_BYTES = 8ull * 1024 * 1024;
+    // The same vertices at 8 bytes instead of 12, so two thirds of the position
+    // reservation covers the same scene.
+    static constexpr VkDeviceSize SHADOW_POSITION_INITIAL_BYTES = 24ull * 1024 * 1024;
     // uint32_t byte offsets and a signed vertexOffset both stay exact well below
     // this, and a single VkBuffer this large is already far past any real scene.
     static constexpr VkDeviceSize ARENA_MAX_BYTES = 1024ull * 1024 * 1024;
@@ -103,6 +154,20 @@ namespace YAEngine
     {
       return (value + multiple - 1) / multiple * multiple;
     }
+
+    VulkanBuffer& IndexBuffer(VkIndexType indexType)
+    {
+      return indexType == VK_INDEX_TYPE_UINT16 ? m_Indices16 : m_Indices32;
+    }
+
+    const VulkanBuffer& IndexBuffer(VkIndexType indexType) const
+    {
+      return indexType == VK_INDEX_TYPE_UINT16 ? m_Indices16 : m_Indices32;
+    }
+
+    // Packs a source index stream into the 16-bit form the narrow buffer stores.
+    static void NarrowIndices(const uint32_t* indices, size_t indexCount,
+      std::vector<uint16_t>& out);
 
     // Allocates from buffer, growing it when the free list and the bump frontier
     // are both exhausted. Returns UINT32_MAX when the hard cap is reached.
@@ -122,17 +187,28 @@ namespace YAEngine
     static void StageCopies(const RenderContext& ctx, const StagedCopy* copies, size_t count);
 
     VulkanBuffer m_Positions;
-    VulkanBuffer m_Indices;
+    // Quantized duplicate of m_Positions. It exists instead of replacing the exact
+    // stream because the depth prepass has to stay bit-identical to the G-buffer,
+    // which rules the quantized form out for every pass but the shadow atlas.
+    VulkanBuffer m_ShadowPositions;
+    // One buffer per index width. A pass binds whichever one the mesh was uploaded
+    // into, so a small mesh never pays for indices it cannot use.
+    VulkanBuffer m_Indices16;
+    VulkanBuffer m_Indices32;
     uint32_t m_PositionHighWater = 0;
-    uint32_t m_IndexHighWater = 0;
-    // The arena binds one index buffer for the whole pass, so every mesh pays for
-    // 32-bit indices. These two track what the old per-mesh 16-bit choice would
-    // have cost, so the price of the single index type stays visible.
+    uint32_t m_ShadowPositionHighWater = 0;
+    uint32_t m_IndexHighWater16 = 0;
+    uint32_t m_IndexHighWater32 = 0;
+    // Index bytes actually uploaded against what a single 32-bit buffer would have
+    // taken, so the saving of the split stays visible.
     uint64_t m_IndexBytes = 0;
-    uint64_t m_NarrowIndexBytes = 0;
+    uint64_t m_WideIndexBytes = 0;
     // Index bytes currently held by shadow LOD levels alone, so the price of the
     // feature stays visible next to what it saves.
     uint64_t m_LodIndexBytes = 0;
+    float m_MaxQuantizeError = 0.0f;
+    float m_MaxQuantizeErrorExtent = 0.0f;
     bool b_ExhaustionReported = false;
+    bool b_ShadowExhaustionReported = false;
   };
 }

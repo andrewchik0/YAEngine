@@ -5,6 +5,7 @@
 #include "VulkanBuffer.h"
 #include "Assets/CpuResourceData.h"
 #include "Utils/MeshSimplifier.h"
+#include "Utils/PositionQuantizer.h"
 
 namespace YAEngine
 {
@@ -63,7 +64,7 @@ namespace YAEngine
 
     void CreateWeldedPositions(const RenderContext& ctx,
       const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices,
-      const MeshLodLevels* lods);
+      const MeshLodLevels* lods, const QuantizedPositions& quantized);
 
     void CreateLodRanges(const RenderContext& ctx, const MeshLodLevels& lods);
 

@@ -76,6 +76,7 @@ namespace YAEngine
     m_Context.depthClampSupported = m_Device.IsDepthClampSupported();
     m_Context.multiDrawIndirectSupported = m_Device.IsMultiDrawIndirectSupported();
     m_Context.drawIndirectFirstInstanceSupported = m_Device.IsDrawIndirectFirstInstanceSupported();
+    m_Context.unorm16VertexSupported = m_Device.IsUnorm16VertexSupported();
 
     VkPhysicalDeviceProperties limitProps {};
     vkGetPhysicalDeviceProperties(m_PhysicalDevice.Get(), &limitProps);
@@ -104,6 +105,12 @@ namespace YAEngine
 
     if (!m_Context.multiDrawIndirectSupported || !m_Context.drawIndirectFirstInstanceSupported)
       YA_LOG_WARN("Render", "Indirect shadow batching is unavailable on this device, the legacy per-draw path is forced");
+
+    YA_LOG_INFO("Render", "Quantized shadow position support: R16G16B16A16_UNORM as a vertex format=%d",
+      m_Context.unorm16VertexSupported ? 1 : 0);
+
+    if (!m_Context.unorm16VertexSupported)
+      YA_LOG_WARN("Render", "Quantized shadow positions are unavailable on this device, the exact position stream is forced");
 
     m_GeometryArena.Init(m_Context);
   }

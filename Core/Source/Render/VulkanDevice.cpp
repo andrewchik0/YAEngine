@@ -63,6 +63,12 @@ namespace YAEngine
       YA_LOG_WARN("Vulkan", "Device reports no drawIndirectFirstInstance support, indirect shadow batching stays disabled");
       deviceFeatures.drawIndirectFirstInstance = VK_FALSE;
     }
+    // The quantized shadow position stream is fed as a vertex attribute, and only
+    // the buffer features of the format say whether that is allowed at all.
+    VkFormatProperties unorm16Props {};
+    vkGetPhysicalDeviceFormatProperties(physicalDevice.Get(), VK_FORMAT_R16G16B16A16_UNORM, &unorm16Props);
+    b_Unorm16VertexSupported = (unorm16Props.bufferFeatures & VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT) != 0;
+
     b_DepthClampSupported = deviceFeatures.depthClamp == VK_TRUE;
     b_MultiDrawIndirectSupported = deviceFeatures.multiDrawIndirect == VK_TRUE;
     b_DrawIndirectFirstInstanceSupported = deviceFeatures.drawIndirectFirstInstance == VK_TRUE;

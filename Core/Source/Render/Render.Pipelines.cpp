@@ -247,6 +247,19 @@ namespace YAEngine
       m_ShadowIndirectPipelines[0] = m_PSOCache.Register(ctx.device, shadowRP, shadowIndirectInfo, pipelineCache);
       shadowIndirectInfo.doubleSided = true;
       m_ShadowIndirectPipelines[1] = m_PSOCache.Register(ctx.device, shadowRP, shadowIndirectInfo, pipelineCache);
+
+      // Quantized twin of the pair above. The shader is the same file: the restoring
+      // transform rides in the model matrix, so only the attribute format differs and
+      // every depth-related state has to stay identical for the toggle to be a fair
+      // comparison.
+      if (ctx.unorm16VertexSupported)
+      {
+        shadowIndirectInfo.doubleSided = false;
+        shadowIndirectInfo.vertexInputFormat = "n4";
+        m_ShadowIndirectQuantizedPipelines[0] = m_PSOCache.Register(ctx.device, shadowRP, shadowIndirectInfo, pipelineCache);
+        shadowIndirectInfo.doubleSided = true;
+        m_ShadowIndirectQuantizedPipelines[1] = m_PSOCache.Register(ctx.device, shadowRP, shadowIndirectInfo, pipelineCache);
+      }
     }
 
     VkRenderPass mainRP = m_Graph.GetPassRenderPass(m_GBufferPassIndex);

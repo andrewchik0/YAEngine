@@ -184,6 +184,16 @@ namespace YAEngine
           "per cull mode. Off falls back to the legacy one-draw-per-caster path.\n"
           "Both must render identically - watch Shadow draws in the performance panel.");
 
+      if (context.render->GetShadowIndirectEnabled())
+      {
+        ImGui::Checkbox("Quantized Positions", &context.render->GetShadowQuantizedPositionsEnabled());
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Indirect casters fetch 8-byte quantized positions instead of 12-byte ones,\n"
+            "restored by a transform folded into the model matrix.\n"
+            "Only the shadow atlas reads them - the depth prepass keeps the exact stream.\n"
+            "Watch for contact shadows drifting and acne on large meshes.");
+      }
+
       ImGui::Checkbox("Shadow Cascade LOD", &context.render->GetShadowLodEnabled());
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Distant cascades draw a simplified index stream over the same vertices.\n"

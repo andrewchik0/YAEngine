@@ -35,11 +35,17 @@ namespace YAEngine
       return b_DrawIndirectFirstInstanceSupported;
     }
 
+    bool IsUnorm16VertexSupported() const
+    {
+      return b_Unorm16VertexSupported;
+    }
+
   private:
 
     VkDevice m_Device {};
     bool b_DepthClampSupported = false;
     bool b_MultiDrawIndirectSupported = false;
     bool b_DrawIndirectFirstInstanceSupported = false;
+    bool b_Unorm16VertexSupported = false;
   };
 }

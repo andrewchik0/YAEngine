@@ -57,7 +57,9 @@ namespace YAEngine
         if (generateShadowLods)
           lods = MeshSimplifier::Build(welded.positions.data(), welded.positions.size(), welded.indices);
 
-        CreateWeldedPositions(ctx, welded.positions, welded.indices, &lods);
+        auto quantized = PositionQuantizer::Quantize(welded.positions.data(), welded.positions.size());
+
+        CreateWeldedPositions(ctx, welded.positions, welded.indices, &lods, quantized);
       }
     }
   }
@@ -74,17 +76,20 @@ namespace YAEngine
     m_IndicesBuffer = VulkanBuffer::CreateStaged(ctx, cpuData.indices.data(), indicesSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
     if (!cpuData.weldedPositions.empty())
-      CreateWeldedPositions(ctx, cpuData.weldedPositions, cpuData.weldedIndices, &cpuData.shadowLods);
+    {
+      CreateWeldedPositions(ctx, cpuData.weldedPositions, cpuData.weldedIndices,
+        &cpuData.shadowLods, cpuData.quantizedPositions);
+    }
   }
 
   void VulkanVertexBuffer::CreateWeldedPositions(const RenderContext& ctx,
     const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices,
-    const MeshLodLevels* lods)
+    const MeshLodLevels* lods, const QuantizedPositions& quantized)
   {
     if (ctx.geometryArena != nullptr)
     {
       m_ArenaAllocation = ctx.geometryArena->Upload(ctx,
-        positions.data(), positions.size(), indices.data(), indices.size());
+        positions.data(), positions.size(), indices.data(), indices.size(), quantized);
 
       if (m_ArenaAllocation.resident)
       {
@@ -108,7 +113,10 @@ namespace YAEngine
       if (levelIndices.empty())
         continue;
 
-      m_LodRanges[level] = m_Arena->UploadIndices(ctx, levelIndices.data(), levelIndices.size());
+      // The mesh's own index type, never a fresh choice: a level in the other index
+      // buffer would break the contiguous indirect command range of its tile.
+      m_LodRanges[level] = m_Arena->UploadIndices(ctx, levelIndices.data(), levelIndices.size(),
+        m_ArenaAllocation.indexType);
     }
   }
 
@@ -205,6 +213,9 @@ namespace YAEngine
         result.shadowLods = MeshSimplifier::Build(welded.positions.data(),
           welded.positions.size(), welded.indices);
       }
+
+      result.quantizedPositions = PositionQuantizer::Quantize(welded.positions.data(),
+        welded.positions.size());
 
       result.weldedPositions = std::move(welded.positions);
       result.weldedIndices = std::move(welded.indices);

@@ -14,6 +14,22 @@
 
 namespace YAEngine
 {
+  namespace
+  {
+    // model * translate(bias) * scale(scale), written out. The restoring transform is
+    // a diagonal plus a translation, so scaling three columns and shifting the fourth
+    // replaces a full 4x4 product - and this runs once per instance per frame.
+    glm::mat4 FoldDequantization(const glm::mat4& model, const glm::vec3& scale, const glm::vec3& bias)
+    {
+      glm::mat4 result;
+      result[3] = model[0] * bias.x + model[1] * bias.y + model[2] * bias.z + model[3];
+      result[0] = model[0] * scale.x;
+      result[1] = model[1] * scale.y;
+      result[2] = model[2] * scale.z;
+      return result;
+    }
+  }
+
   void Render::DrawMeshes(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame,
     VkDescriptorSet frameUBOOverride)
   {
@@ -674,6 +690,13 @@ namespace YAEngine
       && ctx.drawIndirectFirstInstanceSupported
       && ctx.geometryArena != nullptr;
 
+    // Quantized positions belong to the indirect path alone. Every other consumer of
+    // the arena - the depth prepass above all - must keep reading the exact stream,
+    // because the prepass writes the depth the G-buffer then tests against.
+    bool useQuantizedPositions = useIndirect
+      && b_ShadowQuantizedPositions
+      && ctx.unorm16VertexSupported;
+
     // Bakes render the atlas on a single-time command buffer outside the frame loop
     // and pass frameIndex 0, which the frame loop may still own. The passed index is
     // deliberately ignored for them and the dedicated bake slot is used instead.
@@ -829,7 +852,12 @@ namespace YAEngine
     // Ranges of m_ShadowDrawCommands that share a cull mode, one indirect draw each.
     size_t batchBegin[2] = { 0, 0 };
     size_t batchEnd[2] = { 0, 0 };
+    // The free area of the indirect buffer is filled from both ends: 16-bit index
+    // commands grow the head, 32-bit ones grow the tail downwards. One pass over the
+    // casters then yields two contiguous ranges, one per index buffer bind, without
+    // running the frustum test twice.
     uint32_t indirectCursor = 0;
+    uint32_t indirectTail = 0;
     uint32_t indirectCapacity = 0;
     uint32_t modelCapacity = 0;
     VkBuffer indirectBuffer = VK_NULL_HANDLE;
@@ -856,9 +884,18 @@ namespace YAEngine
           continue;
 
         const GeometryArenaAllocation& alloc = vb.GetArenaAllocation();
+
+        // A mesh the shadow position buffer had no room for simply keeps the legacy
+        // per-draw path, which reads the exact stream and needs no restoring.
+        if (useQuantizedPositions && !alloc.shadowPositionsResident)
+          continue;
+
         auto& rec = m_ShadowIndirectRecords[i];
         rec.batchable = true;
-        rec.vertexOffset = int32_t(alloc.vertexOffset);
+        rec.vertexOffset = int32_t(useQuantizedPositions ? alloc.shadowVertexOffset : alloc.vertexOffset);
+        rec.indexType = alloc.indexType;
+        rec.dequantScale = alloc.dequantScale;
+        rec.dequantBias = alloc.dequantBias;
         // GetLodRange already collapses missing levels onto the nearest populated
         // one, so the per-tile emission below never has to test for a level.
         for (uint32_t lod = 0; lod < MeshSimplifier::LOD_COUNT; lod++)
@@ -900,16 +937,37 @@ namespace YAEngine
 
         auto& dc = m_ShadowDrawCommands[i];
         rec.modelBase = modelCursor;
+
+        // Every matrix is finished in registers and stored exactly once. This buffer
+        // is write-combined host memory: it is written sequentially and never read
+        // back, and a second pass that reloaded what it just wrote would pull the
+        // whole SSBO across the bus uncached, costing milliseconds per frame.
+        // Restoring happens in mesh local space, so it multiplies in on the right of
+        // everything the instance already carries.
         if (dc.instanced)
         {
           const auto& instances = *dc.instanceData;
-          for (uint32_t n = 0; n < rec.instanceCount; n++)
-            models[modelCursor + n] = dc.worldTransform * instances[n];
+          if (useQuantizedPositions)
+          {
+            for (uint32_t n = 0; n < rec.instanceCount; n++)
+            {
+              models[modelCursor + n] = FoldDequantization(dc.worldTransform * instances[n],
+                rec.dequantScale, rec.dequantBias);
+            }
+          }
+          else
+          {
+            for (uint32_t n = 0; n < rec.instanceCount; n++)
+              models[modelCursor + n] = dc.worldTransform * instances[n];
+          }
         }
         else
         {
-          models[modelCursor] = dc.worldTransform;
+          models[modelCursor] = useQuantizedPositions
+            ? FoldDequantization(dc.worldTransform, rec.dequantScale, rec.dequantBias)
+            : dc.worldTransform;
         }
+
         modelCursor += rec.instanceCount;
       }
 
@@ -957,6 +1015,7 @@ namespace YAEngine
         m_ShadowIndirectBuffers[shadowSlot].GetMapped());
       indirectCapacity = uint32_t(m_ShadowIndirectBuffers[shadowSlot].GetSize()
         / sizeof(VkDrawIndexedIndirectCommand));
+      indirectTail = indirectCapacity;
     }
 
     auto& atlas = m_ShadowManager.GetAtlas();
@@ -1011,9 +1070,40 @@ namespace YAEngine
 
       if (useIndirect)
       {
+        // One contiguous range of commands, drawn against the index buffer it was
+        // built for. Split across several submissions when the device caps how many
+        // commands one call may carry.
+        auto issueRange = [&](uint32_t first, uint32_t count, VkIndexType indexType)
+        {
+          if (count == 0)
+            return;
+
+          vkCmdBindIndexBuffer(cmd, ctx.geometryArena->GetIndexBuffer(indexType), 0, indexType);
+
+          uint32_t maxPerCall = std::max(ctx.maxDrawIndirectCount, 1u);
+          if (count > maxPerCall && !b_ShadowIndirectCountSplitReported)
+          {
+            b_ShadowIndirectCountSplitReported = true;
+            YA_LOG_WARN("Render",
+              "Shadow indirect range of %u commands exceeds maxDrawIndirectCount %u, splitting",
+              count, maxPerCall);
+          }
+
+          for (uint32_t issued = 0; issued < count; issued += maxPerCall)
+          {
+            uint32_t batch = std::min(maxPerCall, count - issued);
+            vkCmdDrawIndexedIndirect(cmd, indirectBuffer,
+              VkDeviceSize(first + issued) * sizeof(VkDrawIndexedIndirectCommand),
+              batch, sizeof(VkDrawIndexedIndirectCommand));
+            m_Stats.shadowDrawCalls++;
+          }
+          m_Stats.shadowIndirectCommands += count;
+        };
+
         for (uint32_t cullMode = 0; cullMode < 2; cullMode++)
         {
-          uint32_t rangeFirst = indirectCursor;
+          uint32_t narrowFirst = indirectCursor;
+          uint32_t wideEnd = indirectTail;
 
           for (size_t i = batchBegin[cullMode]; i < batchEnd[cullMode]; i++)
           {
@@ -1032,7 +1122,8 @@ namespace YAEngine
                 continue;
             }
 
-            if (indirectCursor >= indirectCapacity)
+            // The two ends meeting is what full means now, not reaching the capacity.
+            if (indirectCursor >= indirectTail)
             {
               if (!b_ShadowIndirectOverflowReported)
               {
@@ -1046,7 +1137,8 @@ namespace YAEngine
 
             const MeshLodRange& lod = rec.lods[lodLevel];
 
-            VkDrawIndexedIndirectCommand& out = indirectCommands[indirectCursor++];
+            bool narrow = rec.indexType == VK_INDEX_TYPE_UINT16;
+            VkDrawIndexedIndirectCommand& out = indirectCommands[narrow ? indirectCursor++ : --indirectTail];
             out.indexCount = lod.indexCount;
             out.instanceCount = rec.instanceCount;
             out.firstIndex = lod.firstIndex;
@@ -1057,11 +1149,14 @@ namespace YAEngine
             countTriangles(i, lod.indexCount, rec.lods[0].indexCount, rec.instanceCount);
           }
 
-          uint32_t commandCount = indirectCursor - rangeFirst;
-          if (commandCount == 0)
+          uint32_t narrowCount = indirectCursor - narrowFirst;
+          uint32_t wideCount = wideEnd - indirectTail;
+          if (narrowCount == 0 && wideCount == 0)
             continue;
 
-          auto& pipeline = m_PSOCache.Get(m_ShadowIndirectPipelines[cullMode]);
+          auto& pipeline = m_PSOCache.Get(useQuantizedPositions
+            ? m_ShadowIndirectQuantizedPipelines[cullMode]
+            : m_ShadowIndirectPipelines[cullMode]);
           pipeline.Bind(cmd);
           pipeline.BindDescriptorSets(cmd,
             { m_ShadowManager.GetShadowCascadeUBODescriptorSet(currentFrame) }, 0);
@@ -1073,30 +1168,14 @@ namespace YAEngine
 
           // Re-bound every tile because the alpha-test tail below binds its own
           // interleaved vertex stream over these.
-          VkBuffer positions = ctx.geometryArena->GetPositionBuffer();
+          VkBuffer positions = useQuantizedPositions
+            ? ctx.geometryArena->GetShadowPositionBuffer()
+            : ctx.geometryArena->GetPositionBuffer();
           VkDeviceSize positionOffset = 0;
           vkCmdBindVertexBuffers(cmd, 0, 1, &positions, &positionOffset);
-          vkCmdBindIndexBuffer(cmd, ctx.geometryArena->GetIndexBuffer(VK_INDEX_TYPE_UINT32), 0,
-            VK_INDEX_TYPE_UINT32);
 
-          uint32_t maxPerCall = std::max(ctx.maxDrawIndirectCount, 1u);
-          if (commandCount > maxPerCall && !b_ShadowIndirectCountSplitReported)
-          {
-            b_ShadowIndirectCountSplitReported = true;
-            YA_LOG_WARN("Render",
-              "Shadow indirect range of %u commands exceeds maxDrawIndirectCount %u, splitting",
-              commandCount, maxPerCall);
-          }
-
-          for (uint32_t issued = 0; issued < commandCount; issued += maxPerCall)
-          {
-            uint32_t batch = std::min(maxPerCall, commandCount - issued);
-            vkCmdDrawIndexedIndirect(cmd, indirectBuffer,
-              VkDeviceSize(rangeFirst + issued) * sizeof(VkDrawIndexedIndirectCommand),
-              batch, sizeof(VkDrawIndexedIndirectCommand));
-            m_Stats.shadowDrawCalls++;
-          }
-          m_Stats.shadowIndirectCommands += commandCount;
+          issueRange(narrowFirst, narrowCount, VK_INDEX_TYPE_UINT16);
+          issueRange(indirectTail, wideCount, VK_INDEX_TYPE_UINT32);
         }
       }
 

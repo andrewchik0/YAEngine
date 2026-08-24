@@ -3,6 +3,7 @@
 #include "Pch.h"
 
 #include "Utils/MeshSimplifier.h"
+#include "Utils/PositionQuantizer.h"
 
 namespace YAEngine
 {
@@ -51,6 +52,9 @@ namespace YAEngine
     // thread; produced for every mesh so all of them can live in the geometry arena.
     std::vector<glm::vec3> weldedPositions;
     std::vector<uint32_t> weldedIndices;
+    // Quantized copy of weldedPositions, read by the indirect shadow path alone.
+    // Packed off the render thread next to the weld.
+    QuantizedPositions quantizedPositions;
     // Simplified index streams over weldedPositions, used by the distant shadow
     // cascades. Built off the render thread alongside the weld.
     MeshLodLevels shadowLods;
