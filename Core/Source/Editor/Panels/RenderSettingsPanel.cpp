@@ -177,6 +177,13 @@ namespace YAEngine
       }
       ImGui::Checkbox("Colliders", &context.render->GetCollidersVisible());
 
+      ImGui::Separator();
+      ImGui::Checkbox("Indirect Shadows", &context.render->GetShadowIndirectEnabled());
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Batches opaque shadow casters into one indirect draw per atlas tile\n"
+          "per cull mode. Off falls back to the legacy one-draw-per-caster path.\n"
+          "Both must render identically - watch Shadow draws in the performance panel.");
+
       ImGui::SliderInt("Reflection Probe Bounces", &context.render->GetProbeBounceCount(),
         Render::MIN_PROBE_BOUNCES, Render::MAX_PROBE_BOUNCES);
       if (ImGui::IsItemHovered())

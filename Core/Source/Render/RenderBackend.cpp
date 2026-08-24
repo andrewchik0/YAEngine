@@ -72,7 +72,10 @@ namespace YAEngine
     m_Context.maxFramesInFlight = m_MaxFramesInFlight;
     m_Context.pipelineCache = m_PipelineCache;
     m_Context.layoutCache = &m_LayoutCache;
+    m_Context.geometryArena = &m_GeometryArena;
     m_Context.depthClampSupported = m_Device.IsDepthClampSupported();
+    m_Context.multiDrawIndirectSupported = m_Device.IsMultiDrawIndirectSupported();
+    m_Context.drawIndirectFirstInstanceSupported = m_Device.IsDrawIndirectFirstInstanceSupported();
 
     VkPhysicalDeviceProperties limitProps {};
     vkGetPhysicalDeviceProperties(m_PhysicalDevice.Get(), &limitProps);
@@ -92,6 +95,17 @@ namespace YAEngine
       ? familyProps[graphicsFamily].timestampValidBits : 0;
     m_Context.timestampsSupported = limitProps.limits.timestampComputeAndGraphics == VK_TRUE
       && m_Context.timestampValidBits > 0;
+    m_Context.maxDrawIndirectCount = limitProps.limits.maxDrawIndirectCount;
+
+    YA_LOG_INFO("Render", "Indirect draw support: multiDrawIndirect=%d, drawIndirectFirstInstance=%d, maxDrawIndirectCount=%u",
+      m_Context.multiDrawIndirectSupported ? 1 : 0,
+      m_Context.drawIndirectFirstInstanceSupported ? 1 : 0,
+      m_Context.maxDrawIndirectCount);
+
+    if (!m_Context.multiDrawIndirectSupported || !m_Context.drawIndirectFirstInstanceSupported)
+      YA_LOG_WARN("Render", "Indirect shadow batching is unavailable on this device, the legacy per-draw path is forced");
+
+    m_GeometryArena.Init(m_Context);
   }
 
   void RenderBackend::Destroy()
@@ -119,6 +133,7 @@ namespace YAEngine
 
     m_Sync.Destroy();
     m_ImGUI.Destroy();
+    m_GeometryArena.Destroy(m_Context);
     m_CommandBuffer.Destroy();
     m_LayoutCache.Destroy(m_Device.Get());
     vkDestroyPipelineCache(m_Device.Get(), m_PipelineCache, nullptr);

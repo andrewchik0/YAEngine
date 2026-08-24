@@ -163,6 +163,7 @@ namespace YAEngine
     settings["taa"] = render.GetTAAEnabled();
     settings["taaClampSigma"] = render.GetTAAClampSigma();
     settings["shadows"] = render.GetShadowsEnabled();
+    settings["shadowIndirect"] = render.GetShadowIndirectEnabled();
     settings["autoExposure"] = render.GetAutoExposureEnabled();
     settings["adaptSpeedUp"] = render.GetAdaptSpeedUp();
     settings["adaptSpeedDown"] = render.GetAdaptSpeedDown();
@@ -265,6 +266,9 @@ namespace YAEngine
     if (settings["taa"]) render.GetTAAEnabled() = settings["taa"].as<bool>();
     if (settings["taaClampSigma"]) render.GetTAAClampSigma() = settings["taaClampSigma"].as<float>();
     if (settings["shadows"]) render.GetShadowsEnabled() = settings["shadows"].as<bool>();
+    // Absent in scenes written before the indirect shadow path existed. Leaving the
+    // member default (on) is deliberate: those scenes should pick up the new path.
+    if (settings["shadowIndirect"]) render.GetShadowIndirectEnabled() = settings["shadowIndirect"].as<bool>();
     if (settings["autoExposure"]) render.GetAutoExposureEnabled() = settings["autoExposure"].as<bool>();
     if (settings["adaptSpeedUp"]) render.GetAdaptSpeedUp() = settings["adaptSpeedUp"].as<float>();
     if (settings["adaptSpeedDown"]) render.GetAdaptSpeedDown() = settings["adaptSpeedDown"].as<float>();

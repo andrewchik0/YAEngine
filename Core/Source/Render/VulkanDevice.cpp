@@ -36,6 +36,10 @@ namespace YAEngine
     // Shadow pipelines clamp depth instead of clipping it: a caster sitting in front of
     // a cascade near plane still has to occlude, not disappear from the shadow map.
     deviceFeatures.depthClamp = VK_TRUE;
+    // Batched shadow casters issue one vkCmdDrawIndexedIndirect per atlas tile with many
+    // commands in it, and each command picks its model matrix through firstInstance.
+    deviceFeatures.multiDrawIndirect = VK_TRUE;
+    deviceFeatures.drawIndirectFirstInstance = VK_TRUE;
 
     VkPhysicalDeviceFeatures supported{};
     vkGetPhysicalDeviceFeatures(physicalDevice.Get(), &supported);
@@ -49,7 +53,19 @@ namespace YAEngine
       YA_LOG_WARN("Vulkan", "Device reports no depth clamp support, shadow casters in front of a cascade near plane will be clipped away");
       deviceFeatures.depthClamp = VK_FALSE;
     }
+    if (supported.multiDrawIndirect == VK_FALSE)
+    {
+      YA_LOG_WARN("Vulkan", "Device reports no multiDrawIndirect support, indirect shadow batching stays disabled");
+      deviceFeatures.multiDrawIndirect = VK_FALSE;
+    }
+    if (supported.drawIndirectFirstInstance == VK_FALSE)
+    {
+      YA_LOG_WARN("Vulkan", "Device reports no drawIndirectFirstInstance support, indirect shadow batching stays disabled");
+      deviceFeatures.drawIndirectFirstInstance = VK_FALSE;
+    }
     b_DepthClampSupported = deviceFeatures.depthClamp == VK_TRUE;
+    b_MultiDrawIndirectSupported = deviceFeatures.multiDrawIndirect == VK_TRUE;
+    b_DrawIndirectFirstInstanceSupported = deviceFeatures.drawIndirectFirstInstance == VK_TRUE;
 
     VkDeviceCreateInfo createInfo{};
     createInfo.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;

@@ -203,6 +203,7 @@ namespace YAEngine
       ubo.Destroy(ctx);
     m_InstanceDescriptorSet.Destroy();
     m_InstanceBuffer.Destroy(ctx);
+    DestroyShadowIndirectResources();
     m_HistogramBuffer.Destroy(ctx);
     m_ExposureBuffer.Destroy(ctx);
     m_PSOCache.Destroy();

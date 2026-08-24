@@ -65,6 +65,55 @@ namespace YAEngine
     return m_PSOCache.Get(m_DepthPipelines[dc.SortKey()]);
   }
 
+  void Render::CreateShadowIndirectResources()
+  {
+    auto& ctx = m_Backend.GetContext();
+
+    // One extra slot past the frames in flight: probe and irradiance volume bakes
+    // render the shadow atlas on a single-time command buffer outside the frame loop
+    // and must not write into a slot the frame loop still owns.
+    uint32_t slotCount = ctx.maxFramesInFlight + 1;
+
+    SetDescription modelDesc = {
+      .set = 1,
+      .bindings = {
+        { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_VERTEX_BIT }
+      }
+    };
+
+    m_ShadowModelBuffers.resize(slotCount);
+    m_ShadowModelDescriptorSets.resize(slotCount);
+    m_ShadowIndirectBuffers.resize(slotCount);
+
+    for (uint32_t i = 0; i < slotCount; i++)
+    {
+      m_ShadowModelBuffers[i] = VulkanBuffer::CreateMapped(ctx, SHADOW_MODEL_INITIAL_BYTES,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT);
+      m_ShadowModelDescriptorSets[i].Init(ctx, modelDesc);
+      m_ShadowModelDescriptorSets[i].WriteStorageBuffer(0, m_ShadowModelBuffers[i].Get(),
+        m_ShadowModelBuffers[i].GetSize());
+
+      m_ShadowIndirectBuffers[i] = VulkanBuffer::CreateMapped(ctx, SHADOW_INDIRECT_INITIAL_BYTES,
+        VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT);
+    }
+  }
+
+  void Render::DestroyShadowIndirectResources()
+  {
+    auto& ctx = m_Backend.GetContext();
+
+    for (auto& set : m_ShadowModelDescriptorSets)
+      set.Destroy();
+    for (auto& buffer : m_ShadowModelBuffers)
+      buffer.Destroy(ctx);
+    for (auto& buffer : m_ShadowIndirectBuffers)
+      buffer.Destroy(ctx);
+
+    m_ShadowModelDescriptorSets.clear();
+    m_ShadowModelBuffers.clear();
+    m_ShadowIndirectBuffers.clear();
+  }
+
   void Render::InitPipelines()
   {
     auto& ctx = m_Backend.GetContext();
@@ -129,7 +178,9 @@ namespace YAEngine
       // so they must not inherit the reversed-Z GREATER default.
       PipelineCreateInfo shadowInfo = {
         .vertexShaderFile = "shadow.vert",
-        .pushConstantSize = sizeof(glm::mat4) + sizeof(int) + sizeof(int),
+        // viewProj * world folded into one matrix, plus the instance offset. Pushing
+        // the tile projection next to the model matrix would need 132 bytes.
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
         .colorAttachmentCount = 0,
         .compareOp = VK_COMPARE_OP_LESS,
         .vertexInputFormat = "f3",
@@ -158,7 +209,7 @@ namespace YAEngine
       PipelineCreateInfo shadowAlphaInfo = {
         .fragmentShaderFile = "alphatest_discard.frag",
         .vertexShaderFile = "shadow_alphatest.vert",
-        .pushConstantSize = sizeof(glm::mat4) + sizeof(int) + sizeof(int),
+        .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
         .doubleSided = true,
         .colorAttachmentCount = 0,
         .compareOp = VK_COMPARE_OP_LESS,
@@ -172,6 +223,30 @@ namespace YAEngine
       shadowAlphaInfo.vertexShaderFile = "shadow_instanced_alphatest.vert";
       shadowAlphaInfo.sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout(), m_DefaultMaterial.GetLayout(), m_InstanceDescriptorSet.GetLayout() });
       m_ShadowPipelines[7] = m_PSOCache.Register(ctx.device, shadowRP, shadowAlphaInfo, pipelineCache);
+    }
+
+    CreateShadowIndirectResources();
+
+    // Indirect opaque shadow pipelines. They differ from the pipelines above only in
+    // where the world matrix comes from - a shared SSBO addressed by gl_InstanceIndex
+    // instead of a push constant - so every depth-related state must stay identical or
+    // the two paths stop being comparable.
+    {
+      PipelineCreateInfo shadowIndirectInfo = {
+        .vertexShaderFile = "shadow_indirect.vert",
+        .pushConstantSize = sizeof(glm::mat4),
+        .colorAttachmentCount = 0,
+        .compareOp = VK_COMPARE_OP_LESS,
+        .vertexInputFormat = "f3",
+        .sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout(),
+          m_ShadowModelDescriptorSets[0].GetLayout() })
+      };
+      shadowIndirectInfo.depthBiasEnable = true;
+      shadowIndirectInfo.depthClampEnable = ctx.depthClampSupported;
+
+      m_ShadowIndirectPipelines[0] = m_PSOCache.Register(ctx.device, shadowRP, shadowIndirectInfo, pipelineCache);
+      shadowIndirectInfo.doubleSided = true;
+      m_ShadowIndirectPipelines[1] = m_PSOCache.Register(ctx.device, shadowRP, shadowIndirectInfo, pipelineCache);
     }
 
     VkRenderPass mainRP = m_Graph.GetPassRenderPass(m_GBufferPassIndex);

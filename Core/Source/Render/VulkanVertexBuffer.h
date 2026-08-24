@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Pch.h"
+#include "GeometryArena.h"
 #include "VulkanBuffer.h"
 #include "Assets/CpuResourceData.h"
 
@@ -40,9 +41,15 @@ namespace YAEngine
     VkBuffer Get() const { return m_VerticesBuffer.Get(); }
     size_t GetIndexCount() const { return m_IndicesCount; }
 
+    bool IsArenaResident() const { return m_ArenaAllocation.resident; }
+    const GeometryArenaAllocation& GetArenaAllocation() const { return m_ArenaAllocation; }
+
   private:
 
     void CreateWeldedPositions(const RenderContext& ctx,
+      const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices);
+
+    void CreateStandalonePositions(const RenderContext& ctx,
       const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices);
 
     VulkanBuffer m_VerticesBuffer;
@@ -53,12 +60,18 @@ namespace YAEngine
     // Position-only stream with duplicate positions removed. Depth prepass and
     // shadow passes fetch this instead of the interleaved stream, which carries
     // one vertex per attribute combination and reuses none of them.
-    // Positions and indices share one allocation: every staged upload costs a
-    // queue submit plus a fence wait, and meshes are uploaded one by one.
+    // It normally lives in the shared geometry arena; only the arena pointer is
+    // kept, never a cached VkBuffer, because growth replaces the arena's handles.
+    GeometryArena* m_Arena = nullptr;
+    GeometryArenaAllocation m_ArenaAllocation {};
+
+    // Fallback for meshes the arena could not accept. Positions and indices share
+    // one allocation: every staged upload costs a queue submit plus a fence wait,
+    // and meshes are uploaded one by one.
     VulkanBuffer m_PositionsBuffer;
     VkDeviceSize m_PositionIndexOffset {};
     size_t m_PositionIndexCount {};
     VkIndexType m_PositionIndexType = VK_INDEX_TYPE_UINT32;
-    bool b_HasWeldedPositions = false;
+    bool b_HasStandalonePositions = false;
   };
 }

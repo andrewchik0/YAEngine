@@ -17,6 +17,11 @@ namespace YAEngine
   {
   public:
 
+    // Pass as worthwhileRatio to keep the welded arrays no matter how little
+    // deduplication saved. The geometry arena needs a position stream for every
+    // mesh: a mesh without one cannot be batched into a shared buffer at all.
+    static constexpr float KEEP_ALWAYS_RATIO = 2.0f;
+
     // Deduplicates positions bitwise. An epsilon would merge vertices that a
     // depth-only pass rasterizes at different subpixel coordinates, opening
     // cracks in shadow maps and the depth prepass.

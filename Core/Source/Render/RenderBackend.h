@@ -1,6 +1,7 @@
 #pragma once
 
 #include "DescriptorLayoutCache.h"
+#include "GeometryArena.h"
 #include "RenderContext.h"
 #include "RenderSpecs.h"
 #include "VulkanCommandBuffer.h"
@@ -34,6 +35,7 @@ namespace YAEngine
     VulkanCommandBuffer& GetCommandBuffer() { return m_CommandBuffer; }
     VulkanDescriptorPool& GetDescriptorPool() { return m_DescriptorPool; }
     DescriptorLayoutCache& GetLayoutCache() { return m_LayoutCache; }
+    GeometryArena& GetGeometryArena() { return m_GeometryArena; }
 
     VkCommandBuffer GetCurrentCommandBuffer() { return m_CommandBuffer.GetCurrentBuffer(); }
     uint32_t GetCurrentFrameIndex() const { return m_CurrentFrameIndex; }
@@ -52,6 +54,7 @@ namespace YAEngine
     VulkanDescriptorPool m_DescriptorPool;
     VulkanImGui m_ImGUI {};
     DescriptorLayoutCache m_LayoutCache;
+    GeometryArena m_GeometryArena;
 
     RenderContext m_Context {};
     VkPipelineCache m_PipelineCache {};

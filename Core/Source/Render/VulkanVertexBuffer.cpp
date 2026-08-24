@@ -48,7 +48,8 @@ namespace YAEngine
       for (size_t i = 0; i < vertexCount; i++)
         std::memcpy(&positions[i], bytes + i * vertexSize, sizeof(glm::vec3));
 
-      auto welded = PositionWelder::Weld(positions.data(), vertexCount, indices);
+      auto welded = PositionWelder::Weld(positions.data(), vertexCount, indices,
+        PositionWelder::KEEP_ALWAYS_RATIO);
       if (welded.worthwhile)
         CreateWeldedPositions(ctx, welded.positions, welded.indices);
     }
@@ -70,6 +71,24 @@ namespace YAEngine
   }
 
   void VulkanVertexBuffer::CreateWeldedPositions(const RenderContext& ctx,
+    const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices)
+  {
+    if (ctx.geometryArena != nullptr)
+    {
+      m_ArenaAllocation = ctx.geometryArena->Upload(ctx,
+        positions.data(), positions.size(), indices.data(), indices.size());
+
+      if (m_ArenaAllocation.resident)
+      {
+        m_Arena = ctx.geometryArena;
+        return;
+      }
+    }
+
+    CreateStandalonePositions(ctx, positions, indices);
+  }
+
+  void VulkanVertexBuffer::CreateStandalonePositions(const RenderContext& ctx,
     const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices)
   {
     m_PositionIndexCount = indices.size();
@@ -98,7 +117,7 @@ namespace YAEngine
     m_PositionsBuffer = VulkanBuffer::CreateStaged(ctx, blob.data(), blob.size(),
       VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
-    b_HasWeldedPositions = true;
+    b_HasStandalonePositions = true;
   }
 
   CpuMeshData VulkanVertexBuffer::PrepareSoA(const std::vector<Vertex>& vertices, std::vector<uint32_t> indices)
@@ -134,7 +153,8 @@ namespace YAEngine
       dstAttrib[i] = { vertices[i].tex, vertices[i].normal, vertices[i].tangent };
     }
 
-    auto welded = PositionWelder::Weld(dstPos, vertices.size(), result.indices);
+    auto welded = PositionWelder::Weld(dstPos, vertices.size(), result.indices,
+      PositionWelder::KEEP_ALWAYS_RATIO);
     if (welded.worthwhile)
     {
       result.weldedPositions = std::move(welded.positions);
@@ -149,10 +169,16 @@ namespace YAEngine
     m_VerticesBuffer.Destroy(ctx);
     m_IndicesBuffer.Destroy(ctx);
 
-    if (b_HasWeldedPositions)
+    if (m_Arena != nullptr)
+    {
+      m_Arena->Free(m_ArenaAllocation);
+      m_Arena = nullptr;
+    }
+
+    if (b_HasStandalonePositions)
     {
       m_PositionsBuffer.Destroy(ctx);
-      b_HasWeldedPositions = false;
+      b_HasStandalonePositions = false;
     }
   }
 
@@ -178,17 +204,29 @@ namespace YAEngine
 
   void VulkanVertexBuffer::DrawPositionOnly(VkCommandBuffer cmd, uint32_t instanceCount)
   {
-    VkBuffer buf = b_HasWeldedPositions ? m_PositionsBuffer.Get() : m_VerticesBuffer.Get();
+    if (m_ArenaAllocation.resident)
+    {
+      VkBuffer positions = m_Arena->GetPositionBuffer();
+      VkDeviceSize offset = 0;
+      vkCmdBindVertexBuffers(cmd, 0, 1, &positions, &offset);
+      vkCmdBindIndexBuffer(cmd, m_Arena->GetIndexBuffer(m_ArenaAllocation.indexType), 0,
+        m_ArenaAllocation.indexType);
+      vkCmdDrawIndexed(cmd, m_ArenaAllocation.indexCount, instanceCount,
+        m_ArenaAllocation.firstIndex, static_cast<int32_t>(m_ArenaAllocation.vertexOffset), 0);
+      return;
+    }
+
+    VkBuffer buf = b_HasStandalonePositions ? m_PositionsBuffer.Get() : m_VerticesBuffer.Get();
     VkDeviceSize offset = 0;
 
-    if (b_HasWeldedPositions)
+    if (b_HasStandalonePositions)
       vkCmdBindIndexBuffer(cmd, buf, m_PositionIndexOffset, m_PositionIndexType);
     else
       vkCmdBindIndexBuffer(cmd, m_IndicesBuffer.Get(), 0, VK_INDEX_TYPE_UINT32);
 
     vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &offset);
 
-    size_t indexCount = b_HasWeldedPositions ? m_PositionIndexCount : m_IndicesCount;
+    size_t indexCount = b_HasStandalonePositions ? m_PositionIndexCount : m_IndicesCount;
     vkCmdDrawIndexed(cmd, static_cast<uint32_t>(indexCount), instanceCount, 0, 0, 0);
   }
 }

@@ -1,12 +1,14 @@
 #include "Render.h"
 
 #include "DebugMarker.h"
+#include "GeometryArena.h"
 #include "VulkanVertexBuffer.h"
 #include "Assets/AssetManager.h"
 #include "RenderObject.h"
 #include "FrustumCull.h"
 #include "Scene/Components.h"
 
+#include "Utils/Log.h"
 #include "Utils/Utils.h"
 #include "Utils/Projection.h"
 
@@ -629,9 +631,54 @@ namespace YAEngine
   }
 #endif
 
+  bool Render::GrowMappedSlot(const RenderContext& ctx, VulkanBuffer& buffer,
+    VkDeviceSize requiredBytes, VkDeviceSize capBytes, VkBufferUsageFlags usage,
+    const char* name, bool& reportedFlag)
+  {
+    VkDeviceSize newSize = buffer.GetSize();
+    while (newSize < requiredBytes && newSize < capBytes)
+      newSize = std::min(newSize * 2, capBytes);
+
+    bool grew = newSize > buffer.GetSize();
+    if (grew)
+    {
+      // Nothing has been recorded into this slot yet this frame, and its previous
+      // contents were retired behind the frame fence, so the old buffer can go now
+      // instead of onto a deferred-destroy queue.
+      buffer.Destroy(ctx);
+      buffer = VulkanBuffer::CreateMapped(ctx, newSize, usage);
+      YA_LOG_INFO("Render", "Shadow %s buffer grown to %llu KB",
+        name, (unsigned long long)(newSize / 1024));
+    }
+
+    if (newSize < requiredBytes && !reportedFlag)
+    {
+      reportedFlag = true;
+      YA_LOG_WARN("Render",
+        "Shadow %s buffer capped at %llu KB while %llu KB was requested, the excess draws are dropped",
+        name, (unsigned long long)(newSize / 1024), (unsigned long long)(requiredBytes / 1024));
+    }
+
+    return grew;
+  }
+
   void Render::RenderShadowMaps(FrameContext& frame, VkCommandBuffer cmd,
     uint32_t frameIndex, const glm::vec3* probeCenter, float probeRadius)
   {
+    auto& ctx = m_Backend.GetContext();
+
+    // Support is a property of the device and the toggle is a user setting, so the
+    // effective path is decided here every frame rather than latched at load time.
+    bool useIndirect = b_ShadowIndirectEnabled
+      && ctx.multiDrawIndirectSupported
+      && ctx.drawIndirectFirstInstanceSupported
+      && ctx.geometryArena != nullptr;
+
+    // Bakes render the atlas on a single-time command buffer outside the frame loop
+    // and pass frameIndex 0, which the frame loop may still own. The passed index is
+    // deliberately ignored for them and the dedicated bake slot is used instead.
+    uint32_t shadowSlot = GetShadowSlot(frameIndex, probeCenter != nullptr);
+
     // Collect shadow draw commands from ALL objects (not just camera-visible).
     // Objects outside the camera frustum can still cast shadows into the view.
     m_ShadowDrawCommands.clear();
@@ -660,14 +707,31 @@ namespace YAEngine
       });
     }
 
-    std::sort(m_ShadowDrawCommands.begin(), m_ShadowDrawCommands.end(),
-      [](const DrawCommand& a, const DrawCommand& b)
-      {
-        uint8_t ka = a.SortKey(), kb = b.SortKey();
-        if (ka != kb) return ka < kb;
-        if (a.materialIndex != b.materialIndex) return a.materialIndex < b.materialIndex;
-        return a.meshIndex < b.meshIndex;
-      });
+    // The indirect path needs the two opaque cull-mode groups contiguous, which the
+    // legacy key does not give (it splits opaque four ways on instancing as well).
+    // The legacy path keeps its own key so its pipeline bind count is unchanged.
+    if (useIndirect)
+    {
+      std::sort(m_ShadowDrawCommands.begin(), m_ShadowDrawCommands.end(),
+        [](const DrawCommand& a, const DrawCommand& b)
+        {
+          uint8_t ka = a.ShadowBatchKey(), kb = b.ShadowBatchKey();
+          if (ka != kb) return ka < kb;
+          if (a.materialIndex != b.materialIndex) return a.materialIndex < b.materialIndex;
+          return a.meshIndex < b.meshIndex;
+        });
+    }
+    else
+    {
+      std::sort(m_ShadowDrawCommands.begin(), m_ShadowDrawCommands.end(),
+        [](const DrawCommand& a, const DrawCommand& b)
+        {
+          uint8_t ka = a.SortKey(), kb = b.SortKey();
+          if (ka != kb) return ka < kb;
+          if (a.materialIndex != b.materialIndex) return a.materialIndex < b.materialIndex;
+          return a.meshIndex < b.meshIndex;
+        });
+    }
 
     // Pre-bind materials needed by alpha-test shadow pipelines
     auto& materialManager = frame.assets.Materials();
@@ -698,6 +762,13 @@ namespace YAEngine
       m_ShadowManager.SetSpotShadowCount(0);
       m_ShadowManager.SetPointShadowCount(0);
       m_ShadowManager.SetUp(frameIndex);
+#ifdef YA_EDITOR
+      if (b_ShadowBreakdownPending && !probeCenter)
+      {
+        m_ShadowBreakdownTriangles.clear();
+        DumpShadowBreakdown();
+      }
+#endif
       return;
     }
 
@@ -753,6 +824,139 @@ namespace YAEngine
     auto currentFrame = frameIndex;
     m_ShadowManager.SetUp(currentFrame);
 
+    auto& meshManager = frame.assets.Meshes();
+
+    // Ranges of m_ShadowDrawCommands that share a cull mode, one indirect draw each.
+    size_t batchBegin[2] = { 0, 0 };
+    size_t batchEnd[2] = { 0, 0 };
+    uint32_t indirectCursor = 0;
+    uint32_t indirectCapacity = 0;
+    uint32_t modelCapacity = 0;
+    VkBuffer indirectBuffer = VK_NULL_HANDLE;
+    VkDrawIndexedIndirectCommand* indirectCommands = nullptr;
+
+    if (useIndirect)
+    {
+      size_t commandCount = m_ShadowDrawCommands.size();
+      m_ShadowIndirectRecords.assign(commandCount, ShadowIndirectRecord {});
+
+      // Pass one resolves the arena range and instance count of every opaque caster,
+      // which is all the model SSBO sizing needs.
+      uint64_t requiredInstances = 0;
+      uint32_t batchableCount = 0;
+      for (size_t i = 0; i < commandCount; i++)
+      {
+        auto& dc = m_ShadowDrawCommands[i];
+        if (dc.isAlphaTest)
+          continue;
+
+        MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
+        auto& vb = meshManager.GetVertexBuffer(meshHandle);
+        if (!vb.IsArenaResident())
+          continue;
+
+        const GeometryArenaAllocation& alloc = vb.GetArenaAllocation();
+        auto& rec = m_ShadowIndirectRecords[i];
+        rec.batchable = true;
+        rec.indexCount = alloc.indexCount;
+        rec.firstIndex = alloc.firstIndex;
+        rec.vertexOffset = int32_t(alloc.vertexOffset);
+        rec.instanceCount = dc.instanced ? uint32_t(dc.instanceData->size()) : 1u;
+        requiredInstances += rec.instanceCount;
+        batchableCount++;
+      }
+
+      // Rewritten only when the handle actually changed: the set is still bound by the
+      // command buffers of the other slots and there is no reason to touch it otherwise.
+      if (GrowMappedSlot(ctx, m_ShadowModelBuffers[shadowSlot],
+        requiredInstances * sizeof(glm::mat4), SHADOW_MODEL_CAP_BYTES,
+        VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, "model", b_ShadowModelOverflowReported))
+      {
+        m_ShadowModelDescriptorSets[shadowSlot].WriteStorageBuffer(0,
+          m_ShadowModelBuffers[shadowSlot].Get(), m_ShadowModelBuffers[shadowSlot].GetSize());
+      }
+      modelCapacity = uint32_t(m_ShadowModelBuffers[shadowSlot].GetSize() / sizeof(glm::mat4));
+
+      // Pass two lays the final world matrices out in sorted order. Instanced casters
+      // are premultiplied here because the indirect shader reads one matrix and cannot
+      // do the pc.world * instance product the legacy shader did; it happens once per
+      // frame rather than once per atlas tile.
+      auto* models = static_cast<glm::mat4*>(m_ShadowModelBuffers[shadowSlot].GetMapped());
+      uint32_t modelCursor = 0;
+      for (size_t i = 0; i < commandCount; i++)
+      {
+        auto& rec = m_ShadowIndirectRecords[i];
+        if (!rec.batchable)
+          continue;
+
+        if (modelCursor + rec.instanceCount > modelCapacity)
+        {
+          rec.batchable = false;
+          batchableCount--;
+          continue;
+        }
+
+        auto& dc = m_ShadowDrawCommands[i];
+        rec.modelBase = modelCursor;
+        if (dc.instanced)
+        {
+          const auto& instances = *dc.instanceData;
+          for (uint32_t n = 0; n < rec.instanceCount; n++)
+            models[modelCursor + n] = dc.worldTransform * instances[n];
+        }
+        else
+        {
+          models[modelCursor] = dc.worldTransform;
+        }
+        modelCursor += rec.instanceCount;
+      }
+
+      // These host writes become visible to the device through the implicit host-write
+      // barrier of vkQueueSubmit. No explicit flush or memory barrier is needed here.
+
+      m_ShadowLegacyIndices.clear();
+      for (size_t i = 0; i < commandCount; i++)
+      {
+        if (!m_ShadowIndirectRecords[i].batchable)
+          m_ShadowLegacyIndices.push_back(uint32_t(i));
+      }
+      // Restores the legacy ordering for the draws that still go one by one, so the
+      // alpha-test tail binds as few pipelines and materials as it does today.
+      std::sort(m_ShadowLegacyIndices.begin(), m_ShadowLegacyIndices.end(),
+        [this](uint32_t a, uint32_t b)
+        {
+          const DrawCommand& ca = m_ShadowDrawCommands[a];
+          const DrawCommand& cb = m_ShadowDrawCommands[b];
+          uint8_t ka = ca.SortKey(), kb = cb.SortKey();
+          if (ka != kb) return ka < kb;
+          if (ca.materialIndex != cb.materialIndex) return ca.materialIndex < cb.materialIndex;
+          return ca.meshIndex < cb.meshIndex;
+        });
+
+      size_t scan = 0;
+      while (scan < commandCount && m_ShadowDrawCommands[scan].ShadowBatchKey() == 0)
+        scan++;
+      batchEnd[0] = scan;
+      batchBegin[1] = scan;
+      while (scan < commandCount && m_ShadowDrawCommands[scan].ShadowBatchKey() == 1)
+        scan++;
+      batchEnd[1] = scan;
+
+      uint32_t tileCount = (hasDirectionalShadow ? CSM_CASCADE_COUNT : 0)
+        + uint32_t(frame.snapshot.spotShadowRequests.size())
+        + uint32_t(frame.snapshot.pointShadowRequests.size()) * 6;
+
+      GrowMappedSlot(ctx, m_ShadowIndirectBuffers[shadowSlot],
+        VkDeviceSize(tileCount) * batchableCount * sizeof(VkDrawIndexedIndirectCommand),
+        SHADOW_INDIRECT_CAP_BYTES, VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT, "indirect",
+        b_ShadowIndirectOverflowReported);
+      indirectBuffer = m_ShadowIndirectBuffers[shadowSlot].Get();
+      indirectCommands = static_cast<VkDrawIndexedIndirectCommand*>(
+        m_ShadowIndirectBuffers[shadowSlot].GetMapped());
+      indirectCapacity = uint32_t(m_ShadowIndirectBuffers[shadowSlot].GetSize()
+        / sizeof(VkDrawIndexedIndirectCommand));
+    }
+
     auto& atlas = m_ShadowManager.GetAtlas();
 
     // Begin shadow atlas render pass (clears entire atlas)
@@ -771,8 +975,6 @@ namespace YAEngine
     vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
     vkCmdSetDepthBias(cmd, 0.5f, 0.0f, 1.5f);
 
-    auto& meshManager = frame.assets.Meshes();
-
     // Upload instance data once before all shadow passes
     for (auto& dc : m_ShadowDrawCommands)
     {
@@ -783,21 +985,127 @@ namespace YAEngine
       }
     }
 
-    // Helper lambda: draw all shadow commands with given shadowMatrixIndex
-    // frustumPlanes + planeCount for frustum culling; nullptr disables frustum culling
-    auto drawShadowPass = [&](int shadowMatrixIndex, const ShadowViewport& sv,
-      const FrustumPlane* frustumPlanes = nullptr, int planeCount = 6)
+    // Helper lambda: draw all shadow commands through the given tile projection.
+    // frustumPlanes + planeCount for frustum culling; nullptr disables frustum culling.
+    // tileTriangles accumulates what actually reaches a draw, and perDrawTriangles -
+    // when armed - splits the same total across m_ShadowDrawCommands for the dump.
+    auto drawShadowPass = [&](const glm::mat4& viewProj, const ShadowViewport& sv,
+      uint32_t* tileTriangles, const FrustumPlane* frustumPlanes = nullptr, int planeCount = 6,
+      uint32_t* perDrawTriangles = nullptr)
     {
       vkCmdSetViewport(cmd, 0, 1, &sv.viewport);
       vkCmdSetScissor(cmd, 0, 1, &sv.scissor);
+
+      auto countTriangles = [&](size_t commandIndex, uint32_t indexCount, uint32_t instanceCount)
+      {
+        uint32_t triangles = (indexCount / 3) * instanceCount;
+        *tileTriangles += triangles;
+        m_Stats.shadowTriangles += triangles;
+        if (perDrawTriangles)
+          perDrawTriangles[commandIndex] += triangles;
+      };
+
+      if (useIndirect)
+      {
+        for (uint32_t cullMode = 0; cullMode < 2; cullMode++)
+        {
+          uint32_t rangeFirst = indirectCursor;
+
+          for (size_t i = batchBegin[cullMode]; i < batchEnd[cullMode]; i++)
+          {
+            auto& rec = m_ShadowIndirectRecords[i];
+            if (!rec.batchable)
+              continue;
+
+            // Same test, same planes, same plane count as the legacy loop below:
+            // the cascades pass 5 planes on purpose and passing 6 here would clip
+            // distant casters out of them.
+            auto& dc = m_ShadowDrawCommands[i];
+            bool hasBounds = dc.boundsMin.x <= dc.boundsMax.x;
+            if (hasBounds && frustumPlanes)
+            {
+              if (!IsAABBVisible(dc.boundsMin, dc.boundsMax, frustumPlanes, planeCount))
+                continue;
+            }
+
+            if (indirectCursor >= indirectCapacity)
+            {
+              if (!b_ShadowIndirectOverflowReported)
+              {
+                b_ShadowIndirectOverflowReported = true;
+                YA_LOG_WARN("Render",
+                  "Shadow indirect command buffer full at %u commands, the rest of the atlas is not drawn",
+                  indirectCapacity);
+              }
+              break;
+            }
+
+            VkDrawIndexedIndirectCommand& out = indirectCommands[indirectCursor++];
+            out.indexCount = rec.indexCount;
+            out.instanceCount = rec.instanceCount;
+            out.firstIndex = rec.firstIndex;
+            out.vertexOffset = rec.vertexOffset;
+            // Picks the batch's first model matrix; gl_InstanceIndex adds the rest.
+            out.firstInstance = rec.modelBase;
+
+            countTriangles(i, rec.indexCount, rec.instanceCount);
+          }
+
+          uint32_t commandCount = indirectCursor - rangeFirst;
+          if (commandCount == 0)
+            continue;
+
+          auto& pipeline = m_PSOCache.Get(m_ShadowIndirectPipelines[cullMode]);
+          pipeline.Bind(cmd);
+          pipeline.BindDescriptorSets(cmd,
+            { m_ShadowManager.GetShadowCascadeUBODescriptorSet(currentFrame) }, 0);
+          pipeline.BindDescriptorSets(cmd,
+            { m_ShadowModelDescriptorSets[shadowSlot].Get() }, 1);
+
+          glm::mat4 tileViewProj = viewProj;
+          pipeline.PushConstants(cmd, &tileViewProj);
+
+          // Re-bound every tile because the alpha-test tail below binds its own
+          // interleaved vertex stream over these.
+          VkBuffer positions = ctx.geometryArena->GetPositionBuffer();
+          VkDeviceSize positionOffset = 0;
+          vkCmdBindVertexBuffers(cmd, 0, 1, &positions, &positionOffset);
+          vkCmdBindIndexBuffer(cmd, ctx.geometryArena->GetIndexBuffer(VK_INDEX_TYPE_UINT32), 0,
+            VK_INDEX_TYPE_UINT32);
+
+          uint32_t maxPerCall = std::max(ctx.maxDrawIndirectCount, 1u);
+          if (commandCount > maxPerCall && !b_ShadowIndirectCountSplitReported)
+          {
+            b_ShadowIndirectCountSplitReported = true;
+            YA_LOG_WARN("Render",
+              "Shadow indirect range of %u commands exceeds maxDrawIndirectCount %u, splitting",
+              commandCount, maxPerCall);
+          }
+
+          for (uint32_t issued = 0; issued < commandCount; issued += maxPerCall)
+          {
+            uint32_t batch = std::min(maxPerCall, commandCount - issued);
+            vkCmdDrawIndexedIndirect(cmd, indirectBuffer,
+              VkDeviceSize(rangeFirst + issued) * sizeof(VkDrawIndexedIndirectCommand),
+              batch, sizeof(VkDrawIndexedIndirectCommand));
+            m_Stats.shadowDrawCalls++;
+          }
+          m_Stats.shadowIndirectCommands += commandCount;
+        }
+      }
 
       uint8_t lastSortKey = UINT8_MAX;
       uint32_t lastMaterialIndex = UINT32_MAX;
       uint32_t lastMaterialGen = UINT32_MAX;
       VulkanPipeline* currentPipeline = nullptr;
 
-      for (auto& dc : m_ShadowDrawCommands)
+      // On the indirect path this is the alpha-test tail plus anything the arena could
+      // not take; otherwise it is the whole pass, unchanged.
+      size_t legacyCount = useIndirect ? m_ShadowLegacyIndices.size() : m_ShadowDrawCommands.size();
+      for (size_t legacyIndex = 0; legacyIndex < legacyCount; legacyIndex++)
       {
+        size_t commandIndex = useIndirect ? m_ShadowLegacyIndices[legacyIndex] : legacyIndex;
+        auto& dc = m_ShadowDrawCommands[commandIndex];
         bool hasBounds = dc.boundsMin.x <= dc.boundsMax.x;
         if (hasBounds && frustumPlanes)
         {
@@ -830,13 +1138,14 @@ namespace YAEngine
 
         struct
         {
-          glm::mat4 model;
+          glm::mat4 viewProjWorld;
           int offset = 0;
-          int shadowMatrixIndex = 0;
         } data;
-        data.model = dc.worldTransform;
+        // The shader used to redo this product per vertex against a dynamically
+        // indexed UBO; the tile projection is uniform over the draw, so it is folded
+        // into the model matrix here instead.
+        data.viewProjWorld = viewProj * dc.worldTransform;
         data.offset = dc.instanceOffset / sizeof(glm::mat4);
-        data.shadowMatrixIndex = shadowMatrixIndex;
         currentPipeline->PushConstants(cmd, &data);
 
         uint32_t instanceCount = 1;
@@ -848,6 +1157,8 @@ namespace YAEngine
         }
 
         auto& vb = meshManager.GetVertexBuffer(meshHandle);
+        m_Stats.shadowDrawCalls++;
+        countTriangles(commandIndex, uint32_t(vb.GetIndexCount()), instanceCount);
         if (dc.isAlphaTest)
           vb.Draw(cmd, instanceCount);
         else
@@ -856,6 +1167,19 @@ namespace YAEngine
     };
 
     auto& shadowData = m_ShadowManager.GetShadowData();
+
+    // Every tile gets its own label so a GPU profiler can price cascades and lights
+    // one by one. DebugMarker is already a no-op outside debug builds.
+    char tileLabel[32];
+
+    uint32_t* breakdownRows = nullptr;
+#ifdef YA_EDITOR
+    if (b_ShadowBreakdownPending && !probeCenter)
+    {
+      m_ShadowBreakdownTriangles.assign(size_t(CSM_CASCADE_COUNT) * m_ShadowDrawCommands.size(), 0u);
+      breakdownRows = m_ShadowBreakdownTriangles.data();
+    }
+#endif
 
     // CSM cascades - frustum cull with 5 planes (skip near plane to keep distant shadow casters)
     if (hasDirectionalShadow)
@@ -870,7 +1194,15 @@ namespace YAEngine
         FrustumPlane csmPlanes[5] = { allPlanes[0], allPlanes[1], allPlanes[2], allPlanes[3], allPlanes[5] };
 
         auto sv = ShadowAtlas::GetCascadeViewport(cascade);
-        drawShadowPass(int(cascade), sv, csmPlanes, 5);
+        uint32_t* perDraw = breakdownRows
+          ? breakdownRows + size_t(cascade) * m_ShadowDrawCommands.size()
+          : nullptr;
+
+        snprintf(tileLabel, sizeof(tileLabel), "Cascade %u", cascade);
+        DebugMarker::BeginLabel(cmd, tileLabel);
+        drawShadowPass(shadowData.cascades[cascade].viewProj, sv,
+          &m_Stats.shadowTrianglesPerCascade[cascade], csmPlanes, 5, perDraw);
+        DebugMarker::EndLabel(cmd);
       }
       DebugMarker::EndLabel(cmd);
     }
@@ -884,7 +1216,12 @@ namespace YAEngine
       ExtractFrustumPlanes(shadowData.spotShadows[i].viewProj, spotPlanes);
 
       auto sv = ShadowAtlas::GetSpotViewport(i);
-      drawShadowPass(int(SHADOW_SPOT_MATRIX_OFFSET + i), sv, spotPlanes, 6);
+
+      snprintf(tileLabel, sizeof(tileLabel), "Spot %u", i);
+      DebugMarker::BeginLabel(cmd, tileLabel);
+      drawShadowPass(shadowData.spotShadows[i].viewProj, sv,
+        &m_Stats.shadowTrianglesPerSpot[i], spotPlanes, 6);
+      DebugMarker::EndLabel(cmd);
     }
     if (hasSpotShadows)
       DebugMarker::EndLabel(cmd);
@@ -900,7 +1237,12 @@ namespace YAEngine
         ExtractFrustumPlanes(shadowData.pointShadows[i].faceViewProj[face], facePlanes);
 
         auto sv = ShadowAtlas::GetPointFaceViewport(i, face);
-        drawShadowPass(int(SHADOW_POINT_MATRIX_OFFSET + i * 6 + face), sv, facePlanes, 6);
+
+        snprintf(tileLabel, sizeof(tileLabel), "Point %u Face %u", i, face);
+        DebugMarker::BeginLabel(cmd, tileLabel);
+        drawShadowPass(shadowData.pointShadows[i].faceViewProj[face], sv,
+          &m_Stats.shadowTrianglesPerPoint[i], facePlanes, 6);
+        DebugMarker::EndLabel(cmd);
       }
     }
     if (hasPointShadows)
@@ -908,7 +1250,83 @@ namespace YAEngine
 
     vkCmdEndRenderPass(cmd);
     DebugMarker::EndLabel(cmd);
+
+#ifdef YA_EDITOR
+    if (b_ShadowBreakdownPending && !probeCenter)
+      DumpShadowBreakdown();
+#endif
   }
+
+#ifdef YA_EDITOR
+  void Render::DumpShadowBreakdown()
+  {
+    b_ShadowBreakdownPending = false;
+
+    uint32_t worstCascade = 0;
+    for (uint32_t cascade = 1; cascade < CSM_CASCADE_COUNT; cascade++)
+    {
+      if (m_Stats.shadowTrianglesPerCascade[cascade] > m_Stats.shadowTrianglesPerCascade[worstCascade])
+        worstCascade = cascade;
+    }
+
+    uint32_t cascadeTriangles = m_Stats.shadowTrianglesPerCascade[worstCascade];
+    size_t commandCount = m_ShadowDrawCommands.size();
+    if (cascadeTriangles == 0 || m_ShadowBreakdownTriangles.size() < size_t(CSM_CASCADE_COUNT) * commandCount)
+    {
+      YA_LOG_INFO("Render", "Shadow breakdown: no cascade geometry was submitted this frame");
+      m_ShadowBreakdownTriangles.clear();
+      return;
+    }
+
+    // Draw commands are per caster, so one mesh usually appears many times over. The
+    // question the dump answers is which mesh the cascade spends its triangles on.
+    struct MeshCost
+    {
+      uint32_t meshIndex;
+      uint32_t meshGeneration;
+      uint32_t triangles;
+      uint32_t drawCount;
+    };
+    std::vector<MeshCost> costs;
+    std::unordered_map<uint64_t, size_t> byMesh;
+
+    const uint32_t* row = m_ShadowBreakdownTriangles.data() + size_t(worstCascade) * commandCount;
+    for (size_t i = 0; i < commandCount; i++)
+    {
+      if (row[i] == 0)
+        continue;
+
+      const DrawCommand& dc = m_ShadowDrawCommands[i];
+      uint64_t key = (uint64_t(dc.meshIndex) << 32) | dc.meshGeneration;
+      auto [it, inserted] = byMesh.try_emplace(key, costs.size());
+      if (inserted)
+        costs.push_back({ dc.meshIndex, dc.meshGeneration, 0, 0 });
+
+      MeshCost& cost = costs[it->second];
+      cost.triangles += row[i];
+      cost.drawCount++;
+    }
+
+    size_t reported = std::min<size_t>(costs.size(), 20);
+    std::partial_sort(costs.begin(), costs.begin() + reported, costs.end(),
+      [](const MeshCost& a, const MeshCost& b) { return a.triangles > b.triangles; });
+
+    YA_LOG_INFO("Render",
+      "Shadow breakdown: cascade %u is the heaviest with %u triangles from %zu meshes, top %zu:",
+      worstCascade, cascadeTriangles, costs.size(), reported);
+
+    // Meshes carry no name, so the handle is the only stable identifier here.
+    for (size_t i = 0; i < reported; i++)
+    {
+      const MeshCost& cost = costs[i];
+      YA_LOG_INFO("Render", "  %2zu. mesh %u:%u  %u tris  %.1f%%  in %u draws",
+        i + 1, cost.meshIndex, cost.meshGeneration, cost.triangles,
+        100.0 * double(cost.triangles) / double(cascadeTriangles), cost.drawCount);
+    }
+
+    m_ShadowBreakdownTriangles.clear();
+  }
+#endif
 
   void Render::DrawQuad(VkCommandBuffer cmd)
   {

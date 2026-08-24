@@ -25,9 +25,21 @@ namespace YAEngine
       return b_DepthClampSupported;
     }
 
+    bool IsMultiDrawIndirectSupported() const
+    {
+      return b_MultiDrawIndirectSupported;
+    }
+
+    bool IsDrawIndirectFirstInstanceSupported() const
+    {
+      return b_DrawIndirectFirstInstanceSupported;
+    }
+
   private:
 
     VkDevice m_Device {};
     bool b_DepthClampSupported = false;
+    bool b_MultiDrawIndirectSupported = false;
+    bool b_DrawIndirectFirstInstanceSupported = false;
   };
 }

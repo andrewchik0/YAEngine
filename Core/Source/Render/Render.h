@@ -37,6 +37,19 @@ namespace YAEngine
     uint32_t drawCalls = 0;
     uint32_t triangles = 0;
     uint32_t vertices = 0;
+    // Shadow atlas draws are counted separately: they are not part of the visible
+    // scene budget above, and collapsing them is what the indirect path is for.
+    uint32_t shadowDrawCalls = 0;
+    // Commands packed into the vkCmdDrawIndexedIndirect calls counted above. Zero
+    // on the legacy path, which is how the two paths tell themselves apart in the UI.
+    uint32_t shadowIndirectCommands = 0;
+    // Triangles that survived frustum culling and reached an indirect command or a
+    // legacy draw, split per atlas tile group. A point light sums its six faces,
+    // because that is the granularity its cost is budgeted at.
+    uint32_t shadowTrianglesPerCascade[CSM_CASCADE_COUNT] {};
+    uint32_t shadowTrianglesPerSpot[MAX_SHADOW_SPOTS] {};
+    uint32_t shadowTrianglesPerPoint[MAX_SHADOW_POINTS] {};
+    uint32_t shadowTriangles = 0;
   };
 
 #ifdef YA_EDITOR
@@ -133,6 +146,7 @@ namespace YAEngine
     bool& GetTAAEnabled() { return b_TAAEnabled; }
     float& GetTAAClampSigma() { return m_TAAClampSigma; }
     bool& GetShadowsEnabled() { return b_ShadowsEnabled; }
+    bool& GetShadowIndirectEnabled() { return b_ShadowIndirectEnabled; }
     int& GetTonemapMode() { return m_TonemapMode; }
     bool& GetAutoExposureEnabled() { return b_AutoExposureEnabled; }
     float& GetAdaptSpeedUp() { return m_AdaptSpeedUp; }
@@ -160,6 +174,12 @@ namespace YAEngine
       std::vector<uint32_t>& outSlots);
 
     const RenderStats& GetStats() const { return m_Stats; }
+
+#ifdef YA_EDITOR
+    // Arms a one-shot YA_LOG_INFO breakdown of the heaviest cascade. Nothing is
+    // tracked per mesh until the next shadow pass sees this set.
+    void RequestShadowBreakdownDump() { b_ShadowBreakdownPending = true; }
+#endif
 
     void ResetTAAHistory() { b_ResetTAAPending = true; }
     void ResetAutoExposure() { b_ResetAutoExposurePending = true; }
@@ -196,6 +216,10 @@ namespace YAEngine
     // uniform neighbourhoods and throw away converged history on sub-pixel geometry.
     float m_TAAClampSigma = 0.979f;
     bool b_ShadowsEnabled = true;
+    // Batches opaque shadow casters into vkCmdDrawIndexedIndirect. Kept as a live
+    // A/B switch rather than a build flag: the legacy per-draw path is the
+    // reference the indirect output is compared against.
+    bool b_ShadowIndirectEnabled = true;
     int m_TonemapMode = TONEMAP_AGX;
     bool b_AutoExposureEnabled = true;
     float m_AdaptSpeedUp = 2.0f;
@@ -245,6 +269,11 @@ namespace YAEngine
       float probeRadius = 0.0f);
     void SetUpCamera(FrameContext& frame);
     void InitPipelines();
+
+    // Per-frame-in-flight model SSBOs and indirect command buffers for the batched
+    // shadow path, plus the descriptor sets that point at them.
+    void CreateShadowIndirectResources();
+    void DestroyShadowIndirectResources();
 
     // Set 3 bindings 5-9. Re-run after every volume atlas rebuild - the image
     // views change and stale ones would dangle.
@@ -491,6 +520,16 @@ namespace YAEngine
         if (noShading) return 4;
         return (instanced ? 2 : 0) + (doubleSided ? 1 : 0);
       }
+
+      // Shadow-only ordering for the indirect path. Opaque casters collapse onto cull
+      // mode alone, because that is the only pipeline state an indirect batch cannot
+      // vary; alpha-test stays separated because it still draws one by one. Sorting on
+      // this is what makes each indirect range a single contiguous run.
+      uint8_t ShadowBatchKey() const
+      {
+        if (isAlphaTest) return instanced ? 3 : 2;
+        return doubleSided ? 1 : 0;
+      }
     };
 
     std::vector<DrawCommand> m_DrawCommands;
@@ -501,6 +540,75 @@ namespace YAEngine
 #endif
     std::vector<DrawCommand> m_ShadowDrawCommands;
     std::vector<DrawCommand> m_TransparentDrawCommands;
+
+    // Everything the indirect path needs about one shadow draw command that does not
+    // change between atlas tiles: where its geometry sits in the arena and where its
+    // world matrices sit in this frame's model SSBO. Resolved once per frame, indexed
+    // in lockstep with m_ShadowDrawCommands.
+    struct ShadowIndirectRecord
+    {
+      uint32_t modelBase = 0;
+      uint32_t instanceCount = 0;
+      uint32_t indexCount = 0;
+      uint32_t firstIndex = 0;
+      int32_t vertexOffset = 0;
+      // False for alpha-test casters and for meshes the arena could not accept; both
+      // fall through to the legacy per-draw loop inside the indirect path.
+      bool batchable = false;
+    };
+
+    // The atlas is a fixed grid, so the worst case is one indirect range per cull mode
+    // in every tile it can hold.
+    static constexpr uint32_t MAX_SHADOW_TILES =
+      CSM_CASCADE_COUNT + MAX_SHADOW_SPOTS + MAX_SHADOW_POINTS * 6;
+
+    // One matrix per shadow-casting instance. Starts at the instance buffer's own
+    // capacity, which is the largest instance count the rest of the engine accepts.
+    static constexpr VkDeviceSize SHADOW_MODEL_INITIAL_BYTES = MAX_INSTANCES * sizeof(glm::mat4);
+    static constexpr VkDeviceSize SHADOW_MODEL_CAP_BYTES = 4 * SHADOW_MODEL_INITIAL_BYTES;
+    static constexpr VkDeviceSize SHADOW_INDIRECT_INITIAL_BYTES = 1024ull * 1024;
+    static constexpr VkDeviceSize SHADOW_INDIRECT_CAP_BYTES = 64ull * 1024 * 1024;
+
+    std::vector<ShadowIndirectRecord> m_ShadowIndirectRecords;
+    // Indices into m_ShadowDrawCommands that the indirect path still has to draw one
+    // by one: alpha-test casters, and opaque meshes the arena could not accept.
+    std::vector<uint32_t> m_ShadowLegacyIndices;
+    // maxFramesInFlight + 1 slots: the extra one belongs to the probe and irradiance
+    // volume bakers, which render the atlas outside the frame loop.
+    std::vector<VulkanBuffer> m_ShadowModelBuffers;
+    std::vector<VulkanDescriptorSet> m_ShadowModelDescriptorSets;
+    std::vector<VulkanBuffer> m_ShadowIndirectBuffers;
+    // [0] cull on, [1] cull off. Kept apart from m_ShadowPipelines so the legacy path
+    // stays intact and the toggle can switch between them without a rebuild.
+    PipelineHandle m_ShadowIndirectPipelines[2] {};
+    bool b_ShadowModelOverflowReported = false;
+    bool b_ShadowIndirectOverflowReported = false;
+    bool b_ShadowIndirectCountSplitReported = false;
+
+#ifdef YA_EDITOR
+    bool b_ShadowBreakdownPending = false;
+    // Triangles each shadow draw command contributed to each cascade, laid out as
+    // CSM_CASCADE_COUNT rows of m_ShadowDrawCommands.size(). Only sized while a dump
+    // is armed, so the normal frame never pays for it.
+    std::vector<uint32_t> m_ShadowBreakdownTriangles;
+
+    // Logs the top meshes by submitted triangle count in the heaviest cascade and
+    // disarms the request.
+    void DumpShadowBreakdown();
+#endif
+
+    // Returns the slot index the shadow pass writes its per-frame buffers into.
+    uint32_t GetShadowSlot(uint32_t frameIndex, bool isBake) const
+    {
+      return isBake ? m_Backend.GetContext().maxFramesInFlight : frameIndex;
+    }
+
+    // Grows a mapped buffer slot in place, returning true when the handle changed.
+    // Only legal before anything is recorded into the slot this frame, at which point
+    // its previous contents are already retired.
+    static bool GrowMappedSlot(const RenderContext& ctx, VulkanBuffer& buffer,
+      VkDeviceSize requiredBytes, VkDeviceSize capBytes, VkBufferUsageFlags usage,
+      const char* name, bool& reportedFlag);
 
     struct ParticleBatch
     {

@@ -4,6 +4,7 @@
 #include <implot.h>
 
 #include "Editor/EditorContext.h"
+#include "Render/GeometryArena.h"
 #include "Render/Render.h"
 #include "Utils/Timer.h"
 
@@ -239,6 +240,64 @@ namespace YAEngine
       ImGui::Text("Draws  %u", stats.drawCalls);
       ImGui::Text("Tris   %u", stats.triangles);
       ImGui::Text("Verts  %u", stats.vertices);
+
+      ImGui::Spacing();
+      ImGui::Text("Shadow draws  %u", stats.shadowDrawCalls);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Recorded draw commands in the shadow atlas pass.\n"
+          "The indirect path collapses these to two per atlas tile\n"
+          "plus one per alpha-test caster.");
+      ImGui::Text("Shadow batched  %u", stats.shadowIndirectCommands);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Casters packed inside those indirect draws.\n"
+          "Zero means the legacy per-draw shadow path is running.");
+      ImGui::Text("Shadow tris  %u", stats.shadowTriangles);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Triangles that survived frustum culling and reached a draw,\n"
+          "summed over every atlas tile. A caster inside four cascades\n"
+          "is counted four times, which is what the GPU actually sees.");
+
+      if (ImGui::TreeNode("Shadow tiles"))
+      {
+        for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
+          ImGui::Text("Cascade %u  %u", i, stats.shadowTrianglesPerCascade[i]);
+        for (uint32_t i = 0; i < MAX_SHADOW_SPOTS; i++)
+        {
+          if (stats.shadowTrianglesPerSpot[i] > 0)
+            ImGui::Text("Spot %u  %u", i, stats.shadowTrianglesPerSpot[i]);
+        }
+        for (uint32_t i = 0; i < MAX_SHADOW_POINTS; i++)
+        {
+          if (stats.shadowTrianglesPerPoint[i] > 0)
+            ImGui::Text("Point %u  %u", i, stats.shadowTrianglesPerPoint[i]);
+        }
+        ImGui::TreePop();
+      }
+
+      if (ImGui::Button("Dump cascade breakdown"))
+        context.render->RequestShadowBreakdownDump();
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Logs the top 20 meshes by triangle count in the heaviest\n"
+          "cascade on the next frame. One shot, nothing is tracked until pressed.");
+
+      if (const GeometryArena* arena = context.render->GetContext().geometryArena)
+      {
+        ImGui::Spacing();
+        ImGui::Text("Arena pos  %u / %llu KB",
+          arena->GetPositionUsedBytes() / 1024,
+          (unsigned long long)(arena->GetPositionCapacityBytes() / 1024));
+        ImGui::Text("Arena idx  %u / %llu KB",
+          arena->GetIndexUsedBytes() / 1024,
+          (unsigned long long)(arena->GetIndexCapacityBytes() / 1024));
+        if (ImGui::IsItemHovered())
+        {
+          ImGui::SetTooltip("Shared position and index storage for every mesh.\n"
+            "High water: %u / %u KB, free blocks: %zu / %zu.\n"
+            "Usage that keeps climbing across regenerations is a leak.",
+            arena->GetPositionHighWaterBytes() / 1024, arena->GetIndexHighWaterBytes() / 1024,
+            arena->GetPositionFreeBlockCount(), arena->GetIndexFreeBlockCount());
+        }
+      }
     }
     else
     {

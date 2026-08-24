@@ -115,6 +115,30 @@ namespace YAEngine
       m_FreeList.clear();
     }
 
+    uint32_t GetAllocatorFrontier() const { return m_FilledData; }
+
+    size_t GetAllocatorFreeBlockCount() const { return m_FreeList.size(); }
+
+    uint32_t GetAllocatorFreeBytes() const
+    {
+      uint32_t total = 0;
+      for (const auto& block : m_FreeList)
+        total += block.size;
+      return total;
+    }
+
+    // Swaps in larger storage while keeping the sub-allocation state. The caller
+    // must have copied the old contents to identical offsets in newStorage first,
+    // which keeps every live sub-allocation valid, and must then destroy
+    // newStorage - it holds the retired handles after the swap.
+    void AdoptStorage(VulkanBuffer& newStorage)
+    {
+      std::swap(m_Buffer, newStorage.m_Buffer);
+      std::swap(m_Allocation, newStorage.m_Allocation);
+      std::swap(m_Size, newStorage.m_Size);
+      std::swap(m_MappedData, newStorage.m_MappedData);
+    }
+
   private:
 
     struct FreeBlock

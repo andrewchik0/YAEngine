@@ -137,6 +137,8 @@ set(SOURCE_FILES
   Source/Render/VulkanImage.h
   Source/Render/RenderBackend.cpp
   Source/Render/RenderBackend.h
+  Source/Render/GeometryArena.cpp
+  Source/Render/GeometryArena.h
   Source/Render/DescriptorLayoutCache.cpp
   Source/Render/DescriptorLayoutCache.h
   Source/Render/RenderGraph.cpp
