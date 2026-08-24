@@ -164,6 +164,14 @@ namespace YAEngine
     settings["taaClampSigma"] = render.GetTAAClampSigma();
     settings["shadows"] = render.GetShadowsEnabled();
     settings["shadowIndirect"] = render.GetShadowIndirectEnabled();
+    settings["shadowLod"] = render.GetShadowLodEnabled();
+    {
+      YAML::Node cascadeLods(YAML::NodeType::Sequence);
+      cascadeLods.SetStyle(YAML::EmitterStyle::Flow);
+      for (uint32_t cascade = 0; cascade < CSM_CASCADE_COUNT; cascade++)
+        cascadeLods.push_back(render.GetShadowCascadeLods()[cascade]);
+      settings["shadowCascadeLods"] = cascadeLods;
+    }
     settings["autoExposure"] = render.GetAutoExposureEnabled();
     settings["adaptSpeedUp"] = render.GetAdaptSpeedUp();
     settings["adaptSpeedDown"] = render.GetAdaptSpeedDown();
@@ -269,6 +277,18 @@ namespace YAEngine
     // Absent in scenes written before the indirect shadow path existed. Leaving the
     // member default (on) is deliberate: those scenes should pick up the new path.
     if (settings["shadowIndirect"]) render.GetShadowIndirectEnabled() = settings["shadowIndirect"].as<bool>();
+    if (settings["shadowLod"]) render.GetShadowLodEnabled() = settings["shadowLod"].as<bool>();
+    if (settings["shadowCascadeLods"])
+    {
+      const auto& cascadeLods = settings["shadowCascadeLods"];
+      // A scene saved with a different cascade count must not shift the mapping, so
+      // only the cascades the file actually describes are overwritten.
+      for (uint32_t cascade = 0; cascade < CSM_CASCADE_COUNT && cascade < cascadeLods.size(); cascade++)
+      {
+        render.GetShadowCascadeLods()[cascade] = std::clamp(cascadeLods[cascade].as<int>(),
+          0, int(MeshSimplifier::LOD_COUNT) - 1);
+      }
+    }
     if (settings["autoExposure"]) render.GetAutoExposureEnabled() = settings["autoExposure"].as<bool>();
     if (settings["adaptSpeedUp"]) render.GetAdaptSpeedUp() = settings["adaptSpeedUp"].as<float>();
     if (settings["adaptSpeedDown"]) render.GetAdaptSpeedDown() = settings["adaptSpeedDown"].as<float>();

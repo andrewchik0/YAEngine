@@ -19,6 +19,7 @@ target_link_libraries(Core PUBLIC
   glfw
   assimp
   yaml-cpp::yaml-cpp
+  meshoptimizer
 )
 find_package(Vulkan REQUIRED)
 target_link_libraries(Core PUBLIC Vulkan::Vulkan EnTT::EnTT)

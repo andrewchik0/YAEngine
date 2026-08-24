@@ -2,6 +2,8 @@
 
 #include "Pch.h"
 
+#include "Utils/MeshSimplifier.h"
+
 namespace YAEngine
 {
   struct CpuMipLevel
@@ -49,6 +51,9 @@ namespace YAEngine
     // thread; produced for every mesh so all of them can live in the geometry arena.
     std::vector<glm::vec3> weldedPositions;
     std::vector<uint32_t> weldedIndices;
+    // Simplified index streams over weldedPositions, used by the distant shadow
+    // cascades. Built off the render thread alongside the weld.
+    MeshLodLevels shadowLods;
   };
 
   struct CpuCubeMapFace

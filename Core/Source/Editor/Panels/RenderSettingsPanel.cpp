@@ -184,6 +184,26 @@ namespace YAEngine
           "per cull mode. Off falls back to the legacy one-draw-per-caster path.\n"
           "Both must render identically - watch Shadow draws in the performance panel.");
 
+      ImGui::Checkbox("Shadow Cascade LOD", &context.render->GetShadowLodEnabled());
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Distant cascades draw a simplified index stream over the same vertices.\n"
+          "Off puts every cascade back on the source mesh.\n"
+          "Watch Shadow tris and Shadow LOD saved in the performance panel.");
+
+      if (context.render->GetShadowLodEnabled())
+      {
+        int* cascadeLods = context.render->GetShadowCascadeLods();
+        for (uint32_t cascade = 0; cascade < CSM_CASCADE_COUNT; cascade++)
+        {
+          char label[32];
+          snprintf(label, sizeof(label), "Cascade %u LOD", cascade);
+          ImGui::SliderInt(label, &cascadeLods[cascade], 0, int(MeshSimplifier::LOD_COUNT) - 1);
+        }
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("0 is the source mesh. A mesh that could not be simplified to the\n"
+            "requested level falls back to the nearest level below it.");
+      }
+
       ImGui::SliderInt("Reflection Probe Bounces", &context.render->GetProbeBounceCount(),
         Render::MIN_PROBE_BOUNCES, Render::MAX_PROBE_BOUNCES);
       if (ImGui::IsItemHovered())

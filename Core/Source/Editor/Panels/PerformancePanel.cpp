@@ -257,6 +257,16 @@ namespace YAEngine
           "summed over every atlas tile. A caster inside four cascades\n"
           "is counted four times, which is what the GPU actually sees.");
 
+      uint32_t lodSaved = stats.shadowTrianglesAtLod0 - stats.shadowTriangles;
+      float lodSavedPercent = stats.shadowTrianglesAtLod0 > 0
+        ? 100.0f * float(lodSaved) / float(stats.shadowTrianglesAtLod0)
+        : 0.0f;
+      ImGui::Text("Shadow LOD saved  %u (%.1f%%)", lodSaved, lodSavedPercent);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Triangles the cascade LOD kept out of the pass, against what\n"
+          "the same tiles would have submitted with every caster at LOD 0.\n"
+          "Zero means the feature is off or nothing reached a simplified level.");
+
       if (ImGui::TreeNode("Shadow tiles"))
       {
         for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)

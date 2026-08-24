@@ -60,6 +60,9 @@ namespace YAEngine
     YA_LOG_INFO("Render", "Geometry arena index width cost: %llu KB uploaded as 32-bit, %llu KB more than 16-bit would have taken",
       (unsigned long long)(m_IndexBytes / 1024),
       (unsigned long long)(GetIndexWideningBytes() / 1024));
+
+    YA_LOG_INFO("Render", "Geometry arena shadow LOD cost: %llu KB of index memory",
+      (unsigned long long)(m_LodIndexBytes / 1024));
   }
 
   uint32_t GeometryArena::AllocateGrowing(const RenderContext& ctx, VulkanBuffer& buffer,
@@ -113,6 +116,56 @@ namespace YAEngine
       (unsigned long long)(newSize / (1024 * 1024)));
 
     return buffer.Allocate(size);
+  }
+
+  void GeometryArena::StageCopies(const RenderContext& ctx, const StagedCopy* copies, size_t count)
+  {
+    size_t totalBytes = 0;
+    for (size_t i = 0; i < count; i++)
+      totalBytes += copies[i].size;
+
+    VkBufferCreateInfo stagingInfo {};
+    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    stagingInfo.size = totalBytes;
+    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VmaAllocationCreateInfo stagingAllocInfo {};
+    stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
+
+    VkBuffer stagingBuffer;
+    VmaAllocation stagingAlloc;
+    if (vmaCreateBuffer(ctx.allocator, &stagingInfo, &stagingAllocInfo, &stagingBuffer, &stagingAlloc, nullptr) != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to create geometry arena staging buffer");
+      throw std::runtime_error("Failed to create geometry arena staging buffer");
+    }
+
+    void* mapped = nullptr;
+    vmaMapMemory(ctx.allocator, stagingAlloc, &mapped);
+    size_t cursor = 0;
+    for (size_t i = 0; i < count; i++)
+    {
+      std::memcpy(static_cast<uint8_t*>(mapped) + cursor, copies[i].data, copies[i].size);
+      cursor += copies[i].size;
+    }
+    vmaUnmapMemory(ctx.allocator, stagingAlloc);
+
+    VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
+
+    cursor = 0;
+    for (size_t i = 0; i < count; i++)
+    {
+      VkBufferCopy region {};
+      region.srcOffset = cursor;
+      region.dstOffset = copies[i].destinationOffset;
+      region.size = copies[i].size;
+      vkCmdCopyBuffer(cmd, stagingBuffer, copies[i].destination, 1, &region);
+      cursor += copies[i].size;
+    }
+
+    ctx.commandBuffer->EndSingleTimeCommands(cmd);
+    vmaDestroyBuffer(ctx.allocator, stagingBuffer, stagingAlloc);
   }
 
   GeometryArenaAllocation GeometryArena::Upload(const RenderContext& ctx,
@@ -172,50 +225,11 @@ namespace YAEngine
       return result;
     }
 
-    // One staging buffer and one submit for both streams: every staged upload costs
-    // a queue submit plus a fence wait, and meshes arrive one at a time.
-    std::vector<uint8_t> blob(positionBytes + indexBytes);
-    std::memcpy(blob.data(), positions, positionBytes);
-    std::memcpy(blob.data() + positionBytes, indices, indexBytes);
-
-    VkBufferCreateInfo stagingInfo {};
-    stagingInfo.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
-    stagingInfo.size = blob.size();
-    stagingInfo.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
-    stagingInfo.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
-
-    VmaAllocationCreateInfo stagingAllocInfo {};
-    stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
-
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAlloc;
-    if (vmaCreateBuffer(ctx.allocator, &stagingInfo, &stagingAllocInfo, &stagingBuffer, &stagingAlloc, nullptr) != VK_SUCCESS)
-    {
-      YA_LOG_ERROR("Render", "Failed to create geometry arena staging buffer");
-      throw std::runtime_error("Failed to create geometry arena staging buffer");
-    }
-
-    void* mapped = nullptr;
-    vmaMapMemory(ctx.allocator, stagingAlloc, &mapped);
-    std::memcpy(mapped, blob.data(), blob.size());
-    vmaUnmapMemory(ctx.allocator, stagingAlloc);
-
-    VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
-
-    VkBufferCopy positionCopy {};
-    positionCopy.srcOffset = 0;
-    positionCopy.dstOffset = positionOffset;
-    positionCopy.size = positionBytes;
-    vkCmdCopyBuffer(cmd, stagingBuffer, m_Positions.Get(), 1, &positionCopy);
-
-    VkBufferCopy indexCopy {};
-    indexCopy.srcOffset = positionBytes;
-    indexCopy.dstOffset = indexOffset;
-    indexCopy.size = indexBytes;
-    vkCmdCopyBuffer(cmd, stagingBuffer, m_Indices.Get(), 1, &indexCopy);
-
-    ctx.commandBuffer->EndSingleTimeCommands(cmd);
-    vmaDestroyBuffer(ctx.allocator, stagingBuffer, stagingAlloc);
+    const StagedCopy copies[] = {
+      { positions, positionBytes, m_Positions.Get(), positionOffset },
+      { indices, indexBytes, m_Indices.Get(), indexOffset },
+    };
+    StageCopies(ctx, copies, std::size(copies));
 
     result.positionByteOffset = positionOffset;
     result.positionByteSize = positionAllocSize;
@@ -235,6 +249,48 @@ namespace YAEngine
     return result;
   }
 
+  GeometryArenaIndexRange GeometryArena::UploadIndices(const RenderContext& ctx,
+    const uint32_t* indices, size_t indexCount)
+  {
+    GeometryArenaIndexRange result {};
+
+    if (indices == nullptr || indexCount == 0)
+      return result;
+
+    size_t indexBytes = indexCount * INDEX_STRIDE;
+    if (indexBytes > ARENA_MAX_BYTES)
+      return result;
+
+    uint32_t indexAllocSize = RoundUp(uint32_t(indexBytes), INDEX_STRIDE);
+    uint32_t indexOffset = AllocateGrowing(ctx, m_Indices, indexAllocSize, INDEX_USAGE, "indices");
+    if (indexOffset == UINT32_MAX)
+      return result;
+
+    if (indexOffset % INDEX_STRIDE != 0)
+    {
+      YA_LOG_ERROR("Render", "Geometry arena produced a misaligned index offset: %u (stride %u)",
+        indexOffset, INDEX_STRIDE);
+      m_Indices.Free(indexOffset, indexAllocSize);
+      return result;
+    }
+
+    const StagedCopy copies[] = {
+      { indices, indexBytes, m_Indices.Get(), indexOffset },
+    };
+    StageCopies(ctx, copies, std::size(copies));
+
+    result.byteOffset = indexOffset;
+    result.byteSize = indexAllocSize;
+    result.firstIndex = indexOffset / INDEX_STRIDE;
+    result.indexCount = uint32_t(indexCount);
+    result.resident = true;
+
+    m_IndexHighWater = std::max(m_IndexHighWater, m_Indices.GetAllocatorFrontier());
+    m_LodIndexBytes += indexBytes;
+
+    return result;
+  }
+
   void GeometryArena::Free(GeometryArenaAllocation& allocation)
   {
     if (!allocation.resident)
@@ -243,5 +299,15 @@ namespace YAEngine
     m_Positions.Free(allocation.positionByteOffset, allocation.positionByteSize);
     m_Indices.Free(allocation.indexByteOffset, allocation.indexByteSize);
     allocation = {};
+  }
+
+  void GeometryArena::FreeIndices(GeometryArenaIndexRange& range)
+  {
+    if (!range.resident)
+      return;
+
+    m_Indices.Free(range.byteOffset, range.byteSize);
+    m_LodIndexBytes -= size_t(range.indexCount) * INDEX_STRIDE;
+    range = {};
   }
 }

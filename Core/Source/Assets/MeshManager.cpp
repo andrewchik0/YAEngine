@@ -4,11 +4,13 @@
 
 namespace YAEngine
 {
-  MeshHandle MeshManager::Load(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices)
+  MeshHandle MeshManager::Load(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices,
+    bool generateShadowLods)
   {
     auto mesh = std::make_unique<Mesh>();
 
-    mesh->vertexBuffer.Create(*m_Ctx, (void*)vertices.data(), vertices.size(), sizeof(Vertex), indices);
+    mesh->vertexBuffer.Create(*m_Ctx, (void*)vertices.data(), vertices.size(), sizeof(Vertex), indices,
+      generateShadowLods);
 
     if (!vertices.empty())
     {

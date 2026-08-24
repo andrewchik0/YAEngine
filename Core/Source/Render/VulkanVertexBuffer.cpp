@@ -5,7 +5,8 @@
 
 namespace YAEngine
 {
-  void VulkanVertexBuffer::Create(const RenderContext& ctx, const void* inputData, size_t vertexCount, uint32_t vertexSize, const std::vector<uint32_t>& indices)
+  void VulkanVertexBuffer::Create(const RenderContext& ctx, const void* inputData, size_t vertexCount,
+    uint32_t vertexSize, const std::vector<uint32_t>& indices, bool generateShadowLods)
   {
     VkDeviceSize totalSize = vertexCount * vertexSize;
 
@@ -51,7 +52,13 @@ namespace YAEngine
       auto welded = PositionWelder::Weld(positions.data(), vertexCount, indices,
         PositionWelder::KEEP_ALWAYS_RATIO);
       if (welded.worthwhile)
-        CreateWeldedPositions(ctx, welded.positions, welded.indices);
+      {
+        MeshLodLevels lods;
+        if (generateShadowLods)
+          lods = MeshSimplifier::Build(welded.positions.data(), welded.positions.size(), welded.indices);
+
+        CreateWeldedPositions(ctx, welded.positions, welded.indices, &lods);
+      }
     }
   }
 
@@ -67,11 +74,12 @@ namespace YAEngine
     m_IndicesBuffer = VulkanBuffer::CreateStaged(ctx, cpuData.indices.data(), indicesSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
 
     if (!cpuData.weldedPositions.empty())
-      CreateWeldedPositions(ctx, cpuData.weldedPositions, cpuData.weldedIndices);
+      CreateWeldedPositions(ctx, cpuData.weldedPositions, cpuData.weldedIndices, &cpuData.shadowLods);
   }
 
   void VulkanVertexBuffer::CreateWeldedPositions(const RenderContext& ctx,
-    const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices)
+    const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices,
+    const MeshLodLevels* lods)
   {
     if (ctx.geometryArena != nullptr)
     {
@@ -81,11 +89,45 @@ namespace YAEngine
       if (m_ArenaAllocation.resident)
       {
         m_Arena = ctx.geometryArena;
+        // LOD levels are extra index ranges over the vertices just uploaded, so they
+        // only exist for meshes the arena accepted.
+        if (lods != nullptr)
+          CreateLodRanges(ctx, *lods);
         return;
       }
     }
 
     CreateStandalonePositions(ctx, positions, indices);
+  }
+
+  void VulkanVertexBuffer::CreateLodRanges(const RenderContext& ctx, const MeshLodLevels& lods)
+  {
+    for (size_t level = 0; level < lods.levels.size() && level < std::size(m_LodRanges); level++)
+    {
+      const auto& levelIndices = lods.levels[level];
+      if (levelIndices.empty())
+        continue;
+
+      m_LodRanges[level] = m_Arena->UploadIndices(ctx, levelIndices.data(), levelIndices.size());
+    }
+  }
+
+  MeshLodRange VulkanVertexBuffer::GetLodRange(uint32_t lodLevel) const
+  {
+    for (uint32_t level = std::min(lodLevel, uint32_t(std::size(m_LodRanges))); level > 0; level--)
+    {
+      const auto& range = m_LodRanges[level - 1];
+      if (range.resident)
+        return { range.firstIndex, range.indexCount };
+    }
+
+    if (m_ArenaAllocation.resident)
+      return { m_ArenaAllocation.firstIndex, m_ArenaAllocation.indexCount };
+
+    if (b_HasStandalonePositions)
+      return { 0, uint32_t(m_PositionIndexCount) };
+
+    return { 0, uint32_t(m_IndicesCount) };
   }
 
   void VulkanVertexBuffer::CreateStandalonePositions(const RenderContext& ctx,
@@ -120,7 +162,8 @@ namespace YAEngine
     b_HasStandalonePositions = true;
   }
 
-  CpuMeshData VulkanVertexBuffer::PrepareSoA(const std::vector<Vertex>& vertices, std::vector<uint32_t> indices)
+  CpuMeshData VulkanVertexBuffer::PrepareSoA(const std::vector<Vertex>& vertices,
+    std::vector<uint32_t> indices, bool generateShadowLods)
   {
     CpuMeshData result;
     result.indices = std::move(indices);
@@ -157,6 +200,12 @@ namespace YAEngine
       PositionWelder::KEEP_ALWAYS_RATIO);
     if (welded.worthwhile)
     {
+      if (generateShadowLods)
+      {
+        result.shadowLods = MeshSimplifier::Build(welded.positions.data(),
+          welded.positions.size(), welded.indices);
+      }
+
       result.weldedPositions = std::move(welded.positions);
       result.weldedIndices = std::move(welded.indices);
     }
@@ -171,6 +220,9 @@ namespace YAEngine
 
     if (m_Arena != nullptr)
     {
+      for (auto& range : m_LodRanges)
+        m_Arena->FreeIndices(range);
+
       m_Arena->Free(m_ArenaAllocation);
       m_Arena = nullptr;
     }
@@ -202,17 +254,19 @@ namespace YAEngine
     vkCmdDrawIndexed(cmd, static_cast<uint32_t>(m_IndicesCount), instanceCount, 0, 0, 0);
   }
 
-  void VulkanVertexBuffer::DrawPositionOnly(VkCommandBuffer cmd, uint32_t instanceCount)
+  void VulkanVertexBuffer::DrawPositionOnly(VkCommandBuffer cmd, uint32_t instanceCount, uint32_t lodLevel)
   {
     if (m_ArenaAllocation.resident)
     {
+      MeshLodRange lod = GetLodRange(lodLevel);
+
       VkBuffer positions = m_Arena->GetPositionBuffer();
       VkDeviceSize offset = 0;
       vkCmdBindVertexBuffers(cmd, 0, 1, &positions, &offset);
       vkCmdBindIndexBuffer(cmd, m_Arena->GetIndexBuffer(m_ArenaAllocation.indexType), 0,
         m_ArenaAllocation.indexType);
-      vkCmdDrawIndexed(cmd, m_ArenaAllocation.indexCount, instanceCount,
-        m_ArenaAllocation.firstIndex, static_cast<int32_t>(m_ArenaAllocation.vertexOffset), 0);
+      vkCmdDrawIndexed(cmd, lod.indexCount, instanceCount,
+        lod.firstIndex, static_cast<int32_t>(m_ArenaAllocation.vertexOffset), 0);
       return;
     }
 

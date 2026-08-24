@@ -49,7 +49,7 @@ namespace YAEngine
         continue;
       }
 
-      auto handle = m_Assets.Meshes().Load(procMesh.vertices, procMesh.indices);
+      auto handle = m_Assets.Meshes().Load(procMesh.vertices, procMesh.indices, false);
       registry.emplace_or_replace<MeshComponent>(entity, handle);
 
       glm::vec3 boundsMin(std::numeric_limits<float>::max());

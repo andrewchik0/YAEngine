@@ -10,6 +10,7 @@
 #include "PipelineCache.h"
 #include "VulkanStorageBuffer.h"
 #include "VulkanUniformBuffer.h"
+#include "VulkanVertexBuffer.h"
 #include "LightStorageBuffer.h"
 #include "TileLightBuffer.h"
 #include "ShadowManager.h"
@@ -50,6 +51,9 @@ namespace YAEngine
     uint32_t shadowTrianglesPerSpot[MAX_SHADOW_SPOTS] {};
     uint32_t shadowTrianglesPerPoint[MAX_SHADOW_POINTS] {};
     uint32_t shadowTriangles = 0;
+    // What the same pass would have submitted with every caster at LOD 0. The gap
+    // against shadowTriangles is what the cascade LOD actually saved this frame.
+    uint32_t shadowTrianglesAtLod0 = 0;
   };
 
 #ifdef YA_EDITOR
@@ -147,6 +151,8 @@ namespace YAEngine
     float& GetTAAClampSigma() { return m_TAAClampSigma; }
     bool& GetShadowsEnabled() { return b_ShadowsEnabled; }
     bool& GetShadowIndirectEnabled() { return b_ShadowIndirectEnabled; }
+    bool& GetShadowLodEnabled() { return b_ShadowLodEnabled; }
+    int* GetShadowCascadeLods() { return m_ShadowCascadeLods; }
     int& GetTonemapMode() { return m_TonemapMode; }
     bool& GetAutoExposureEnabled() { return b_AutoExposureEnabled; }
     float& GetAdaptSpeedUp() { return m_AdaptSpeedUp; }
@@ -220,6 +226,14 @@ namespace YAEngine
     // A/B switch rather than a build flag: the legacy per-draw path is the
     // reference the indirect output is compared against.
     bool b_ShadowIndirectEnabled = true;
+    // Distant cascades cover so much world per texel that a simplified silhouette is
+    // indistinguishable from the original, so they draw a cheaper index stream.
+    // Only the CSM tiles use this: spot and point tiles are small and fit their
+    // caster tightly, so there is nothing to win there.
+    bool b_ShadowLodEnabled = true;
+    // Mesh LOD level each cascade submits. Cascade 0 and 1 stay on the source mesh:
+    // they are what the camera sees up close.
+    int m_ShadowCascadeLods[CSM_CASCADE_COUNT] = { 0, 1, 1, 2 };
     int m_TonemapMode = TONEMAP_AGX;
     bool b_AutoExposureEnabled = true;
     float m_AdaptSpeedUp = 2.0f;
@@ -541,17 +555,17 @@ namespace YAEngine
     std::vector<DrawCommand> m_ShadowDrawCommands;
     std::vector<DrawCommand> m_TransparentDrawCommands;
 
-    // Everything the indirect path needs about one shadow draw command that does not
-    // change between atlas tiles: where its geometry sits in the arena and where its
-    // world matrices sit in this frame's model SSBO. Resolved once per frame, indexed
-    // in lockstep with m_ShadowDrawCommands.
+    // Everything the indirect path needs about one shadow draw command that it can
+    // resolve once per frame: where its geometry sits in the arena and where its
+    // world matrices sit in this frame's model SSBO. Indexed in lockstep with
+    // m_ShadowDrawCommands. The index range is the one thing that does vary between
+    // tiles, so every LOD level is resolved up front and the tile picks one.
     struct ShadowIndirectRecord
     {
       uint32_t modelBase = 0;
       uint32_t instanceCount = 0;
-      uint32_t indexCount = 0;
-      uint32_t firstIndex = 0;
       int32_t vertexOffset = 0;
+      MeshLodRange lods[MeshSimplifier::LOD_COUNT] {};
       // False for alpha-test casters and for meshes the arena could not accept; both
       // fall through to the legacy per-draw loop inside the indirect path.
       bool batchable = false;

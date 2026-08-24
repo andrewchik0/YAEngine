@@ -25,6 +25,18 @@ namespace YAEngine
     bool resident = false;
   };
 
+  // An extra index range over the vertices of an existing allocation. A shadow LOD
+  // level indexes the same positions and varies only firstIndex and indexCount, so
+  // it never costs position memory.
+  struct GeometryArenaIndexRange
+  {
+    uint32_t byteOffset = 0;
+    uint32_t byteSize = 0;
+    uint32_t firstIndex = 0;
+    uint32_t indexCount = 0;
+    bool resident = false;
+  };
+
   // One shared positions buffer plus one shared index buffer for every mesh in the
   // scene, so a whole pass can bind geometry once and vary only the draw arguments.
   class GeometryArena
@@ -40,7 +52,15 @@ namespace YAEngine
       const glm::vec3* positions, size_t positionCount,
       const uint32_t* indices, size_t indexCount);
 
+    // Copies one more index stream for a mesh whose positions are already resident.
+    // Returns a non-resident range when the index arena cannot grow far enough; the
+    // caller then simply has one LOD level fewer.
+    GeometryArenaIndexRange UploadIndices(const RenderContext& ctx,
+      const uint32_t* indices, size_t indexCount);
+
     void Free(GeometryArenaAllocation& allocation);
+
+    void FreeIndices(GeometryArenaIndexRange& range);
 
     VkBuffer GetPositionBuffer() const { return m_Positions.Get(); }
 
@@ -60,6 +80,7 @@ namespace YAEngine
     uint32_t GetPositionHighWaterBytes() const { return m_PositionHighWater; }
     uint32_t GetIndexHighWaterBytes() const { return m_IndexHighWater; }
     uint64_t GetIndexWideningBytes() const { return m_IndexBytes - m_NarrowIndexBytes; }
+    uint64_t GetLodIndexBytes() const { return m_LodIndexBytes; }
 
     void LogUsage(const char* reason) const;
 
@@ -88,6 +109,18 @@ namespace YAEngine
     uint32_t AllocateGrowing(const RenderContext& ctx, VulkanBuffer& buffer,
       uint32_t size, VkBufferUsageFlags usage, const char* name);
 
+    struct StagedCopy
+    {
+      const void* data;
+      size_t size;
+      VkBuffer destination;
+      uint32_t destinationOffset;
+    };
+
+    // Pushes every copy through one staging buffer and one submit: a staged upload
+    // costs a queue submit plus a fence wait, and meshes arrive one at a time.
+    static void StageCopies(const RenderContext& ctx, const StagedCopy* copies, size_t count);
+
     VulkanBuffer m_Positions;
     VulkanBuffer m_Indices;
     uint32_t m_PositionHighWater = 0;
@@ -97,6 +130,9 @@ namespace YAEngine
     // have cost, so the price of the single index type stays visible.
     uint64_t m_IndexBytes = 0;
     uint64_t m_NarrowIndexBytes = 0;
+    // Index bytes currently held by shadow LOD levels alone, so the price of the
+    // feature stays visible next to what it saves.
+    uint64_t m_LodIndexBytes = 0;
     bool b_ExhaustionReported = false;
   };
 }

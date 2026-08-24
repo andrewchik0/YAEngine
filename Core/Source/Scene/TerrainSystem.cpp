@@ -172,7 +172,7 @@ namespace YAEngine
 
     m_HeightGridCache[entityId] = std::move(result.heightGrid);
 
-    auto handle = m_Assets.Meshes().Load(result.mesh.vertices, result.mesh.indices);
+    auto handle = m_Assets.Meshes().Load(result.mesh.vertices, result.mesh.indices, false);
     registry.emplace_or_replace<MeshComponent>(entity, handle);
 
     glm::vec3 boundsMin(std::numeric_limits<float>::max());

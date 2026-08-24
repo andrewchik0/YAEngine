@@ -4,10 +4,19 @@
 #include "GeometryArena.h"
 #include "VulkanBuffer.h"
 #include "Assets/CpuResourceData.h"
+#include "Utils/MeshSimplifier.h"
 
 namespace YAEngine
 {
   struct RenderContext;
+
+  // Resolved draw range of one LOD level: the vertices are shared with level 0, so
+  // only the index window moves.
+  struct MeshLodRange
+  {
+    uint32_t firstIndex = 0;
+    uint32_t indexCount = 0;
+  };
 
   struct Vertex
   {
@@ -28,15 +37,17 @@ namespace YAEngine
   {
   public:
 
-    void Create(const RenderContext& ctx, const void* inputData, size_t vertexCount, uint32_t vertexSize, const std::vector<uint32_t>& indices);
+    void Create(const RenderContext& ctx, const void* inputData, size_t vertexCount, uint32_t vertexSize,
+      const std::vector<uint32_t>& indices, bool generateShadowLods = true);
 
-    static CpuMeshData PrepareSoA(const std::vector<Vertex>& vertices, std::vector<uint32_t> indices);
+    static CpuMeshData PrepareSoA(const std::vector<Vertex>& vertices, std::vector<uint32_t> indices,
+      bool generateShadowLods = true);
 
     void CreateFromSoA(const RenderContext& ctx, const CpuMeshData& cpuData);
     void Destroy(const RenderContext& ctx);
 
     void Draw(VkCommandBuffer cmd, uint32_t instanceCount = 1);
-    void DrawPositionOnly(VkCommandBuffer cmd, uint32_t instanceCount = 1);
+    void DrawPositionOnly(VkCommandBuffer cmd, uint32_t instanceCount = 1, uint32_t lodLevel = 0);
 
     VkBuffer Get() const { return m_VerticesBuffer.Get(); }
     size_t GetIndexCount() const { return m_IndicesCount; }
@@ -44,10 +55,17 @@ namespace YAEngine
     bool IsArenaResident() const { return m_ArenaAllocation.resident; }
     const GeometryArenaAllocation& GetArenaAllocation() const { return m_ArenaAllocation; }
 
+    // Draw range for the requested level, falling back to the nearest populated one
+    // below it. Never fails, so no call site has to test for a missing level.
+    MeshLodRange GetLodRange(uint32_t lodLevel) const;
+
   private:
 
     void CreateWeldedPositions(const RenderContext& ctx,
-      const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices);
+      const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices,
+      const MeshLodLevels* lods);
+
+    void CreateLodRanges(const RenderContext& ctx, const MeshLodLevels& lods);
 
     void CreateStandalonePositions(const RenderContext& ctx,
       const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices);
@@ -64,6 +82,10 @@ namespace YAEngine
     // kept, never a cached VkBuffer, because growth replaces the arena's handles.
     GeometryArena* m_Arena = nullptr;
     GeometryArenaAllocation m_ArenaAllocation {};
+
+    // Shadow LOD levels 1..N, indexing the same arena vertices as the allocation
+    // above. A non-resident entry means that level collapsed into the one below it.
+    GeometryArenaIndexRange m_LodRanges[MeshSimplifier::LOD_COUNT - 1] {};
 
     // Fallback for meshes the arena could not accept. Positions and indices share
     // one allocation: every staged upload costs a queue submit plus a fence wait,

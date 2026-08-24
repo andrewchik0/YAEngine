@@ -174,6 +174,8 @@ set(SOURCE_FILES
   Source/Utils/RoadMeshGenerator.cpp
   Source/Utils/PositionWelder.h
   Source/Utils/PositionWelder.cpp
+  Source/Utils/MeshSimplifier.h
+  Source/Utils/MeshSimplifier.cpp
   Source/Scene/ComponentRegistry.h
   Source/Scene/CoreComponentSerializers.h
   Source/Scene/CoreComponentSerializers.cpp

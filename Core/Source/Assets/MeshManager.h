@@ -28,8 +28,11 @@ namespace YAEngine
 
     void SetRenderContext(const AssetManagerInitInfo& info) override { m_Ctx = info.ctx; }
 
+    // generateShadowLods off for procedural grids - terrain and road meshes carry
+    // skirts and seams that simplification tears open.
     [[nodiscard]]
-    MeshHandle Load(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices);
+    MeshHandle Load(const std::vector<Vertex>& vertices, const std::vector<uint32_t>& indices,
+      bool generateShadowLods = true);
 
     [[nodiscard]]
     MeshHandle LoadFromCpuData(CpuMeshData&& cpuData);

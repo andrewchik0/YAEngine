@@ -858,9 +858,11 @@ namespace YAEngine
         const GeometryArenaAllocation& alloc = vb.GetArenaAllocation();
         auto& rec = m_ShadowIndirectRecords[i];
         rec.batchable = true;
-        rec.indexCount = alloc.indexCount;
-        rec.firstIndex = alloc.firstIndex;
         rec.vertexOffset = int32_t(alloc.vertexOffset);
+        // GetLodRange already collapses missing levels onto the nearest populated
+        // one, so the per-tile emission below never has to test for a level.
+        for (uint32_t lod = 0; lod < MeshSimplifier::LOD_COUNT; lod++)
+          rec.lods[lod] = vb.GetLodRange(lod);
         rec.instanceCount = dc.instanced ? uint32_t(dc.instanceData->size()) : 1u;
         requiredInstances += rec.instanceCount;
         batchableCount++;
@@ -991,16 +993,18 @@ namespace YAEngine
     // when armed - splits the same total across m_ShadowDrawCommands for the dump.
     auto drawShadowPass = [&](const glm::mat4& viewProj, const ShadowViewport& sv,
       uint32_t* tileTriangles, const FrustumPlane* frustumPlanes = nullptr, int planeCount = 6,
-      uint32_t* perDrawTriangles = nullptr)
+      uint32_t* perDrawTriangles = nullptr, uint32_t lodLevel = 0)
     {
       vkCmdSetViewport(cmd, 0, 1, &sv.viewport);
       vkCmdSetScissor(cmd, 0, 1, &sv.scissor);
 
-      auto countTriangles = [&](size_t commandIndex, uint32_t indexCount, uint32_t instanceCount)
+      auto countTriangles = [&](size_t commandIndex, uint32_t indexCount, uint32_t lod0IndexCount,
+        uint32_t instanceCount)
       {
         uint32_t triangles = (indexCount / 3) * instanceCount;
         *tileTriangles += triangles;
         m_Stats.shadowTriangles += triangles;
+        m_Stats.shadowTrianglesAtLod0 += (lod0IndexCount / 3) * instanceCount;
         if (perDrawTriangles)
           perDrawTriangles[commandIndex] += triangles;
       };
@@ -1040,15 +1044,17 @@ namespace YAEngine
               break;
             }
 
+            const MeshLodRange& lod = rec.lods[lodLevel];
+
             VkDrawIndexedIndirectCommand& out = indirectCommands[indirectCursor++];
-            out.indexCount = rec.indexCount;
+            out.indexCount = lod.indexCount;
             out.instanceCount = rec.instanceCount;
-            out.firstIndex = rec.firstIndex;
+            out.firstIndex = lod.firstIndex;
             out.vertexOffset = rec.vertexOffset;
             // Picks the batch's first model matrix; gl_InstanceIndex adds the rest.
             out.firstInstance = rec.modelBase;
 
-            countTriangles(i, rec.indexCount, rec.instanceCount);
+            countTriangles(i, lod.indexCount, rec.lods[0].indexCount, rec.instanceCount);
           }
 
           uint32_t commandCount = indirectCursor - rangeFirst;
@@ -1158,11 +1164,20 @@ namespace YAEngine
 
         auto& vb = meshManager.GetVertexBuffer(meshHandle);
         m_Stats.shadowDrawCalls++;
-        countTriangles(commandIndex, uint32_t(vb.GetIndexCount()), instanceCount);
         if (dc.isAlphaTest)
+        {
+          // Alpha-test casters draw the interleaved stream for their UVs, which has
+          // no simplified counterpart: LOD lives on the position-only stream.
+          countTriangles(commandIndex, uint32_t(vb.GetIndexCount()), uint32_t(vb.GetIndexCount()),
+            instanceCount);
           vb.Draw(cmd, instanceCount);
+        }
         else
-          vb.DrawPositionOnly(cmd, instanceCount);
+        {
+          MeshLodRange lod = vb.GetLodRange(lodLevel);
+          countTriangles(commandIndex, lod.indexCount, vb.GetLodRange(0).indexCount, instanceCount);
+          vb.DrawPositionOnly(cmd, instanceCount, lodLevel);
+        }
       }
     };
 
@@ -1198,10 +1213,17 @@ namespace YAEngine
           ? breakdownRows + size_t(cascade) * m_ShadowDrawCommands.size()
           : nullptr;
 
+        uint32_t lodLevel = 0;
+        if (b_ShadowLodEnabled)
+        {
+          lodLevel = uint32_t(std::clamp(m_ShadowCascadeLods[cascade], 0,
+            int(MeshSimplifier::LOD_COUNT) - 1));
+        }
+
         snprintf(tileLabel, sizeof(tileLabel), "Cascade %u", cascade);
         DebugMarker::BeginLabel(cmd, tileLabel);
         drawShadowPass(shadowData.cascades[cascade].viewProj, sv,
-          &m_Stats.shadowTrianglesPerCascade[cascade], csmPlanes, 5, perDraw);
+          &m_Stats.shadowTrianglesPerCascade[cascade], csmPlanes, 5, perDraw, lodLevel);
         DebugMarker::EndLabel(cmd);
       }
       DebugMarker::EndLabel(cmd);
