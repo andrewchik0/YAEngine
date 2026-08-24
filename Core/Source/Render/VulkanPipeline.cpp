@@ -124,18 +124,22 @@ namespace YAEngine
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());
     dynamicState.pDynamicStates = dynamicStates.data();
 
-    VkPushConstantRange range{};
-    range.stageFlags = VK_SHADER_STAGE_ALL;
-    range.offset = 0;
-    range.size = m_PushConstantSize;
-
     VkPipelineLayoutCreateInfo pipelineLayoutInfo{};
     pipelineLayoutInfo.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
-    pipelineLayoutInfo.setLayoutCount = 0;
-    pipelineLayoutInfo.pushConstantRangeCount = 1;
-    pipelineLayoutInfo.pPushConstantRanges = &range;
     pipelineLayoutInfo.pSetLayouts = info.sets.data();
     pipelineLayoutInfo.setLayoutCount = (uint32_t)info.sets.size();
+
+    // A zero-sized range is invalid, so a shader without push constants gets a layout
+    // with none at all.
+    VkPushConstantRange range{};
+    if (m_PushConstantSize > 0)
+    {
+      range.stageFlags = VK_SHADER_STAGE_ALL;
+      range.offset = 0;
+      range.size = m_PushConstantSize;
+      pipelineLayoutInfo.pushConstantRangeCount = 1;
+      pipelineLayoutInfo.pPushConstantRanges = &range;
+    }
 
     if (vkCreatePipelineLayout(m_Device, &pipelineLayoutInfo, nullptr, &m_PipelineLayout) != VK_SUCCESS)
     {

@@ -17,19 +17,14 @@ layout(set = 1, binding = 0) readonly buffer Instances
 #endif
 
 #ifdef INDIRECT
-// One final world matrix per instance for the whole pass. A non-instanced caster is
-// a batch of length one, so every draw addresses this the same way.
+// One clip-space matrix per (instance, atlas tile): the tile's viewProj is folded
+// into the world matrix on the CPU, so a vertex is one matrix load and one product.
+// The tile blocks are laid out back to back and firstInstance selects the block, so
+// a non-instanced caster is still just a batch of length one.
 layout(set = 1, binding = 0) readonly buffer Models
 {
   mat4 data[];
 } models;
-
-layout(push_constant) uniform PushConstants
-{
-  // The tile's projection, written once before its draws. It used to be an index
-  // into the cascade UBO, which cost a dynamically indexed load per vertex.
-  mat4 viewProj;
-} pc;
 #else
 layout(push_constant) uniform PushConstants
 {
@@ -45,8 +40,7 @@ void main()
 #ifdef INDIRECT
   // gl_InstanceIndex already carries firstInstance from the indirect command, so the
   // command's firstInstance is the batch base and no offset is added here.
-  vec4 worldPos = models.data[gl_InstanceIndex] * vec4(inPosition, 1.0);
-  gl_Position = pc.viewProj * worldPos;
+  gl_Position = models.data[gl_InstanceIndex] * vec4(inPosition, 1.0);
 #elif defined(INSTANCED)
   gl_Position = pc.viewProjWorld * (instances.data[gl_InstanceIndex + pc.offset] * vec4(inPosition, 1.0));
 #else

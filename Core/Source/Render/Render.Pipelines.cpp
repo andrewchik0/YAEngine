@@ -228,13 +228,15 @@ namespace YAEngine
     CreateShadowIndirectResources();
 
     // Indirect opaque shadow pipelines. They differ from the pipelines above only in
-    // where the world matrix comes from - a shared SSBO addressed by gl_InstanceIndex
-    // instead of a push constant - so every depth-related state must stay identical or
-    // the two paths stop being comparable.
+    // where the clip-space matrix comes from - a shared SSBO addressed by
+    // gl_InstanceIndex instead of a push constant - so every depth-related state must
+    // stay identical or the two paths stop being comparable.
     {
       PipelineCreateInfo shadowIndirectInfo = {
         .vertexShaderFile = "shadow_indirect.vert",
-        .pushConstantSize = sizeof(glm::mat4),
+        // The tile projection is premultiplied into the SSBO matrices, so this
+        // variant has nothing left to push.
+        .pushConstantSize = 0,
         .colorAttachmentCount = 0,
         .compareOp = VK_COMPARE_OP_LESS,
         .vertexInputFormat = "f3",

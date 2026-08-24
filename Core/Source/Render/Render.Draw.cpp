@@ -863,6 +863,17 @@ namespace YAEngine
     VkBuffer indirectBuffer = VK_NULL_HANDLE;
     VkDrawIndexedIndirectCommand* indirectCommands = nullptr;
 
+    // The model SSBO is cut into one equally sized block per atlas tile, laid out in
+    // the order the tiles are drawn below. A tile writes viewProj * world into its own
+    // block, so the matrix the shader loads is already a clip-space transform.
+    glm::mat4* modelMatrices = nullptr;
+    uint32_t modelTileStride = 0;
+    uint32_t modelTileIndex = 0;
+
+    uint32_t tileCount = (hasDirectionalShadow ? CSM_CASCADE_COUNT : 0)
+      + uint32_t(frame.snapshot.spotShadowRequests.size())
+      + uint32_t(frame.snapshot.pointShadowRequests.size()) * 6;
+
     if (useIndirect)
     {
       size_t commandCount = m_ShadowDrawCommands.size();
@@ -905,22 +916,29 @@ namespace YAEngine
         batchableCount++;
       }
 
+      // Every tile needs its own copy of the matrices, because each one folds in a
+      // different projection.
       // Rewritten only when the handle actually changed: the set is still bound by the
       // command buffers of the other slots and there is no reason to touch it otherwise.
       if (GrowMappedSlot(ctx, m_ShadowModelBuffers[shadowSlot],
-        requiredInstances * sizeof(glm::mat4), SHADOW_MODEL_CAP_BYTES,
+        requiredInstances * tileCount * sizeof(glm::mat4), SHADOW_MODEL_CAP_BYTES,
         VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, "model", b_ShadowModelOverflowReported))
       {
         m_ShadowModelDescriptorSets[shadowSlot].WriteStorageBuffer(0,
           m_ShadowModelBuffers[shadowSlot].Get(), m_ShadowModelBuffers[shadowSlot].GetSize());
       }
       modelCapacity = uint32_t(m_ShadowModelBuffers[shadowSlot].GetSize() / sizeof(glm::mat4));
+      // Tiles get an equal share of the buffer. Casters past that share drop to the
+      // legacy path, so every block ends up the same length and the stride is exact.
+      uint32_t tileBudget = tileCount > 0 ? modelCapacity / tileCount : 0;
 
-      // Pass two lays the final world matrices out in sorted order. Instanced casters
-      // are premultiplied here because the indirect shader reads one matrix and cannot
-      // do the pc.world * instance product the legacy shader did; it happens once per
-      // frame rather than once per atlas tile.
-      auto* models = static_cast<glm::mat4*>(m_ShadowModelBuffers[shadowSlot].GetMapped());
+      // Pass two lays the final world matrices out in sorted order, in plain cached
+      // memory: the per-tile products below read them back, which the write-combined
+      // SSBO mapping would make ruinously slow. Instanced casters are premultiplied
+      // here because the indirect shader reads one matrix and cannot do the
+      // pc.world * instance product the legacy shader did.
+      m_ShadowModelWorlds.resize(std::min<uint64_t>(requiredInstances, tileBudget));
+      glm::mat4* models = m_ShadowModelWorlds.data();
       uint32_t modelCursor = 0;
       for (size_t i = 0; i < commandCount; i++)
       {
@@ -928,7 +946,7 @@ namespace YAEngine
         if (!rec.batchable)
           continue;
 
-        if (modelCursor + rec.instanceCount > modelCapacity)
+        if (modelCursor + rec.instanceCount > tileBudget)
         {
           rec.batchable = false;
           batchableCount--;
@@ -938,10 +956,6 @@ namespace YAEngine
         auto& dc = m_ShadowDrawCommands[i];
         rec.modelBase = modelCursor;
 
-        // Every matrix is finished in registers and stored exactly once. This buffer
-        // is write-combined host memory: it is written sequentially and never read
-        // back, and a second pass that reloaded what it just wrote would pull the
-        // whole SSBO across the bus uncached, costing milliseconds per frame.
         // Restoring happens in mesh local space, so it multiplies in on the right of
         // everything the instance already carries.
         if (dc.instanced)
@@ -970,6 +984,10 @@ namespace YAEngine
 
         modelCursor += rec.instanceCount;
       }
+
+      // Blocks are as long as the part of the share the casters actually used.
+      modelTileStride = modelCursor;
+      modelMatrices = static_cast<glm::mat4*>(m_ShadowModelBuffers[shadowSlot].GetMapped());
 
       // These host writes become visible to the device through the implicit host-write
       // barrier of vkQueueSubmit. No explicit flush or memory barrier is needed here.
@@ -1001,10 +1019,6 @@ namespace YAEngine
       while (scan < commandCount && m_ShadowDrawCommands[scan].ShadowBatchKey() == 1)
         scan++;
       batchEnd[1] = scan;
-
-      uint32_t tileCount = (hasDirectionalShadow ? CSM_CASCADE_COUNT : 0)
-        + uint32_t(frame.snapshot.spotShadowRequests.size())
-        + uint32_t(frame.snapshot.pointShadowRequests.size()) * 6;
 
       GrowMappedSlot(ctx, m_ShadowIndirectBuffers[shadowSlot],
         VkDeviceSize(tileCount) * batchableCount * sizeof(VkDrawIndexedIndirectCommand),
@@ -1057,6 +1071,10 @@ namespace YAEngine
       vkCmdSetViewport(cmd, 0, 1, &sv.viewport);
       vkCmdSetScissor(cmd, 0, 1, &sv.scissor);
 
+      // Tiles are visited in the order the buffer was cut for, so the counter alone
+      // picks this tile's block.
+      uint32_t modelTileBase = modelTileIndex++ * modelTileStride;
+
       auto countTriangles = [&](size_t commandIndex, uint32_t indexCount, uint32_t lod0IndexCount,
         uint32_t instanceCount)
       {
@@ -1068,7 +1086,9 @@ namespace YAEngine
           perDrawTriangles[commandIndex] += triangles;
       };
 
-      if (useIndirect)
+      // The blocks were sized for exactly tileCount tiles, and a tile past that would
+      // write outside the mapping.
+      if (useIndirect && modelTileBase + modelTileStride <= modelCapacity)
       {
         // One contiguous range of commands, drawn against the index buffer it was
         // built for. Split across several submissions when the device caps how many
@@ -1135,6 +1155,14 @@ namespace YAEngine
               break;
             }
 
+            // The tile projection is folded in here instead of being pushed, so the
+            // vertex shader is one matrix load and one product. Only casters that
+            // survived this tile's cull are written, and the block fills in ascending
+            // order because the records are visited in the order they were laid out.
+            uint32_t modelSlot = modelTileBase + rec.modelBase;
+            for (uint32_t n = 0; n < rec.instanceCount; n++)
+              modelMatrices[modelSlot + n] = viewProj * m_ShadowModelWorlds[rec.modelBase + n];
+
             const MeshLodRange& lod = rec.lods[lodLevel];
 
             bool narrow = rec.indexType == VK_INDEX_TYPE_UINT16;
@@ -1143,8 +1171,9 @@ namespace YAEngine
             out.instanceCount = rec.instanceCount;
             out.firstIndex = lod.firstIndex;
             out.vertexOffset = rec.vertexOffset;
-            // Picks the batch's first model matrix; gl_InstanceIndex adds the rest.
-            out.firstInstance = rec.modelBase;
+            // Picks the batch's first matrix inside this tile's block; gl_InstanceIndex
+            // adds the rest.
+            out.firstInstance = modelSlot;
 
             countTriangles(i, lod.indexCount, rec.lods[0].indexCount, rec.instanceCount);
           }
@@ -1162,9 +1191,6 @@ namespace YAEngine
             { m_ShadowManager.GetShadowCascadeUBODescriptorSet(currentFrame) }, 0);
           pipeline.BindDescriptorSets(cmd,
             { m_ShadowModelDescriptorSets[shadowSlot].Get() }, 1);
-
-          glm::mat4 tileViewProj = viewProj;
-          pipeline.PushConstants(cmd, &tileViewProj);
 
           // Re-bound every tile because the alpha-test tail below binds its own
           // interleaved vertex stream over these.

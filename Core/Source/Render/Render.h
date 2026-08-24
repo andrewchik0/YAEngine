@@ -567,6 +567,8 @@ namespace YAEngine
     // tiles, so every LOD level is resolved up front and the tile picks one.
     struct ShadowIndirectRecord
     {
+      // Offset of this caster's matrices inside one tile block of the model SSBO, and
+      // the same offset inside m_ShadowModelWorlds.
       uint32_t modelBase = 0;
       uint32_t instanceCount = 0;
       int32_t vertexOffset = 0;
@@ -588,14 +590,19 @@ namespace YAEngine
     static constexpr uint32_t MAX_SHADOW_TILES =
       CSM_CASCADE_COUNT + MAX_SHADOW_SPOTS + MAX_SHADOW_POINTS * 6;
 
-    // One matrix per shadow-casting instance. Starts at the instance buffer's own
-    // capacity, which is the largest instance count the rest of the engine accepts.
+    // One matrix per shadow-casting instance per atlas tile. Starts at the instance
+    // buffer's own capacity, which is the largest instance count the rest of the
+    // engine accepts.
     static constexpr VkDeviceSize SHADOW_MODEL_INITIAL_BYTES = MAX_INSTANCES * sizeof(glm::mat4);
     static constexpr VkDeviceSize SHADOW_MODEL_CAP_BYTES = 4 * SHADOW_MODEL_INITIAL_BYTES;
     static constexpr VkDeviceSize SHADOW_INDIRECT_INITIAL_BYTES = 1024ull * 1024;
     static constexpr VkDeviceSize SHADOW_INDIRECT_CAP_BYTES = 64ull * 1024 * 1024;
 
     std::vector<ShadowIndirectRecord> m_ShadowIndirectRecords;
+    // World matrices of every batchable shadow instance, in model SSBO order. Kept in
+    // cached memory because each tile reads the whole set back to premultiply its own
+    // projection into its block of the write-combined SSBO.
+    std::vector<glm::mat4> m_ShadowModelWorlds;
     // Indices into m_ShadowDrawCommands that the indirect path still has to draw one
     // by one: alpha-test casters, and opaque meshes the arena could not accept.
     std::vector<uint32_t> m_ShadowLegacyIndices;
