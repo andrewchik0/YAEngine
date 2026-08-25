@@ -117,6 +117,10 @@ namespace YAEngine
     // to bind for every mesh, so the price of the split stays visible.
     uint64_t GetIndexSavedBytes() const { return m_WideIndexBytes - m_IndexBytes; }
     uint64_t GetLodIndexBytes() const { return m_LodIndexBytes; }
+    // Bumped on every successful upload or free. The shadow cache keys on it:
+    // async loading can make a mesh arena-resident after its entity already sat
+    // in the snapshot, changing shadow depth with no snapshot digest change.
+    uint64_t GetContentVersion() const { return m_ContentVersion; }
 
     void LogUsage(const char* reason) const;
 
@@ -208,6 +212,7 @@ namespace YAEngine
     uint64_t m_LodIndexBytes = 0;
     float m_MaxQuantizeError = 0.0f;
     float m_MaxQuantizeErrorExtent = 0.0f;
+    uint64_t m_ContentVersion = 0;
     bool b_ExhaustionReported = false;
     bool b_ShadowExhaustionReported = false;
   };

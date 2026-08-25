@@ -194,6 +194,106 @@ namespace YAEngine
             "Watch for contact shadows drifting and acne on large meshes.");
       }
 
+      // Measurement spike for the shadow caching project - deliberately not
+      // serialized so it resets to FullClear on every launch (see ShadowClearMode).
+      int shadowClearMode = int(context.render->GetShadowClearMode());
+      // Indices must match ShadowClearMode in Render.h
+      const char* shadowClearModes[] = { "Full Clear", "Per-Tile Passes", "Load + Clear Rects" };
+      if (ImGui::Combo("Shadow Clear Mode", &shadowClearMode, shadowClearModes, IM_ARRAYSIZE(shadowClearModes)))
+        context.render->GetShadowClearMode() = ShadowClearMode(shadowClearMode);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Measurement spike for the shadow caching project.\n"
+          "Full Clear: one pass over the whole atlas with LOAD_OP_CLEAR - the current,\n"
+          "fast-clear-friendly control group.\n"
+          "Per-Tile Passes: one render pass instance per atlas tile, clearing only that\n"
+          "tile's rect and preserving the rest of the atlas.\n"
+          "Load + Clear Rects: one LOAD_OP_LOAD pass over the atlas, with a\n"
+          "vkCmdClearAttachments rect before each tile's draws.\n"
+          "Bakes always use Full Clear. Not serialized - resets on launch.");
+
+      ImGui::Checkbox("Cascade Fit Hysteresis", &context.render->GetShadowFitHysteresisEnabled());
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Freezes each cascade's light matrix until its camera frustum slice no\n"
+          "longer fits inside the frozen sphere, then refits once with the margin.\n"
+          "Shadows look near-identical: the map stops re-centering on small camera\n"
+          "moves, at up to the margin factor of effective texel density.\n"
+          "Frozen matrices stay bit-identical - the future tile cache keys on that.\n"
+          "Off restores the exact per-frame fit (A/B control).\n"
+          "Watch the cascade refits block in the performance panel.");
+
+      if (context.render->GetShadowFitHysteresisEnabled())
+      {
+        ImGui::SliderFloat("Fit Margin", &context.render->GetShadowFitMargin(), 1.0f, 1.5f, "%.2f");
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Sphere inflation applied on every refit. Larger survives more camera\n"
+            "motion between refits but costs texel density by the same factor.");
+
+        ImGui::SliderFloat("Sun Threshold (deg)", &context.render->GetShadowSunThresholdDeg(),
+          0.0f, 5.0f, "%.2f");
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("How far the sun may drift from the frozen direction before every\n"
+            "cascade refits. Inside the threshold shadows lag the sun by up to\n"
+            "this angle - keep it small when the sun animates.");
+
+        ImGui::SliderInt("Refit Budget", &context.render->GetShadowRefitBudget(), 0, 4);
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Stage 5: proactive cascade refits per frame. A cascade close to\n"
+            "escaping its frozen sphere refits early (highest urgency first),\n"
+            "so cascades stop escaping together in one expensive frame. Hard\n"
+            "escapes still refit immediately and consume the budget.\n"
+            "0 disables scheduling - the exact stage 4 behavior (A/B control).");
+
+        ImGui::SliderFloat("Refit Threshold", &context.render->GetShadowRefitThreshold(),
+          0.90f, 1.00f, "%.2f");
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Fit urgency at which a cascade becomes a proactive refit candidate\n"
+            "(1.0 = the escape boundary). Lower schedules earlier and spreads\n"
+            "refits more evenly. Clamped internally above 1/margin so a fresh\n"
+            "refit can never immediately re-enqueue itself.");
+      }
+
+      bool fitHysteresisOn = context.render->GetShadowFitHysteresisEnabled();
+      ImGui::BeginDisabled(!fitHysteresisOn);
+      ImGui::Checkbox("Shadow Caching", &context.render->GetShadowCacheEnabled());
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Stage 3 of the shadow caching project, all-or-nothing granularity:\n"
+          "skips the entire shadow pass while nothing shadow-relevant changed\n"
+          "since the last rendered frame - the atlas keeps its content.\n"
+          "Requires Cascade Fit Hysteresis: without frozen fits every frame\n"
+          "refits and there is nothing to reuse.\n"
+          "Watch the Shadow cache line in the performance panel. A shadow that\n"
+          "sticks while its caster moves is an invalidation bug, not a feature.");
+      if (!fitHysteresisOn)
+        ImGui::TextDisabled("Shadow Caching needs Cascade Fit Hysteresis");
+
+      bool shadowCacheOn = fitHysteresisOn && context.render->GetShadowCacheEnabled();
+      ImGui::BeginDisabled(!shadowCacheOn);
+      ImGui::Checkbox("Per-Tile Rebuilds", &context.render->GetShadowCachePerTileEnabled());
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Stage 4 of the shadow caching project: when the only change is a\n"
+          "cascade refit, only the refitted cascade tiles are redrawn and the\n"
+          "rest of the atlas keeps its content. Digest-driven invalidations\n"
+          "(lights, settings, geometry, bakes) still rebuild the whole atlas;\n"
+          "caster movement is handled by Dirty Rect Updates below when it is\n"
+          "enabled. Off restores the stage 3 all-or-nothing behavior (A/B).\n"
+          "Watch the Shadow cache PARTIAL line and the Shadow tiles rows in\n"
+          "the performance panel.");
+
+      bool perTileOn = shadowCacheOn && context.render->GetShadowCachePerTileEnabled();
+      ImGui::BeginDisabled(!perTileOn);
+      ImGui::Checkbox("Dirty Rect Updates", &context.render->GetShadowCacheDirtyRectEnabled());
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Stage 6 of the shadow caching project: a moving caster patches only\n"
+          "the atlas regions its projected footprint touches - per cascade\n"
+          "tile a padded rect over the union of its previous and current\n"
+          "bounds, spot/point tiles wholesale when a mover intersects their\n"
+          "frustum. Off makes any caster movement a full atlas rebuild again\n"
+          "(stage 5 behavior, A/B control). Watch the Shadow cache RECT line\n"
+          "and the rect rows under Shadow tiles in the performance panel.");
+
       ImGui::Checkbox("Shadow Cascade LOD", &context.render->GetShadowLodEnabled());
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Distant cascades draw a simplified index stream over the same vertices.\n"

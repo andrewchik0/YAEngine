@@ -118,12 +118,11 @@ namespace YAEngine
     }
   }
 
-  float ShadowManager::FitCascadeToFrustum(
-    uint32_t cascadeIndex,
+  void ShadowManager::ComputeFrustumSliceSphere(
     const glm::mat4& invView,
     float fov, float aspect,
     float nearDist, float farDist,
-    const glm::vec3& lightDir)
+    glm::vec3& outCenter, float& outRadius)
   {
     // Slice corners straight from the camera geometry in view space: corners 0-3 sit on the
     // near split plane, 4-7 on the far split plane, looking down -Z.
@@ -152,6 +151,21 @@ namespace YAEngine
       float dist = glm::length(worldCorners[i] - center);
       radius = std::max(radius, dist);
     }
+
+    outCenter = center;
+    outRadius = radius;
+  }
+
+  float ShadowManager::FitCascadeToFrustum(
+    uint32_t cascadeIndex,
+    const glm::mat4& invView,
+    float fov, float aspect,
+    float nearDist, float farDist,
+    const glm::vec3& lightDir)
+  {
+    glm::vec3 center;
+    float radius;
+    ComputeFrustumSliceSphere(invView, fov, aspect, nearDist, farDist, center, radius);
 
     return FitCascadeToSphere(cascadeIndex, center, radius, lightDir);
   }
@@ -213,16 +227,190 @@ namespace YAEngine
 
     m_ShadowData.shadowsEnabled = 1;
 
+    // Split depths are camera-relative selection depths, not part of any fit,
+    // so they keep updating every frame even while every cascade stays frozen.
     ComputeCascadeSplits(cameraNear, shadowDistance);
 
     glm::mat4 invView = glm::inverse(cameraView);
+    glm::vec3 sunDir = glm::normalize(lightDirection);
+    m_FitFrame++;
+
+    if (!b_FitHysteresis)
+    {
+      // A/B control: the exact pre-hysteresis per-frame fit, bit for bit.
+      for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
+      {
+        m_FrozenFits[i].valid = false;
+        m_CascadeUrgency[i] = 0.0f;
+
+        float texelWorldSize = FitCascadeToFrustum(i, invView, cameraFov, cameraAspect,
+          m_CascadeSplits[i], m_CascadeSplits[i + 1], sunDir);
+
+        // Normal bias = 1.5 texels in world space, scales automatically per cascade
+        m_ShadowData.cascades[i].splitDepthAndBias = glm::vec4(
+          m_CascadeSplits[i + 1],
+          0.0f,
+          texelWorldSize * 1.5f,
+          0.0f);
+      }
+      b_HysteresisWasOff = true;
+      return;
+    }
+
+    // Full-refit triggers shared by all cascades, compared against the inputs
+    // the frozen matrices were built from.
+    ShadowInvalidation fullReason = ShadowInvalidation::None;
+    if (b_FrozenParamsValid)
+    {
+      if (b_HysteresisWasOff)
+        fullReason = ShadowInvalidation::DebugToggleChanged;
+      else if (shadowDistance != m_FrozenShadowDistance
+        || cameraFov != m_FrozenFov
+        || cameraAspect != m_FrozenAspect
+        || cameraNear != m_FrozenNear)
+        fullReason = ShadowInvalidation::ShadowParamsChanged;
+      else if (sunDir != m_FrozenSunDir
+        && glm::dot(sunDir, m_FrozenSunDir) < std::cos(glm::radians(m_SunThresholdDeg)))
+        fullReason = ShadowInvalidation::SunMoved;
+    }
+    b_HysteresisWasOff = false;
+
+    if (!b_FrozenParamsValid || fullReason != ShadowInvalidation::None)
+    {
+      // ShadowParamsChanged keeps the frozen direction: the sun is still inside
+      // the threshold, and fitting against the frozen direction is what keeps
+      // the new matrices reproducible until it actually escapes.
+      if (fullReason != ShadowInvalidation::ShadowParamsChanged)
+        m_FrozenSunDir = sunDir;
+      m_FrozenShadowDistance = shadowDistance;
+      m_FrozenFov = cameraFov;
+      m_FrozenAspect = cameraAspect;
+      m_FrozenNear = cameraNear;
+      b_FrozenParamsValid = true;
+      for (auto& frozen : m_FrozenFits)
+        frozen.valid = false;
+    }
+
+    double now = glfwGetTime();
+
+    // Stage 5 refit scheduler. While a required sphere still fits inside its
+    // frozen one, refitting early is visually safe: the frozen matrix is still
+    // valid, the fit just gets re-centered ahead of time. Spreading those
+    // proactive refits across frames (budgeted, highest urgency first) keeps
+    // several cascades from escaping in the same frame and spiking the pass.
+    // The full-refit triggers above are deliberately NOT staggered: all
+    // affected cascades refit in the same frame, because cascades fitted
+    // against different sun directions would be lit inconsistently.
+    glm::vec3 requiredCenters[CSM_CASCADE_COUNT];
+    float requiredRadii[CSM_CASCADE_COUNT];
+    bool refit[CSM_CASCADE_COUNT];
+    int hardRefits = 0;
 
     for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
     {
-      float texelWorldSize = FitCascadeToFrustum(i, invView, cameraFov, cameraAspect,
-        m_CascadeSplits[i], m_CascadeSplits[i + 1], glm::normalize(lightDirection));
+      ComputeFrustumSliceSphere(invView, cameraFov, cameraAspect,
+        m_CascadeSplits[i], m_CascadeSplits[i + 1], requiredCenters[i], requiredRadii[i]);
 
-      // Normal bias = 1.5 texels in world space, scales automatically per cascade
+      const auto& frozen = m_FrozenFits[i];
+      if (!frozen.valid)
+      {
+        // Cold start or a full-refit trigger: refits now, urgency is set by
+        // the fit below once there is a frozen sphere to measure against.
+        refit[i] = true;
+        hardRefits++;
+        continue;
+      }
+
+      float required = glm::length(requiredCenters[i] - frozen.center) + requiredRadii[i];
+      m_CascadeUrgency[i] = required / frozen.radius;
+
+      // Hard escape keeps the exact stage 2 containment comparison, so budget
+      // 0 reproduces stage 4 bit for bit; it equals urgency >= 1 up to the
+      // rounding of the division above. Correctness beats smoothness: a hard
+      // escape refits immediately and never waits for a budget slot. With
+      // proactive scheduling it should almost never happen - the performance
+      // panel counts these as "forced".
+      refit[i] = required > frozen.radius;
+      if (refit[i])
+      {
+        hardRefits++;
+        m_ForcedRefitCount++;
+      }
+    }
+
+    // Right after a refit urgency sits at ~1/margin: the fresh frozen sphere
+    // is the required one inflated by the margin. A soft threshold at or
+    // below that would re-enqueue the cascade immediately and refit it every
+    // frame, so the effective threshold is clamped above 1/margin no matter
+    // what the sliders say.
+    float effectiveThreshold = std::max(m_RefitSoftThreshold, 1.0f / m_FitMargin + 0.02f);
+
+    // Hard refits happen regardless of the budget but still consume it, so a
+    // frame that already paid for an escape adds no scheduled work on top.
+    int scheduledSlots = std::max(0, m_RefitBudget - hardRefits);
+    while (scheduledSlots > 0)
+    {
+      // Highest urgency first; strict > keeps ties deterministic on the
+      // lowest cascade index.
+      int best = -1;
+      for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
+      {
+        if (refit[i] || !m_FrozenFits[i].valid) continue;
+        if (m_CascadeUrgency[i] < effectiveThreshold) continue;
+        if (best < 0 || m_CascadeUrgency[i] > m_CascadeUrgency[best]) best = int(i);
+      }
+      if (best < 0) break;
+      refit[best] = true;
+      m_ScheduledRefitCount++;
+      scheduledSlots--;
+    }
+
+    for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
+    {
+      auto& frozen = m_FrozenFits[i];
+
+      float texelWorldSize;
+      if (!refit[i])
+      {
+        // Verbatim reuse is the entire point: the future tile cache keys on the
+        // matrix staying bit-identical between refits.
+        m_ShadowData.cascades[i].viewProj = frozen.viewProj;
+        texelWorldSize = frozen.texelWorldSize;
+      }
+      else
+      {
+        // The margin is what buys frames of reuse: the camera can move until the
+        // required sphere escapes the inflated one. Pre-rounded the same way
+        // FitCascadeToSphere rounds (idempotent), so the stored radius is the
+        // fitted one and the containment test cannot flicker at the boundary.
+        float inflated = std::ceil(requiredRadii[i] * m_FitMargin * 16.0f) / 16.0f;
+        texelWorldSize = FitCascadeToSphere(i, requiredCenters[i], inflated, m_FrozenSunDir);
+
+        frozen = {
+          .viewProj = m_ShadowData.cascades[i].viewProj,
+          .center = requiredCenters[i],
+          .radius = inflated,
+          .texelWorldSize = texelWorldSize,
+          .valid = true,
+        };
+
+        auto& stats = m_FitStats[i];
+        stats.refitCount++;
+        stats.lastRefitFrame = m_FitFrame;
+        stats.lastRefitTime = now;
+        // A scheduled refit IS a refit: it records CascadeRefit like an
+        // organic escape, so the stage 4 partial rebuild picks its tile up
+        // unchanged.
+        stats.lastReason = fullReason != ShadowInvalidation::None
+          ? fullReason : ShadowInvalidation::CascadeRefit;
+
+        // Urgency restarts from the fresh sphere (~1/margin): the required
+        // sphere is centered inside it, so the distance term is zero.
+        m_CascadeUrgency[i] = requiredRadii[i] / inflated;
+      }
+
+      // Normal bias = 1.5 texels in world space, scales automatically per
+      // cascade; while frozen it comes from the frozen fit's texel size.
       m_ShadowData.cascades[i].splitDepthAndBias = glm::vec4(
         m_CascadeSplits[i + 1],
         0.0f,

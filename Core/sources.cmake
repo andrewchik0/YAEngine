@@ -149,6 +149,7 @@ set(SOURCE_FILES
   Source/Render/PipelineCache.h
   Source/Render/ShadowAtlas.cpp
   Source/Render/ShadowAtlas.h
+  Source/Render/ShadowInvalidation.h
   Source/Render/ShadowManager.cpp
   Source/Render/ShadowManager.h
   Source/Utils/Topology.h

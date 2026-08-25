@@ -19,7 +19,9 @@ namespace YAEngine
   {
   public:
 
-    static constexpr uint32_t MAX_ZONES = 48;
+    // Sized for the render graph passes plus one GPU zone per shadow atlas tile
+    // group (4 cascades + 8 spots + 4 point lights) with headroom.
+    static constexpr uint32_t MAX_ZONES = 64;
     // Sized for ten seconds of history at 400 fps. The panel aggregates frames into
     // time buckets, so the ring only has to be long enough, not economical.
     static constexpr uint32_t HISTORY_SIZE = 4096;

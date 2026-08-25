@@ -6,6 +6,7 @@
 #include "Editor/EditorContext.h"
 #include "Render/GeometryArena.h"
 #include "Render/Render.h"
+#include "Scene/SceneSnapshot.h"
 #include "Utils/Timer.h"
 
 namespace YAEngine
@@ -93,6 +94,7 @@ namespace YAEngine
       m_StatsTimer = 0.0f;
       if (context.timer)
         m_DisplayFPS = context.timer->GetFPS();
+      UpdatePercentiles();
     }
 
     bool refreshOrder = m_OrderTimer >= STACK_ORDER_INTERVAL;
@@ -105,6 +107,7 @@ namespace YAEngine
       m_LastAggregate = now;
       b_ForceAggregate = false;
 
+      UpdateFrameTimeStats();
       if (m_Mode != DisplayMode::GPU)
         Aggregate(ProfileDomain::CPU, refreshOrder);
       if (m_Mode != DisplayMode::CPU)
@@ -231,6 +234,27 @@ namespace YAEngine
     ImGui::Text("avg  %.2f ms", m_AvgFrametime);
 
     ImGui::Spacing();
+    ImGui::TextDisabled("CPU frame, last %u frames", m_CpuPercentiles.samples);
+    ImGui::Text("p50    %.2f ms", m_CpuPercentiles.p50);
+    ImGui::Text("p99    %.2f ms", m_CpuPercentiles.p99);
+    ImGui::Text("p99.9  %.2f ms", m_CpuPercentiles.p999);
+    ImGui::Text("max    %.2f ms", m_CpuPercentiles.max);
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("GPU frame, last %u frames", m_GpuPercentiles.samples);
+    ImGui::Text("p50    %.2f ms", m_GpuPercentiles.p50);
+    ImGui::Text("p99    %.2f ms", m_GpuPercentiles.p99);
+    ImGui::Text("p99.9  %.2f ms", m_GpuPercentiles.p999);
+    ImGui::Text("max    %.2f ms", m_GpuPercentiles.max);
+
+    ImGui::Spacing();
+    ImGui::TextDisabled("Shadows GPU, last %u frames", m_ShadowPercentiles.samples);
+    ImGui::Text("p50    %.3f ms", m_ShadowPercentiles.p50);
+    ImGui::Text("p99    %.3f ms", m_ShadowPercentiles.p99);
+    ImGui::Text("p99.9  %.3f ms", m_ShadowPercentiles.p999);
+    ImGui::Text("max    %.3f ms", m_ShadowPercentiles.max);
+
+    ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
@@ -267,10 +291,52 @@ namespace YAEngine
           "the same tiles would have submitted with every caster at LOD 0.\n"
           "Zero means the feature is off or nothing reached a simplified level.");
 
+      // Indices must match ShadowClearMode in Render.h
+      static constexpr const char* CLEAR_MODE_NAMES[] = { "FullClear", "PerTilePasses", "LoadAndClearRects" };
+      ImGui::Text("Shadow clear  %s", CLEAR_MODE_NAMES[std::min(stats.shadowClearMode, 2u)]);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Active atlas clear strategy, set by the Shadow Clear Mode combo\n"
+          "in Render Settings. Shown here so screenshots are self-describing.");
+
       if (ImGui::TreeNode("Shadow tiles"))
       {
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Per tile group: kind of the last redraw (full, partial or rect),\n"
+            "how long\n"
+            "ago it happened, the invalidation reason that forced it and the\n"
+            "triangles it submitted. Untouched tiles keep their last redraw's\n"
+            "values - the age is how stale the cached atlas content is.\n"
+            "Cascade rows append fit urgency: how close the cascade is to\n"
+            "escaping its frozen sphere (100% = the escape boundary).");
+        double tileNowSeconds = glfwGetTime();
+        auto tileStateRow = [&](const char* label, const ShadowTileState& tile,
+          float fitUrgency = -1.0f)
+        {
+          if (!tile.valid)
+          {
+            ImGui::Text("%s  -", label);
+            return;
+          }
+          char fitSuffix[16] = "";
+          if (fitUrgency >= 0.0f)
+            snprintf(fitSuffix, sizeof(fitSuffix), "  fit %.0f%%", double(fitUrgency) * 100.0);
+          static constexpr const char* TILE_KIND_NAMES[] = { "full", "partial", "rect" };
+          ImGui::Text("%s  %s  %.1f s ago  %s  %u tris%s", label,
+            TILE_KIND_NAMES[uint32_t(tile.kind)],
+            tileNowSeconds - tile.lastDrawTime,
+            ShadowInvalidationName(tile.lastReason),
+            tile.lastTriangles, fitSuffix);
+        };
+        char tileLabel[8];
+        auto& shadowManager = context.render->GetShadowManager();
         for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
-          ImGui::Text("Cascade %u  %u", i, stats.shadowTrianglesPerCascade[i]);
+        {
+          snprintf(tileLabel, sizeof(tileLabel), "C%u", i);
+          tileStateRow(tileLabel, context.render->GetShadowCascadeTileState(i),
+            shadowManager.GetCascadeUrgency(i));
+        }
+        tileStateRow("Spots", context.render->GetShadowSpotTileState());
+        tileStateRow("Points", context.render->GetShadowPointTileState());
         for (uint32_t i = 0; i < MAX_SHADOW_SPOTS; i++)
         {
           if (stats.shadowTrianglesPerSpot[i] > 0)
@@ -283,6 +349,71 @@ namespace YAEngine
         }
         ImGui::TreePop();
       }
+
+      ImGui::Spacing();
+      ImGui::TextDisabled("cascade refits");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Per cascade: total refit count, seconds since the last refit and its\n"
+          "reason. The Stage 2 measurable - refit frequency under camera motion\n"
+          "predicts how often the future tile cache could reuse a cascade tile.\n"
+          "A stationary camera should sit at zero refits.");
+      {
+        double nowSeconds = glfwGetTime();
+        auto& shadowManager = context.render->GetShadowManager();
+        for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
+        {
+          const auto& fit = shadowManager.GetCascadeFitStats(i);
+          if (fit.refitCount == 0)
+            ImGui::Text("C%u  0", i);
+          else
+            ImGui::Text("C%u  %u  %.1f s ago  %s", i, fit.refitCount,
+              nowSeconds - fit.lastRefitTime, ShadowInvalidationName(fit.lastReason));
+        }
+
+        ImGui::Text("refits scheduled %llu  forced %llu",
+          (unsigned long long)shadowManager.GetScheduledRefitCount(),
+          (unsigned long long)shadowManager.GetForcedRefitCount());
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Stage 5 scheduler split of organic refits. Scheduled: performed\n"
+            "early, while the cascade still fit inside its frozen sphere,\n"
+            "budgeted per frame. Forced: hard escapes the scheduler failed to\n"
+            "preempt. Forced climbing during normal camera motion means the\n"
+            "threshold or budget cannot keep up. Full refits (sun, params,\n"
+            "toggles) count in neither.");
+      }
+
+      ImGui::Spacing();
+      if (stats.shadowCacheHit != 0)
+        ImGui::Text("Shadow cache  HIT x%u", stats.shadowCacheConsecutiveHits);
+      else if (stats.shadowCacheRect != 0)
+        ImGui::Text("Shadow cache  RECT %u tiles %.1f%%",
+          stats.shadowCacheRectTiles, double(stats.shadowCacheRectAreaPercent));
+      else if (stats.shadowCachePartial != 0)
+        ImGui::Text("Shadow cache  PARTIAL %u tiles", stats.shadowCachePartialTiles);
+      else
+        ImGui::Text("Shadow cache  REBUILD %s",
+          ShadowInvalidationName(ShadowInvalidation(stats.shadowCacheRebuildReason)));
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Shadow cache state this frame. HIT: the entire shadow pass was\n"
+          "skipped, with the streak length. RECT: movers patched only their\n"
+          "footprint rects (stage 6, Dirty Rect Updates), with the touched\n"
+          "tile count and the redrawn share of those tiles' area. PARTIAL:\n"
+          "only the refitted cascade tiles were redrawn (stage 4, Per-Tile\n"
+          "Rebuilds). REBUILD: the whole atlas rendered, with the reason\n"
+          "that forced it. Needs Shadow Caching plus Cascade Fit Hysteresis\n"
+          "in Render Settings.");
+      ImGui::Text("hits %llu  rect %llu  partial %llu  full %llu",
+        (unsigned long long)stats.shadowCacheTotalHits,
+        (unsigned long long)stats.shadowCacheTotalRects,
+        (unsigned long long)stats.shadowCacheTotalPartials,
+        (unsigned long long)stats.shadowCacheTotalRebuilds);
+
+      if (ImGui::Button("Dump cache blockers"))
+        g_ShadowCacheBlockerDumpPending = true;
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Logs every shadow caster whose transform was stamped within the\n"
+          "last 2 ticks on the next snapshot - the entities keeping the cache\n"
+          "in REBUILD caster-moved. One shot, nothing is tracked until pressed.");
 
       if (ImGui::Button("Dump cascade breakdown"))
         context.render->RequestShadowBreakdownDump();
@@ -342,6 +473,109 @@ namespace YAEngine
       ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "PAUSED");
     else if (storage.IsWarmingUp())
       ImGui::TextDisabled("warming up...");
+  }
+
+  // Nearest-rank percentile over an ascending-sorted range.
+  static float Percentile(const std::vector<float>& sorted, float q)
+  {
+    if (sorted.empty())
+      return 0.0f;
+
+    size_t rank = size_t(std::ceil(q * float(sorted.size())));
+    rank = std::clamp<size_t>(rank, 1, sorted.size());
+    return sorted[rank - 1];
+  }
+
+  void PerformancePanel::UpdatePercentiles()
+  {
+    auto& storage = ProfilerStorage::Get();
+
+    auto compute = [this](Percentiles& out)
+    {
+      // Zeroes are frames where nothing was recorded (warmup, pause, the zone
+      // did not run); they would drag every percentile toward zero.
+      std::erase_if(m_PercentileScratch, [](float value) { return value <= 0.0f; });
+      std::sort(m_PercentileScratch.begin(), m_PercentileScratch.end());
+
+      out.samples = uint32_t(m_PercentileScratch.size());
+      out.p50 = Percentile(m_PercentileScratch, 0.5f);
+      out.p99 = Percentile(m_PercentileScratch, 0.99f);
+      out.p999 = Percentile(m_PercentileScratch, 0.999f);
+      out.max = m_PercentileScratch.empty() ? 0.0f : m_PercentileScratch.back();
+    };
+
+    uint32_t cpuFrames = std::min(storage.GetAvailableFrames(ProfileDomain::CPU), PERCENTILE_WINDOW);
+    m_PercentileScratch.assign(cpuFrames, 0.0f);
+    if (cpuFrames > 0)
+      storage.CopyFrameTotals(ProfileDomain::CPU, cpuFrames, m_PercentileScratch);
+    compute(m_CpuPercentiles);
+
+    // With vsync on the CPU totals are dominated by the WaitFrame zone, so the
+    // GPU frame total is the block that stays meaningful either way.
+    uint32_t gpuFrames = std::min(storage.GetAvailableFrames(ProfileDomain::GPU), PERCENTILE_WINDOW);
+    m_PercentileScratch.assign(gpuFrames, 0.0f);
+    if (gpuFrames > 0)
+      storage.CopyFrameTotals(ProfileDomain::GPU, gpuFrames, m_PercentileScratch);
+    compute(m_GpuPercentiles);
+
+    // The profiler ring already retains per-frame zone history, so the shadow
+    // pass gets the same treatment without any extra recording machinery.
+    uint32_t shadowZone = UINT32_MAX;
+    uint32_t gpuZones = storage.GetZoneCount(ProfileDomain::GPU);
+    for (uint32_t zone = 0; zone < gpuZones; zone++)
+    {
+      if (std::string_view(storage.GetZoneName(ProfileDomain::GPU, zone)) == "Shadows")
+      {
+        shadowZone = zone;
+        break;
+      }
+    }
+
+    m_PercentileScratch.assign(gpuFrames, 0.0f);
+    if (shadowZone != UINT32_MAX && gpuFrames > 0)
+      storage.CopyZoneHistory(ProfileDomain::GPU, shadowZone, gpuFrames, m_PercentileScratch);
+    compute(m_ShadowPercentiles);
+  }
+
+  void PerformancePanel::UpdateFrameTimeStats()
+  {
+    auto& storage = ProfilerStorage::Get();
+
+    uint32_t avail = storage.GetAvailableFrames(ProfileDomain::CPU);
+    if (avail < 2)
+      return;
+
+    m_FrameTimes.resize(avail);
+    storage.CopyFrameTimes(ProfileDomain::CPU, avail, m_FrameTimes);
+
+    // Same seconds window as the chart, so the numbers and the plot agree.
+    double start = m_FrameTimes[avail - 1] - static_cast<double>(WindowSeconds());
+    auto first = std::lower_bound(m_FrameTimes.begin(), m_FrameTimes.begin() + avail, start);
+    uint32_t tail = avail - static_cast<uint32_t>(first - m_FrameTimes.begin());
+    if (tail < 1)
+      return;
+
+    m_Values.resize(tail);
+    storage.CopyFrameTotals(ProfileDomain::CPU, tail, m_Values);
+
+    float minimum = FLT_MAX;
+    float maximum = 0.0f;
+    float sum = 0.0f;
+    uint32_t count = 0;
+    for (uint32_t i = 0; i < tail; i++)
+    {
+      float value = m_Values[i];
+      if (value <= 0.0f)
+        continue;
+      minimum = std::min(minimum, value);
+      maximum = std::max(maximum, value);
+      sum += value;
+      count++;
+    }
+
+    m_MinFrametime = count > 0 ? minimum : 0.0f;
+    m_MaxFrametime = maximum;
+    m_AvgFrametime = count > 0 ? sum / static_cast<float>(count) : 0.0f;
   }
 
   void PerformancePanel::Aggregate(ProfileDomain domain, bool refreshOrder)
@@ -408,32 +642,6 @@ namespace YAEngine
     }
 
     m_Values.resize(tail);
-
-    // Frame time statistics come from the same window as the plot, so the numbers in
-    // the summary and the shape of the chart can never disagree.
-    if (domain == ProfileDomain::CPU)
-    {
-      storage.CopyFrameTotals(domain, tail, m_Values);
-
-      float minimum = FLT_MAX;
-      float maximum = 0.0f;
-      float sum = 0.0f;
-      uint32_t count = 0;
-      for (uint32_t i = 0; i < tail; i++)
-      {
-        float value = m_Values[i];
-        if (value <= 0.0f)
-          continue;
-        minimum = std::min(minimum, value);
-        maximum = std::max(maximum, value);
-        sum += value;
-        count++;
-      }
-
-      m_MinFrametime = count > 0 ? minimum : 0.0f;
-      m_MaxFrametime = maximum;
-      m_AvgFrametime = count > 0 ? sum / static_cast<float>(count) : 0.0f;
-    }
 
     view.buckets.assign(static_cast<size_t>(zoneCount) * BUCKET_COUNT, 0.0f);
 

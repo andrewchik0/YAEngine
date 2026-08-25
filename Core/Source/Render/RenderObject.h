@@ -80,6 +80,14 @@ namespace YAEngine
     IrradianceGridLayout grid;
   };
 
+  // Union of a moved shadow caster's previous and current world AABB - the
+  // region of a shadow tile its movement can have changed.
+  struct ShadowMoverBounds
+  {
+    glm::vec3 min { 0.0f };
+    glm::vec3 max { 0.0f };
+  };
+
   struct SceneSnapshot
   {
     std::vector<RenderObject> objects;
@@ -96,5 +104,21 @@ namespace YAEngine
     std::vector<IrradianceVolumeInstance> irradianceVolumes;
 #endif
     TerrainRenderData terrainData {};
+
+    // Shadow cache keys, folded by BuildSceneSnapshot in registry order - the
+    // later frustum-cull partition of `objects` does not touch them, so camera
+    // motion alone never flips a digest. Equal digests mean the shadow pass
+    // would redraw the atlas with identical content.
+    uint64_t casterIdentityDigest = 0;
+    uint64_t casterTransformDigest = 0;
+    uint64_t lightDigest = 0;
+
+    // Stage 6 dirty rects: union AABBs of the shadow-relevant casters that
+    // moved in the tick right before this snapshot. The transform digest
+    // stays the trigger; these attribute the change to footprints. A mover
+    // without WorldBounds cannot be attributed one and sets the flag, which
+    // forces the full-rebuild fallback.
+    std::vector<ShadowMoverBounds> shadowMoverBounds;
+    bool shadowMoverUnbounded = false;
   };
 }

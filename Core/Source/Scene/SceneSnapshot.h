@@ -13,11 +13,41 @@
 
 namespace YAEngine
 {
+  // FNV-1a fold of shadow-relevant scene state, computed while the snapshot
+  // loops already run. Floats are hashed bit-wise: any actual change flips the
+  // digest, bit-identical state keeps it. Local to the snapshot on purpose -
+  // this is not a general hashing utility yet.
+  struct SnapshotDigest
+  {
+    uint64_t value = 14695981039346656037ull;
+
+    template<typename T>
+    void Add(const T& data)
+    {
+      const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&data);
+      for (size_t i = 0; i < sizeof(T); i++)
+      {
+        value ^= bytes[i];
+        value *= 1099511628211ull;
+      }
+    }
+  };
+
+#ifdef YA_EDITOR
+  // One-shot request from PerformancePanel: the next BuildSceneSnapshot logs
+  // every shadow-relevant caster whose lastChangeTick is recent - the entities
+  // keeping casterTransformDigest changing. One bool check per frame while
+  // disarmed.
+  inline bool g_ShadowCacheBlockerDumpPending = false;
+#endif
+
   inline void BuildSceneSnapshot(SceneSnapshot& snapshot, LightBuffer& lights, Scene& scene, MeshManager& meshManager, MaterialManager& materialManager)
   {
     snapshot.objects.clear();
     snapshot.spotShadowRequests.clear();
     snapshot.pointShadowRequests.clear();
+    snapshot.shadowMoverBounds.clear();
+    snapshot.shadowMoverUnbounded = false;
     snapshot.skybox = scene.GetSkybox();
 
     // Extract camera
@@ -37,6 +67,16 @@ namespace YAEngine
     // Extract render objects
     auto view = scene.GetView<MeshComponent, WorldTransform, MaterialComponent>();
     auto& reg = scene.GetRegistry();
+
+    // Tick of the TransformSystem update right before this snapshot. Objects
+    // stamped with it moved THIS tick; older stamps were already handled by
+    // the rebuild their digest change forced.
+    uint64_t currentTransformTick = 0;
+    if (auto* tickCtx = reg.ctx().find<TransformTickContext>())
+      currentTransformTick = tickCtx->tick;
+
+    SnapshotDigest identityDigest;
+    SnapshotDigest transformDigest;
 
     view.each([&](entt::entity entity, MeshComponent& mesh, WorldTransform& wt, MaterialComponent& material)
     {
@@ -78,15 +118,83 @@ namespace YAEngine
         snapshot.terrainData.layer1 = &reg.get<TerrainMaterialComponent>(entity);
       }
 
-      if (reg.all_of<WorldBounds>(entity))
+      const WorldBounds* wb = reg.try_get<WorldBounds>(entity);
+      if (wb)
       {
-        auto& wb = reg.get<WorldBounds>(entity);
-        obj.boundsMin = wb.min;
-        obj.boundsMax = wb.max;
+        obj.boundsMin = wb->min;
+        obj.boundsMax = wb->max;
+      }
+
+      // Shadow-relevant casters only, matching what RenderShadowMaps skips.
+      // Identity catches set/order/mesh/material/flag/instancing changes; the
+      // transform digest catches any recomputed world matrix via its stamp.
+      if (!obj.noShading && !obj.isTransparent)
+      {
+        identityDigest.Add(uint32_t(entity));
+        identityDigest.Add(obj.mesh.index);
+        identityDigest.Add(obj.mesh.generation);
+        identityDigest.Add(obj.material.index);
+        identityDigest.Add(obj.material.generation);
+        identityDigest.Add(obj.doubleSided);
+        identityDigest.Add(obj.isAlphaTest);
+        identityDigest.Add(obj.instanceOffset);
+        identityDigest.Add(obj.instanceData ? uint32_t(obj.instanceData->size()) : 0u);
+        transformDigest.Add(wt.lastChangeTick);
+
+        // Stage 6 dirty rects: attribute the digest change to the objects
+        // that moved this tick, as the union of previous and current bounds.
+        if (currentTransformTick != 0 && wt.lastChangeTick == currentTransformTick)
+        {
+          if (wb)
+          {
+            snapshot.shadowMoverBounds.push_back({
+              .min = glm::min(wb->min, wb->prevMin),
+              .max = glm::max(wb->max, wb->prevMax),
+            });
+          }
+          else
+          {
+            snapshot.shadowMoverUnbounded = true;
+          }
+        }
       }
 
       snapshot.objects.push_back(obj);
     });
+
+    snapshot.casterIdentityDigest = identityDigest.value;
+    snapshot.casterTransformDigest = transformDigest.value;
+
+#ifdef YA_EDITOR
+    if (g_ShadowCacheBlockerDumpPending)
+    {
+      g_ShadowCacheBlockerDumpPending = false;
+
+      uint64_t maxTick = 0;
+      auto tickView = reg.view<WorldTransform>();
+      for (auto e : tickView)
+        maxTick = std::max(maxTick, tickView.get<WorldTransform>(e).lastChangeTick);
+
+      uint32_t blockers = 0;
+      view.each([&](entt::entity entity, MeshComponent& mesh, WorldTransform& wt, MaterialComponent& material)
+      {
+        if (reg.all_of<HiddenTag>(entity)) return;
+        auto& mat = materialManager.Get(material.asset);
+        if (mat.shadingModel == ShadingModel::Unlit || mat.transparent) return;
+        if (wt.lastChangeTick + 2 < maxTick) return;
+        blockers++;
+        YA_LOG_INFO("Render", "Shadow cache blocker: '%s' (entity %u) tick %llu, max %llu",
+          scene.GetName(entity).c_str(), uint32_t(entity),
+          (unsigned long long)wt.lastChangeTick, (unsigned long long)maxTick);
+      });
+      if (blockers == 0)
+        YA_LOG_INFO("Render", "Shadow cache blockers: none (no caster stamped within 2 ticks of max %llu)",
+          (unsigned long long)maxTick);
+      else
+        YA_LOG_INFO("Render", "Shadow cache blockers: %u caster(s) stamped within 2 ticks of max %llu",
+          blockers, (unsigned long long)maxTick);
+    }
+#endif
 
     snapshot.visibleCount = uint32_t(snapshot.objects.size());
 
@@ -264,5 +372,30 @@ namespace YAEngine
         }
       }
     }
+
+    // Any change to a shadow-casting light forces a full redraw, which is what
+    // keeps the ordinal tile-to-light binding safe under all-or-nothing caching.
+    // The sun DIRECTION is deliberately excluded: the cascade fit hysteresis
+    // owns it, and hashing it here would defeat the angular threshold.
+    SnapshotDigest lightDigest;
+    lightDigest.Add(snapshot.directionalShadow.castShadow);
+    lightDigest.Add(snapshot.directionalShadow.shadowDistance);
+    lightDigest.Add(uint32_t(snapshot.spotShadowRequests.size()));
+    for (const auto& req : snapshot.spotShadowRequests)
+    {
+      lightDigest.Add(req.position);
+      lightDigest.Add(req.direction);
+      lightDigest.Add(req.outerCone);
+      lightDigest.Add(req.radius);
+      lightDigest.Add(req.lightIndex);
+    }
+    lightDigest.Add(uint32_t(snapshot.pointShadowRequests.size()));
+    for (const auto& req : snapshot.pointShadowRequests)
+    {
+      lightDigest.Add(req.position);
+      lightDigest.Add(req.radius);
+      lightDigest.Add(req.lightIndex);
+    }
+    snapshot.lightDigest = lightDigest.value;
   }
 }

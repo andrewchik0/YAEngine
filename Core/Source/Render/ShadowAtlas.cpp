@@ -26,17 +26,10 @@ namespace YAEngine
 
     m_Image.Init(ctx, imageDesc, &samplerDesc);
 
-    // Create render pass (depth-only, clear on load)
-    VkAttachmentDescription depthAttachment {};
-    depthAttachment.format = VK_FORMAT_D32_SFLOAT;
-    depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
-    depthAttachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-    depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-    depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-    depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-    depthAttachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-    depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
-
+    // Create render passes (depth-only). The main pass clears the whole atlas
+    // from UNDEFINED; the clear-mode spike variants preserve prior contents, so
+    // their initialLayout is READ_ONLY - UNDEFINED may discard the whole
+    // subresource, not just renderArea.
     VkAttachmentReference depthRef {};
     depthRef.attachment = 0;
     depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -46,28 +39,62 @@ namespace YAEngine
     subpass.colorAttachmentCount = 0;
     subpass.pDepthStencilAttachment = &depthRef;
 
-    VkSubpassDependency dependency {};
-    dependency.srcSubpass = 0;
-    dependency.dstSubpass = VK_SUBPASS_EXTERNAL;
-    dependency.srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
-    dependency.dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
-    dependency.srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-    dependency.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    VkSubpassDependency dependencies[2] {};
+    // Entry: the atlas image is shared across frames in flight, and the implicit
+    // entry dependency carries no execution dependency, so without this the pass
+    // could start writing depth while the previous frame's lighting pass is
+    // still sampling the atlas.
+    dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[0].dstSubpass = 0;
+    dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[0].dstStageMask = VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT
+      | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+    dependencies[0].dstAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_READ_BIT
+      | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    // Exit: depth writes visible to the passes that sample the atlas.
+    dependencies[1].srcSubpass = 0;
+    dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+    dependencies[1].srcStageMask = VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT;
+    dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    dependencies[1].srcAccessMask = VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+    dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
-    VkRenderPassCreateInfo rpInfo {};
-    rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
-    rpInfo.attachmentCount = 1;
-    rpInfo.pAttachments = &depthAttachment;
-    rpInfo.subpassCount = 1;
-    rpInfo.pSubpasses = &subpass;
-    rpInfo.dependencyCount = 1;
-    rpInfo.pDependencies = &dependency;
-
-    if (vkCreateRenderPass(ctx.device, &rpInfo, nullptr, &m_RenderPass) != VK_SUCCESS)
+    auto createPass = [&](VkAttachmentLoadOp loadOp, VkImageLayout initialLayout) -> VkRenderPass
     {
-      YA_LOG_ERROR("Render", "Failed to create shadow atlas render pass");
-      throw std::runtime_error("Failed to create shadow atlas render pass!");
-    }
+      VkAttachmentDescription depthAttachment {};
+      depthAttachment.format = VK_FORMAT_D32_SFLOAT;
+      depthAttachment.samples = VK_SAMPLE_COUNT_1_BIT;
+      depthAttachment.loadOp = loadOp;
+      depthAttachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+      depthAttachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+      depthAttachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+      depthAttachment.initialLayout = initialLayout;
+      depthAttachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL;
+
+      VkRenderPassCreateInfo rpInfo {};
+      rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+      rpInfo.attachmentCount = 1;
+      rpInfo.pAttachments = &depthAttachment;
+      rpInfo.subpassCount = 1;
+      rpInfo.pSubpasses = &subpass;
+      rpInfo.dependencyCount = 2;
+      rpInfo.pDependencies = dependencies;
+
+      VkRenderPass pass = VK_NULL_HANDLE;
+      if (vkCreateRenderPass(ctx.device, &rpInfo, nullptr, &pass) != VK_SUCCESS)
+      {
+        YA_LOG_ERROR("Render", "Failed to create shadow atlas render pass");
+        throw std::runtime_error("Failed to create shadow atlas render pass!");
+      }
+      return pass;
+    };
+
+    m_RenderPass = createPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_IMAGE_LAYOUT_UNDEFINED);
+    m_PerTileRenderPass = createPass(VK_ATTACHMENT_LOAD_OP_CLEAR,
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+    m_LoadRenderPass = createPass(VK_ATTACHMENT_LOAD_OP_LOAD,
+      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
     // Create framebuffer
     VkImageView view = m_Image.GetView();
@@ -93,6 +120,10 @@ namespace YAEngine
       m_Image.GetView(), "ShadowAtlas View");
     YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_RENDER_PASS,
       m_RenderPass, "ShadowAtlas RenderPass");
+    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_RENDER_PASS,
+      m_PerTileRenderPass, "ShadowAtlas PerTile RenderPass");
+    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_RENDER_PASS,
+      m_LoadRenderPass, "ShadowAtlas Load RenderPass");
     YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_FRAMEBUFFER,
       m_Framebuffer, "ShadowAtlas FB");
 
@@ -178,6 +209,16 @@ namespace YAEngine
     {
       vkDestroyRenderPass(ctx.device, m_RenderPass, nullptr);
       m_RenderPass = VK_NULL_HANDLE;
+    }
+    if (m_PerTileRenderPass)
+    {
+      vkDestroyRenderPass(ctx.device, m_PerTileRenderPass, nullptr);
+      m_PerTileRenderPass = VK_NULL_HANDLE;
+    }
+    if (m_LoadRenderPass)
+    {
+      vkDestroyRenderPass(ctx.device, m_LoadRenderPass, nullptr);
+      m_LoadRenderPass = VK_NULL_HANDLE;
     }
     m_Image.Destroy(ctx);
   }

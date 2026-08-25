@@ -65,6 +65,13 @@ namespace YAEngine
     // an average of the most recent quarter second when nothing is hovered. Computed
     // once per column instead of per row, per widget.
     void CacheZoneValues(ProfileDomain domain);
+    // Recomputes the percentile blocks from the profiler ring. Runs on the stats
+    // interval - sorting a thousand samples every frame would be waste.
+    void UpdatePercentiles();
+    // Recomputes the summary min/max/avg frame-time block. Runs on the
+    // aggregation cadence in every display mode - the CPU chart aggregation it
+    // used to live in is skipped entirely while the GPU mode is selected.
+    void UpdateFrameTimeStats();
 
     DomainView& GetView(ProfileDomain domain) { return m_Views[static_cast<size_t>(domain)]; }
     const DomainView& GetView(ProfileDomain domain) const { return m_Views[static_cast<size_t>(domain)]; }
@@ -97,11 +104,27 @@ namespace YAEngine
     ProfileDomain m_BreakdownDomain = ProfileDomain::GPU;
 
     float m_DisplayFPS = 0.0f;
-    // Frame time statistics over the same window the chart shows, filled while the
-    // CPU domain is aggregated so the numbers and the plot cannot disagree.
+    // Frame time statistics over the same seconds window the chart shows,
+    // refreshed by UpdateFrameTimeStats in every display mode.
     float m_MinFrametime = 0.0f;
     float m_MaxFrametime = 0.0f;
     float m_AvgFrametime = 0.0f;
+
+    // Sliding-window percentiles - the primary success metric of the shadow
+    // caching project: CPU and GPU frame time and the "Shadows" GPU zone.
+    static constexpr uint32_t PERCENTILE_WINDOW = 1000;
+    struct Percentiles
+    {
+      float p50 = 0.0f;
+      float p99 = 0.0f;
+      float p999 = 0.0f;
+      float max = 0.0f;
+      uint32_t samples = 0;
+    };
+    Percentiles m_CpuPercentiles;
+    Percentiles m_GpuPercentiles;
+    Percentiles m_ShadowPercentiles;
+    std::vector<float> m_PercentileScratch;
 
     double m_LastAggregate = 0.0;
     float m_StatsTimer = 0.0f;

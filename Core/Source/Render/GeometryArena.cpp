@@ -349,6 +349,7 @@ namespace YAEngine
     indexHighWater = std::max(indexHighWater, indexBuffer.GetAllocatorFrontier());
     m_IndexBytes += indexBytes;
     m_WideIndexBytes += indexCount * sizeof(uint32_t);
+    m_ContentVersion++;
 
     return result;
   }
@@ -403,6 +404,7 @@ namespace YAEngine
     uint32_t& indexHighWater = narrow ? m_IndexHighWater16 : m_IndexHighWater32;
     indexHighWater = std::max(indexHighWater, indexBuffer.GetAllocatorFrontier());
     m_LodIndexBytes += indexBytes;
+    m_ContentVersion++;
 
     return result;
   }
@@ -417,6 +419,7 @@ namespace YAEngine
     if (allocation.shadowPositionsResident)
       m_ShadowPositions.Free(allocation.shadowPositionByteOffset, allocation.shadowPositionByteSize);
     allocation = {};
+    m_ContentVersion++;
   }
 
   void GeometryArena::FreeIndices(GeometryArenaIndexRange& range)
@@ -427,5 +430,6 @@ namespace YAEngine
     IndexBuffer(range.indexType).Free(range.byteOffset, range.byteSize);
     m_LodIndexBytes -= size_t(range.indexCount) * IndexStride(range.indexType);
     range = {};
+    m_ContentVersion++;
   }
 }

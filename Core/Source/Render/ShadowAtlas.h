@@ -21,6 +21,12 @@ namespace YAEngine
     void Destroy(const RenderContext& ctx);
 
     VkRenderPass GetRenderPass() const { return m_RenderPass; }
+    // Clear-mode spike variants (see Render::ShadowClearMode). Same format,
+    // samples and final layout as the main pass - only loadOp and initialLayout
+    // differ, which render pass compatibility ignores, so the shadow pipelines
+    // and the framebuffer below work with all three unchanged.
+    VkRenderPass GetPerTileRenderPass() const { return m_PerTileRenderPass; }
+    VkRenderPass GetLoadRenderPass() const { return m_LoadRenderPass; }
     VkFramebuffer GetFramebuffer() const { return m_Framebuffer; }
     VkExtent2D GetExtent() const { return { SHADOW_ATLAS_SIZE, SHADOW_ATLAS_SIZE }; }
 
@@ -42,6 +48,8 @@ namespace YAEngine
 
     VulkanImage m_Image;
     VkRenderPass m_RenderPass = VK_NULL_HANDLE;
+    VkRenderPass m_PerTileRenderPass = VK_NULL_HANDLE;
+    VkRenderPass m_LoadRenderPass = VK_NULL_HANDLE;
     VkFramebuffer m_Framebuffer = VK_NULL_HANDLE;
   };
 }

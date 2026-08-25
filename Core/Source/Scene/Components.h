@@ -22,10 +22,23 @@ namespace YAEngine
   struct WorldTransform
   {
     glm::mat4 world { 1.0f };
+    // TransformSystem tick of the last world recompute. Derived data like the
+    // matrix itself, never serialized. The shadow cache folds it into its
+    // transform digest, so movement stays detectable after the transient
+    // TransformDirty tag is consumed.
+    uint64_t lastChangeTick = 0;
   };
 
   struct TransformDirty {};
   struct BoundsDirty {};
+
+  // Published into the registry context by TransformSystem on every Update.
+  // Lets BuildSceneSnapshot ask "did this caster move in the tick right
+  // before this snapshot" without threading the system through signatures.
+  struct TransformTickContext
+  {
+    uint64_t tick = 0;
+  };
 
   struct LocalBounds
   {
@@ -37,6 +50,12 @@ namespace YAEngine
   {
     glm::vec3 min {};
     glm::vec3 max {};
+    // Bounds of the previous recompute - for a per-frame mover, exactly the
+    // footprint the last rendered frame saw. Derived data like min/max, never
+    // serialized; the shadow dirty-rect path unions prev with current to
+    // cover the erase region and the new footprint in one rect.
+    glm::vec3 prevMin {};
+    glm::vec3 prevMax {};
   };
 
   struct CameraComponent

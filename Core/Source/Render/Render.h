@@ -54,6 +54,63 @@ namespace YAEngine
     // What the same pass would have submitted with every caster at LOD 0. The gap
     // against shadowTriangles is what the cascade LOD actually saved this frame.
     uint32_t shadowTrianglesAtLod0 = 0;
+    // Active ShadowClearMode this frame, so screenshots taken while the
+    // clear-mode spike is being measured are self-describing.
+    uint32_t shadowClearMode = 0;
+    // Stage 3 shadow cache: 1 when this frame skipped the whole shadow pass,
+    // the current hit streak, the ShadowInvalidation value of the last rebuild,
+    // and lifetime totals for the performance panel.
+    uint32_t shadowCacheHit = 0;
+    uint32_t shadowCacheConsecutiveHits = 0;
+    uint32_t shadowCacheRebuildReason = 0;
+    // Stage 4: 1 when this frame redrew only the refitted cascade tiles, with
+    // how many tiles that was. Lifetime totals split into hit/partial/full.
+    uint32_t shadowCachePartial = 0;
+    uint32_t shadowCachePartialTiles = 0;
+    // Stage 6: 1 when this frame patched only mover footprints, how many
+    // atlas tiles were touched, and the redrawn area as a percent of those
+    // tiles' area (whole-tile redraws count at 100%).
+    uint32_t shadowCacheRect = 0;
+    uint32_t shadowCacheRectTiles = 0;
+    float shadowCacheRectAreaPercent = 0.0f;
+    uint64_t shadowCacheTotalHits = 0;
+    uint64_t shadowCacheTotalPartials = 0;
+    uint64_t shadowCacheTotalRects = 0;
+    uint64_t shadowCacheTotalRebuilds = 0;
+  };
+
+  // Kind of the last redraw a shadow atlas tile group received.
+  enum class ShadowTileRedrawKind : uint8_t
+  {
+    Full = 0,    // whole tile as part of a full atlas rebuild
+    Partial = 1, // whole tile via a stage 4/5 per-tile cascade refit
+    Rect = 2,    // stage 6: a mover's footprint was patched in place
+  };
+
+  // Last-redraw bookkeeping for one shadow atlas tile group, shown by the tile
+  // state rows in the performance panel. Cascades keep one entry each; spot and
+  // point tiles share one summary entry per group, because they are only ever
+  // redrawn whole. Untouched tiles keep the values of their last redraw - the
+  // age of that stamp is how stale the cached content is.
+  struct ShadowTileState
+  {
+    double lastDrawTime = 0.0; // glfwGetTime seconds of the last redraw
+    ShadowInvalidation lastReason = ShadowInvalidation::None;
+    uint32_t lastTriangles = 0; // triangles that redraw submitted
+    ShadowTileRedrawKind kind = ShadowTileRedrawKind::Full;
+    bool valid = false;         // drawn at least once
+  };
+
+  // Shadow atlas clear strategy - a measurement spike for the shadow caching
+  // project. Deliberately NOT serialized (an exception to the project's
+  // serialization rule): it must reset to FullClear on every launch so every
+  // measurement session starts from the bit-exact control group.
+  // Indices must match the combo in RenderSettingsPanel.
+  enum class ShadowClearMode : uint8_t
+  {
+    FullClear = 0,        // one pass over the whole atlas, LOAD_OP_CLEAR (current behavior)
+    PerTilePasses = 1,    // one render pass instance per tile, clearing only its rect
+    LoadAndClearRects = 2 // one LOAD_OP_LOAD pass, vkCmdClearAttachments per tile
   };
 
 #ifdef YA_EDITOR
@@ -154,6 +211,15 @@ namespace YAEngine
     bool& GetShadowQuantizedPositionsEnabled() { return b_ShadowQuantizedPositions; }
     bool& GetShadowLodEnabled() { return b_ShadowLodEnabled; }
     int* GetShadowCascadeLods() { return m_ShadowCascadeLods; }
+    ShadowClearMode& GetShadowClearMode() { return m_ShadowClearMode; }
+    bool& GetShadowFitHysteresisEnabled() { return b_ShadowFitHysteresis; }
+    float& GetShadowFitMargin() { return m_ShadowFitMargin; }
+    float& GetShadowSunThresholdDeg() { return m_ShadowSunThresholdDeg; }
+    int& GetShadowRefitBudget() { return m_ShadowRefitBudget; }
+    float& GetShadowRefitThreshold() { return m_ShadowRefitThreshold; }
+    bool& GetShadowCacheEnabled() { return b_ShadowCacheEnabled; }
+    bool& GetShadowCachePerTileEnabled() { return b_ShadowCachePerTile; }
+    bool& GetShadowCacheDirtyRectEnabled() { return b_ShadowCacheDirtyRect; }
     int& GetTonemapMode() { return m_TonemapMode; }
     bool& GetAutoExposureEnabled() { return b_AutoExposureEnabled; }
     float& GetAdaptSpeedUp() { return m_AdaptSpeedUp; }
@@ -181,6 +247,10 @@ namespace YAEngine
       std::vector<uint32_t>& outSlots);
 
     const RenderStats& GetStats() const { return m_Stats; }
+    const ShadowManager& GetShadowManager() const { return m_ShadowManager; }
+    const ShadowTileState& GetShadowCascadeTileState(uint32_t cascadeIndex) const { return m_ShadowCascadeTileStates[cascadeIndex]; }
+    const ShadowTileState& GetShadowSpotTileState() const { return m_ShadowSpotTileState; }
+    const ShadowTileState& GetShadowPointTileState() const { return m_ShadowPointTileState; }
 
 #ifdef YA_EDITOR
     // Arms a one-shot YA_LOG_INFO breakdown of the heaviest cascade. Nothing is
@@ -239,6 +309,67 @@ namespace YAEngine
     // Mesh LOD level each cascade submits. Cascade 0 and 1 stay on the source mesh:
     // they are what the camera sees up close.
     int m_ShadowCascadeLods[CSM_CASCADE_COUNT] = { 0, 1, 1, 2 };
+    // See the ShadowClearMode declaration: spike state, intentionally not serialized.
+    ShadowClearMode m_ShadowClearMode = ShadowClearMode::FullClear;
+    // Cascade fit hysteresis (Stage 2 of the shadow caching project): each
+    // cascade keeps a frozen fit until its required sphere escapes it, so the
+    // light matrix stays bit-identical between refits - what the future tile
+    // cache keys on. Off is the A/B control with the exact per-frame fit.
+    bool b_ShadowFitHysteresis = true;
+    // Sphere inflation applied on every refit. Buys frames of reuse at the cost
+    // of up to that factor of effective texel density.
+    float m_ShadowFitMargin = 1.15f;
+    // Degrees the sun may drift from the frozen direction before all cascades refit.
+    float m_ShadowSunThresholdDeg = 0.5f;
+    // Stage 5 refit scheduler: how many proactive refits per frame while a
+    // cascade is close to escaping its frozen sphere but still inside it.
+    // 0 disables scheduling - the bit-exact stage 4 behavior (A/B control).
+    int m_ShadowRefitBudget = 1;
+    // Fit urgency at which a cascade becomes a proactive refit candidate.
+    // Clamped at use time above 1/margin so no slider combination can make a
+    // fresh refit re-enqueue itself every frame.
+    float m_ShadowRefitThreshold = 0.95f;
+    // Stage 3 of the shadow caching project: when nothing shadow-relevant
+    // changed since the last rendered frame, the whole shadow pass is skipped
+    // and the atlas keeps its content. All-or-nothing granularity on purpose -
+    // a missed invalidation reason shows as a visibly stuck shadow, never as a
+    // subtle artifact. Requires cascade fit hysteresis: without frozen fits
+    // every frame refits and there is nothing to reuse.
+    bool b_ShadowCacheEnabled = true;
+    // Stage 4: when the ONLY invalidation is a subset of cascade refits, just
+    // those cascade tiles are redrawn; every digest-driven reason still takes
+    // the full all-or-nothing rebuild. Off is the stage 3 behavior (A/B).
+    bool b_ShadowCachePerTile = true;
+    // Stage 6: a caster movement patches only the atlas regions its projected
+    // footprint touches instead of forcing a full rebuild. Off restores the
+    // stage 5 behavior where any caster movement is a full rebuild (A/B).
+    bool b_ShadowCacheDirtyRect = true;
+    // False at startup and after any invalidation that bypasses the digests
+    // (probe/volume bakes, a shadows-off stretch).
+    bool b_ShadowAtlasContentValid = false;
+    // Reason to charge the next redraw with when the digests cannot carry it.
+    ShadowInvalidation m_ShadowCachePendingReason = ShadowInvalidation::None;
+    ShadowInvalidation m_ShadowCacheLastRebuildReason = ShadowInvalidation::None;
+    uint32_t m_ShadowCacheConsecutiveHits = 0;
+    uint64_t m_ShadowCacheTotalHits = 0;
+    uint64_t m_ShadowCacheTotalPartials = 0;
+    uint64_t m_ShadowCacheTotalRects = 0;
+    uint64_t m_ShadowCacheTotalRebuilds = 0;
+    // State of the last RENDERED (not skipped) frame, compared wholesale. Kept
+    // up to date even while the cache toggle is off, so enabling it mid-flight
+    // never compares against stale values.
+    uint64_t m_ShadowCachedIdentityDigest = 0;
+    uint64_t m_ShadowCachedTransformDigest = 0;
+    uint64_t m_ShadowCachedLightDigest = 0;
+    uint64_t m_ShadowCachedSettingsDigest = 0;
+    uint64_t m_ShadowCachedGeometryVersion = 0;
+    uint32_t m_ShadowCachedSpotCount = 0;
+    uint32_t m_ShadowCachedPointCount = 0;
+    // Tile state rows for the performance panel, stamped by every full or
+    // partial redraw of the corresponding tiles.
+    ShadowTileState m_ShadowCascadeTileStates[CSM_CASCADE_COUNT];
+    ShadowTileState m_ShadowSpotTileState;
+    ShadowTileState m_ShadowPointTileState;
     int m_TonemapMode = TONEMAP_AGX;
     bool b_AutoExposureEnabled = true;
     float m_AdaptSpeedUp = 2.0f;

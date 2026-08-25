@@ -31,7 +31,22 @@ namespace YAEngine
         worldMax = glm::max(worldMax, wc);
       }
 
-      registry.emplace_or_replace<WorldBounds>(e, WorldBounds { .min = worldMin, .max = worldMax });
+      // Prev keeps the bounds of the previous recompute for the shadow
+      // dirty-rect path. The first compute seeds prev with current, so the
+      // union adds no bogus erase region.
+      if (auto* wb = registry.try_get<WorldBounds>(e))
+      {
+        wb->prevMin = wb->min;
+        wb->prevMax = wb->max;
+        wb->min = worldMin;
+        wb->max = worldMax;
+      }
+      else
+      {
+        registry.emplace<WorldBounds>(e, WorldBounds {
+          .min = worldMin, .max = worldMax,
+          .prevMin = worldMin, .prevMax = worldMax });
+      }
       registry.remove<BoundsDirty>(e);
     }
   }
