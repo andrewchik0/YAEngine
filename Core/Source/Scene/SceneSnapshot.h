@@ -13,22 +13,53 @@
 
 namespace YAEngine
 {
-  // FNV-1a fold of shadow-relevant scene state, computed while the snapshot
-  // loops already run. Floats are hashed bit-wise: any actual change flips the
-  // digest, bit-identical state keeps it. Local to the snapshot on purpose -
-  // this is not a general hashing utility yet.
+  // FNV-1a-flavoured fold of shadow-relevant scene state, computed while the
+  // snapshot loops already run. Floats are hashed bit-wise: any actual change
+  // flips the digest, bit-identical state keeps it. The fold consumes 64 bits
+  // per step instead of one byte, because the per-caster loop below runs on
+  // every frame including cache HITs. Local to the snapshot on purpose - this
+  // is not a general hashing utility yet, and the values are only ever
+  // compared against the previous frame, never stored.
   struct SnapshotDigest
   {
     uint64_t value = 14695981039346656037ull;
+
+    void AddWord(uint64_t word)
+    {
+      // Avalanche the input first: a packed pair of handles has only a handful
+      // of live bits, and without this they would only ever stir the low end
+      // of the digest.
+      word *= 0xff51afd7ed558ccdull;
+      word ^= word >> 33;
+      value = (value ^ word) * 1099511628211ull;
+      value ^= value >> 29;
+    }
+
+    void AddPair(uint32_t low, uint32_t high)
+    {
+      AddWord(uint64_t(low) | (uint64_t(high) << 32));
+    }
 
     template<typename T>
     void Add(const T& data)
     {
       const uint8_t* bytes = reinterpret_cast<const uint8_t*>(&data);
-      for (size_t i = 0; i < sizeof(T); i++)
+      size_t remaining = sizeof(T);
+      while (remaining >= sizeof(uint64_t))
       {
-        value ^= bytes[i];
-        value *= 1099511628211ull;
+        uint64_t word;
+        std::memcpy(&word, bytes, sizeof(uint64_t));
+        AddWord(word);
+        bytes += sizeof(uint64_t);
+        remaining -= sizeof(uint64_t);
+      }
+      if (remaining > 0)
+      {
+        uint64_t word = 0;
+        std::memcpy(&word, bytes, remaining);
+        // The tail length rides in the top byte, which a short tail always
+        // leaves zero, so a 4-byte field cannot fold like an 8-byte one.
+        AddWord(word | (uint64_t(remaining) << 56));
       }
     }
   };
@@ -130,16 +161,39 @@ namespace YAEngine
       // transform digest catches any recomputed world matrix via its stamp.
       if (!obj.noShading && !obj.isTransparent)
       {
-        identityDigest.Add(uint32_t(entity));
-        identityDigest.Add(obj.mesh.index);
-        identityDigest.Add(obj.mesh.generation);
-        identityDigest.Add(obj.material.index);
-        identityDigest.Add(obj.material.generation);
-        identityDigest.Add(obj.doubleSided);
-        identityDigest.Add(obj.isAlphaTest);
-        identityDigest.Add(obj.instanceOffset);
-        identityDigest.Add(obj.instanceData ? uint32_t(obj.instanceData->size()) : 0u);
-        transformDigest.Add(wt.lastChangeTick);
+        // Two 32-bit inputs per fold step: the field positions inside a word
+        // are fixed and every caster contributes the same word sequence, so
+        // packing costs nothing in change detection and saves most of the
+        // work this loop does on a HIT frame.
+        //
+        // INVARIANT for anyone writing instance matrices: what goes in below
+        // is the instance COUNT, never the matrices. A writer that mutates a
+        // live instanceData vector in place while keeping its length (wind, an
+        // LOD reshuffle, a respawn pool) leaves the shadow atlas - and the
+        // instance SSBO, whose upload sits behind the cache early-return -
+        // holding the old matrices forever. Regeneration must recreate the
+        // mesh asset, which moves the mesh handle folded below.
+        uint32_t instanceCount = obj.instanceData ? uint32_t(obj.instanceData->size()) : 0u;
+        uint32_t shadowFlags = (obj.doubleSided ? 1u : 0u) | (obj.isAlphaTest ? 2u : 0u);
+
+        identityDigest.AddPair(uint32_t(entity), obj.mesh.index);
+        identityDigest.AddPair(obj.mesh.generation, obj.material.index);
+        identityDigest.AddPair(obj.material.generation, obj.instanceOffset);
+        identityDigest.AddPair(instanceCount, shadowFlags);
+
+        // The shadow pass reads exactly one thing out of a material: the alpha
+        // of baseColorTexture in alphatest_discard.frag, and only for an
+        // alpha-test caster (Render.Draw.cpp binds the material descriptor
+        // under `if (dc.isAlphaTest)`). The handle pair folded above is only
+        // the SlotMap slot key, which does not move when the inspector assigns
+        // a different texture to the same material, so the texture handle has
+        // to go in separately. Nothing else from the material reaches a shadow
+        // shader - folding roughness, albedo or an emissive map here would
+        // rebuild the atlas for edits it cannot see.
+        if (obj.isAlphaTest)
+          identityDigest.AddPair(mat.baseColorTexture.index, mat.baseColorTexture.generation);
+
+        transformDigest.AddWord(wt.lastChangeTick);
 
         // Stage 6 dirty rects: attribute the digest change to the objects
         // that moved this tick, as the union of previous and current bounds.

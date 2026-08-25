@@ -10,7 +10,10 @@ namespace YAEngine
 
     uint32_t framesInFlight = ctx.maxFramesInFlight;
 
-    // Shadow cascade UBO (used in shadow vertex shader at set 0)
+    // Set 0 of every shadow pipeline layout. No shadow shader reads it any more -
+    // the tile projection is folded into the model matrix on the CPU - so only the
+    // LAYOUT is still live, and the buffer behind it is never bound or updated.
+    // Kept until the shadow shaders renumber their sets down.
     m_CascadeDescriptorSets.resize(framesInFlight);
     m_CascadeUBOs.resize(framesInFlight);
 
@@ -521,7 +524,9 @@ namespace YAEngine
 
   void ShadowManager::SetUp(uint32_t frameIndex)
   {
-    m_CascadeUBOs[frameIndex].Update(m_ShadowData);
+    // m_CascadeUBOs is deliberately not refreshed: no shadow shader reads set 0
+    // since the tile projection moved into the model matrix, and this runs on
+    // every frame including the ones the shadow cache skips entirely.
     m_LightingShadowUBOs[frameIndex].Update(m_ShadowData);
   }
 }

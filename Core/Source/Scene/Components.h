@@ -54,8 +54,11 @@ namespace YAEngine
     // footprint the last rendered frame saw. Derived data like min/max, never
     // serialized; the shadow dirty-rect path unions prev with current to
     // cover the erase region and the new footprint in one rect.
-    glm::vec3 prevMin {};
-    glm::vec3 prevMax {};
+    // Defaulted to the empty AABB (inverted extremes), which is the identity
+    // of that union: a writer that fills only min/max still gets a rect
+    // covering exactly the current footprint, not one stretched to the origin.
+    glm::vec3 prevMin { std::numeric_limits<float>::max() };
+    glm::vec3 prevMax { -std::numeric_limits<float>::max() };
   };
 
   struct CameraComponent

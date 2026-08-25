@@ -101,10 +101,10 @@ namespace YAEngine
     bool valid = false;         // drawn at least once
   };
 
-  // Shadow atlas clear strategy - a measurement spike for the shadow caching
-  // project. Deliberately NOT serialized (an exception to the project's
-  // serialization rule): it must reset to FullClear on every launch so every
-  // measurement session starts from the bit-exact control group.
+  // Shadow atlas clear strategy. Deliberately NOT serialized (an exception to
+  // the project's serialization rule): it resets to the same value on every
+  // launch so a measurement session never starts from a saved outlier, and
+  // FullClear stays one combo entry away as the bit-exact control group.
   // Indices must match the combo in RenderSettingsPanel.
   enum class ShadowClearMode : uint8_t
   {
@@ -306,11 +306,20 @@ namespace YAEngine
     // Only the CSM tiles use this: spot and point tiles are small and fit their
     // caster tightly, so there is nothing to win there.
     bool b_ShadowLodEnabled = true;
-    // Mesh LOD level each cascade submits. Cascade 0 and 1 stay on the source mesh:
-    // they are what the camera sees up close.
+    // Mesh LOD level each cascade submits. Only cascade 0 stays on the source mesh;
+    // cascade 1 already draws LOD 1. That makes cascade 1 the tightest constraint on
+    // the LOD 1 simplification error budget: it is the nearest slice the camera sees
+    // simplified geometry in, and its texel is the smallest one a LOD 1 silhouette
+    // error has to stay under before the shadow visibly leaves its caster.
     int m_ShadowCascadeLods[CSM_CASCADE_COUNT] = { 0, 1, 1, 2 };
-    // See the ShadowClearMode declaration: spike state, intentionally not serialized.
-    ShadowClearMode m_ShadowClearMode = ShadowClearMode::FullClear;
+    // See the ShadowClearMode declaration: intentionally not serialized. Defaults
+    // to the tile-limited clear because even a FULL rebuild only ever draws the
+    // tiles the active lights ask for - four cascades in a directional-only
+    // setup, a quarter of the atlas - while FullClear pays 67.1M texels of depth
+    // write every time. Atlas regions no live tile owns are never sampled:
+    // shadowsEnabled gates the cascades and a light's shadow index, which is
+    // always inside the requested count, gates spot and point lookups.
+    ShadowClearMode m_ShadowClearMode = ShadowClearMode::LoadAndClearRects;
     // Cascade fit hysteresis (Stage 2 of the shadow caching project): each
     // cascade keeps a frozen fit until its required sphere escapes it, so the
     // light matrix stays bit-identical between refits - what the future tile
@@ -737,6 +746,29 @@ namespace YAEngine
     // Indices into m_ShadowDrawCommands that the indirect path still has to draw one
     // by one: alpha-test casters, and opaque meshes the arena could not accept.
     std::vector<uint32_t> m_ShadowLegacyIndices;
+
+    // Everything the shadow ordering compares, pulled out of DrawCommand so the sort
+    // moves 16 bytes per element instead of the whole command.
+    struct ShadowSortEntry
+    {
+      uint8_t key;
+      uint32_t materialIndex;
+      uint32_t meshIndex;
+      uint32_t commandIndex;
+    };
+    std::vector<ShadowSortEntry> m_ShadowSortEntries;
+    // Destination of the sort permutation, swapped with m_ShadowDrawCommands. Kept as
+    // a member so the two buffers alternate roles instead of reallocating per frame.
+    std::vector<DrawCommand> m_ShadowSortedCommands;
+
+    // Caster bounds in m_ShadowDrawCommands order. The per-tile frustum cull repeats
+    // up to MAX_SHADOW_TILES times a frame and reads only these 24 bytes.
+    struct ShadowBounds
+    {
+      glm::vec3 min;
+      glm::vec3 max;
+    };
+    std::vector<ShadowBounds> m_ShadowBounds;
     // maxFramesInFlight + 1 slots: the extra one belongs to the probe and irradiance
     // volume bakers, which render the atlas outside the frame loop.
     std::vector<VulkanBuffer> m_ShadowModelBuffers;

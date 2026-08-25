@@ -13,12 +13,15 @@ namespace YAEngine
   {
   public:
     void Init(PipelineCache* psoCache, VkDevice device, ThreadPool* threadPool);
-    void Update(double currentTime);
+    // True on the call that actually recreated pipelines. Anything holding
+    // rendered content produced by the replaced pipelines - the shadow atlas
+    // cache above all - has to drop it, and no digest can see a shader change.
+    bool Update(double currentTime);
     void RecompileAll();
     void Destroy();
 
   private:
-    void ProcessCompilationResults();
+    bool ProcessCompilationResults();
 
     PipelineCache* m_PSOCache = nullptr;
     VkDevice m_Device = VK_NULL_HANDLE;

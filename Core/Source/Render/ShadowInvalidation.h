@@ -25,6 +25,7 @@ namespace YAEngine
     Resize,               // atlas or tile layout changed
     GeometryStreamedIn,   // streamed-in geometry appeared inside an already fitted tile
     DebugToggleChanged,   // a debug A/B toggle (hysteresis, indirect, clear mode) flipped
+    ShaderReloaded,       // editor hot reload swapped the pipelines that wrote the atlas
   };
 
   constexpr const char* ShadowInvalidationName(ShadowInvalidation reason)
@@ -47,6 +48,7 @@ namespace YAEngine
       case ShadowInvalidation::Resize:                return "resize";
       case ShadowInvalidation::GeometryStreamedIn:    return "streamed";
       case ShadowInvalidation::DebugToggleChanged:    return "debug-toggle";
+      case ShadowInvalidation::ShaderReloaded:        return "shader-reload";
     }
     return "unknown";
   }

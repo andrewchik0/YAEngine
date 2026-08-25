@@ -300,7 +300,14 @@ namespace YAEngine
 
     {
       YA_PROFILE_CPU("ShaderPoll");
-      m_ShaderHotReload.Update(frame.time);
+      if (m_ShaderHotReload.Update(frame.time))
+      {
+        // shadow.vert and alphatest_discard.frag feed the whole shadow pipeline
+        // family, so a reload can change what the atlas should contain while
+        // every cache digest stays equal. Nothing else observes shader identity.
+        b_ShadowAtlasContentValid = false;
+        m_ShadowCachePendingReason = ShadowInvalidation::ShaderReloaded;
+      }
     }
 
     if (m_PendingInvalidateSlot > 0)
@@ -337,6 +344,11 @@ namespace YAEngine
 
     if (!imageIndex)
     {
+      // The snapshot and the refit scheduler already ran, so WorldBounds::prev
+      // advanced for this frame while the atlas was never patched. Dropping the
+      // cached content is the only way the next frame can still trust it.
+      b_ShadowAtlasContentValid = false;
+      m_ShadowCachePendingReason = ShadowInvalidation::Resize;
       Resize();
       return;
     }

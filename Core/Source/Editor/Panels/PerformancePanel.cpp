@@ -7,6 +7,7 @@
 #include "Render/GeometryArena.h"
 #include "Render/Render.h"
 #include "Scene/SceneSnapshot.h"
+#include "Utils/MeshSimplifier.h"
 #include "Utils/Timer.h"
 
 namespace YAEngine
@@ -434,7 +435,9 @@ namespace YAEngine
         {
           ImGui::SetTooltip("Quantized positions for the indirect shadow path.\n"
             "High water: %u KB, free blocks: %zu.\n"
-            "Worst quantization error: %.3f cm on a mesh %.1f m across.",
+            "Worst quantization error: %.3f cm on a mesh %.1f units across.\n"
+            "Both are mesh local units: the stream is shared by every instance, so\n"
+            "instance scale is not folded in. World error is this times that scale.",
             arena->GetShadowPositionHighWaterBytes() / 1024,
             arena->GetShadowPositionFreeBlockCount(),
             arena->GetMaxQuantizeError() * 100.0f,
@@ -460,6 +463,19 @@ namespace YAEngine
             arena->GetIndexFreeBlockCount(VK_INDEX_TYPE_UINT16),
             arena->GetIndexFreeBlockCount(VK_INDEX_TYPE_UINT32),
             (unsigned long long)(arena->GetIndexSavedBytes() / 1024));
+        }
+
+        ImGui::Text("Shadow LOD err %.2f cm / %u dropped",
+          MeshSimplifier::GetMaxKeptError() * 100.0f,
+          MeshSimplifier::GetRejectedLevelCount());
+        if (ImGui::IsItemHovered())
+        {
+          ImGui::SetTooltip("Worst silhouette deformation any kept shadow LOD carries,\n"
+            "on a mesh %.1f units across, plus the number of levels the budget threw\n"
+            "away. Mesh local units, like the quantization error above.\n"
+            "This is the number that decides whether MeshSimplifier::LEVEL_MAX_ERROR\n"
+            "is safe: past roughly one cascade texel the shadow leaves its caster.",
+            MeshSimplifier::GetMaxKeptErrorExtent());
         }
       }
     }

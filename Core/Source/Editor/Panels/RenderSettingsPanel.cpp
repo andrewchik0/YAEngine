@@ -195,7 +195,7 @@ namespace YAEngine
       }
 
       // Measurement spike for the shadow caching project - deliberately not
-      // serialized so it resets to FullClear on every launch (see ShadowClearMode).
+      // serialized so it resets to the same value on every launch (see ShadowClearMode).
       int shadowClearMode = int(context.render->GetShadowClearMode());
       // Indices must match ShadowClearMode in Render.h
       const char* shadowClearModes[] = { "Full Clear", "Per-Tile Passes", "Load + Clear Rects" };
@@ -203,11 +203,11 @@ namespace YAEngine
         context.render->GetShadowClearMode() = ShadowClearMode(shadowClearMode);
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Measurement spike for the shadow caching project.\n"
-          "Full Clear: one pass over the whole atlas with LOAD_OP_CLEAR - the current,\n"
-          "fast-clear-friendly control group.\n"
+          "Full Clear: one pass over the whole atlas with LOAD_OP_CLEAR - the\n"
+          "fast-clear-friendly control group, no longer the default.\n"
           "Per-Tile Passes: one render pass instance per atlas tile, clearing only that\n"
           "tile's rect and preserving the rest of the atlas.\n"
-          "Load + Clear Rects: one LOAD_OP_LOAD pass over the atlas, with a\n"
+          "Load + Clear Rects (default): one LOAD_OP_LOAD pass over the atlas, with a\n"
           "vkCmdClearAttachments rect before each tile's draws.\n"
           "Bakes always use Full Clear. Not serialized - resets on launch.");
 

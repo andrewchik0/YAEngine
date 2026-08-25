@@ -1,6 +1,7 @@
 #include "VulkanVertexBuffer.h"
 
 #include "RenderContext.h"
+#include "Utils/Log.h"
 #include "Utils/PositionWelder.h"
 
 namespace YAEngine
@@ -57,28 +58,14 @@ namespace YAEngine
         if (generateShadowLods)
           lods = MeshSimplifier::Build(welded.positions.data(), welded.positions.size(), welded.indices);
 
-        auto quantized = PositionQuantizer::Quantize(welded.positions.data(), welded.positions.size());
+        // Nothing can read a UNORM16 vertex stream without the format, so on a device
+        // that lacks it the packing is not worth running either.
+        QuantizedPositions quantized;
+        if (ctx.unorm16VertexSupported)
+          quantized = PositionQuantizer::Quantize(welded.positions.data(), welded.positions.size());
 
         CreateWeldedPositions(ctx, welded.positions, welded.indices, &lods, quantized);
       }
-    }
-  }
-
-  void VulkanVertexBuffer::CreateFromSoA(const RenderContext& ctx, const CpuMeshData& cpuData)
-  {
-    VkDeviceSize vertexSize = cpuData.vertexData.size();
-    m_AttribOffset = cpuData.attribOffset;
-
-    m_VerticesBuffer = VulkanBuffer::CreateStaged(ctx, cpuData.vertexData.data(), vertexSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
-
-    m_IndicesCount = cpuData.indices.size();
-    VkDeviceSize indicesSize = cpuData.indices.size() * sizeof(uint32_t);
-    m_IndicesBuffer = VulkanBuffer::CreateStaged(ctx, cpuData.indices.data(), indicesSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
-
-    if (!cpuData.weldedPositions.empty())
-    {
-      CreateWeldedPositions(ctx, cpuData.weldedPositions, cpuData.weldedIndices,
-        &cpuData.shadowLods, cpuData.quantizedPositions);
     }
   }
 
@@ -88,36 +75,20 @@ namespace YAEngine
   {
     if (ctx.geometryArena != nullptr)
     {
+      // The LOD index ranges go in with the mesh: they index the same vertices, and a
+      // call of their own would cost a queue submit plus a fence wait per level.
       m_ArenaAllocation = ctx.geometryArena->Upload(ctx,
-        positions.data(), positions.size(), indices.data(), indices.size(), quantized);
+        positions.data(), positions.size(), indices.data(), indices.size(), quantized,
+        lods, m_LodRanges, std::size(m_LodRanges));
 
       if (m_ArenaAllocation.resident)
       {
         m_Arena = ctx.geometryArena;
-        // LOD levels are extra index ranges over the vertices just uploaded, so they
-        // only exist for meshes the arena accepted.
-        if (lods != nullptr)
-          CreateLodRanges(ctx, *lods);
         return;
       }
     }
 
     CreateStandalonePositions(ctx, positions, indices);
-  }
-
-  void VulkanVertexBuffer::CreateLodRanges(const RenderContext& ctx, const MeshLodLevels& lods)
-  {
-    for (size_t level = 0; level < lods.levels.size() && level < std::size(m_LodRanges); level++)
-    {
-      const auto& levelIndices = lods.levels[level];
-      if (levelIndices.empty())
-        continue;
-
-      // The mesh's own index type, never a fresh choice: a level in the other index
-      // buffer would break the contiguous indirect command range of its tile.
-      m_LodRanges[level] = m_Arena->UploadIndices(ctx, levelIndices.data(), levelIndices.size(),
-        m_ArenaAllocation.indexType);
-    }
   }
 
   MeshLodRange VulkanVertexBuffer::GetLodRange(uint32_t lodLevel) const
@@ -144,9 +115,25 @@ namespace YAEngine
     m_PositionIndexCount = indices.size();
     m_PositionIndexOffset = positions.size() * sizeof(glm::vec3);
 
+    uint32_t maxIndex = 0;
+    for (uint32_t index : indices)
+      maxIndex = std::max(maxIndex, index);
+
+    // The vertex limit already implies every index fits 16 bits, but the width is
+    // decided by the indices themselves: a stream that disagrees with its own vertex
+    // count would otherwise truncate into garbage triangles without a word.
+    bool fitsVertexLimit = positions.size() <= GeometryArena::NARROW_INDEX_VERTEX_LIMIT;
+    bool narrow = fitsVertexLimit && maxIndex <= UINT16_MAX;
+
+    if (fitsVertexLimit && maxIndex > UINT16_MAX)
+    {
+      YA_LOG_WARN("Render",
+        "Mesh index %u is out of range for its %zu vertices, the standalone positions keep 32-bit indices",
+        maxIndex, positions.size());
+    }
+
     // A vec3 stream is 12-byte aligned, which satisfies the 2- and 4-byte index
     // offset alignment Vulkan requires, so no padding is needed between them.
-    bool narrow = positions.size() <= 65536;
     m_PositionIndexType = narrow ? VK_INDEX_TYPE_UINT16 : VK_INDEX_TYPE_UINT32;
     size_t indexSize = narrow ? sizeof(uint16_t) : sizeof(uint32_t);
 
@@ -170,60 +157,6 @@ namespace YAEngine
     b_HasStandalonePositions = true;
   }
 
-  CpuMeshData VulkanVertexBuffer::PrepareSoA(const std::vector<Vertex>& vertices,
-    std::vector<uint32_t> indices, bool generateShadowLods)
-  {
-    CpuMeshData result;
-    result.indices = std::move(indices);
-    result.vertexCount = vertices.size();
-
-    if (!vertices.empty())
-    {
-      glm::vec3 bbMin = vertices[0].position;
-      glm::vec3 bbMax = vertices[0].position;
-      for (size_t i = 1; i < vertices.size(); i++)
-      {
-        bbMin = glm::min(bbMin, vertices[i].position);
-        bbMax = glm::max(bbMax, vertices[i].position);
-      }
-      result.minBB = bbMin;
-      result.maxBB = bbMax;
-    }
-
-    size_t posSize = vertices.size() * sizeof(glm::vec3);
-    size_t attribSize = vertices.size() * sizeof(VertexAttribs);
-    result.attribOffset = posSize;
-    result.vertexData.resize(posSize + attribSize);
-
-    auto* dstPos = reinterpret_cast<glm::vec3*>(result.vertexData.data());
-    auto* dstAttrib = reinterpret_cast<VertexAttribs*>(result.vertexData.data() + posSize);
-
-    for (size_t i = 0; i < vertices.size(); i++)
-    {
-      dstPos[i] = vertices[i].position;
-      dstAttrib[i] = { vertices[i].tex, vertices[i].normal, vertices[i].tangent };
-    }
-
-    auto welded = PositionWelder::Weld(dstPos, vertices.size(), result.indices,
-      PositionWelder::KEEP_ALWAYS_RATIO);
-    if (welded.worthwhile)
-    {
-      if (generateShadowLods)
-      {
-        result.shadowLods = MeshSimplifier::Build(welded.positions.data(),
-          welded.positions.size(), welded.indices);
-      }
-
-      result.quantizedPositions = PositionQuantizer::Quantize(welded.positions.data(),
-        welded.positions.size());
-
-      result.weldedPositions = std::move(welded.positions);
-      result.weldedIndices = std::move(welded.indices);
-    }
-
-    return result;
-  }
-
   void VulkanVertexBuffer::Destroy(const RenderContext& ctx)
   {
     m_VerticesBuffer.Destroy(ctx);
@@ -245,8 +178,38 @@ namespace YAEngine
     }
   }
 
-  void VulkanVertexBuffer::Draw(VkCommandBuffer cmd, uint32_t instanceCount)
+  void VulkanVertexBuffer::BindPositionStream(VkCommandBuffer cmd, MeshBindCache* bindCache,
+    VkBuffer vertices, VkBuffer indices, VkDeviceSize indexOffset, VkIndexType indexType)
   {
+    if (bindCache != nullptr
+      && bindCache->vertices == vertices
+      && bindCache->indices == indices
+      && bindCache->indexOffset == indexOffset
+      && bindCache->indexType == indexType)
+    {
+      return;
+    }
+
+    VkDeviceSize vertexOffset = 0;
+    vkCmdBindVertexBuffers(cmd, 0, 1, &vertices, &vertexOffset);
+    vkCmdBindIndexBuffer(cmd, indices, indexOffset, indexType);
+
+    if (bindCache != nullptr)
+    {
+      bindCache->vertices = vertices;
+      bindCache->indices = indices;
+      bindCache->indexOffset = indexOffset;
+      bindCache->indexType = indexType;
+    }
+  }
+
+  void VulkanVertexBuffer::Draw(VkCommandBuffer cmd, uint32_t instanceCount, MeshBindCache* bindCache)
+  {
+    // The interleaved stream binds its own buffers over whatever the position-only
+    // draws left bound, and it uses two vertex bindings where they use one.
+    if (bindCache != nullptr)
+      bindCache->Clear();
+
     vkCmdBindIndexBuffer(cmd, m_IndicesBuffer.Get(), 0, VK_INDEX_TYPE_UINT32);
 
     if (m_AttribOffset > 0)
@@ -265,31 +228,30 @@ namespace YAEngine
     vkCmdDrawIndexed(cmd, static_cast<uint32_t>(m_IndicesCount), instanceCount, 0, 0, 0);
   }
 
-  void VulkanVertexBuffer::DrawPositionOnly(VkCommandBuffer cmd, uint32_t instanceCount, uint32_t lodLevel)
+  void VulkanVertexBuffer::DrawPositionOnly(VkCommandBuffer cmd, uint32_t instanceCount,
+    uint32_t lodLevel, MeshBindCache* bindCache)
   {
     if (m_ArenaAllocation.resident)
     {
       MeshLodRange lod = GetLodRange(lodLevel);
 
-      VkBuffer positions = m_Arena->GetPositionBuffer();
-      VkDeviceSize offset = 0;
-      vkCmdBindVertexBuffers(cmd, 0, 1, &positions, &offset);
-      vkCmdBindIndexBuffer(cmd, m_Arena->GetIndexBuffer(m_ArenaAllocation.indexType), 0,
-        m_ArenaAllocation.indexType);
+      // Queried per draw, never cached in the mesh: arena growth swaps the handles.
+      // The cache above compares the handles it actually bound, so a swap simply
+      // fails the comparison and rebinds.
+      BindPositionStream(cmd, bindCache, m_Arena->GetPositionBuffer(),
+        m_Arena->GetIndexBuffer(m_ArenaAllocation.indexType), 0, m_ArenaAllocation.indexType);
+
       vkCmdDrawIndexed(cmd, lod.indexCount, instanceCount,
         lod.firstIndex, static_cast<int32_t>(m_ArenaAllocation.vertexOffset), 0);
       return;
     }
 
     VkBuffer buf = b_HasStandalonePositions ? m_PositionsBuffer.Get() : m_VerticesBuffer.Get();
-    VkDeviceSize offset = 0;
 
     if (b_HasStandalonePositions)
-      vkCmdBindIndexBuffer(cmd, buf, m_PositionIndexOffset, m_PositionIndexType);
+      BindPositionStream(cmd, bindCache, buf, buf, m_PositionIndexOffset, m_PositionIndexType);
     else
-      vkCmdBindIndexBuffer(cmd, m_IndicesBuffer.Get(), 0, VK_INDEX_TYPE_UINT32);
-
-    vkCmdBindVertexBuffers(cmd, 0, 1, &buf, &offset);
+      BindPositionStream(cmd, bindCache, buf, m_IndicesBuffer.Get(), 0, VK_INDEX_TYPE_UINT32);
 
     size_t indexCount = b_HasStandalonePositions ? m_PositionIndexCount : m_IndicesCount;
     vkCmdDrawIndexed(cmd, static_cast<uint32_t>(indexCount), instanceCount, 0, 0, 0);

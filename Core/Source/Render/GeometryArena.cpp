@@ -17,19 +17,89 @@ namespace YAEngine
       VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
       VK_BUFFER_USAGE_TRANSFER_DST_BIT |
       VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+
+    // Hands a reserved block back unless Commit() ran first. Staging allocation and
+    // the queue submit that follow a reservation both throw, and a block nobody
+    // returns stays occupied for the rest of the session, shrinking the arena.
+    struct ArenaReservation
+    {
+      ArenaReservation() = default;
+      ArenaReservation(const ArenaReservation&) = delete;
+      ArenaReservation& operator=(const ArenaReservation&) = delete;
+
+      ~ArenaReservation()
+      {
+        Release();
+      }
+
+      void Attach(VulkanBuffer& target, uint32_t blockOffset, uint32_t blockSize)
+      {
+        buffer = &target;
+        offset = blockOffset;
+        size = blockSize;
+      }
+
+      void Release()
+      {
+        if (buffer != nullptr)
+          buffer->Free(offset, size);
+        buffer = nullptr;
+      }
+
+      void Commit()
+      {
+        buffer = nullptr;
+      }
+
+      VulkanBuffer* buffer = nullptr;
+      uint32_t offset = 0;
+      uint32_t size = 0;
+    };
+
+    // Owns the staging buffer across the submit, which throws.
+    struct StagingScope
+    {
+      ~StagingScope()
+      {
+        if (buffer != VK_NULL_HANDLE)
+          vmaDestroyBuffer(allocator, buffer, allocation);
+      }
+
+      VmaAllocator allocator {};
+      VkBuffer buffer {};
+      VmaAllocation allocation {};
+    };
+
+    // Owns a VulkanBuffer that has no destructor of its own. After AdoptStorage the
+    // same object holds the retired handles, which have to go either way.
+    struct BufferScope
+    {
+      ~BufferScope()
+      {
+        buffer.Destroy(ctx);
+      }
+
+      const RenderContext& ctx;
+      VulkanBuffer& buffer;
+    };
   }
 
   void GeometryArena::Init(const RenderContext& ctx)
   {
     m_Positions = VulkanBuffer::CreateGpuOnly(ctx, POSITION_INITIAL_BYTES, POSITION_USAGE);
-    m_ShadowPositions = VulkanBuffer::CreateGpuOnly(ctx, SHADOW_POSITION_INITIAL_BYTES, POSITION_USAGE);
     m_Indices16 = VulkanBuffer::CreateGpuOnly(ctx, NARROW_INDEX_INITIAL_BYTES, INDEX_USAGE);
     m_Indices32 = VulkanBuffer::CreateGpuOnly(ctx, WIDE_INDEX_INITIAL_BYTES, INDEX_USAGE);
+
+    // Without R16G16B16A16_UNORM as a vertex format nothing can read the quantized
+    // stream, so it is not reserved, not staged and not even packed on the CPU.
+    b_ShadowStreamEnabled = ctx.unorm16VertexSupported;
+    if (b_ShadowStreamEnabled)
+      m_ShadowPositions = VulkanBuffer::CreateGpuOnly(ctx, SHADOW_POSITION_INITIAL_BYTES, POSITION_USAGE);
 
     YA_LOG_INFO("Render",
       "Geometry arena created: positions %llu MB, shadow positions %llu MB, 16-bit indices %llu MB, 32-bit indices %llu MB",
       (unsigned long long)(POSITION_INITIAL_BYTES / (1024 * 1024)),
-      (unsigned long long)(SHADOW_POSITION_INITIAL_BYTES / (1024 * 1024)),
+      (unsigned long long)((b_ShadowStreamEnabled ? SHADOW_POSITION_INITIAL_BYTES : 0) / (1024 * 1024)),
       (unsigned long long)(NARROW_INDEX_INITIAL_BYTES / (1024 * 1024)),
       (unsigned long long)(WIDE_INDEX_INITIAL_BYTES / (1024 * 1024)));
   }
@@ -100,8 +170,13 @@ namespace YAEngine
     YA_LOG_INFO("Render", "Geometry arena shadow LOD cost: %llu KB of index memory",
       (unsigned long long)(m_LodIndexBytes / 1024));
 
-    YA_LOG_INFO("Render", "Geometry arena quantization: worst position error %.3f cm on a mesh %.1f m across",
+    YA_LOG_INFO("Render",
+      "Geometry arena quantization: worst position error %.3f cm on a mesh %.1f units across, both in mesh local space",
       m_MaxQuantizeError * 100.0f, m_MaxQuantizeErrorExtent);
+
+    // The LOD deformation budget is the twin of the number above, so the two worst
+    // cases of the shadow geometry path print together.
+    MeshSimplifier::LogWorstError();
   }
 
   uint32_t GeometryArena::AllocateGrowing(const RenderContext& ctx, VulkanBuffer& buffer,
@@ -132,6 +207,7 @@ namespace YAEngine
     }
 
     VulkanBuffer grown = VulkanBuffer::CreateGpuOnly(ctx, newSize, usage);
+    BufferScope grownScope { .ctx = ctx, .buffer = grown };
 
     // The old buffer may still be referenced by in-flight command buffers. Growth
     // happens on asset load or procedural regeneration only, so a wait-idle here is
@@ -145,9 +221,8 @@ namespace YAEngine
     ctx.commandBuffer->EndSingleTimeCommands(cmd);
 
     // Contents land at identical offsets, so every live allocation stays valid and
-    // no mesh record needs fixing up.
+    // no mesh record needs fixing up. grownScope then destroys the retired handles.
     buffer.AdoptStorage(grown);
-    grown.Destroy(ctx);
 
     YA_LOG_INFO("Render", "Geometry arena %s grown from %llu MB to %llu MB",
       name,
@@ -172,23 +247,24 @@ namespace YAEngine
     VmaAllocationCreateInfo stagingAllocInfo {};
     stagingAllocInfo.usage = VMA_MEMORY_USAGE_CPU_ONLY;
 
-    VkBuffer stagingBuffer;
-    VmaAllocation stagingAlloc;
-    if (vmaCreateBuffer(ctx.allocator, &stagingInfo, &stagingAllocInfo, &stagingBuffer, &stagingAlloc, nullptr) != VK_SUCCESS)
+    StagingScope staging;
+    staging.allocator = ctx.allocator;
+    if (vmaCreateBuffer(ctx.allocator, &stagingInfo, &stagingAllocInfo, &staging.buffer, &staging.allocation, nullptr) != VK_SUCCESS)
     {
+      staging.buffer = VK_NULL_HANDLE;
       YA_LOG_ERROR("Render", "Failed to create geometry arena staging buffer");
       throw std::runtime_error("Failed to create geometry arena staging buffer");
     }
 
     void* mapped = nullptr;
-    vmaMapMemory(ctx.allocator, stagingAlloc, &mapped);
+    vmaMapMemory(ctx.allocator, staging.allocation, &mapped);
     size_t cursor = 0;
     for (size_t i = 0; i < count; i++)
     {
       std::memcpy(static_cast<uint8_t*>(mapped) + cursor, copies[i].data, copies[i].size);
       cursor += copies[i].size;
     }
-    vmaUnmapMemory(ctx.allocator, stagingAlloc);
+    vmaUnmapMemory(ctx.allocator, staging.allocation);
 
     VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
 
@@ -199,18 +275,19 @@ namespace YAEngine
       region.srcOffset = cursor;
       region.dstOffset = copies[i].destinationOffset;
       region.size = copies[i].size;
-      vkCmdCopyBuffer(cmd, stagingBuffer, copies[i].destination, 1, &region);
+      vkCmdCopyBuffer(cmd, staging.buffer, copies[i].destination, 1, &region);
       cursor += copies[i].size;
     }
 
     ctx.commandBuffer->EndSingleTimeCommands(cmd);
-    vmaDestroyBuffer(ctx.allocator, stagingBuffer, stagingAlloc);
   }
 
   GeometryArenaAllocation GeometryArena::Upload(const RenderContext& ctx,
     const glm::vec3* positions, size_t positionCount,
     const uint32_t* indices, size_t indexCount,
-    const QuantizedPositions& quantized)
+    const QuantizedPositions& quantized,
+    const MeshLodLevels* lods,
+    GeometryArenaIndexRange* lodRanges, size_t lodRangeCount)
   {
     GeometryArenaAllocation result {};
 
@@ -240,54 +317,80 @@ namespace YAEngine
     uint32_t positionOffset = AllocateGrowing(ctx, m_Positions, positionAllocSize, POSITION_USAGE, "positions");
     if (positionOffset == UINT32_MAX)
     {
-      if (!b_ExhaustionReported)
+      if (!b_PositionExhaustionReported)
       {
-        b_ExhaustionReported = true;
+        b_PositionExhaustionReported = true;
         YA_LOG_WARN("Render", "Geometry arena position allocation failed, mesh falls back to standalone buffers");
       }
       return result;
     }
 
+    // From here on every reservation is owned by a scope guard: the staging upload at
+    // the end of this function throws on allocation failure and on submit failure.
+    ArenaReservation positionReservation;
+    positionReservation.Attach(m_Positions, positionOffset, positionAllocSize);
+
     VulkanBuffer& indexBuffer = IndexBuffer(indexType);
     uint32_t indexOffset = AllocateGrowing(ctx, indexBuffer, indexAllocSize, INDEX_USAGE, indexBufferName);
     if (indexOffset == UINT32_MAX)
     {
-      m_Positions.Free(positionOffset, positionAllocSize);
-      if (!b_ExhaustionReported)
+      if (!b_IndexExhaustionReported)
       {
-        b_ExhaustionReported = true;
+        b_IndexExhaustionReported = true;
         YA_LOG_WARN("Render", "Geometry arena index allocation failed, mesh falls back to standalone buffers");
       }
       return result;
     }
+
+    ArenaReservation indexReservation;
+    indexReservation.Attach(indexBuffer, indexOffset, indexAllocSize);
 
     if (positionOffset % POSITION_STRIDE != 0 || indexOffset % indexStride != 0)
     {
       YA_LOG_ERROR("Render",
         "Geometry arena produced misaligned offsets: positions %u (stride %u), indices %u (stride %u)",
         positionOffset, POSITION_STRIDE, indexOffset, indexStride);
-      m_Positions.Free(positionOffset, positionAllocSize);
-      indexBuffer.Free(indexOffset, indexAllocSize);
       return result;
     }
 
     // Optional third stream: failing to place it only costs the mesh its seat in the
-    // quantized shadow path, so nothing allocated above is rolled back for it.
+    // quantized shadow path, so nothing reserved above is rolled back for it.
     size_t shadowBytes = quantized.data.size() * sizeof(uint16_t);
     uint32_t shadowOffset = UINT32_MAX;
     uint32_t shadowAllocSize = 0;
-    if (quantized.data.size() == positionCount * 4 && shadowBytes <= ARENA_MAX_BYTES)
+    ArenaReservation shadowReservation;
+
+    bool quantizedUsable = b_ShadowStreamEnabled
+      && quantized.data.size() == positionCount * 4
+      && shadowBytes <= ARENA_MAX_BYTES;
+
+    // A mesh whose grid is coarser than the shadow bias would drift visibly, and the
+    // exact stream costs it nothing but the indirect batch.
+    if (quantizedUsable && quantized.maxError > MAX_QUANTIZE_ERROR)
+    {
+      quantizedUsable = false;
+      YA_LOG_WARN("Render",
+        "Quantization error %.3f cm exceeds the %.3f cm budget on a mesh %.1f units across (%zu vertices), "
+        "it keeps the exact shadow position stream",
+        quantized.maxError * 100.0f, MAX_QUANTIZE_ERROR * 100.0f,
+        std::max({ quantized.scale.x, quantized.scale.y, quantized.scale.z }), positionCount);
+    }
+
+    if (quantizedUsable)
     {
       shadowAllocSize = RoundUp(uint32_t(shadowBytes), SHADOW_POSITION_STRIDE);
       shadowOffset = AllocateGrowing(ctx, m_ShadowPositions, shadowAllocSize, POSITION_USAGE,
         "shadow positions");
+
+      if (shadowOffset != UINT32_MAX)
+        shadowReservation.Attach(m_ShadowPositions, shadowOffset, shadowAllocSize);
 
       if (shadowOffset != UINT32_MAX && shadowOffset % SHADOW_POSITION_STRIDE != 0)
       {
         YA_LOG_ERROR("Render",
           "Geometry arena produced a misaligned shadow position offset: %u (stride %u)",
           shadowOffset, SHADOW_POSITION_STRIDE);
-        m_ShadowPositions.Free(shadowOffset, shadowAllocSize);
+        shadowReservation.Release();
         shadowOffset = UINT32_MAX;
       }
 
@@ -299,6 +402,59 @@ namespace YAEngine
       }
     }
 
+    // Shadow LOD levels are extra index ranges over the vertices reserved above, so
+    // they cost no position memory and travel with the mesh they belong to.
+    ArenaReservation lodReservations[MeshSimplifier::LOD_COUNT - 1];
+    std::vector<uint16_t> narrowLodIndices[MeshSimplifier::LOD_COUNT - 1];
+    size_t lodByteSizes[MeshSimplifier::LOD_COUNT - 1] {};
+    // Handed to the caller only once the upload has gone through, so a throw leaves
+    // no range pointing at a block the guards have already given back.
+    GeometryArenaIndexRange stagedRanges[MeshSimplifier::LOD_COUNT - 1] {};
+
+    size_t lodLevelCount = lods != nullptr
+      ? std::min({ lods->levels.size(), lodRangeCount, std::size(lodReservations) })
+      : size_t(0);
+
+    for (size_t level = 0; level < lodLevelCount; level++)
+    {
+      const auto& levelIndices = lods->levels[level];
+      if (levelIndices.empty())
+        continue;
+
+      size_t lodBytes = levelIndices.size() * indexStride;
+      if (lodBytes > ARENA_MAX_BYTES)
+        continue;
+
+      uint32_t lodAllocSize = RoundUp(uint32_t(lodBytes), indexStride);
+      // The mesh's own index buffer, never a fresh choice: a level in the other one
+      // would break the contiguous indirect command range of its tile.
+      uint32_t lodOffset = AllocateGrowing(ctx, indexBuffer, lodAllocSize, INDEX_USAGE, indexBufferName);
+      if (lodOffset == UINT32_MAX)
+        continue;
+
+      lodReservations[level].Attach(indexBuffer, lodOffset, lodAllocSize);
+
+      if (lodOffset % indexStride != 0)
+      {
+        YA_LOG_ERROR("Render", "Geometry arena produced a misaligned index offset: %u (stride %u)",
+          lodOffset, indexStride);
+        lodReservations[level].Release();
+        continue;
+      }
+
+      if (narrow)
+        NarrowIndices(levelIndices.data(), levelIndices.size(), narrowLodIndices[level]);
+
+      lodByteSizes[level] = lodBytes;
+
+      stagedRanges[level].byteOffset = lodOffset;
+      stagedRanges[level].byteSize = lodAllocSize;
+      stagedRanges[level].firstIndex = lodOffset / indexStride;
+      stagedRanges[level].indexCount = uint32_t(levelIndices.size());
+      stagedRanges[level].indexType = indexType;
+      stagedRanges[level].resident = true;
+    }
+
     std::vector<uint16_t> narrowIndices;
     if (narrow)
       NarrowIndices(indices, indexCount, narrowIndices);
@@ -307,13 +463,36 @@ namespace YAEngine
       ? static_cast<const void*>(narrowIndices.data())
       : static_cast<const void*>(indices);
 
-    StagedCopy copies[3] {};
+    // Buffer handles are read only here: growing an arena swaps its VkBuffer, and
+    // every reservation above can be the one that triggers the growth.
+    StagedCopy copies[3 + MeshSimplifier::LOD_COUNT - 1] {};
     size_t copyCount = 0;
     copies[copyCount++] = { positions, positionBytes, m_Positions.Get(), positionOffset };
     copies[copyCount++] = { indexData, indexBytes, indexBuffer.Get(), indexOffset };
     if (shadowOffset != UINT32_MAX)
       copies[copyCount++] = { quantized.data.data(), shadowBytes, m_ShadowPositions.Get(), shadowOffset };
+
+    for (size_t level = 0; level < lodLevelCount; level++)
+    {
+      if (!stagedRanges[level].resident)
+        continue;
+
+      const void* lodData = narrow
+        ? static_cast<const void*>(narrowLodIndices[level].data())
+        : static_cast<const void*>(lods->levels[level].data());
+      copies[copyCount++] = { lodData, lodByteSizes[level], indexBuffer.Get(), stagedRanges[level].byteOffset };
+    }
+
     StageCopies(ctx, copies, copyCount);
+
+    positionReservation.Commit();
+    indexReservation.Commit();
+    shadowReservation.Commit();
+    for (auto& reservation : lodReservations)
+      reservation.Commit();
+
+    for (size_t level = 0; level < lodLevelCount; level++)
+      lodRanges[level] = stagedRanges[level];
 
     result.positionByteOffset = positionOffset;
     result.positionByteSize = positionAllocSize;
@@ -344,66 +523,17 @@ namespace YAEngine
       }
     }
 
+    for (size_t level = 0; level < lodLevelCount; level++)
+    {
+      if (stagedRanges[level].resident)
+        m_LodIndexBytes += lodByteSizes[level];
+    }
+
     m_PositionHighWater = std::max(m_PositionHighWater, m_Positions.GetAllocatorFrontier());
     uint32_t& indexHighWater = narrow ? m_IndexHighWater16 : m_IndexHighWater32;
     indexHighWater = std::max(indexHighWater, indexBuffer.GetAllocatorFrontier());
     m_IndexBytes += indexBytes;
     m_WideIndexBytes += indexCount * sizeof(uint32_t);
-    m_ContentVersion++;
-
-    return result;
-  }
-
-  GeometryArenaIndexRange GeometryArena::UploadIndices(const RenderContext& ctx,
-    const uint32_t* indices, size_t indexCount, VkIndexType indexType)
-  {
-    GeometryArenaIndexRange result {};
-
-    if (indices == nullptr || indexCount == 0)
-      return result;
-
-    bool narrow = indexType == VK_INDEX_TYPE_UINT16;
-    uint32_t indexStride = IndexStride(indexType);
-
-    size_t indexBytes = indexCount * indexStride;
-    if (indexBytes > ARENA_MAX_BYTES)
-      return result;
-
-    VulkanBuffer& indexBuffer = IndexBuffer(indexType);
-    uint32_t indexAllocSize = RoundUp(uint32_t(indexBytes), indexStride);
-    uint32_t indexOffset = AllocateGrowing(ctx, indexBuffer, indexAllocSize, INDEX_USAGE,
-      narrow ? "16-bit indices" : "32-bit indices");
-    if (indexOffset == UINT32_MAX)
-      return result;
-
-    if (indexOffset % indexStride != 0)
-    {
-      YA_LOG_ERROR("Render", "Geometry arena produced a misaligned index offset: %u (stride %u)",
-        indexOffset, indexStride);
-      indexBuffer.Free(indexOffset, indexAllocSize);
-      return result;
-    }
-
-    std::vector<uint16_t> narrowIndices;
-    if (narrow)
-      NarrowIndices(indices, indexCount, narrowIndices);
-
-    const StagedCopy copies[] = {
-      { narrow ? static_cast<const void*>(narrowIndices.data()) : static_cast<const void*>(indices),
-        indexBytes, indexBuffer.Get(), indexOffset },
-    };
-    StageCopies(ctx, copies, std::size(copies));
-
-    result.byteOffset = indexOffset;
-    result.byteSize = indexAllocSize;
-    result.firstIndex = indexOffset / indexStride;
-    result.indexCount = uint32_t(indexCount);
-    result.indexType = indexType;
-    result.resident = true;
-
-    uint32_t& indexHighWater = narrow ? m_IndexHighWater16 : m_IndexHighWater32;
-    indexHighWater = std::max(indexHighWater, indexBuffer.GetAllocatorFrontier());
-    m_LodIndexBytes += indexBytes;
     m_ContentVersion++;
 
     return result;
@@ -418,6 +548,12 @@ namespace YAEngine
     IndexBuffer(allocation.indexType).Free(allocation.indexByteOffset, allocation.indexByteSize);
     if (allocation.shadowPositionsResident)
       m_ShadowPositions.Free(allocation.shadowPositionByteOffset, allocation.shadowPositionByteSize);
+
+    // Symmetric with the increments in Upload, otherwise the width saving keeps
+    // counting meshes that a regeneration already threw away.
+    m_IndexBytes -= size_t(allocation.indexCount) * IndexStride(allocation.indexType);
+    m_WideIndexBytes -= size_t(allocation.indexCount) * sizeof(uint32_t);
+
     allocation = {};
     m_ContentVersion++;
   }

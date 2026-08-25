@@ -131,8 +131,10 @@ namespace YAEngine
     const ShadowAtlas& GetAtlas() const { return m_Atlas; }
     const ShadowBuffer& GetShadowData() const { return m_ShadowData; }
 
+    // Set 0 of the shadow pipeline layouts. Only the layout is live: the shaders
+    // stopped reading the block, so the sets themselves are never bound and there
+    // is no accessor handing one out.
     VkDescriptorSetLayout GetShadowCascadeUBOLayout() const { return m_CascadeDescriptorSets[0].GetLayout(); }
-    VkDescriptorSet GetShadowCascadeUBODescriptorSet(uint32_t frameIndex) const { return m_CascadeDescriptorSets[frameIndex].Get(); }
 
     VkDescriptorSet GetLightingShadowDescriptorSet(uint32_t frameIndex) const { return m_LightingShadowDescriptorSets[frameIndex].Get(); }
     VkDescriptorSetLayout GetLightingShadowLayout() const { return m_LightingShadowDescriptorSets[0].GetLayout(); }
@@ -213,7 +215,8 @@ namespace YAEngine
     // name the frame without the manager knowing about the engine frame index.
     uint64_t m_FitFrame = 0;
 
-    // Per-frame UBO for shadow cascade data (used in shadow vertex shader set 0)
+    // Set 0 of the shadow pipeline layouts. The shaders no longer read it, so the
+    // sets are never bound and the buffers are never written - see Init.
     std::vector<VulkanDescriptorSet> m_CascadeDescriptorSets;
     std::vector<VulkanUniformBuffer> m_CascadeUBOs;
 

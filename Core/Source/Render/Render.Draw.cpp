@@ -431,6 +431,7 @@ namespace YAEngine
     lastMaterialIndex = UINT32_MAX;
     uint32_t lastMaterialGen = UINT32_MAX;
     VulkanPipeline* currentPipeline = nullptr;
+    MeshBindCache bindCache;
 
     for (auto& dc : m_DepthDrawCommands)
     {
@@ -475,9 +476,9 @@ namespace YAEngine
 
       auto& vb = meshManager.GetVertexBuffer(meshHandle);
       if (dc.isAlphaTest)
-        vb.Draw(cmd, instanceCount);
+        vb.Draw(cmd, instanceCount, &bindCache);
       else
-        vb.DrawPositionOnly(cmd, instanceCount);
+        vb.DrawPositionOnly(cmd, instanceCount, 0, &bindCache);
     }
   }
 
@@ -553,6 +554,7 @@ namespace YAEngine
 
     VulkanPipeline* currentPipeline = nullptr;
     const VulkanPipeline* lastBound = nullptr;
+    MeshBindCache bindCache;
     lastMaterialIndex = UINT32_MAX;
     lastMaterialGeneration = UINT32_MAX;
 
@@ -602,9 +604,9 @@ namespace YAEngine
 
       auto& vb = meshManager.GetVertexBuffer(meshHandle);
       if (dc.isAlphaTest)
-        vb.Draw(cmd, instanceCount);
+        vb.Draw(cmd, instanceCount, &bindCache);
       else
-        vb.DrawPositionOnly(cmd, instanceCount);
+        vb.DrawPositionOnly(cmd, instanceCount, 0, &bindCache);
     }
   }
 
@@ -654,6 +656,7 @@ namespace YAEngine
 
     VulkanPipeline* currentPipeline = nullptr;
     const VulkanPipeline* lastBound = nullptr;
+    MeshBindCache bindCache;
 
     for (auto& dc : m_BackfaceDrawCommands)
     {
@@ -685,7 +688,7 @@ namespace YAEngine
           uint32_t(instanceCount * sizeof(glm::mat4)));
       }
 
-      meshManager.GetVertexBuffer(meshHandle).DrawPositionOnly(cmd, instanceCount);
+      meshManager.GetVertexBuffer(meshHandle).DrawPositionOnly(cmd, instanceCount, 0, &bindCache);
     }
   }
 #endif
@@ -1187,28 +1190,48 @@ namespace YAEngine
     // The indirect path needs the two opaque cull-mode groups contiguous, which the
     // legacy key does not give (it splits opaque four ways on instancing as well).
     // The legacy path keeps its own key so its pipeline bind count is unchanged.
-    if (useIndirect)
+    // Only three fields decide the order, so those are what gets sorted: moving a
+    // whole DrawCommand log n times is over a hundred bytes of copy per swap.
+    // The command index breaks ties, which the comparators alone did not: an
+    // unspecified order among identical keys could put a caster on a different side
+    // of the model SSBO budget between a rebuild and the rect frames patching it.
+    m_ShadowSortEntries.clear();
+    m_ShadowSortEntries.reserve(m_ShadowDrawCommands.size());
+    for (uint32_t i = 0; i < uint32_t(m_ShadowDrawCommands.size()); i++)
     {
-      std::sort(m_ShadowDrawCommands.begin(), m_ShadowDrawCommands.end(),
-        [](const DrawCommand& a, const DrawCommand& b)
-        {
-          uint8_t ka = a.ShadowBatchKey(), kb = b.ShadowBatchKey();
-          if (ka != kb) return ka < kb;
-          if (a.materialIndex != b.materialIndex) return a.materialIndex < b.materialIndex;
-          return a.meshIndex < b.meshIndex;
-        });
+      const DrawCommand& dc = m_ShadowDrawCommands[i];
+      m_ShadowSortEntries.push_back({
+        .key = useIndirect ? dc.ShadowBatchKey() : dc.SortKey(),
+        .materialIndex = dc.materialIndex,
+        .meshIndex = dc.meshIndex,
+        .commandIndex = i,
+      });
     }
-    else
+
+    std::sort(m_ShadowSortEntries.begin(), m_ShadowSortEntries.end(),
+      [](const ShadowSortEntry& a, const ShadowSortEntry& b)
+      {
+        if (a.key != b.key) return a.key < b.key;
+        if (a.materialIndex != b.materialIndex) return a.materialIndex < b.materialIndex;
+        if (a.meshIndex != b.meshIndex) return a.meshIndex < b.meshIndex;
+        return a.commandIndex < b.commandIndex;
+      });
+
+    // Applying the permutation touches every command exactly once. The bounds are
+    // split off into their own array here as well: the per-tile frustum cull below
+    // runs once per drawn atlas tile over this whole list and reads nothing else,
+    // so it has no reason to walk the full command stride.
+    m_ShadowSortedCommands.clear();
+    m_ShadowSortedCommands.reserve(m_ShadowDrawCommands.size());
+    m_ShadowBounds.clear();
+    m_ShadowBounds.reserve(m_ShadowDrawCommands.size());
+    for (const auto& entry : m_ShadowSortEntries)
     {
-      std::sort(m_ShadowDrawCommands.begin(), m_ShadowDrawCommands.end(),
-        [](const DrawCommand& a, const DrawCommand& b)
-        {
-          uint8_t ka = a.SortKey(), kb = b.SortKey();
-          if (ka != kb) return ka < kb;
-          if (a.materialIndex != b.materialIndex) return a.materialIndex < b.materialIndex;
-          return a.meshIndex < b.meshIndex;
-        });
+      const DrawCommand& dc = m_ShadowDrawCommands[entry.commandIndex];
+      m_ShadowBounds.push_back({ .min = dc.boundsMin, .max = dc.boundsMax });
+      m_ShadowSortedCommands.push_back(dc);
     }
+    m_ShadowDrawCommands.swap(m_ShadowSortedCommands);
 
     // Pre-bind materials needed by alpha-test shadow pipelines
     auto& materialManager = frame.assets.Materials();
@@ -1335,7 +1358,14 @@ namespace YAEngine
       modelCapacity = uint32_t(m_ShadowModelBuffers[shadowSlot].GetSize() / sizeof(glm::mat4));
       // Tiles get an equal share of the buffer. Casters past that share drop to the
       // legacy path, so every block ends up the same length and the stride is exact.
-      uint32_t tileBudget = tileCount > 0 ? modelCapacity / tileCount : 0;
+      // The share is cut against the atlas tile count at full capacity, NOT against
+      // the number of tiles that happen to be dirty: a rect frame patches over a full
+      // rebuild, and a caster that flipped between the two paths would redraw the same
+      // geometry from the other position stream - quantized instead of exact - which
+      // breaks the bit-identical-depth assumption the patch rests on.
+      // tileCount <= MAX_SHADOW_TILES, so tileCount * tileBudget still fits.
+      constexpr uint32_t tileBudget =
+        uint32_t(SHADOW_MODEL_CAP_BYTES / sizeof(glm::mat4)) / MAX_SHADOW_TILES;
 
       // Pass two lays the final world matrices out in sorted order, in plain cached
       // memory: the per-tile products below read them back, which the write-combined
@@ -1579,11 +1609,11 @@ namespace YAEngine
             // Same test, same planes, same plane count as the legacy loop below:
             // the cascades pass 5 planes on purpose and passing 6 here would clip
             // distant casters out of them.
-            auto& dc = m_ShadowDrawCommands[i];
-            bool hasBounds = dc.boundsMin.x <= dc.boundsMax.x;
+            const ShadowBounds& bounds = m_ShadowBounds[i];
+            bool hasBounds = bounds.min.x <= bounds.max.x;
             if (hasBounds && frustumPlanes)
             {
-              if (!IsAABBVisible(dc.boundsMin, dc.boundsMax, frustumPlanes, planeCount))
+              if (!IsAABBVisible(bounds.min, bounds.max, frustumPlanes, planeCount))
                 continue;
             }
 
@@ -1632,8 +1662,10 @@ namespace YAEngine
             ? m_ShadowIndirectQuantizedPipelines[cullMode]
             : m_ShadowIndirectPipelines[cullMode]);
           pipeline.Bind(cmd);
-          pipeline.BindDescriptorSets(cmd,
-            { m_ShadowManager.GetShadowCascadeUBODescriptorSet(currentFrame) }, 0);
+          // Set 0 is the cascade UBO the shaders stopped reading when the tile
+          // projection moved into the model matrix. It is still in the pipeline
+          // layout, but Vulkan only requires a set to be bound when it is
+          // statically accessed, so nothing binds it any more.
           pipeline.BindDescriptorSets(cmd,
             { m_ShadowModelDescriptorSets[shadowSlot].Get() }, 1);
 
@@ -1654,6 +1686,9 @@ namespace YAEngine
       uint32_t lastMaterialIndex = UINT32_MAX;
       uint32_t lastMaterialGen = UINT32_MAX;
       VulkanPipeline* currentPipeline = nullptr;
+      // Scoped to the tile lambda, so it starts empty for every atlas tile and
+      // cannot outlive the command buffer recording it.
+      MeshBindCache bindCache;
 
       // On the indirect path this is the alpha-test tail plus anything the arena could
       // not take; otherwise it is the whole pass, unchanged.
@@ -1661,14 +1696,17 @@ namespace YAEngine
       for (size_t legacyIndex = 0; legacyIndex < legacyCount; legacyIndex++)
       {
         size_t commandIndex = useIndirect ? m_ShadowLegacyIndices[legacyIndex] : legacyIndex;
-        auto& dc = m_ShadowDrawCommands[commandIndex];
-        bool hasBounds = dc.boundsMin.x <= dc.boundsMax.x;
+        // Culled casters never touch the command itself, which is why the bounds
+        // live in their own array.
+        const ShadowBounds& bounds = m_ShadowBounds[commandIndex];
+        bool hasBounds = bounds.min.x <= bounds.max.x;
         if (hasBounds && frustumPlanes)
         {
-          if (!IsAABBVisible(dc.boundsMin, dc.boundsMax, frustumPlanes, planeCount))
+          if (!IsAABBVisible(bounds.min, bounds.max, frustumPlanes, planeCount))
             continue;
         }
 
+        auto& dc = m_ShadowDrawCommands[commandIndex];
         MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
         uint8_t sortKey = dc.SortKey();
 
@@ -1676,8 +1714,7 @@ namespace YAEngine
         {
           currentPipeline = &m_PSOCache.Get(m_ShadowPipelines[sortKey]);
           currentPipeline->Bind(cmd);
-          currentPipeline->BindDescriptorSets(cmd,
-            { m_ShadowManager.GetShadowCascadeUBODescriptorSet(currentFrame) }, 0);
+          // See the indirect branch above: set 0 is dead in every shadow shader.
           lastSortKey = sortKey;
           lastMaterialIndex = UINT32_MAX;
           lastMaterialGen = UINT32_MAX;
@@ -1720,13 +1757,13 @@ namespace YAEngine
           // no simplified counterpart: LOD lives on the position-only stream.
           countTriangles(commandIndex, uint32_t(vb.GetIndexCount()), uint32_t(vb.GetIndexCount()),
             instanceCount);
-          vb.Draw(cmd, instanceCount);
+          vb.Draw(cmd, instanceCount, &bindCache);
         }
         else
         {
           MeshLodRange lod = vb.GetLodRange(lodLevel);
           countTriangles(commandIndex, lod.indexCount, vb.GetLodRange(0).indexCount, instanceCount);
-          vb.DrawPositionOnly(cmd, instanceCount, lodLevel);
+          vb.DrawPositionOnly(cmd, instanceCount, lodLevel, &bindCache);
         }
       }
 

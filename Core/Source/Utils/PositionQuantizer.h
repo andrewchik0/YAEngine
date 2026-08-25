@@ -15,9 +15,11 @@ namespace YAEngine
     // the CPU is what keeps the shader untouched.
     glm::vec3 scale { 0.0f };
     glm::vec3 bias { 0.0f };
-    // Worst per-axis deviation of a restored position from its source, in world
-    // units. Carried for diagnostics: it is the number that decides whether 16 bits
-    // are enough for a given mesh.
+    // Worst per-axis deviation of a restored position from its source, in the space
+    // the positions were handed in: mesh local units, which equal world units only at
+    // instance scale 1. The scale cannot be folded in here - the same quantized mesh
+    // is shared by instances of different scale - so a caller comparing this against
+    // a world-space budget has to multiply by the largest scale the mesh is drawn at.
     float maxError = 0.0f;
   };
 

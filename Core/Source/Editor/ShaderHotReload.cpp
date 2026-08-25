@@ -30,23 +30,20 @@ namespace YAEngine
     }
   }
 
-  void ShaderHotReload::Update(double currentTime)
+  bool ShaderHotReload::Update(double currentTime)
   {
     // Check if there's a pending compilation batch to process
     if (m_PendingBatch)
-    {
-      ProcessCompilationResults();
-      return;
-    }
+      return ProcessCompilationResults();
 
     // Throttle polling
     if (currentTime - m_LastPollTime < POLL_INTERVAL)
-      return;
+      return false;
     m_LastPollTime = currentTime;
 
     auto tasks = m_DependencyGraph.PollChanges();
     if (tasks.empty())
-      return;
+      return false;
 
     YA_LOG_INFO("ShaderHotReload", "Detected changes, compiling %u shader(s)...",
       static_cast<uint32_t>(tasks.size()));
@@ -66,6 +63,7 @@ namespace YAEngine
     }
 
     m_PendingBatch = std::move(batch);
+    return false;
   }
 
   void ShaderHotReload::RecompileAll()
@@ -96,13 +94,13 @@ namespace YAEngine
     m_PendingBatch = std::move(batch);
   }
 
-  void ShaderHotReload::ProcessCompilationResults()
+  bool ShaderHotReload::ProcessCompilationResults()
   {
     // Check if all futures are ready
     for (auto& entry : m_PendingBatch->entries)
     {
       if (entry.future.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
-        return;
+        return false;
     }
 
     // All done - collect results
@@ -127,12 +125,12 @@ namespace YAEngine
     m_PendingBatch.reset();
 
     if (successOutputs.empty())
-      return;
+      return false;
 
     if (!allSuccess)
     {
       YA_LOG_WARN("ShaderHotReload", "Some shaders failed to compile, skipping pipeline recreation");
-      return;
+      return false;
     }
 
     // Called from Update() on the main thread - safe to wait and recreate directly
@@ -151,5 +149,6 @@ namespace YAEngine
     }
 
     YA_LOG_INFO("ShaderHotReload", "Reloaded %u shader(s)", total);
+    return total > 0;
   }
 }

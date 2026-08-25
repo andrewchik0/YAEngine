@@ -2,6 +2,7 @@
 
 #include "Pch.h"
 #include "VulkanBuffer.h"
+#include "Utils/MeshSimplifier.h"
 #include "Utils/PositionQuantizer.h"
 
 namespace YAEngine
@@ -62,24 +63,31 @@ namespace YAEngine
     void Init(const RenderContext& ctx);
     void Destroy(const RenderContext& ctx);
 
-    // Copies one mesh into the arena. Returns a non-resident allocation when the
-    // arena cannot grow far enough; the caller then keeps its own buffers. An empty
-    // quantized stream, or one the shadow buffer has no room for, only costs the mesh
-    // its place in the quantized shadow path - the rest of the allocation stands.
+    // Copies one mesh into the arena, together with the shadow LOD index streams that
+    // index the same vertices. Returns a non-resident allocation when the arena cannot
+    // grow far enough; the caller then keeps its own buffers. An empty quantized
+    // stream, or one the shadow buffer has no room for, only costs the mesh its place
+    // in the quantized shadow path - the rest of the allocation stands, and so does a
+    // LOD level the index arena had no room for.
+    // Every stream rides one staging buffer and one submit: a stream of its own would
+    // cost another queue submit and blocking fence wait per mesh.
+    // lods may be null, and lodRanges must have room for lodRangeCount entries.
     GeometryArenaAllocation Upload(const RenderContext& ctx,
       const glm::vec3* positions, size_t positionCount,
       const uint32_t* indices, size_t indexCount,
-      const QuantizedPositions& quantized);
+      const QuantizedPositions& quantized,
+      const MeshLodLevels* lods,
+      GeometryArenaIndexRange* lodRanges, size_t lodRangeCount);
 
-    // Copies one more index stream for a mesh whose positions are already resident.
-    // indexType must be the one the mesh itself was uploaded with. Returns a
-    // non-resident range when the index arena cannot grow far enough; the caller then
-    // simply has one LOD level fewer.
-    GeometryArenaIndexRange UploadIndices(const RenderContext& ctx,
-      const uint32_t* indices, size_t indexCount, VkIndexType indexType);
-
+    // Returns the blocks to the free list for immediate reuse. The caller must
+    // guarantee that no command buffer still in flight references them: the next
+    // Upload can be handed the same bytes and overwrite them, and the staged copy
+    // waits only on its own transfer fence. Every runtime deletion site satisfies
+    // this today by deferring the free by DESTROY_DELAY_FRAMES or by calling
+    // Render::WaitIdle first.
     void Free(GeometryArenaAllocation& allocation);
 
+    // Same in-flight contract as Free().
     void FreeIndices(GeometryArenaIndexRange& range);
 
     VkBuffer GetPositionBuffer() const { return m_Positions.Get(); }
@@ -103,6 +111,9 @@ namespace YAEngine
     size_t GetShadowPositionFreeBlockCount() const { return m_ShadowPositions.GetAllocatorFreeBlockCount(); }
     // Worst position error any resident mesh pays for quantization, and the size of
     // the mesh that pays it. The pair is what tells whether 16 bits still suffice.
+    // Both are in mesh local units: the grid is built from the mesh AABB and the
+    // instance scale is applied only later, so an instance scaled above 1 drifts
+    // proportionally further than this reports.
     float GetMaxQuantizeError() const { return m_MaxQuantizeError; }
     float GetMaxQuantizeErrorExtent() const { return m_MaxQuantizeErrorExtent; }
     VkDeviceSize GetIndexCapacityBytes(VkIndexType indexType) const { return IndexBuffer(indexType).GetSize(); }
@@ -153,6 +164,15 @@ namespace YAEngine
     // uint32_t byte offsets and a signed vertexOffset both stay exact well below
     // this, and a single VkBuffer this large is already far past any real scene.
     static constexpr VkDeviceSize ARENA_MAX_BYTES = 1024ull * 1024 * 1024;
+
+    // Past this a quantized position drifts further than the shadow bias can hide, so
+    // the mesh keeps the exact stream and the legacy per-draw path instead. The grid
+    // is built from the mesh AABB, so the error is extent/131070 per axis: 1 cm is a
+    // local extent of about 1.3 km. Mesh local units, like QuantizedPositions::
+    // maxError - the instance scale is not known here, and the cascade 0 budget it is
+    // measured against, normalBias = texelWorldSize * 1.5, is about 2.2 cm at the
+    // default shadowDistance of 200, so half of it is left as scale headroom.
+    static constexpr float MAX_QUANTIZE_ERROR = 0.01f;
 
     static uint32_t RoundUp(uint32_t value, uint32_t multiple)
     {
@@ -213,7 +233,13 @@ namespace YAEngine
     float m_MaxQuantizeError = 0.0f;
     float m_MaxQuantizeErrorExtent = 0.0f;
     uint64_t m_ContentVersion = 0;
-    bool b_ExhaustionReported = false;
+    // Nothing can read a UNORM16 vertex stream on a device without the format, so the
+    // shadow buffer is never even reserved there.
+    bool b_ShadowStreamEnabled = false;
+    // One latch per arena: a shared one would let whichever ran out first silence the
+    // others for the rest of the session.
+    bool b_PositionExhaustionReported = false;
+    bool b_IndexExhaustionReported = false;
     bool b_ShadowExhaustionReported = false;
   };
 }

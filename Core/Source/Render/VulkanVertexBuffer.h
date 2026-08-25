@@ -3,7 +3,6 @@
 #include "Pch.h"
 #include "GeometryArena.h"
 #include "VulkanBuffer.h"
-#include "Assets/CpuResourceData.h"
 #include "Utils/MeshSimplifier.h"
 #include "Utils/PositionQuantizer.h"
 
@@ -17,6 +16,29 @@ namespace YAEngine
   {
     uint32_t firstIndex = 0;
     uint32_t indexCount = 0;
+  };
+
+  // What a pass has already bound for its position-only draws. The arena holds one
+  // position buffer and two index buffers for the whole scene, so a run of meshes
+  // over it binds geometry once and varies only the draw arguments, which is the
+  // point of the arena; without this every mesh re-binds the same two handles.
+  // A pass declares one on the stack and hands it to every draw it issues. That
+  // scope is deliberate: the cache cannot outlive the recording it describes, and it
+  // starts empty every time the pass runs. Draw() clears it because the interleaved
+  // stream replaces these bindings, and anything else on the same command buffer
+  // that binds a vertex or index buffer has to Clear() it for the same reason.
+  struct MeshBindCache
+  {
+    VkBuffer vertices = VK_NULL_HANDLE;
+    VkBuffer indices = VK_NULL_HANDLE;
+    VkDeviceSize indexOffset = 0;
+    VkIndexType indexType = VK_INDEX_TYPE_UINT32;
+
+    void Clear()
+    {
+      vertices = VK_NULL_HANDLE;
+      indices = VK_NULL_HANDLE;
+    }
   };
 
   struct Vertex
@@ -41,14 +63,13 @@ namespace YAEngine
     void Create(const RenderContext& ctx, const void* inputData, size_t vertexCount, uint32_t vertexSize,
       const std::vector<uint32_t>& indices, bool generateShadowLods = true);
 
-    static CpuMeshData PrepareSoA(const std::vector<Vertex>& vertices, std::vector<uint32_t> indices,
-      bool generateShadowLods = true);
-
-    void CreateFromSoA(const RenderContext& ctx, const CpuMeshData& cpuData);
     void Destroy(const RenderContext& ctx);
 
-    void Draw(VkCommandBuffer cmd, uint32_t instanceCount = 1);
-    void DrawPositionOnly(VkCommandBuffer cmd, uint32_t instanceCount = 1, uint32_t lodLevel = 0);
+    // bindCache is optional: passing null simply binds on every draw, which is what
+    // a pass that issues a single draw wants anyway.
+    void Draw(VkCommandBuffer cmd, uint32_t instanceCount = 1, MeshBindCache* bindCache = nullptr);
+    void DrawPositionOnly(VkCommandBuffer cmd, uint32_t instanceCount = 1, uint32_t lodLevel = 0,
+      MeshBindCache* bindCache = nullptr);
 
     VkBuffer Get() const { return m_VerticesBuffer.Get(); }
     size_t GetIndexCount() const { return m_IndicesCount; }
@@ -66,10 +87,13 @@ namespace YAEngine
       const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices,
       const MeshLodLevels* lods, const QuantizedPositions& quantized);
 
-    void CreateLodRanges(const RenderContext& ctx, const MeshLodLevels& lods);
-
     void CreateStandalonePositions(const RenderContext& ctx,
       const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices);
+
+    // Binds the single vertex binding and the index buffer a position-only draw
+    // reads, skipping the pair when the cache says they are already current.
+    static void BindPositionStream(VkCommandBuffer cmd, MeshBindCache* bindCache,
+      VkBuffer vertices, VkBuffer indices, VkDeviceSize indexOffset, VkIndexType indexType);
 
     VulkanBuffer m_VerticesBuffer;
     VulkanBuffer m_IndicesBuffer;
