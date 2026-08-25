@@ -191,10 +191,7 @@ public:
 
 private:
 #ifdef BISTRO_RACING
-  // BistroExterior has no terrain, so the car rides a constant plane. kAsphaltY is the wet
-  // cobblestone roadway level in front of the bistro (the pedestrian pavement sits at 0.37);
-  // the wheel offset drops the model so the tires - lowest point at 0.0039 in model space -
-  // land exactly on it.
+  // No terrain in BistroExterior, so the car rides a constant plane; kAsphaltY is the roadway level (pavement sits at 0.37), offset by the wheel's lowest point (0.0039 model space) so tires land on it.
   static constexpr double kAsphaltY = 0.32;
   static constexpr double kCarScale = 1.2;
   static constexpr double kWheelBottomLocalY = 0.0039;

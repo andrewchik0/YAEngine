@@ -37,26 +37,19 @@ namespace YAEngine
     FrameUniformBuffer m_FrameUBO;
     TileLightBuffer m_TileLightBuffer;
 
-    // Graph resource handles
     RGHandle m_GBuffer0 {};
     RGHandle m_GBuffer1 {};
     RGHandle m_MainDepth {};
     RGHandle m_MainVelocity {};
     RGHandle m_LitColor {};
 
-    // Pass indices
     uint32_t m_DepthPrepassIndex {};
     uint32_t m_GBufferPassIndex {};
     uint32_t m_LightCullPassIndex {};
     uint32_t m_DeferredLightingPassIndex {};
 
-    // Descriptor sets for deferred lighting GBuffer input (set 1)
     VulkanDescriptorSet m_DeferredGBufferDescriptorSet;
-
-    // Light cull input descriptor set (set 1: lights SSBO + depth sampler)
     VulkanDescriptorSet m_LightCullInputDescriptorSet;
-
-    // Deferred lighting set 2 (lights + tile + shadow UBO + shadow atlas)
     VulkanDescriptorSet m_DeferredLightDescriptorSet;
 
     uint32_t m_Resolution = 0;

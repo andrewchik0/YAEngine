@@ -1,4 +1,5 @@
 #include "ShadowManager.h"
+#include "DescriptorLayoutCache.h"
 #include "RenderContext.h"
 #include "Utils/Log.h"
 
@@ -10,36 +11,13 @@ namespace YAEngine
 
     uint32_t framesInFlight = ctx.maxFramesInFlight;
 
-    // Set 0 of every shadow pipeline layout. No shadow shader reads it any more -
-    // the tile projection is folded into the model matrix on the CPU - so only the
-    // LAYOUT is still live, and the buffer behind it is never bound or updated.
-    // Kept until the shadow shaders renumber their sets down.
-    m_CascadeDescriptorSets.resize(framesInFlight);
-    m_CascadeUBOs.resize(framesInFlight);
+    // Set 0 of every shadow pipeline layout. No shadow shader reads it - the tile
+    // projection is folded into the model matrix on the CPU - so only the LAYOUT
+    // exists, keeping the shadow shaders' set indices as they are. Nothing is
+    // allocated for it and no set is ever bound. The cache owns the layout.
+    m_CascadeLayout = ctx.layoutCache->GetOrCreate(ctx.device,
+      { { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT } });
 
-    VkDescriptorSetLayout cascadeLayout = nullptr;
-    for (uint32_t i = 0; i < framesInFlight; i++)
-    {
-      SetDescription desc = {
-        .set = 0,
-        .bindings = {
-          { { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_VERTEX_BIT } }
-        }
-      };
-      if (i == 0)
-      {
-        m_CascadeDescriptorSets[i].Init(ctx, desc);
-        cascadeLayout = m_CascadeDescriptorSets[i].GetLayout();
-      }
-      else
-      {
-        m_CascadeDescriptorSets[i].Init(ctx, cascadeLayout);
-      }
-      m_CascadeUBOs[i].Create(ctx, sizeof(ShadowBuffer));
-      m_CascadeDescriptorSets[i].WriteUniformBuffer(0, m_CascadeUBOs[i].Get(), sizeof(ShadowBuffer));
-    }
-
-    // Lighting pass shadow descriptor sets (UBO + sampler, per-frame)
     m_LightingShadowDescriptorSets.resize(framesInFlight);
     m_LightingShadowUBOs.resize(framesInFlight);
 
@@ -71,7 +49,6 @@ namespace YAEngine
         VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
     }
 
-    // Initialize ShadowBuffer defaults
     m_ShadowData.atlasSize = glm::vec4(
       float(SHADOW_ATLAS_SIZE), float(SHADOW_ATLAS_SIZE),
       1.0f / float(SHADOW_ATLAS_SIZE), 1.0f / float(SHADOW_ATLAS_SIZE));
@@ -80,7 +57,6 @@ namespace YAEngine
     m_ShadowData.spotShadowCount = 0;
     m_ShadowData.pointShadowCount = 0;
 
-    // Set atlas viewport UVs for each cascade (from ShadowAtlas layout)
     for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
     {
       auto sv = ShadowAtlas::GetCascadeViewport(i);
@@ -93,11 +69,6 @@ namespace YAEngine
 
   void ShadowManager::Destroy(const RenderContext& ctx)
   {
-    for (auto& set : m_CascadeDescriptorSets) set.Destroy();
-    for (auto& ubo : m_CascadeUBOs) ubo.Destroy(ctx);
-    m_CascadeDescriptorSets.clear();
-    m_CascadeUBOs.clear();
-
     for (auto& set : m_LightingShadowDescriptorSets) set.Destroy();
     for (auto& ubo : m_LightingShadowUBOs) ubo.Destroy(ctx);
     m_LightingShadowDescriptorSets.clear();
@@ -141,13 +112,11 @@ namespace YAEngine
       worldCorners[i] = glm::vec3(invView * glm::vec4(sx * halfW, sy * halfH, -dist, 1.0f));
     }
 
-    // Compute bounding sphere center
     glm::vec3 center(0.0f);
     for (uint32_t i = 0; i < 8; i++)
       center += worldCorners[i];
     center /= 8.0f;
 
-    // Compute bounding sphere radius
     float radius = 0.0f;
     for (uint32_t i = 0; i < 8; i++)
     {
@@ -181,12 +150,10 @@ namespace YAEngine
     // Round up radius to reduce shimmer
     radius = std::ceil(radius * 16.0f) / 16.0f;
 
-    // Light view matrix
     glm::vec3 up = std::abs(glm::dot(lightDir, glm::vec3(0, 1, 0))) > 0.99f
       ? glm::vec3(1, 0, 0) : glm::vec3(0, 1, 0);
     glm::mat4 lightView = glm::lookAt(center - lightDir * radius, center, up);
 
-    // Orthographic projection
     glm::mat4 lightProj = glm::ortho(-radius, radius, -radius, radius, 0.0f, 2.0f * radius);
     lightProj[1][1] *= -1.0f; // Vulkan Y flip
 
@@ -217,6 +184,9 @@ namespace YAEngine
     float shadowDistance,
     const glm::vec3& lightDirection)
   {
+    std::fill(std::begin(b_CascadeRefitThisFit), std::end(b_CascadeRefitThisFit), false);
+    m_RefitReasonThisFit = ShadowInvalidation::None;
+
     if (shadowDistance <= cameraNear)
     {
       m_ShadowData.shadowsEnabled = 0;
@@ -236,47 +206,21 @@ namespace YAEngine
 
     glm::mat4 invView = glm::inverse(cameraView);
     glm::vec3 sunDir = glm::normalize(lightDirection);
-    m_FitFrame++;
-
-    if (!b_FitHysteresis)
-    {
-      // A/B control: the exact pre-hysteresis per-frame fit, bit for bit.
-      for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
-      {
-        m_FrozenFits[i].valid = false;
-        m_CascadeUrgency[i] = 0.0f;
-
-        float texelWorldSize = FitCascadeToFrustum(i, invView, cameraFov, cameraAspect,
-          m_CascadeSplits[i], m_CascadeSplits[i + 1], sunDir);
-
-        // Normal bias = 1.5 texels in world space, scales automatically per cascade
-        m_ShadowData.cascades[i].splitDepthAndBias = glm::vec4(
-          m_CascadeSplits[i + 1],
-          0.0f,
-          texelWorldSize * 1.5f,
-          0.0f);
-      }
-      b_HysteresisWasOff = true;
-      return;
-    }
 
     // Full-refit triggers shared by all cascades, compared against the inputs
     // the frozen matrices were built from.
     ShadowInvalidation fullReason = ShadowInvalidation::None;
     if (b_FrozenParamsValid)
     {
-      if (b_HysteresisWasOff)
-        fullReason = ShadowInvalidation::DebugToggleChanged;
-      else if (shadowDistance != m_FrozenShadowDistance
+      if (shadowDistance != m_FrozenShadowDistance
         || cameraFov != m_FrozenFov
         || cameraAspect != m_FrozenAspect
         || cameraNear != m_FrozenNear)
         fullReason = ShadowInvalidation::ShadowParamsChanged;
       else if (sunDir != m_FrozenSunDir
-        && glm::dot(sunDir, m_FrozenSunDir) < std::cos(glm::radians(m_SunThresholdDeg)))
+        && glm::dot(sunDir, m_FrozenSunDir) < std::cos(glm::radians(SUN_THRESHOLD_DEG)))
         fullReason = ShadowInvalidation::SunMoved;
     }
-    b_HysteresisWasOff = false;
 
     if (!b_FrozenParamsValid || fullReason != ShadowInvalidation::None)
     {
@@ -294,18 +238,17 @@ namespace YAEngine
         frozen.valid = false;
     }
 
-    double now = glfwGetTime();
-
-    // Stage 5 refit scheduler. While a required sphere still fits inside its
-    // frozen one, refitting early is visually safe: the frozen matrix is still
-    // valid, the fit just gets re-centered ahead of time. Spreading those
-    // proactive refits across frames (budgeted, highest urgency first) keeps
-    // several cascades from escaping in the same frame and spiking the pass.
-    // The full-refit triggers above are deliberately NOT staggered: all
-    // affected cascades refit in the same frame, because cascades fitted
-    // against different sun directions would be lit inconsistently.
+    // Refit scheduler. While a required sphere still fits inside its frozen one,
+    // refitting early is visually safe: the frozen matrix is still valid, the fit
+    // just gets re-centered ahead of time. Spreading those proactive refits across
+    // frames (budgeted, highest urgency first) keeps several cascades from escaping
+    // in the same frame and spiking the pass. The full-refit triggers above are
+    // deliberately NOT staggered: all affected cascades refit in the same frame,
+    // because cascades fitted against different sun directions would be lit
+    // inconsistently.
     glm::vec3 requiredCenters[CSM_CASCADE_COUNT];
     float requiredRadii[CSM_CASCADE_COUNT];
+    float urgency[CSM_CASCADE_COUNT] {};
     bool refit[CSM_CASCADE_COUNT];
     int hardRefits = 0;
 
@@ -325,32 +268,28 @@ namespace YAEngine
       }
 
       float required = glm::length(requiredCenters[i] - frozen.center) + requiredRadii[i];
-      m_CascadeUrgency[i] = required / frozen.radius;
+      urgency[i] = required / frozen.radius;
 
-      // Hard escape keeps the exact stage 2 containment comparison, so budget
-      // 0 reproduces stage 4 bit for bit; it equals urgency >= 1 up to the
-      // rounding of the division above. Correctness beats smoothness: a hard
-      // escape refits immediately and never waits for a budget slot. With
-      // proactive scheduling it should almost never happen - the performance
-      // panel counts these as "forced".
+      // Hard escape is the containment comparison itself; it equals urgency >= 1
+      // up to the rounding of the division above. Correctness beats smoothness: a
+      // hard escape refits immediately and never waits for a budget slot. With
+      // proactive scheduling it should almost never happen.
       refit[i] = required > frozen.radius;
       if (refit[i])
-      {
         hardRefits++;
-        m_ForcedRefitCount++;
-      }
     }
 
     // Right after a refit urgency sits at ~1/margin: the fresh frozen sphere
     // is the required one inflated by the margin. A soft threshold at or
     // below that would re-enqueue the cascade immediately and refit it every
-    // frame, so the effective threshold is clamped above 1/margin no matter
-    // what the sliders say.
-    float effectiveThreshold = std::max(m_RefitSoftThreshold, 1.0f / m_FitMargin + 0.02f);
+    // frame, so the effective threshold is clamped above 1/margin.
+    constexpr float EFFECTIVE_THRESHOLD =
+      REFIT_SOFT_THRESHOLD > 1.0f / FIT_MARGIN + 0.02f
+        ? REFIT_SOFT_THRESHOLD : 1.0f / FIT_MARGIN + 0.02f;
 
     // Hard refits happen regardless of the budget but still consume it, so a
     // frame that already paid for an escape adds no scheduled work on top.
-    int scheduledSlots = std::max(0, m_RefitBudget - hardRefits);
+    int scheduledSlots = std::max(0, REFIT_BUDGET - hardRefits);
     while (scheduledSlots > 0)
     {
       // Highest urgency first; strict > keeps ties deterministic on the
@@ -359,12 +298,11 @@ namespace YAEngine
       for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
       {
         if (refit[i] || !m_FrozenFits[i].valid) continue;
-        if (m_CascadeUrgency[i] < effectiveThreshold) continue;
-        if (best < 0 || m_CascadeUrgency[i] > m_CascadeUrgency[best]) best = int(i);
+        if (urgency[i] < EFFECTIVE_THRESHOLD) continue;
+        if (best < 0 || urgency[i] > urgency[best]) best = int(i);
       }
       if (best < 0) break;
       refit[best] = true;
-      m_ScheduledRefitCount++;
       scheduledSlots--;
     }
 
@@ -386,7 +324,7 @@ namespace YAEngine
         // required sphere escapes the inflated one. Pre-rounded the same way
         // FitCascadeToSphere rounds (idempotent), so the stored radius is the
         // fitted one and the containment test cannot flicker at the boundary.
-        float inflated = std::ceil(requiredRadii[i] * m_FitMargin * 16.0f) / 16.0f;
+        float inflated = std::ceil(requiredRadii[i] * FIT_MARGIN * 16.0f) / 16.0f;
         texelWorldSize = FitCascadeToSphere(i, requiredCenters[i], inflated, m_FrozenSunDir);
 
         frozen = {
@@ -397,19 +335,11 @@ namespace YAEngine
           .valid = true,
         };
 
-        auto& stats = m_FitStats[i];
-        stats.refitCount++;
-        stats.lastRefitFrame = m_FitFrame;
-        stats.lastRefitTime = now;
-        // A scheduled refit IS a refit: it records CascadeRefit like an
-        // organic escape, so the stage 4 partial rebuild picks its tile up
-        // unchanged.
-        stats.lastReason = fullReason != ShadowInvalidation::None
+        // A scheduled refit IS a refit: it records CascadeRefit like an organic
+        // escape, so the partial rebuild picks its tile up unchanged.
+        b_CascadeRefitThisFit[i] = true;
+        m_RefitReasonThisFit = fullReason != ShadowInvalidation::None
           ? fullReason : ShadowInvalidation::CascadeRefit;
-
-        // Urgency restarts from the fresh sphere (~1/margin): the required
-        // sphere is centered inside it, so the distance term is zero.
-        m_CascadeUrgency[i] = requiredRadii[i] / inflated;
       }
 
       // Normal bias = 1.5 texels in world space, scales automatically per
@@ -524,9 +454,6 @@ namespace YAEngine
 
   void ShadowManager::SetUp(uint32_t frameIndex)
   {
-    // m_CascadeUBOs is deliberately not refreshed: no shadow shader reads set 0
-    // since the tile projection moved into the model matrix, and this runs on
-    // every frame including the ones the shadow cache skips entirely.
     m_LightingShadowUBOs[frameIndex].Update(m_ShadowData);
   }
 }

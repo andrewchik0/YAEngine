@@ -60,18 +60,15 @@ namespace YAEngine
     {
       if (mip == 0)
       {
-        // Mip 0: read from depth buffer
         m_HiZDescriptorSets[mip].WriteCombinedImageSampler(0,
           depth.GetView(), depth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
       }
       else
       {
-        // Mip N: read from full Hi-Z texture (in GENERAL layout during compute)
         m_HiZDescriptorSets[mip].WriteCombinedImageSampler(0,
           hiZ.GetView(), hiZ.GetSampler(), VK_IMAGE_LAYOUT_GENERAL);
       }
 
-      // Storage image write for this mip level
       m_HiZDescriptorSets[mip].WriteStorageImage(1, m_HiZMipViews[mip], VK_IMAGE_LAYOUT_GENERAL);
     }
   }

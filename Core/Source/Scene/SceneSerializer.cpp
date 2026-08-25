@@ -163,8 +163,6 @@ namespace YAEngine
     settings["taa"] = render.GetTAAEnabled();
     settings["taaClampSigma"] = render.GetTAAClampSigma();
     settings["shadows"] = render.GetShadowsEnabled();
-    settings["shadowIndirect"] = render.GetShadowIndirectEnabled();
-    settings["shadowQuantizedPositions"] = render.GetShadowQuantizedPositionsEnabled();
     settings["shadowLod"] = render.GetShadowLodEnabled();
     {
       YAML::Node cascadeLods(YAML::NodeType::Sequence);
@@ -173,14 +171,6 @@ namespace YAEngine
         cascadeLods.push_back(render.GetShadowCascadeLods()[cascade]);
       settings["shadowCascadeLods"] = cascadeLods;
     }
-    settings["shadowFitHysteresis"] = render.GetShadowFitHysteresisEnabled();
-    settings["shadowFitMargin"] = render.GetShadowFitMargin();
-    settings["shadowSunThresholdDeg"] = render.GetShadowSunThresholdDeg();
-    settings["shadowRefitBudget"] = render.GetShadowRefitBudget();
-    settings["shadowRefitThreshold"] = render.GetShadowRefitThreshold();
-    settings["shadowCache"] = render.GetShadowCacheEnabled();
-    settings["shadowCachePerTile"] = render.GetShadowCachePerTileEnabled();
-    settings["shadowCacheDirtyRect"] = render.GetShadowCacheDirtyRectEnabled();
     settings["autoExposure"] = render.GetAutoExposureEnabled();
     settings["adaptSpeedUp"] = render.GetAdaptSpeedUp();
     settings["adaptSpeedDown"] = render.GetAdaptSpeedDown();
@@ -283,11 +273,6 @@ namespace YAEngine
     if (settings["taa"]) render.GetTAAEnabled() = settings["taa"].as<bool>();
     if (settings["taaClampSigma"]) render.GetTAAClampSigma() = settings["taaClampSigma"].as<float>();
     if (settings["shadows"]) render.GetShadowsEnabled() = settings["shadows"].as<bool>();
-    // Absent in scenes written before the indirect shadow path existed. Leaving the
-    // member default (on) is deliberate: those scenes should pick up the new path.
-    if (settings["shadowIndirect"]) render.GetShadowIndirectEnabled() = settings["shadowIndirect"].as<bool>();
-    if (settings["shadowQuantizedPositions"])
-      render.GetShadowQuantizedPositionsEnabled() = settings["shadowQuantizedPositions"].as<bool>();
     if (settings["shadowLod"]) render.GetShadowLodEnabled() = settings["shadowLod"].as<bool>();
     if (settings["shadowCascadeLods"])
     {
@@ -300,32 +285,6 @@ namespace YAEngine
           0, int(MeshSimplifier::LOD_COUNT) - 1);
       }
     }
-    if (settings["shadowFitHysteresis"])
-      render.GetShadowFitHysteresisEnabled() = settings["shadowFitHysteresis"].as<bool>();
-    if (settings["shadowFitMargin"])
-    {
-      // Below 1 the frozen sphere cannot contain the required one and every
-      // frame would refit, so the load clamps to the range the UI offers.
-      render.GetShadowFitMargin() = std::clamp(settings["shadowFitMargin"].as<float>(), 1.0f, 1.5f);
-    }
-    if (settings["shadowSunThresholdDeg"])
-    {
-      render.GetShadowSunThresholdDeg() = std::clamp(
-        settings["shadowSunThresholdDeg"].as<float>(), 0.0f, 5.0f);
-    }
-    if (settings["shadowRefitBudget"])
-      render.GetShadowRefitBudget() = std::clamp(settings["shadowRefitBudget"].as<int>(), 0, 4);
-    if (settings["shadowRefitThreshold"])
-    {
-      render.GetShadowRefitThreshold() = std::clamp(
-        settings["shadowRefitThreshold"].as<float>(), 0.90f, 1.00f);
-    }
-    if (settings["shadowCache"])
-      render.GetShadowCacheEnabled() = settings["shadowCache"].as<bool>();
-    if (settings["shadowCachePerTile"])
-      render.GetShadowCachePerTileEnabled() = settings["shadowCachePerTile"].as<bool>();
-    if (settings["shadowCacheDirtyRect"])
-      render.GetShadowCacheDirtyRectEnabled() = settings["shadowCacheDirtyRect"].as<bool>();
     if (settings["autoExposure"]) render.GetAutoExposureEnabled() = settings["autoExposure"].as<bool>();
     if (settings["adaptSpeedUp"]) render.GetAdaptSpeedUp() = settings["adaptSpeedUp"].as<float>();
     if (settings["adaptSpeedDown"]) render.GetAdaptSpeedDown() = settings["adaptSpeedDown"].as<float>();

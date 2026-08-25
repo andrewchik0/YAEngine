@@ -12,9 +12,7 @@ namespace YAEngine
 
   void RegisterCoreComponentSerializers(ComponentRegistry& registry, AssetManager& assets);
 
-  // Texture reference helpers, shared with the model override layer so both write the
-  // same shape. Textures embedded in a model file are addressed by a synthetic key that
-  // no loader can resolve from disk, so they are never written out.
+  // Texture reference helpers, shared with the model override layer so both write the same shape; textures embedded in a model file use a synthetic key no loader can resolve, so those are never written out.
   bool IsEmbeddedTexturePath(const std::string& path);
   void SerializeTextureField(YAML::Node& node, const std::string& key,
     TextureHandle handle, TextureManager& textures, AssetManager& assets);

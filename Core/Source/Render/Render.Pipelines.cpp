@@ -46,9 +46,7 @@ namespace YAEngine
 #ifdef YA_EDITOR
   VulkanPipeline& Render::GetPickPipeline(const DrawCommand& dc)
   {
-    // Cull mode has to match what the object was drawn with, or a back face that is
-    // visible on screen would leave a hole in the id buffer. Alpha-test and unlit are
-    // both rendered double-sided.
+    // Cull mode must match the original draw, or a back face visible on screen leaves a hole in the id buffer (alpha-test and unlit are always rendered double-sided).
     uint32_t idx;
     if (dc.isAlphaTest)
       idx = dc.instanced ? 5 : 4;
@@ -69,9 +67,7 @@ namespace YAEngine
   {
     auto& ctx = m_Backend.GetContext();
 
-    // One extra slot past the frames in flight: probe and irradiance volume bakes
-    // render the shadow atlas on a single-time command buffer outside the frame loop
-    // and must not write into a slot the frame loop still owns.
+    // One extra slot past frames-in-flight: probe/irradiance volume bakes render the shadow atlas on a single-time command buffer outside the frame loop and must not write into a slot the frame loop still owns.
     uint32_t slotCount = ctx.maxFramesInFlight + 1;
 
     SetDescription modelDesc = {
@@ -227,10 +223,7 @@ namespace YAEngine
 
     CreateShadowIndirectResources();
 
-    // Indirect opaque shadow pipelines. They differ from the pipelines above only in
-    // where the clip-space matrix comes from - a shared SSBO addressed by
-    // gl_InstanceIndex instead of a push constant - so every depth-related state must
-    // stay identical or the two paths stop being comparable.
+    // Indirect opaque shadow pipelines: same as above but the clip-space matrix comes from a shared SSBO addressed by gl_InstanceIndex instead of a push constant, so every depth-related state must stay identical or the two paths stop being comparable.
     {
       PipelineCreateInfo shadowIndirectInfo = {
         .vertexShaderFile = "shadow_indirect.vert",
@@ -250,10 +243,7 @@ namespace YAEngine
       shadowIndirectInfo.doubleSided = true;
       m_ShadowIndirectPipelines[1] = m_PSOCache.Register(ctx.device, shadowRP, shadowIndirectInfo, pipelineCache);
 
-      // Quantized twin of the pair above. The shader is the same file: the restoring
-      // transform rides in the model matrix, so only the attribute format differs and
-      // every depth-related state has to stay identical for the toggle to be a fair
-      // comparison.
+      // Quantized twin of the pair above: same shader file, restoring transform rides in the model matrix, so only the attribute format differs and depth-related state must stay identical for a fair comparison.
       if (ctx.unorm16VertexSupported)
       {
         shadowIndirectInfo.doubleSided = false;
@@ -480,7 +470,6 @@ namespace YAEngine
       m_TAADescriptorSets[i].Init(ctx, taaDesc);
     }
 
-    // Quad pipeline - tone mapping pass
 #ifdef YA_EDITOR
     VkRenderPass quadRP = m_Graph.GetPassRenderPass(m_SceneComposePassIndex);
 #else
@@ -529,7 +518,6 @@ namespace YAEngine
     }
 #endif
 
-    // TAA pipeline - use TAA render pass (compatible format)
     VkRenderPass taaRP = m_Graph.GetPassRenderPass(m_TAAPassIndex);
     PipelineCreateInfo taaInfo = {
       .fragmentShaderFile = "taa.frag",
@@ -572,7 +560,6 @@ namespace YAEngine
       0,
       pipelineCache);
 
-    // GTAO main pass
     VkRenderPass gtaoRP = m_Graph.GetPassRenderPass(m_GTAOPassIndex);
 
     m_GTAOPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
@@ -610,7 +597,6 @@ namespace YAEngine
     };
     m_GTAOPipeline = m_PSOCache.Register(ctx.device, gtaoRP, gtaoInfo, pipelineCache);
 
-    // GTAO denoise
     VkRenderPass gtaoDenoiseRP = m_Graph.GetPassRenderPass(m_GTAODenoisePassIndex);
 
     m_GTAODenoiseDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
@@ -675,7 +661,6 @@ namespace YAEngine
     };
     m_SSRPipeline = m_PSOCache.Register(ctx.device, ssrRP, ssrPipelineDesc, pipelineCache);
 
-    // Deferred Lighting descriptor sets and pipeline
     VkRenderPass deferredRP = m_Graph.GetPassRenderPass(m_DeferredLightingPassIndex);
 
     m_DeferredLightingDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
@@ -807,8 +792,7 @@ namespace YAEngine
       m_ForwardTransparentPipelines[1] = m_PSOCache.Register(ctx.device, transparentRP, trInfo, pipelineCache);
 
       // [2] instanced, [3] instanced + doubleSided
-      // Use mesh_transparent_instanced permutation that binds Instances at set=4
-      // (set=2 is taken by lights buffer in transparent pipeline layout).
+      // Uses mesh_transparent_instanced, which binds Instances at set=4 since set=2 is taken by the lights buffer here.
       trInfo.doubleSided = false;
       trInfo.vertexShaderFile = "mesh_transparent_instanced.vert";
       trInfo.sets.push_back(m_InstanceDescriptorSet.GetLayout());
@@ -817,7 +801,6 @@ namespace YAEngine
       m_ForwardTransparentPipelines[3] = m_PSOCache.Register(ctx.device, transparentRP, trInfo, pipelineCache);
     }
 
-    // Light cull compute pipeline - descriptor sets
     m_LightCullInputDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
     for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
     {
@@ -844,7 +827,6 @@ namespace YAEngine
       0,
       pipelineCache);
 
-    // Hi-Z compute pipeline
     SetDescription hizSetDesc = {
       .set = 0,
       .bindings = {
@@ -860,7 +842,6 @@ namespace YAEngine
       pipelineCache);
     hizLayoutHelper.Destroy();
 
-    // Auto Exposure - buffers
     m_HistogramBuffer.Create(ctx, HISTOGRAM_BIN_COUNT * sizeof(uint32_t));
     m_ExposureBuffer.Create(ctx, sizeof(float));
     float initialExposure = 0.1f;
@@ -920,7 +901,6 @@ namespace YAEngine
       sizeof(ExposureAdaptPushConstants),
       pipelineCache);
 
-    // Bloom compute pipelines
     SetDescription bloomPipelineSetDesc = {
       .set = 0,
       .bindings = {
@@ -1022,11 +1002,7 @@ namespace YAEngine
     }
 
 #ifdef YA_EDITOR
-    // Pick id pipelines - the depth-only set plus the entity id in the push constant.
-    // Depth comes from the passes that already ran (no write, GEQUAL), so occlusion is
-    // resolved for free. Alpha-test still needs a real discard: a punched-out fragment
-    // in front of whatever wrote the depth would otherwise pass the test and claim the
-    // pixel, hence the dedicated variants [4] and [5].
+    // Pick id pipelines reuse existing depth (no write, GEQUAL) for free occlusion; alpha-test needs a real discard so a punched-out fragment doesn't wrongly claim the pixel, hence the dedicated variants [4] and [5].
     {
       VkRenderPass pickRP = m_Graph.GetPassRenderPass(m_PickIdPassIndex);
       constexpr uint32_t pickPushConstantSize = sizeof(glm::mat4) + sizeof(int) + sizeof(uint32_t);
@@ -1083,10 +1059,7 @@ namespace YAEngine
   {
     auto& ctx = m_Backend.GetContext();
 
-    // doubleSided means VK_CULL_MODE_NONE here, and that is the whole point: with
-    // back faces culled a node behind a wall never sees the wall at all, which is
-    // exactly the case the classification has to catch. Depth write plus the usual
-    // reversed-Z GREATER leaves the nearest surface in the mask, front or back.
+    // doubleSided (VK_CULL_MODE_NONE) is intentional: with back faces culled, a node behind a wall would never see it, defeating the classification. Depth write plus the usual reversed-Z GREATER keeps the nearest surface in the mask regardless of facing.
     PipelineCreateInfo maskInfo = {
       .fragmentShaderFile = "backface_mask.frag",
       .vertexShaderFile = "mesh_depth.vert",

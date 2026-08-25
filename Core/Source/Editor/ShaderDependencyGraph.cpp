@@ -33,7 +33,6 @@ namespace YAEngine
     std::string line;
     while (std::getline(file, line))
     {
-      // Parse #include "..." directives
       auto pos = line.find("#include");
       if (pos == std::string::npos)
         continue;
@@ -153,7 +152,6 @@ namespace YAEngine
     if (!visited.insert(changedFile).second)
       return;
 
-    // If this file is itself a compilable shader, it's a root
     std::string filename = std::filesystem::path(changedFile).filename().string();
     if (IsCompilable(filename))
       roots.insert(changedFile);
@@ -191,13 +189,11 @@ namespace YAEngine
     if (changedFiles.empty())
       return {};
 
-    // Collect all root shaders affected by any changed file
     std::unordered_set<std::string> affectedRoots;
     std::unordered_set<std::string> visited;
     for (auto& changed : changedFiles)
       CollectRootShaders(changed, affectedRoots, visited);
 
-    // Generate compile tasks
     std::vector<CompileTask> tasks;
     std::unordered_set<std::string> addedOutputs;
 
@@ -205,7 +201,6 @@ namespace YAEngine
     {
       std::string filename = std::filesystem::path(rootCanonical).filename().string();
 
-      // Check if this file has registered permutations
       auto permIt = m_Permutations.find(filename);
       if (permIt != m_Permutations.end())
       {
@@ -216,7 +211,7 @@ namespace YAEngine
         }
       }
 
-      // Always add the default compilation (source.ext → source.ext.spv)
+      // Always add the default compilation (source.ext -> source.ext.spv)
       std::string defaultOutput = filename + ".spv";
       if (addedOutputs.insert(defaultOutput).second)
         tasks.push_back({ filename, defaultOutput, {} });

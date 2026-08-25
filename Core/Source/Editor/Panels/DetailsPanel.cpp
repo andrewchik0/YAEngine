@@ -355,11 +355,8 @@ namespace YAEngine
     return false;
   }
 
-  // Overlapping volumes share nodes on the world lattice, and a shared node is
-  // only really shared when both bakes captured it the same way. A different
-  // capture resolution means a different SH projection error, so the two volumes
-  // disagree by that error exactly where they are supposed to agree. Warn, never
-  // block - the artist may well want a cheap outer volume anyway.
+  // Overlapping volumes must share capture resolution, or shared lattice nodes disagree
+  // by SH projection error; warn but never block - a cheap outer volume may be wanted.
   static void DrawVolumeResolutionConflicts(EditorContext& context,
     const IrradianceVolumeComponent& iv, const glm::vec3& center, const glm::quat& rotation)
   {
@@ -451,9 +448,8 @@ namespace YAEngine
       for (int i = 0; i < 3; i++)
         if (resValues[i] == iv.captureResolution) resIdx = i;
 
-      // Snapped instead of silently displayed as something else: a value outside
-      // the three options would otherwise show as "32" while the component kept
-      // the original, and the resolution conflict warning compares the raw values.
+      // Snapped, not just relabeled: an out-of-range value would display as e.g. "32"
+      // while staying different internally, and the conflict warning compares raw values.
       if (resIdx < 0)
       {
         resIdx = 1;
@@ -471,10 +467,9 @@ namespace YAEngine
           "Rejected nodes inherit their nearest valid neighbour, so rejecting is cheap.\n"
           "Lower catches more leaks, higher keeps more nodes. 1.00 switches the test off.");
 
-      // Node count is shown BEFORE baking - it is the only warning the user gets
-      // before committing to minutes of offscreen rendering. The lattice covers
-      // the world-space AABB of the rotated box, so the entity transform is part
-      // of the count and has to be fed in the same way the baker feeds it.
+      // Shown before baking as the only warning before minutes of offscreen rendering;
+      // count follows the world-space AABB of the rotated box, so it must be fed the
+      // same transform the baker feeds it.
       const glm::mat4& volumeWorld = context.scene->GetWorldTransform(context.selectedEntity).world;
       glm::vec3 center = glm::vec3(volumeWorld[3]);
       glm::quat rotation = ExtractIrradianceBoxRotation(volumeWorld);
@@ -574,11 +569,9 @@ namespace YAEngine
       ImGui::Separator();
       ImGui::Text("Control Points");
 
-      // XZ spline editor using SplinePathEditor
       std::vector<glm::vec2> points2D;
       points2D.reserve(road.points.size());
 
-      // Find XZ bounds for normalization
       glm::vec2 minXZ(std::numeric_limits<float>::max());
       glm::vec2 maxXZ(-std::numeric_limits<float>::max());
       for (auto& p : road.points)
@@ -609,7 +602,6 @@ namespace YAEngine
         committed = true;
       }
 
-      // Sync point count changes from editor
       while (road.points.size() < points2D.size())
       {
         glm::vec2 edPt = points2D[road.points.size()];
@@ -1158,7 +1150,6 @@ namespace YAEngine
     auto& scene = *context.scene;
     Entity entity = context.selectedEntity;
 
-    // Entity name header
     if (scene.HasComponent<Name>(entity))
       ImGui::Text("%s", scene.GetName(entity).c_str());
     else

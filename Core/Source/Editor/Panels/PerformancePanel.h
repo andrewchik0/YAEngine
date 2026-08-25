@@ -110,8 +110,7 @@ namespace YAEngine
     float m_MaxFrametime = 0.0f;
     float m_AvgFrametime = 0.0f;
 
-    // Sliding-window percentiles - the primary success metric of the shadow
-    // caching project: CPU and GPU frame time and the "Shadows" GPU zone.
+    // Sliding-window percentiles over CPU and GPU frame time.
     static constexpr uint32_t PERCENTILE_WINDOW = 1000;
     struct Percentiles
     {
@@ -123,7 +122,6 @@ namespace YAEngine
     };
     Percentiles m_CpuPercentiles;
     Percentiles m_GpuPercentiles;
-    Percentiles m_ShadowPercentiles;
     std::vector<float> m_PercentileScratch;
 
     double m_LastAggregate = 0.0;

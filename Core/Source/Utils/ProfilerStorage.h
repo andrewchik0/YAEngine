@@ -11,10 +11,9 @@ namespace YAEngine
     Count = 2
   };
 
-  // Per-frame timings kept in a zone-major ring buffer: history[zone][frame].
-  // Zone-major so the panel can hand ImPlot a contiguous series without repacking,
-  // and so a zone keeps its slot - and with it its color and stack position - even
-  // on frames where it does not run.
+  // Per-frame timings in a zone-major ring buffer (history[zone][frame]), so the panel
+  // can hand ImPlot a contiguous series and a zone keeps its slot (color, stack position)
+  // even on frames where it does not run.
   class ProfilerStorage
   {
   public:
@@ -25,16 +24,14 @@ namespace YAEngine
     // Sized for ten seconds of history at 400 fps. The panel aggregates frames into
     // time buckets, so the ring only has to be long enough, not economical.
     static constexpr uint32_t HISTORY_SIZE = 4096;
-    // Scene and asset loading make the first frames cost orders of magnitude more
-    // than a steady one. A single such frame would pin the chart scale for the whole
-    // history window, so those frames are dropped instead of recorded.
+    // Scene/asset loading makes the first frames cost orders of magnitude more than a
+    // steady one, which would pin the chart scale for the whole window, so they are dropped.
     static constexpr uint32_t WARMUP_FRAMES = 120;
 
     static ProfilerStorage& Get();
 
-    // Advances the frame counter and zeroes the incoming column in both domains.
-    // GPU results land in the column of the frame they belong to, several frames
-    // after that frame was recorded, so the clear has to happen here and not on resolve.
+    // Advances the frame counter and zeroes the incoming column in both domains; done here
+    // (not on resolve) since GPU results land several frames after the frame they belong to.
     void BeginFrame();
 
     uint64_t GetCurrentFrame() const { return m_CurrentFrame; }
@@ -55,14 +52,12 @@ namespace YAEngine
     // Unrolls the ring into chronological order, oldest first, ending at the newest frame.
     void CopyZoneHistory(ProfileDomain domain, uint32_t zone, uint32_t count, std::span<float> out) const;
     void CopyFrameTotals(ProfileDomain domain, uint32_t count, std::span<float> out) const;
-    // Seconds since startup for each frame of the same window, so the panel can group
-    // frames by elapsed time instead of by frame index. Double, because a float loses
-    // sub-bucket resolution after an hour of uptime and frames would land in the
-    // wrong bucket.
+    // Seconds since startup per frame of the window, so the panel can bucket by elapsed
+    // time instead of frame index. Double, since a float loses sub-bucket resolution
+    // after an hour of uptime.
     void CopyFrameTimes(ProfileDomain domain, uint32_t count, std::span<double> out) const;
-    // Takes effect on the next frame boundary, never mid-frame: the pause control is
-    // drawn from inside the swapchain pass, so flipping it immediately would split a
-    // column between the frame being recorded and the one recorded after the pause.
+    // Takes effect on the next frame boundary, never mid-frame: the pause control is drawn
+    // from inside the swapchain pass, so flipping it immediately would split a column.
     void SetPaused(bool paused) { b_PauseRequested = paused; }
     bool IsPaused() const { return b_PauseRequested; }
     bool IsWarmingUp() const { return m_WarmupLeft > 0; }

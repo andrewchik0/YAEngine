@@ -31,9 +31,7 @@ namespace YAEngine
         worldMax = glm::max(worldMax, wc);
       }
 
-      // Prev keeps the bounds of the previous recompute for the shadow
-      // dirty-rect path. The first compute seeds prev with current, so the
-      // union adds no bogus erase region.
+      // Prev holds the pre-update bounds for the shadow dirty-rect union; first compute seeds prev = current so no bogus erase region is added.
       if (auto* wb = registry.try_get<WorldBounds>(e))
       {
         wb->prevMin = wb->min;

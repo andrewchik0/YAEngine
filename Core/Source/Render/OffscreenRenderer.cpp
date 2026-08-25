@@ -65,7 +65,6 @@ namespace YAEngine
       .additionalUsage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT
     });
 
-    // 1. Depth prepass
     m_DepthPrepassIndex = m_Graph.AddPass({
       .name = "OffDepthPrepass",
       .depthOutput = m_MainDepth,
@@ -77,7 +76,6 @@ namespace YAEngine
       }
     });
 
-    // 2. GBuffer pass
     m_GBufferPassIndex = m_Graph.AddPass({
       .name = "OffGBufferPass",
       .colorOutputs = { m_GBuffer0, m_GBuffer1, m_MainVelocity },
@@ -90,7 +88,6 @@ namespace YAEngine
       }
     });
 
-    // 3. Light cull (compute)
     m_LightCullPassIndex = m_Graph.AddPass({
       .name = "OffLightCull",
       .inputs = { m_MainDepth },
@@ -113,7 +110,6 @@ namespace YAEngine
           m_TileLightBuffer.GetTileCountX(),
           m_TileLightBuffer.GetTileCountY(), 1);
 
-        // Buffer barrier: compute write -> fragment read
         VkBufferMemoryBarrier bufferBarrier {};
         bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
         bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -130,7 +126,6 @@ namespace YAEngine
       }
     });
 
-    // 4. Deferred lighting
     m_DeferredLightingPassIndex = m_Graph.AddPass({
       .name = "OffDeferredLighting",
       .inputs = { m_GBuffer0, m_GBuffer1, m_MainDepth },
@@ -166,7 +161,6 @@ namespace YAEngine
 
     m_Graph.Compile();
 
-    // Init tile light buffer for this resolution
     uint32_t tileCountX = (resolution + TILE_SIZE - 1) / TILE_SIZE;
     uint32_t tileCountY = (resolution + TILE_SIZE - 1) / TILE_SIZE;
     m_TileLightBuffer.Init(*m_Ctx, tileCountX, tileCountY);
@@ -193,7 +187,6 @@ namespace YAEngine
       m_Render->m_NoneTexture.GetView(), m_Render->m_NoneTexture.GetSampler(),
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-    // Light cull set 1: lights SSBO + depth sampler
     SetDescription lcDesc = {
       .set = 1,
       .bindings = {
@@ -204,11 +197,9 @@ namespace YAEngine
       }
     };
     m_LightCullInputDescriptorSet.Init(*m_Ctx, lcDesc);
-    // Bind lights SSBO from Render's LightStorageBuffer
     m_LightCullInputDescriptorSet.WriteStorageBuffer(0,
       m_Render->m_LightBuffer.GetBuffer(0), sizeof(LightBuffer));
 
-    // Deferred lighting set 2: lights SSBO + tile SSBO + shadow UBO + shadow atlas
     SetDescription dlLightDesc = {
       .set = 2,
       .bindings = {
@@ -222,17 +213,14 @@ namespace YAEngine
     };
     m_DeferredLightDescriptorSet.Init(*m_Ctx, dlLightDesc);
 
-    // Bind lights SSBO (binding 0)
     m_DeferredLightDescriptorSet.WriteStorageBuffer(0,
       m_Render->m_LightBuffer.GetBuffer(0), sizeof(LightBuffer));
 
-    // Bind our tile SSBO (binding 1)
     VkDeviceSize tileBufferSize = m_TileLightBuffer.GetTileCountX() *
       m_TileLightBuffer.GetTileCountY() * sizeof(TileData);
     m_DeferredLightDescriptorSet.WriteStorageBuffer(1,
       m_TileLightBuffer.GetBuffer(0), tileBufferSize);
 
-    // Bind shadow UBO (binding 2) + shadow atlas sampler (binding 3)
     auto& shadowMgr = m_Render->m_ShadowManager;
     m_DeferredLightDescriptorSet.WriteUniformBuffer(2,
       shadowMgr.GetShadowUBOBuffer(0), sizeof(ShadowBuffer));
@@ -251,7 +239,6 @@ namespace YAEngine
       YA_LOG_ERROR("Render", "OffscreenRenderer::RenderFace asked for %u but the graph is %u - rebuild it first",
         resolution, m_Resolution);
 
-    // Set up camera for this cubemap face
     glm::mat4 proj = MakeReversedInfinitePerspective(glm::radians(90.0f), 1.0f, 0.01f);
     proj[1][1] *= -1.0f;
 

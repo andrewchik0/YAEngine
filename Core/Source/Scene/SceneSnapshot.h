@@ -64,14 +64,6 @@ namespace YAEngine
     }
   };
 
-#ifdef YA_EDITOR
-  // One-shot request from PerformancePanel: the next BuildSceneSnapshot logs
-  // every shadow-relevant caster whose lastChangeTick is recent - the entities
-  // keeping casterTransformDigest changing. One bool check per frame while
-  // disarmed.
-  inline bool g_ShadowCacheBlockerDumpPending = false;
-#endif
-
   inline void BuildSceneSnapshot(SceneSnapshot& snapshot, LightBuffer& lights, Scene& scene, MeshManager& meshManager, MaterialManager& materialManager)
   {
     snapshot.objects.clear();
@@ -218,37 +210,6 @@ namespace YAEngine
 
     snapshot.casterIdentityDigest = identityDigest.value;
     snapshot.casterTransformDigest = transformDigest.value;
-
-#ifdef YA_EDITOR
-    if (g_ShadowCacheBlockerDumpPending)
-    {
-      g_ShadowCacheBlockerDumpPending = false;
-
-      uint64_t maxTick = 0;
-      auto tickView = reg.view<WorldTransform>();
-      for (auto e : tickView)
-        maxTick = std::max(maxTick, tickView.get<WorldTransform>(e).lastChangeTick);
-
-      uint32_t blockers = 0;
-      view.each([&](entt::entity entity, MeshComponent& mesh, WorldTransform& wt, MaterialComponent& material)
-      {
-        if (reg.all_of<HiddenTag>(entity)) return;
-        auto& mat = materialManager.Get(material.asset);
-        if (mat.shadingModel == ShadingModel::Unlit || mat.transparent) return;
-        if (wt.lastChangeTick + 2 < maxTick) return;
-        blockers++;
-        YA_LOG_INFO("Render", "Shadow cache blocker: '%s' (entity %u) tick %llu, max %llu",
-          scene.GetName(entity).c_str(), uint32_t(entity),
-          (unsigned long long)wt.lastChangeTick, (unsigned long long)maxTick);
-      });
-      if (blockers == 0)
-        YA_LOG_INFO("Render", "Shadow cache blockers: none (no caster stamped within 2 ticks of max %llu)",
-          (unsigned long long)maxTick);
-      else
-        YA_LOG_INFO("Render", "Shadow cache blockers: %u caster(s) stamped within 2 ticks of max %llu",
-          blockers, (unsigned long long)maxTick);
-    }
-#endif
 
     snapshot.visibleCount = uint32_t(snapshot.objects.size());
 

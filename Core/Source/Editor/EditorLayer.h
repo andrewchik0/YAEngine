@@ -70,7 +70,6 @@ namespace YAEngine
     bool b_PickRequestExact = false; // Ctrl was held: select the exact mesh, not its root
     Ray m_PickFallbackRay {};
 
-    // Gizmo drag state
     bool b_DragActive = false;
     GizmoAxis m_DragAxis {};
     GizmoMode m_DragMode {};

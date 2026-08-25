@@ -480,7 +480,6 @@ namespace YAEngine
       ctx.commandBuffer->EndSingleTimeCommands(cmd);
     }
 
-    // Generate mip chain from rendered mip 0
     cmd = ctx.commandBuffer->BeginSingleTimeCommands();
 
     TransitionImageLayout(cmd, m_CubemapImage,

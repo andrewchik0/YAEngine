@@ -5,38 +5,25 @@
 
 namespace YAEngine
 {
-  // Allowed node spacings in meters. Powers of two on purpose: with a lattice
-  // anchored at the world origin, the nodes of a coarse volume are a strict
-  // subset of the nodes of a finer one, so a shared node is literally the same
-  // sample point in both and the baked values are identical, not merely close.
+  // Allowed node spacings in meters. Powers of two so a coarse volume's nodes are always a
+  // strict subset of a finer volume's, keeping shared sample points identical, not merely close.
   inline constexpr std::array<float, 5> IRRADIANCE_SPACINGS = { 0.25f, 0.5f, 1.0f, 2.0f, 4.0f };
 
-  // Snaps an arbitrary spacing to the nearest allowed one. The metric is the
-  // ratio (distance in log2 space), not the linear difference - the set is
-  // geometric, so 3.0 is closer to 4.0 than to 2.0, and there are no ties.
+  // Snaps to the nearest allowed spacing using log2 distance (the set is geometric), not linear difference.
   float SnapIrradianceSpacing(float spacing);
 
-  // Orientation of an influence box taken from an entity world matrix, with the
-  // basis normalized so transform scale cannot leak into the box - halfExtents
-  // alone define it. The baker, the snapshot and the editor must agree on this,
-  // otherwise the node count shown before a bake is not the one that gets baked.
+  // Orientation of an influence box from a world matrix; basis is normalized so scale can't leak
+  // in - halfExtents alone define the box. Baker, snapshot and editor must agree, or the previewed
+  // node count won't match the bake.
   glm::quat ExtractIrradianceBoxRotation(const glm::mat4& world);
 
-  // World-space AABB half-extents of a box rotated by `rotation`. The sampling
-  // lattice covers this AABB, so it is also the box the editor compares against
-  // when it looks for overlapping volumes.
+  // World-space AABB half-extents of the rotated box; this is also what the editor checks for overlapping volumes.
   glm::vec3 ComputeRotatedBoxAabbHalfExtents(const glm::quat& rotation, const glm::vec3& halfExtents);
 
-  // Node layout of one irradiance volume. Purely geometric - no Vulkan, no Scene.
-  //
-  // The sampling lattice is world axis aligned and anchored at the world origin:
-  // every node sits at a multiple of `spacing` on every axis. The influence box
-  // may still be rotated - the lattice then covers the world-space AABB of the
-  // rotated box, and nodes that fall outside the box are still baked so trilinear
-  // interpolation stays well defined right up to the rotated faces.
-  //
-  // Nodes are ordered x first, then y, then z, matching IrradianceVolumeFile and
-  // the 3D texture upload, so a node array is never reshuffled.
+  // Node layout of one irradiance volume (purely geometric, no Vulkan/Scene). The lattice is world
+  // axis aligned and anchored at the origin, so a rotated influence box only selects which lattice
+  // nodes get baked (some outside the box, so trilinear stays defined at the rotated faces). Nodes
+  // are ordered x, then y, then z, matching IrradianceVolumeFile and the 3D texture upload.
   struct IrradianceGridLayout
   {
     glm::uvec3 nodeCounts { 2 };
@@ -73,23 +60,16 @@ namespace YAEngine
     }
   };
 
-  // Lays the world lattice over the world-space AABB of the rotated box: the
-  // spacing is snapped to IRRADIANCE_SPACINGS and then kept exact, and both AABB
-  // corners are pushed out to lattice multiples so the box spans whole cells.
-  // Node count per axis is max(2, cells + 1). Two is the hard minimum because
-  // hardware trilinear filtering needs a node on both sides of every axis.
+  // Snaps spacing to IRRADIANCE_SPACINGS, pushes both AABB corners out to lattice multiples so the
+  // box spans whole cells, and clamps node count per axis to at least 2 (trilinear filtering needs
+  // a node on both sides of every axis).
   IrradianceGridLayout ComputeIrradianceGridLayout(const glm::vec3& center,
     const glm::quat& rotation, const glm::vec3& halfExtents, float spacing);
 
-  // Replaces every invalid node with the coefficients of the nearest valid one
-  // (multi-source BFS over 6-connectivity). This is what lets the shader trust
-  // hardware trilinear filtering: an interpolation cell can never contain a node
-  // that was never captured, so three texture fetches are enough and no manual
-  // 8-tap validity weighting is needed.
-  //
-  // The validity array is left untouched - it travels into the asset as is so the
-  // editor can still show which nodes were rejected.
-  // Returns false when no node was valid at all; coefficients are then all zero.
+  // Fills invalid nodes with the nearest valid node's coefficients (multi-source BFS, 6-connectivity),
+  // so every lattice node is safe for hardware trilinear filtering without manual validity weighting.
+  // Validity array is left untouched (travels into the asset for the editor). Returns false if no
+  // node was valid at all.
   bool FloodFillIrradianceNodes(const IrradianceGridLayout& layout,
     std::vector<SHL1RGB>& coefficients, const std::vector<uint8_t>& validity);
 }

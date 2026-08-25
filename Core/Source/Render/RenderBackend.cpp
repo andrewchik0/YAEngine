@@ -37,7 +37,6 @@ namespace YAEngine
 
     m_DescriptorPool.Init(m_Device.Get());
 
-    // Load pipeline cache from disk if available
     std::vector<char> cacheData;
     {
       std::ifstream file("pipeline_cache.bin", std::ios::binary | std::ios::ate);
@@ -117,7 +116,6 @@ namespace YAEngine
 
   void RenderBackend::Destroy()
   {
-    // Save pipeline cache to disk
     {
       size_t cacheSize = 0;
       vkGetPipelineCacheData(m_Device.Get(), m_PipelineCache, &cacheSize, nullptr);

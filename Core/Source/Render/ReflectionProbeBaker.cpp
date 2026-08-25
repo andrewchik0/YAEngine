@@ -46,7 +46,7 @@ namespace YAEngine
     const std::string& prefilterSavePath)
   {
     // Clamped before the log line: an out-of-range resolution is exactly the case
-    // where the log matters, and it used to report the value the bake never used.
+    // where the log matters.
     resolution = std::clamp(resolution,
       BakeLimits::PROBE_MIN_CAPTURE_RESOLUTION, BakeLimits::PROBE_MAX_CAPTURE_RESOLUTION);
 
@@ -56,7 +56,6 @@ namespace YAEngine
 
     uint32_t srcMipLevels = Detail::MipLevels(resolution);
 
-    // Create temporary cubemap render target with mip chain for prefilter sampling
     VulkanImage cubemap;
     {
       ImageDesc desc {
@@ -79,7 +78,6 @@ namespace YAEngine
       cubemap.Init(*m_Ctx, desc, &sampler);
     }
 
-    // Initial cubemap layout transition
     VkCommandBuffer cmd = m_Ctx->commandBuffer->BeginSingleTimeCommands();
     TransitionImageLayout(cmd, cubemap.GetImage(),
       VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
@@ -113,7 +111,6 @@ namespace YAEngine
       m_Ctx->commandBuffer->EndSingleTimeCommands(cmd);
     }
 
-    // Generate mip chain from rendered mip 0
     cmd = m_Ctx->commandBuffer->BeginSingleTimeCommands();
 
     TransitionImageLayout(cmd, cubemap.GetImage(),
@@ -156,12 +153,10 @@ namespace YAEngine
     VulkanImage prefilterImg = ConvolvePrefilter(*m_Ctx, cubicRes,
       cubemap.GetView(), cubemap.GetSampler(), resolution, PROBE_PREFILTER_SIZE, PROBE_PREFILTER_MIP_LEVELS);
 
-    // Upload to atlas
     uint32_t baseLayer = atlasSlot * 6;
 
     cmd = m_Ctx->commandBuffer->BeginSingleTimeCommands();
 
-    // Prefilter: SHADER_READ -> TRANSFER_SRC (temp), SHADER_READ -> TRANSFER_DST (atlas)
     TransitionImageLayout(cmd, prefilterImg.GetImage(),
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL,
       VK_IMAGE_ASPECT_COLOR_BIT, 0, PROBE_PREFILTER_MIP_LEVELS, 0, 6);
@@ -191,7 +186,6 @@ namespace YAEngine
 
     m_Ctx->commandBuffer->EndSingleTimeCommands(cmd);
 
-    // GPU readback + save to disk
     if (!prefilterSavePath.empty())
     {
       size_t pfTotalSize = CubeMapFile::GetTotalSize(
@@ -231,7 +225,6 @@ namespace YAEngine
       pfStaging.Destroy(*m_Ctx);
     }
 
-    // Cleanup temporary resources
     cubemap.Destroy(*m_Ctx);
     prefilterImg.Destroy(*m_Ctx);
 

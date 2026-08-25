@@ -16,9 +16,8 @@ namespace YAEngine
 {
   namespace
   {
-    // model * translate(bias) * scale(scale), written out. The restoring transform is
-    // a diagonal plus a translation, so scaling three columns and shifting the fourth
-    // replaces a full 4x4 product - and this runs once per instance per frame.
+    // Restoring transform (translate(bias)*scale(scale)) is diagonal+translation, so folding it
+    // into model scales 3 columns and shifts the 4th instead of a full 4x4 product; runs once per instance per frame.
     glm::mat4 FoldDequantization(const glm::mat4& model, const glm::vec3& scale, const glm::vec3& bias)
     {
       glm::mat4 result;
@@ -729,29 +728,25 @@ namespace YAEngine
   {
     auto& ctx = m_Backend.GetContext();
 
-    // Support is a property of the device and the toggle is a user setting, so the
-    // effective path is decided here every frame rather than latched at load time.
-    bool useIndirect = b_ShadowIndirectEnabled
-      && ctx.multiDrawIndirectSupported
+    // Support is a property of the device, so the effective path is decided here
+    // rather than latched at load time.
+    bool useIndirect = ctx.multiDrawIndirectSupported
       && ctx.drawIndirectFirstInstanceSupported
       && ctx.geometryArena != nullptr;
 
     // Quantized positions belong to the indirect path alone. Every other consumer of
     // the arena - the depth prepass above all - must keep reading the exact stream,
     // because the prepass writes the depth the G-buffer then tests against.
-    bool useQuantizedPositions = useIndirect
-      && b_ShadowQuantizedPositions
-      && ctx.unorm16VertexSupported;
+    bool useQuantizedPositions = useIndirect && ctx.unorm16VertexSupported;
+
+    // Bakes rewrite the whole atlas with different matrices, so they clear it whole;
+    // every other frame loads it and clears only the tiles it is about to draw.
+    const bool isBake = probeCenter != nullptr;
 
     // Bakes render the atlas on a single-time command buffer outside the frame loop
     // and pass frameIndex 0, which the frame loop may still own. The passed index is
     // deliberately ignored for them and the dedicated bake slot is used instead.
-    uint32_t shadowSlot = GetShadowSlot(frameIndex, probeCenter != nullptr);
-
-    // Bakes rewrite the whole atlas with different matrices, so they always take
-    // the full-clear path regardless of the spike mode selected in the editor.
-    ShadowClearMode clearMode = probeCenter ? ShadowClearMode::FullClear : m_ShadowClearMode;
-    m_Stats.shadowClearMode = uint32_t(clearMode);
+    uint32_t shadowSlot = GetShadowSlot(frameIndex, isBake);
 
     bool hasDirectionalShadow = b_ShadowsEnabled && frame.snapshot.directionalShadow.castShadow;
     bool hasSpotShadows = b_ShadowsEnabled && !frame.snapshot.spotShadowRequests.empty();
@@ -770,13 +765,6 @@ namespace YAEngine
         b_ShadowAtlasContentValid = false;
         m_ShadowCachePendingReason = ShadowInvalidation::ShadowsToggled;
       }
-#ifdef YA_EDITOR
-      if (b_ShadowBreakdownPending && !probeCenter)
-      {
-        m_ShadowBreakdownTriangles.clear();
-        DumpShadowBreakdown();
-      }
-#endif
       return;
     }
 
@@ -799,9 +787,6 @@ namespace YAEngine
       }
       else
       {
-        m_ShadowManager.SetFitHysteresis(b_ShadowFitHysteresis,
-          m_ShadowFitMargin, m_ShadowSunThresholdDeg,
-          m_ShadowRefitBudget, m_ShadowRefitThreshold);
         m_ShadowManager.ComputeCascades(
           m_FrameUniformBuffer.uniforms.view,
           cam.fov, cam.aspectRatio,
@@ -846,18 +831,15 @@ namespace YAEngine
     {
       Fnv1a digest;
       digest.Add(b_ShadowsEnabled);
-      digest.Add(useIndirect);
-      digest.Add(useQuantizedPositions);
       digest.Add(b_ShadowLodEnabled);
       for (int lod : m_ShadowCascadeLods)
         digest.Add(lod);
-      digest.Add(clearMode);
       shadowSettingsDigest = digest.value;
     }
 
     // Which tiles this frame draws. Bakes and full rebuilds take every tile;
-    // the stage 4 partial decision narrows this to the refitted cascades, the
-    // stage 6 rect decision to the tiles a mover's footprint touches.
+    // the partial decision narrows this to the refitted cascades, the rect
+    // decision to the tiles a mover's footprint touches.
     bool partialRebuild = false;
     bool rectRebuild = false;
     bool cascadeDirty[CSM_CASCADE_COUNT];
@@ -879,10 +861,10 @@ namespace YAEngine
     };
     CascadeDirtyRect cascadeRects[CSM_CASCADE_COUNT];
 
-    // Stage 3 all-or-nothing cache: when nothing shadow-relevant changed since
-    // the last rendered frame, the atlas already holds exactly what this frame
-    // would draw, so collection, sort, SSBO writes and the render pass are all
-    // skipped. Bakes never take it and invalidate at the end of the function.
+    // All-or-nothing cache: when nothing shadow-relevant changed since the last
+    // rendered frame, the atlas already holds exactly what this frame would draw,
+    // so collection, sort, SSBO writes and the render pass are all skipped. Bakes
+    // never take it and invalidate at the end of the function.
     if (!probeCenter)
     {
       // First detected reason wins. The pending one goes first: a bake or a
@@ -893,7 +875,7 @@ namespace YAEngine
       else if (hasDirectionalShadow && m_ShadowManager.AnyRefitThisFit())
         reason = m_ShadowManager.LastRefitReasonThisFit();
       else if (shadowSettingsDigest != m_ShadowCachedSettingsDigest)
-        reason = ShadowInvalidation::DebugToggleChanged;
+        reason = ShadowInvalidation::SettingsChanged;
       else if (frame.snapshot.casterIdentityDigest != m_ShadowCachedIdentityDigest)
         reason = ShadowInvalidation::CasterAddedOrRemoved;
       else if (frame.snapshot.casterTransformDigest != m_ShadowCachedTransformDigest)
@@ -905,34 +887,20 @@ namespace YAEngine
       else if (shadowGeometryVersion != m_ShadowCachedGeometryVersion)
         reason = ShadowInvalidation::GeometryStreamedIn;
 
-      // Hysteresis off means every frame refits and there is nothing to reuse,
-      // so it counts as cache-off; the settings panel says so next to the toggle.
-      if (b_ShadowCacheEnabled && b_ShadowFitHysteresis
-        && b_ShadowAtlasContentValid && reason == ShadowInvalidation::None)
+      if (b_ShadowAtlasContentValid && reason == ShadowInvalidation::None)
       {
         // SetUp above already refreshed this slot's UBOs: the matrices are
         // unchanged, but the other frame in flight keeps its own copy current.
         // Nothing writes the atlas on this path, so the frames-in-flight WAR
-        // hazard the stage 0 barrier guards against cannot arise either.
-        m_ShadowCacheConsecutiveHits++;
-        m_ShadowCacheTotalHits++;
-        m_Stats.shadowCacheHit = 1;
-        m_Stats.shadowCacheConsecutiveHits = m_ShadowCacheConsecutiveHits;
-        m_Stats.shadowCacheRebuildReason = uint32_t(m_ShadowCacheLastRebuildReason);
-        m_Stats.shadowCacheTotalHits = m_ShadowCacheTotalHits;
-        m_Stats.shadowCacheTotalPartials = m_ShadowCacheTotalPartials;
-        m_Stats.shadowCacheTotalRects = m_ShadowCacheTotalRects;
-        m_Stats.shadowCacheTotalRebuilds = m_ShadowCacheTotalRebuilds;
+        // hazard the pass entry barrier guards against cannot arise either.
         return;
       }
 
-      m_ShadowCacheLastRebuildReason = reason;
-
-      // Stage 4 partial rebuild and stage 6 dirty rects share a precondition:
-      // the atlas is valid, no pending reason, and every digest except the
-      // caster transforms is equal. The reason chain above stops at the first
-      // hit, so equality is re-checked wholesale here - a refit or a mover
-      // that coincides with any OTHER digest change must stay a full rebuild.
+      // The partial rebuild and the dirty rects share a precondition: the atlas
+      // is valid, no pending reason, and every digest except the caster
+      // transforms is equal. The reason chain above stops at the first hit, so
+      // equality is re-checked wholesale here - a refit or a mover that
+      // coincides with any OTHER digest change must stay a full rebuild.
       bool digestsEqualExceptTransform = shadowSettingsDigest == m_ShadowCachedSettingsDigest
         && frame.snapshot.casterIdentityDigest == m_ShadowCachedIdentityDigest
         && frame.snapshot.lightDigest == m_ShadowCachedLightDigest
@@ -942,18 +910,17 @@ namespace YAEngine
       bool transformDigestChanged =
         frame.snapshot.casterTransformDigest != m_ShadowCachedTransformDigest;
 
-      if (b_ShadowCacheEnabled && b_ShadowFitHysteresis && b_ShadowCachePerTile
-        && b_ShadowAtlasContentValid && digestsEqualExceptTransform
+      if (b_ShadowAtlasContentValid && digestsEqualExceptTransform
         && m_ShadowCachePendingReason == ShadowInvalidation::None)
       {
         if (!transformDigestChanged
           && hasDirectionalShadow && m_ShadowManager.AnyRefitThisFit())
         {
-          // Stage 4: the ONLY trigger is a cascade refit, so just the
-          // refitted cascade tiles are redrawn. Spot and point tiles keep
-          // their content: their matrices depend only on lights and casters,
-          // whose digests are equal by precondition (a sun rotation refits
-          // all four cascades but still leaves them alone).
+          // The ONLY trigger is a cascade refit, so just the refitted cascade
+          // tiles are redrawn. Spot and point tiles keep their content: their
+          // matrices depend only on lights and casters, whose digests are equal
+          // by precondition (a sun rotation refits all four cascades but still
+          // leaves them alone).
           partialRebuild = true;
           std::fill(std::begin(spotTileDirty), std::end(spotTileDirty), false);
           for (auto& faces : pointFaceDirty)
@@ -961,18 +928,17 @@ namespace YAEngine
           for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
             cascadeDirty[i] = m_ShadowManager.DidCascadeRefitThisFit(i);
         }
-        else if (transformDigestChanged && b_ShadowCacheDirtyRect
+        else if (transformDigestChanged
           && !frame.snapshot.shadowMoverBounds.empty()
           && !frame.snapshot.shadowMoverUnbounded)
         {
-          // Stage 6: casters moved and the snapshot attributed every one of
-          // them a union AABB (previous + current position). Each cascade
-          // tile gets the projected footprint as a clear+redraw rect against
-          // its FROZEN matrix; spot and point tiles are small (1024/512) and
-          // get whole-tile granularity. A cascade refit that coincides simply
-          // makes that cascade fully dirty.
+          // Casters moved and the snapshot attributed every one of them a union
+          // AABB (previous + current position). Each cascade tile gets the
+          // projected footprint as a clear+redraw rect against its FROZEN
+          // matrix; spot and point tiles are small (1024/512) and get whole-tile
+          // granularity. A cascade refit that coincides simply makes that
+          // cascade fully dirty.
           rectRebuild = true;
-          m_ShadowCacheLastRebuildReason = ShadowInvalidation::CasterMoved;
 
           const auto& movers = frame.snapshot.shadowMoverBounds;
           const auto& dirtyShadowData = m_ShadowManager.GetShadowData();
@@ -1114,7 +1080,6 @@ namespace YAEngine
       m_ShadowCachedPointCount = requestedPointShadows;
       b_ShadowAtlasContentValid = true;
       m_ShadowCachePendingReason = ShadowInvalidation::None;
-      m_ShadowCacheConsecutiveHits = 0;
     };
 
     if (rectRebuild)
@@ -1141,23 +1106,9 @@ namespace YAEngine
       if (!anyTileDirty)
       {
         refreshCacheBaseline();
-        m_ShadowCacheTotalRects++;
-        m_Stats.shadowCacheRect = 1;
-        m_Stats.shadowCacheRebuildReason = uint32_t(m_ShadowCacheLastRebuildReason);
-        m_Stats.shadowCacheTotalHits = m_ShadowCacheTotalHits;
-        m_Stats.shadowCacheTotalPartials = m_ShadowCacheTotalPartials;
-        m_Stats.shadowCacheTotalRects = m_ShadowCacheTotalRects;
-        m_Stats.shadowCacheTotalRebuilds = m_ShadowCacheTotalRebuilds;
         return;
       }
     }
-
-    // PARTIAL and RECT always take the load-pass shape regardless of the
-    // clear-mode combo: untouched tiles must be preserved, and stage 1
-    // measured the per-rect clears as free. FULL keeps honoring the combo.
-    ShadowClearMode effectiveClearMode = (partialRebuild || rectRebuild)
-      ? ShadowClearMode::LoadAndClearRects : clearMode;
-    m_Stats.shadowClearMode = uint32_t(effectiveClearMode);
 
     // Collect shadow draw commands from ALL objects (not just camera-visible).
     // Objects outside the camera frustum can still cast shadows into the view.
@@ -1470,8 +1421,8 @@ namespace YAEngine
     auto& atlas = m_ShadowManager.GetAtlas();
 
     // Upload instance data once before all shadow passes. A host write into a
-    // mapped buffer, but kept above the first pass begin so nothing besides
-    // draws and clears sits inside a render pass instance in any clear mode.
+    // mapped buffer, but kept above the pass begin so nothing besides draws and
+    // clears sits inside the render pass instance.
     for (auto& dc : m_ShadowDrawCommands)
     {
       if (dc.instanced)
@@ -1484,47 +1435,31 @@ namespace YAEngine
     VkClearValue clearValue {};
     clearValue.depthStencil = { 1.0f, 0 };
 
-    // One render pass instance over the given area. Dynamic state does not
-    // persist across instances, so the depth bias is re-set on every begin;
-    // viewport and scissor are set per tile inside drawShadowPass.
-    auto beginAtlasPass = [&](VkRenderPass renderPass, VkRect2D renderArea)
+    // One render pass instance over the whole atlas. A bake clears it outright;
+    // every other frame loads it and clears only the tiles it redraws, because
+    // untouched tiles must keep their cached content.
     {
       VkRenderPassBeginInfo rpBegin {};
       rpBegin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      rpBegin.renderPass = renderPass;
+      rpBegin.renderPass = isBake ? atlas.GetRenderPass() : atlas.GetLoadRenderPass();
       rpBegin.framebuffer = atlas.GetFramebuffer();
-      rpBegin.renderArea = renderArea;
+      rpBegin.renderArea = { {0, 0}, atlas.GetExtent() };
       rpBegin.clearValueCount = 1;
       rpBegin.pClearValues = &clearValue;
+      DebugMarker::BeginLabel(cmd, "Shadows");
       vkCmdBeginRenderPass(cmd, &rpBegin, VK_SUBPASS_CONTENTS_INLINE);
       vkCmdSetDepthBias(cmd, 0.5f, 0.0f, 1.5f);
-    };
-
-    DebugMarker::BeginLabel(cmd, "Shadows");
-    if (effectiveClearMode == ShadowClearMode::FullClear)
-      beginAtlasPass(atlas.GetRenderPass(), { {0, 0}, atlas.GetExtent() });
-    else if (effectiveClearMode == ShadowClearMode::LoadAndClearRects)
-      beginAtlasPass(atlas.GetLoadRenderPass(), { {0, 0}, atlas.GetExtent() });
+    }
 
     // Helper lambda: draw all shadow commands through the given tile projection.
     // frustumPlanes + planeCount for frustum culling; nullptr disables frustum culling.
-    // tileTriangles accumulates what actually reaches a draw, and perDrawTriangles -
-    // when armed - splits the same total across m_ShadowDrawCommands for the dump.
     // dirtyRect (atlas pixels, pre-clamped to the tile) narrows the clear and
-    // the scissor to a stage 6 mover footprint; nullptr keeps the whole tile.
+    // the scissor to a mover footprint; nullptr keeps the whole tile.
     auto drawShadowPass = [&](const glm::mat4& viewProj, const ShadowViewport& sv,
-      uint32_t* tileTriangles, const FrustumPlane* frustumPlanes = nullptr, int planeCount = 6,
-      uint32_t* perDrawTriangles = nullptr, uint32_t lodLevel = 0,
-      const VkRect2D* dirtyRect = nullptr)
+      const FrustumPlane* frustumPlanes = nullptr, int planeCount = 6,
+      uint32_t lodLevel = 0, const VkRect2D* dirtyRect = nullptr)
     {
-      if (effectiveClearMode == ShadowClearMode::PerTilePasses)
-      {
-        // loadOp CLEAR only clears within renderArea, so this pass instance
-        // clears exactly this tile while the preserving initialLayout of the
-        // per-tile pass keeps the rest of the atlas.
-        beginAtlasPass(atlas.GetPerTileRenderPass(), sv.scissor);
-      }
-      else if (effectiveClearMode == ShadowClearMode::LoadAndClearRects)
+      if (!isBake)
       {
         VkClearAttachment clearAttachment {};
         clearAttachment.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
@@ -1549,17 +1484,6 @@ namespace YAEngine
       // Tiles are visited in the order the buffer was cut for, so the counter alone
       // picks this tile's block.
       uint32_t modelTileBase = modelTileIndex++ * modelTileStride;
-
-      auto countTriangles = [&](size_t commandIndex, uint32_t indexCount, uint32_t lod0IndexCount,
-        uint32_t instanceCount)
-      {
-        uint32_t triangles = (indexCount / 3) * instanceCount;
-        *tileTriangles += triangles;
-        m_Stats.shadowTriangles += triangles;
-        m_Stats.shadowTrianglesAtLod0 += (lod0IndexCount / 3) * instanceCount;
-        if (perDrawTriangles)
-          perDrawTriangles[commandIndex] += triangles;
-      };
 
       // The blocks were sized for exactly tileCount tiles, and a tile past that would
       // write outside the mapping.
@@ -1590,9 +1514,7 @@ namespace YAEngine
             vkCmdDrawIndexedIndirect(cmd, indirectBuffer,
               VkDeviceSize(first + issued) * sizeof(VkDrawIndexedIndirectCommand),
               batch, sizeof(VkDrawIndexedIndirectCommand));
-            m_Stats.shadowDrawCalls++;
           }
-          m_Stats.shadowIndirectCommands += count;
         };
 
         for (uint32_t cullMode = 0; cullMode < 2; cullMode++)
@@ -1649,8 +1571,6 @@ namespace YAEngine
             // Picks the batch's first matrix inside this tile's block; gl_InstanceIndex
             // adds the rest.
             out.firstInstance = modelSlot;
-
-            countTriangles(i, lod.indexCount, rec.lods[0].indexCount, rec.instanceCount);
           }
 
           uint32_t narrowCount = indirectCursor - narrowFirst;
@@ -1750,25 +1670,17 @@ namespace YAEngine
         }
 
         auto& vb = meshManager.GetVertexBuffer(meshHandle);
-        m_Stats.shadowDrawCalls++;
         if (dc.isAlphaTest)
         {
           // Alpha-test casters draw the interleaved stream for their UVs, which has
           // no simplified counterpart: LOD lives on the position-only stream.
-          countTriangles(commandIndex, uint32_t(vb.GetIndexCount()), uint32_t(vb.GetIndexCount()),
-            instanceCount);
           vb.Draw(cmd, instanceCount, &bindCache);
         }
         else
         {
-          MeshLodRange lod = vb.GetLodRange(lodLevel);
-          countTriangles(commandIndex, lod.indexCount, vb.GetLodRange(0).indexCount, instanceCount);
           vb.DrawPositionOnly(cmd, instanceCount, lodLevel, &bindCache);
         }
       }
-
-      if (effectiveClearMode == ShadowClearMode::PerTilePasses)
-        vkCmdEndRenderPass(cmd);
     };
 
     auto& shadowData = m_ShadowManager.GetShadowData();
@@ -1783,15 +1695,6 @@ namespace YAEngine
     GpuProfiler* tileProfiler = probeCenter ? nullptr : &m_GpuProfiler;
 #endif
 
-    uint32_t* breakdownRows = nullptr;
-#ifdef YA_EDITOR
-    if (b_ShadowBreakdownPending && !probeCenter)
-    {
-      m_ShadowBreakdownTriangles.assign(size_t(CSM_CASCADE_COUNT) * m_ShadowDrawCommands.size(), 0u);
-      breakdownRows = m_ShadowBreakdownTriangles.data();
-    }
-#endif
-
     // CSM cascades - frustum cull with 5 planes (skip near plane to keep distant shadow casters)
     if (hasDirectionalShadow)
     {
@@ -1800,7 +1703,7 @@ namespace YAEngine
       {
         // Partial frames draw only the refitted cascades; the frozen matrices
         // of the others are bit-identical, so the atlas already matches them.
-        // Skipped tiles get no GPU zone, label or triangle count this frame.
+        // Skipped tiles get no GPU zone and no label this frame.
         if (!cascadeDirty[cascade])
           continue;
 
@@ -1825,9 +1728,6 @@ namespace YAEngine
         FrustumPlane csmPlanes[5] = { allPlanes[0], allPlanes[1], allPlanes[2], allPlanes[3], allPlanes[5] };
 
         auto sv = ShadowAtlas::GetCascadeViewport(cascade);
-        uint32_t* perDraw = breakdownRows
-          ? breakdownRows + size_t(cascade) * m_ShadowDrawCommands.size()
-          : nullptr;
 
         uint32_t lodLevel = 0;
         if (b_ShadowLodEnabled)
@@ -1843,8 +1743,7 @@ namespace YAEngine
           GpuZoneScope tileZone(tileProfiler, cmd, tileLabel);
 #endif
           drawShadowPass(shadowData.cascades[cascade].viewProj, sv,
-            &m_Stats.shadowTrianglesPerCascade[cascade], csmPlanes, 5, perDraw, lodLevel,
-            tileRect);
+            csmPlanes, 5, lodLevel, tileRect);
         }
         DebugMarker::EndLabel(cmd);
       }
@@ -1876,8 +1775,7 @@ namespace YAEngine
 #ifdef YA_EDITOR
         GpuZoneScope tileZone(tileProfiler, cmd, tileLabel);
 #endif
-        drawShadowPass(shadowData.spotShadows[i].viewProj, sv,
-          &m_Stats.shadowTrianglesPerSpot[i], spotPlanes, 6);
+        drawShadowPass(shadowData.spotShadows[i].viewProj, sv, spotPlanes, 6);
       }
       DebugMarker::EndLabel(cmd);
     }
@@ -1918,22 +1816,15 @@ namespace YAEngine
 
         snprintf(tileLabel, sizeof(tileLabel), "Point %u Face %u", i, face);
         DebugMarker::BeginLabel(cmd, tileLabel);
-        drawShadowPass(shadowData.pointShadows[i].faceViewProj[face], sv,
-          &m_Stats.shadowTrianglesPerPoint[i], facePlanes, 6);
+        drawShadowPass(shadowData.pointShadows[i].faceViewProj[face], sv, facePlanes, 6);
         DebugMarker::EndLabel(cmd);
       }
     }
     if (hasPointShadows && anyPointTiles)
       DebugMarker::EndLabel(cmd);
 
-    if (effectiveClearMode != ShadowClearMode::PerTilePasses)
-      vkCmdEndRenderPass(cmd);
+    vkCmdEndRenderPass(cmd);
     DebugMarker::EndLabel(cmd);
-
-#ifdef YA_EDITOR
-    if (b_ShadowBreakdownPending && !probeCenter)
-      DumpShadowBreakdown();
-#endif
 
     if (probeCenter)
     {
@@ -1944,200 +1835,10 @@ namespace YAEngine
     }
     else
     {
-      // This render is the new cache baseline. Stored even while the cache
-      // toggle is off, so enabling it mid-flight compares against real state.
+      // This render is the new cache baseline.
       refreshCacheBaseline();
-      if (rectRebuild)
-        m_ShadowCacheTotalRects++;
-      else if (partialRebuild)
-        m_ShadowCacheTotalPartials++;
-      else
-        m_ShadowCacheTotalRebuilds++;
-
-      // Rect frame accounting: how much of the touched tiles' area actually
-      // redrew. Whole-tile redraws (refit or fallback cascades, spot/point
-      // tiles a mover intersects) count at 100%.
-      if (rectRebuild)
-      {
-        uint64_t drawnTexels = 0;
-        uint64_t touchedTexels = 0;
-        if (hasDirectionalShadow)
-        {
-          for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
-          {
-            if (!cascadeDirty[i])
-              continue;
-            uint64_t tileTexels = uint64_t(SHADOW_CASCADE_SIZE) * SHADOW_CASCADE_SIZE;
-            touchedTexels += tileTexels;
-            drawnTexels += cascadeRects[i].hasRect
-              ? uint64_t(cascadeRects[i].rect.extent.width) * cascadeRects[i].rect.extent.height
-              : tileTexels;
-          }
-        }
-        for (uint32_t i = 0; i < requestedSpotShadows; i++)
-        {
-          if (!spotTileDirty[i])
-            continue;
-          drawnTexels += uint64_t(SHADOW_SPOT_SIZE) * SHADOW_SPOT_SIZE;
-          touchedTexels += uint64_t(SHADOW_SPOT_SIZE) * SHADOW_SPOT_SIZE;
-        }
-        for (uint32_t i = 0; i < requestedPointShadows; i++)
-        {
-          for (uint32_t face = 0; face < 6; face++)
-          {
-            if (!pointFaceDirty[i][face])
-              continue;
-            drawnTexels += uint64_t(SHADOW_POINT_FACE_SIZE) * SHADOW_POINT_FACE_SIZE;
-            touchedTexels += uint64_t(SHADOW_POINT_FACE_SIZE) * SHADOW_POINT_FACE_SIZE;
-          }
-        }
-        m_Stats.shadowCacheRect = 1;
-        m_Stats.shadowCacheRectTiles = tileCount;
-        m_Stats.shadowCacheRectAreaPercent = touchedTexels > 0
-          ? 100.0f * float(double(drawnTexels) / double(touchedTexels)) : 0.0f;
-      }
-
-      m_Stats.shadowCacheHit = 0;
-      m_Stats.shadowCacheConsecutiveHits = 0;
-      m_Stats.shadowCachePartial = partialRebuild ? 1u : 0u;
-      m_Stats.shadowCachePartialTiles = partialRebuild ? tileCount : 0u;
-      m_Stats.shadowCacheRebuildReason = uint32_t(m_ShadowCacheLastRebuildReason);
-      m_Stats.shadowCacheTotalHits = m_ShadowCacheTotalHits;
-      m_Stats.shadowCacheTotalPartials = m_ShadowCacheTotalPartials;
-      m_Stats.shadowCacheTotalRects = m_ShadowCacheTotalRects;
-      m_Stats.shadowCacheTotalRebuilds = m_ShadowCacheTotalRebuilds;
-
-      // Tile state for the performance panel rows. Only tiles drawn this frame
-      // are stamped: untouched ones keep their last redraw's values, and the
-      // age of that stamp is what the UI shows as staleness. The per-frame
-      // triangle counters deliberately stay zero for untouched tiles - they
-      // count submissions, not cached content.
-      double tileStateNow = glfwGetTime();
-      for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
-      {
-        if (!hasDirectionalShadow || !cascadeDirty[i])
-          continue;
-        auto& tile = m_ShadowCascadeTileStates[i];
-        tile.lastDrawTime = tileStateNow;
-        if (rectRebuild)
-        {
-          // A refitted cascade in a rect frame is a whole-tile refit redraw -
-          // the stage 4 partial kind; everything else is mover-caused (the
-          // rect itself, or the whole tile via the area fallback).
-          bool refit = m_ShadowManager.DidCascadeRefitThisFit(i);
-          tile.kind = refit ? ShadowTileRedrawKind::Partial : ShadowTileRedrawKind::Rect;
-          tile.lastReason = refit
-            ? m_ShadowManager.GetCascadeFitStats(i).lastReason
-            : ShadowInvalidation::CasterMoved;
-        }
-        else
-        {
-          tile.kind = partialRebuild
-            ? ShadowTileRedrawKind::Partial : ShadowTileRedrawKind::Full;
-          tile.lastReason = partialRebuild
-            ? m_ShadowManager.GetCascadeFitStats(i).lastReason
-            : m_ShadowCacheLastRebuildReason;
-        }
-        tile.lastTriangles = m_Stats.shadowTrianglesPerCascade[i];
-        tile.valid = true;
-      }
-      if (anySpotTiles && hasSpotShadows)
-      {
-        uint32_t spotTriangles = 0;
-        for (uint32_t i = 0; i < requestedSpotShadows; i++)
-          spotTriangles += m_Stats.shadowTrianglesPerSpot[i];
-        m_ShadowSpotTileState.lastDrawTime = tileStateNow;
-        m_ShadowSpotTileState.kind = rectRebuild
-          ? ShadowTileRedrawKind::Rect : ShadowTileRedrawKind::Full;
-        m_ShadowSpotTileState.lastReason = m_ShadowCacheLastRebuildReason;
-        m_ShadowSpotTileState.lastTriangles = spotTriangles;
-        m_ShadowSpotTileState.valid = true;
-      }
-      if (anyPointTiles && hasPointShadows)
-      {
-        uint32_t pointTriangles = 0;
-        for (uint32_t i = 0; i < requestedPointShadows; i++)
-          pointTriangles += m_Stats.shadowTrianglesPerPoint[i];
-        m_ShadowPointTileState.lastDrawTime = tileStateNow;
-        m_ShadowPointTileState.kind = rectRebuild
-          ? ShadowTileRedrawKind::Rect : ShadowTileRedrawKind::Full;
-        m_ShadowPointTileState.lastReason = m_ShadowCacheLastRebuildReason;
-        m_ShadowPointTileState.lastTriangles = pointTriangles;
-        m_ShadowPointTileState.valid = true;
-      }
     }
   }
-
-#ifdef YA_EDITOR
-  void Render::DumpShadowBreakdown()
-  {
-    b_ShadowBreakdownPending = false;
-
-    uint32_t worstCascade = 0;
-    for (uint32_t cascade = 1; cascade < CSM_CASCADE_COUNT; cascade++)
-    {
-      if (m_Stats.shadowTrianglesPerCascade[cascade] > m_Stats.shadowTrianglesPerCascade[worstCascade])
-        worstCascade = cascade;
-    }
-
-    uint32_t cascadeTriangles = m_Stats.shadowTrianglesPerCascade[worstCascade];
-    size_t commandCount = m_ShadowDrawCommands.size();
-    if (cascadeTriangles == 0 || m_ShadowBreakdownTriangles.size() < size_t(CSM_CASCADE_COUNT) * commandCount)
-    {
-      YA_LOG_INFO("Render", "Shadow breakdown: no cascade geometry was submitted this frame");
-      m_ShadowBreakdownTriangles.clear();
-      return;
-    }
-
-    // Draw commands are per caster, so one mesh usually appears many times over. The
-    // question the dump answers is which mesh the cascade spends its triangles on.
-    struct MeshCost
-    {
-      uint32_t meshIndex;
-      uint32_t meshGeneration;
-      uint32_t triangles;
-      uint32_t drawCount;
-    };
-    std::vector<MeshCost> costs;
-    std::unordered_map<uint64_t, size_t> byMesh;
-
-    const uint32_t* row = m_ShadowBreakdownTriangles.data() + size_t(worstCascade) * commandCount;
-    for (size_t i = 0; i < commandCount; i++)
-    {
-      if (row[i] == 0)
-        continue;
-
-      const DrawCommand& dc = m_ShadowDrawCommands[i];
-      uint64_t key = (uint64_t(dc.meshIndex) << 32) | dc.meshGeneration;
-      auto [it, inserted] = byMesh.try_emplace(key, costs.size());
-      if (inserted)
-        costs.push_back({ dc.meshIndex, dc.meshGeneration, 0, 0 });
-
-      MeshCost& cost = costs[it->second];
-      cost.triangles += row[i];
-      cost.drawCount++;
-    }
-
-    size_t reported = std::min<size_t>(costs.size(), 20);
-    std::partial_sort(costs.begin(), costs.begin() + reported, costs.end(),
-      [](const MeshCost& a, const MeshCost& b) { return a.triangles > b.triangles; });
-
-    YA_LOG_INFO("Render",
-      "Shadow breakdown: cascade %u is the heaviest with %u triangles from %zu meshes, top %zu:",
-      worstCascade, cascadeTriangles, costs.size(), reported);
-
-    // Meshes carry no name, so the handle is the only stable identifier here.
-    for (size_t i = 0; i < reported; i++)
-    {
-      const MeshCost& cost = costs[i];
-      YA_LOG_INFO("Render", "  %2zu. mesh %u:%u  %u tris  %.1f%%  in %u draws",
-        i + 1, cost.meshIndex, cost.meshGeneration, cost.triangles,
-        100.0 * double(cost.triangles) / double(cascadeTriangles), cost.drawCount);
-    }
-
-    m_ShadowBreakdownTriangles.clear();
-  }
-#endif
 
   void Render::DrawQuad(VkCommandBuffer cmd)
   {

@@ -11,16 +11,6 @@ namespace YAEngine
   struct RenderContext;
   struct SceneSnapshot;
 
-  // Refit instrumentation for one cascade - the Stage 2 measurable: refit
-  // frequency under camera motion predicts the future tile cache's ceiling.
-  struct CascadeFitStats
-  {
-    uint32_t refitCount = 0;
-    uint64_t lastRefitFrame = 0;
-    double lastRefitTime = 0.0;
-    ShadowInvalidation lastReason = ShadowInvalidation::None;
-  };
-
   class ShadowManager
   {
   public:
@@ -51,71 +41,23 @@ namespace YAEngine
       const glm::vec3& lightDirection,
       float volumeRadius = 0.0f);
 
-    // Applies to the next ComputeCascades call. With hysteresis on, each cascade
-    // keeps its frozen light matrix bit-identical until the required frustum
-    // sphere escapes the frozen one - the future tile cache keys on that.
-    // refitBudget caps stage 5 SCHEDULED (proactive) refits per frame; 0
-    // disables scheduling, which is bit-exact stage 4 behavior (the A/B
-    // control). refitSoftThreshold is the fit urgency at which a cascade
-    // becomes a proactive refit candidate; ComputeCascades clamps it above
-    // 1/margin at use time.
-    void SetFitHysteresis(bool enabled, float margin, float sunThresholdDeg,
-      int refitBudget, float refitSoftThreshold)
-    {
-      b_FitHysteresis = enabled;
-      m_FitMargin = margin;
-      m_SunThresholdDeg = sunThresholdDeg;
-      m_RefitBudget = refitBudget;
-      m_RefitSoftThreshold = refitSoftThreshold;
-    }
-
-    const CascadeFitStats& GetCascadeFitStats(uint32_t cascadeIndex) const
-    {
-      return m_FitStats[cascadeIndex];
-    }
-
-    // Fit urgency of a cascade after the last ComputeCascades call: (distance
-    // from the frozen center plus the required radius) over the frozen radius.
-    // 1.0 is the escape boundary; right after a refit it sits near 1/margin.
-    float GetCascadeUrgency(uint32_t cascadeIndex) const
-    {
-      return m_CascadeUrgency[cascadeIndex];
-    }
-
-    // Lifetime split of organic cascade refits for the UI. Scheduled: refits
-    // the stage 5 scheduler performed early, while the cascade still fit its
-    // frozen sphere. Forced: hard escapes (urgency >= 1) the scheduler failed
-    // to preempt. Full-refit reasons (sun, params, toggle, cold start) count
-    // in neither, so forced cleanly answers "did the scheduler fall behind".
-    uint64_t GetScheduledRefitCount() const { return m_ScheduledRefitCount; }
-    uint64_t GetForcedRefitCount() const { return m_ForcedRefitCount; }
-
     // Reason of a refit performed by the LAST ComputeCascades call (the camera
-    // path), None when every cascade reused its frozen fit. The stage 3 skip
+    // path), None when every cascade reused its frozen fit. The cache skip
     // decision consults this instead of duplicating refit state. A refit never
     // records None, so the reason doubles as the "any refit" flag.
-    ShadowInvalidation LastRefitReasonThisFit() const
-    {
-      for (const auto& stats : m_FitStats)
-      {
-        if (stats.refitCount > 0 && stats.lastRefitFrame == m_FitFrame)
-          return stats.lastReason;
-      }
-      return ShadowInvalidation::None;
-    }
+    ShadowInvalidation LastRefitReasonThisFit() const { return m_RefitReasonThisFit; }
 
     bool AnyRefitThisFit() const
     {
-      return LastRefitReasonThisFit() != ShadowInvalidation::None;
+      return m_RefitReasonThisFit != ShadowInvalidation::None;
     }
 
-    // Same comparison for one cascade: whether the LAST ComputeCascades call
-    // refitted it. The stage 4 partial rebuild redraws exactly the cascade
-    // tiles this returns true for.
+    // Same question for one cascade: whether the LAST ComputeCascades call
+    // refitted it. The partial rebuild redraws exactly the cascade tiles this
+    // returns true for.
     bool DidCascadeRefitThisFit(uint32_t cascadeIndex) const
     {
-      const auto& stats = m_FitStats[cascadeIndex];
-      return stats.refitCount > 0 && stats.lastRefitFrame == m_FitFrame;
+      return b_CascadeRefitThisFit[cascadeIndex];
     }
 
     void ComputeSpotShadow(uint32_t spotIndex,
@@ -131,10 +73,10 @@ namespace YAEngine
     const ShadowAtlas& GetAtlas() const { return m_Atlas; }
     const ShadowBuffer& GetShadowData() const { return m_ShadowData; }
 
-    // Set 0 of the shadow pipeline layouts. Only the layout is live: the shaders
-    // stopped reading the block, so the sets themselves are never bound and there
-    // is no accessor handing one out.
-    VkDescriptorSetLayout GetShadowCascadeUBOLayout() const { return m_CascadeDescriptorSets[0].GetLayout(); }
+    // Set 0 of the shadow pipeline layouts. No shadow shader reads the block, so
+    // this is a numbering placeholder only: nothing is ever allocated for it and
+    // no set is ever bound. It exists so the shadow shaders keep their set indices.
+    VkDescriptorSetLayout GetShadowCascadeUBOLayout() const { return m_CascadeLayout; }
 
     VkDescriptorSet GetLightingShadowDescriptorSet(uint32_t frameIndex) const { return m_LightingShadowDescriptorSets[frameIndex].Get(); }
     VkDescriptorSetLayout GetLightingShadowLayout() const { return m_LightingShadowDescriptorSets[0].GetLayout(); }
@@ -168,15 +110,27 @@ namespace YAEngine
     // sqrt(3): the corner-to-forward ratio of a 90 degree cube face
     static constexpr float OMNI_CASCADE_SLACK = 1.7320508f;
 
+    // Sphere inflation applied on every refit. Buys frames of reuse at the cost
+    // of that factor of effective texel density.
+    static constexpr float FIT_MARGIN = 1.15f;
+    // Degrees the sun may drift from the frozen direction before all cascades refit.
+    static constexpr float SUN_THRESHOLD_DEG = 0.5f;
+    // Proactive refits per frame while a cascade is close to escaping its frozen
+    // sphere but still inside it.
+    static constexpr int REFIT_BUDGET = 1;
+    // Fit urgency at which a cascade becomes a proactive refit candidate.
+    static constexpr float REFIT_SOFT_THRESHOLD = 0.95f;
+
     ShadowAtlas m_Atlas;
     ShadowBuffer m_ShadowData {};
     float m_CascadeSplits[CSM_CASCADE_COUNT + 1] {};
 
     // The fit a cascade stays on while the required sphere still fits inside it.
     // viewProj is reused VERBATIM on those frames so the matrix is bit-identical
-    // between refits. Only ComputeCascades touches this - the probe/volume bake
-    // path (ComputeCascadesAroundPoint) bypasses hysteresis entirely and the
-    // next camera frame rewrites m_ShadowData from here, so bakes self-heal.
+    // between refits - what the tile cache keys on. Only ComputeCascades touches
+    // this: the probe/volume bake path (ComputeCascadesAroundPoint) bypasses
+    // hysteresis entirely and the next camera frame rewrites m_ShadowData from
+    // here, so bakes self-heal.
     struct FrozenCascadeFit
     {
       glm::mat4 viewProj { 1.0f };
@@ -187,18 +141,11 @@ namespace YAEngine
     };
 
     FrozenCascadeFit m_FrozenFits[CSM_CASCADE_COUNT];
-    CascadeFitStats m_FitStats[CSM_CASCADE_COUNT];
 
-    bool b_FitHysteresis = true;
-    float m_FitMargin = 1.15f;
-    float m_SunThresholdDeg = 0.5f;
-    // Stage 5 refit scheduler knobs, applied by ComputeCascades. Budget 0
-    // disables proactive refits entirely (stage 4 A/B control).
-    int m_RefitBudget = 1;
-    float m_RefitSoftThreshold = 0.95f;
-    float m_CascadeUrgency[CSM_CASCADE_COUNT] {};
-    uint64_t m_ScheduledRefitCount = 0;
-    uint64_t m_ForcedRefitCount = 0;
+    // What the last ComputeCascades call refitted, and why. Reset at its entry,
+    // never touched by the bake path.
+    bool b_CascadeRefitThisFit[CSM_CASCADE_COUNT] {};
+    ShadowInvalidation m_RefitReasonThisFit = ShadowInvalidation::None;
 
     // Fit inputs captured when the frozen state was established. Any change is a
     // full refit: matrices frozen against stale inputs would silently skew.
@@ -208,17 +155,9 @@ namespace YAEngine
     float m_FrozenAspect = 0.0f;
     float m_FrozenNear = 0.0f;
     bool b_FrozenParamsValid = false;
-    // Set while hysteresis is off so switching it back on refits everything with
-    // its own reason instead of silently reusing pre-toggle state.
-    bool b_HysteresisWasOff = false;
-    // Counts ComputeCascades calls (the camera path only), so refit stats can
-    // name the frame without the manager knowing about the engine frame index.
-    uint64_t m_FitFrame = 0;
 
-    // Set 0 of the shadow pipeline layouts. The shaders no longer read it, so the
-    // sets are never bound and the buffers are never written - see Init.
-    std::vector<VulkanDescriptorSet> m_CascadeDescriptorSets;
-    std::vector<VulkanUniformBuffer> m_CascadeUBOs;
+    // Set 0 of the shadow pipeline layouts, owned by the context's layout cache.
+    VkDescriptorSetLayout m_CascadeLayout = VK_NULL_HANDLE;
 
     // Combined shadow UBO + sampler for deferred lighting (set 2 extension)
     std::vector<VulkanDescriptorSet> m_LightingShadowDescriptorSets;

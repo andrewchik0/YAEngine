@@ -8,7 +8,6 @@ namespace YAEngine
 {
   void ShadowAtlas::Init(const RenderContext& ctx)
   {
-    // Create depth image
     ImageDesc imageDesc;
     imageDesc.width = SHADOW_ATLAS_SIZE;
     imageDesc.height = SHADOW_ATLAS_SIZE;
@@ -26,10 +25,8 @@ namespace YAEngine
 
     m_Image.Init(ctx, imageDesc, &samplerDesc);
 
-    // Create render passes (depth-only). The main pass clears the whole atlas
-    // from UNDEFINED; the clear-mode spike variants preserve prior contents, so
-    // their initialLayout is READ_ONLY - UNDEFINED may discard the whole
-    // subresource, not just renderArea.
+    // Load variant preserves prior contents (initialLayout READ_ONLY, not UNDEFINED -
+    // UNDEFINED may discard the whole subresource, not just renderArea).
     VkAttachmentReference depthRef {};
     depthRef.attachment = 0;
     depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
@@ -91,12 +88,9 @@ namespace YAEngine
     };
 
     m_RenderPass = createPass(VK_ATTACHMENT_LOAD_OP_CLEAR, VK_IMAGE_LAYOUT_UNDEFINED);
-    m_PerTileRenderPass = createPass(VK_ATTACHMENT_LOAD_OP_CLEAR,
-      VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
     m_LoadRenderPass = createPass(VK_ATTACHMENT_LOAD_OP_LOAD,
       VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
 
-    // Create framebuffer
     VkImageView view = m_Image.GetView();
 
     VkFramebufferCreateInfo fbInfo {};
@@ -120,8 +114,6 @@ namespace YAEngine
       m_Image.GetView(), "ShadowAtlas View");
     YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_RENDER_PASS,
       m_RenderPass, "ShadowAtlas RenderPass");
-    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_RENDER_PASS,
-      m_PerTileRenderPass, "ShadowAtlas PerTile RenderPass");
     YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_RENDER_PASS,
       m_LoadRenderPass, "ShadowAtlas Load RenderPass");
     YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_FRAMEBUFFER,
@@ -209,11 +201,6 @@ namespace YAEngine
     {
       vkDestroyRenderPass(ctx.device, m_RenderPass, nullptr);
       m_RenderPass = VK_NULL_HANDLE;
-    }
-    if (m_PerTileRenderPass)
-    {
-      vkDestroyRenderPass(ctx.device, m_PerTileRenderPass, nullptr);
-      m_PerTileRenderPass = VK_NULL_HANDLE;
     }
     if (m_LoadRenderPass)
     {

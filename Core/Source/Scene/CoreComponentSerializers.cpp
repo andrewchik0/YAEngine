@@ -47,7 +47,6 @@ namespace YAEngine
 
   void RegisterCoreComponentSerializers(ComponentRegistry& registry, AssetManager& assets)
   {
-    // CameraComponent
     registry.Register<CameraComponent>("camera",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& c = reg.get<CameraComponent>(e);
@@ -66,7 +65,6 @@ namespace YAEngine
       }
     );
 
-    // LightComponent
     registry.Register<LightComponent>("light",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& l = reg.get<LightComponent>(e);
@@ -110,7 +108,7 @@ namespace YAEngine
       }
     );
 
-    // MeshComponent (primitive meshes only)
+    // primitive meshes only
     registry.Register<MeshComponent>("mesh",
       [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& mc = reg.get<MeshComponent>(e);
@@ -172,7 +170,7 @@ namespace YAEngine
       }
     );
 
-    // MaterialComponent (inline material definition)
+    // inline material definition
     registry.Register<MaterialComponent>("material",
       [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& mc = reg.get<MaterialComponent>(e);
@@ -201,8 +199,7 @@ namespace YAEngine
           n["metallicFactor"] = mat.metallicFactor;
         if (mat.doubleSided)
           n["doubleSided"] = true;
-        // Both come from the model file and change how the G-buffer samples the
-        // material, so a material edited on a model node has to carry them
+        // Both come from the model file and change how the G-buffer samples the material, so a material edited on a model node has to carry them.
         if (mat.sg)
           n["sg"] = true;
         if (mat.combinedTextures)
@@ -266,7 +263,6 @@ namespace YAEngine
       }
     );
 
-    // ModelSourceComponent
     registry.Register<ModelSourceComponent>("model",
       [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& m = reg.get<ModelSourceComponent>(e);
@@ -315,16 +311,13 @@ namespace YAEngine
       if (n["extents"]) lp.extents = DeserializeVec3(n["extents"]);
       if (n["fadeDistance"]) lp.fadeDistance = n["fadeDistance"].as<float>();
       if (n["priority"]) lp.priority = n["priority"].as<int>();
-      // A scene written with an out-of-range value would otherwise re-poison
-      // every bake on every machine that opens it.
+      // A scene written with an out-of-range value would otherwise re-poison every bake on every machine that opens it.
       if (n["resolution"])
         lp.resolution = std::clamp(n["resolution"].as<uint32_t>(),
           BakeLimits::PROBE_MIN_CAPTURE_RESOLUTION,
           BakeLimits::PROBE_MAX_CAPTURE_RESOLUTION);
       if (n["parallaxCorrection"]) lp.parallaxCorrection = n["parallaxCorrection"].as<bool>();
-      // "bakedIrradiance" is present in every pre-volume scene and is ignored
-      // on purpose - the key is dead, but warning about it on every probe of
-      // every old scene would be noise.
+      // "bakedIrradiance" is dead but present in every pre-volume scene; ignored silently since warning per probe on every old scene would be noise.
       if (n["bakedPrefilter"])
         lp.bakedPrefilterPath = n["bakedPrefilter"].as<std::string>();
       lp.baked = false;
@@ -341,9 +334,7 @@ namespace YAEngine
         n["priority"] = lp.priority;
         n["resolution"] = lp.resolution;
         n["parallaxCorrection"] = lp.parallaxCorrection;
-        // Not gated on lp.baked: that flag is false whenever the .yacm failed to
-        // load or the atlas was full, and dropping the path there would erase
-        // authored data on the next save.
+        // Not gated on lp.baked - that flag is false when the .yacm failed to load or the atlas was full, and dropping the path then would erase authored data on next save.
         if (!lp.bakedPrefilterPath.empty())
           n["bakedPrefilter"] = lp.bakedPrefilterPath;
         return n;
@@ -351,12 +342,9 @@ namespace YAEngine
       deserializeReflectionProbe
     );
 
-    // Every scene written before the Light Probe -> Reflection Probe rename stores
-    // the component under "lightProbe". Read-only, so a resave migrates the scene
-    // to the new key and the old one is never written again.
+    // Scenes written before the Light Probe -> Reflection Probe rename store the component under "lightProbe"; read-only, so a resave migrates to the new key.
     registry.RegisterAlias("lightProbe", deserializeReflectionProbe);
 
-    // IrradianceVolumeComponent
     registry.Register<IrradianceVolumeComponent>("irradianceVolume",
       [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& iv = reg.get<IrradianceVolumeComponent>(e);
@@ -372,18 +360,15 @@ namespace YAEngine
       [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
         IrradianceVolumeComponent iv;
         if (n["halfExtents"]) iv.halfExtents = DeserializeVec3(n["halfExtents"]);
-        // Snapped on read so a scene written before the world lattice, or edited
-        // by hand, still lands on a lattice the other volumes share.
+        // Snapped on read so a scene written before the world lattice, or edited by hand, still lands on a lattice the other volumes share.
         if (n["spacing"]) iv.spacing = SnapIrradianceSpacing(n["spacing"].as<float>());
-        // Clamped like the probe resolution above, so a hand-edited scene cannot
-        // put a value in the component that the UI combo silently misreports.
+        // Clamped like the probe resolution above, so a hand-edited scene cannot put a value in the component that the UI combo silently misreports.
         if (n["captureResolution"])
         {
           iv.captureResolution = std::clamp(n["captureResolution"].as<uint32_t>(),
             BakeLimits::VOLUME_MIN_CAPTURE_RESOLUTION, BakeLimits::VOLUME_MAX_CAPTURE_RESOLUTION);
         }
-        // Absent in scenes written before node classification existed; those keep the
-        // component default rather than silently baking with the test switched off.
+        // Absent in scenes written before node classification existed; those keep the component default rather than silently baking with the test switched off.
         if (n["backfaceRatioThreshold"])
         {
           iv.backfaceRatioThreshold = std::clamp(n["backfaceRatioThreshold"].as<float>(),
@@ -395,7 +380,6 @@ namespace YAEngine
       }
     );
 
-    // TerrainComponent
     registry.Register<TerrainComponent>("terrain",
       [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& t = reg.get<TerrainComponent>(e);
@@ -495,7 +479,6 @@ namespace YAEngine
       }
     );
 
-    // TerrainMaterialComponent
     registry.Register<TerrainMaterialComponent>("terrainMaterial",
       [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& tm = reg.get<TerrainMaterialComponent>(e);
@@ -551,7 +534,6 @@ namespace YAEngine
       }
     );
 
-    // RoadComponent
     registry.Register<RoadComponent>("road",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& r = reg.get<RoadComponent>(e);
@@ -621,7 +603,6 @@ namespace YAEngine
       }
     );
 
-    // ScatterComponent
     registry.Register<ScatterComponent>("scatter",
       [&assets](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& s = reg.get<ScatterComponent>(e);
@@ -712,7 +693,6 @@ namespace YAEngine
       }
     );
 
-    // ColliderComponent
     registry.Register<ColliderComponent>("collider",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& c = reg.get<ColliderComponent>(e);
@@ -746,7 +726,7 @@ namespace YAEngine
       }
     );
 
-    // InstancedColliderComponent: instances are regenerated by ScatterSystem, only persist metadata
+    // instances are regenerated by ScatterSystem; only metadata persists
     registry.Register<InstancedColliderComponent>("instancedCollider",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& c = reg.get<InstancedColliderComponent>(e);
@@ -774,7 +754,6 @@ namespace YAEngine
       }
     );
 
-    // HiddenTag
     registry.Register<HiddenTag>("hidden",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {
         YAML::Node n;

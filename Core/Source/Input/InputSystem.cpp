@@ -8,9 +8,7 @@ namespace YAEngine
     const auto& windowEventStack = m_Window.PollEvents();
 
     ImGuiIO* io = b_ImGuiFiltering ? &ImGui::GetIO() : nullptr;
-    // IsViewportHovered, not the raw flag: a captured cursor leaves the viewport as far
-    // as ImGui is concerned, and with keyboard nav enabled it claims the keyboard, so
-    // WASD would be filtered away for the whole duration of a look.
+    // IsViewportHovered, not the raw flag - ImGui keyboard nav would filter WASD during a captured look otherwise.
     bool passThrough = IsViewportHovered();
 
     for (const auto& windowEvent : windowEventStack)

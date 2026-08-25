@@ -7,10 +7,9 @@ namespace YAEngine
 {
   namespace
   {
-    // Index of a pixel along a Hilbert curve of order GTAO_HILBERT_LEVEL. Ported from XeGTAO
-    // (Intel, MIT), which took it from https://www.shadertoy.com/view/3tB3z3. Walking the R2
-    // sequence along this curve rather than in scanline order is what makes neighbouring
-    // pixels get well-separated samples, i.e. gives the noise its blue-noise character.
+    // Hilbert-curve pixel index (ported from XeGTAO/Intel, MIT, via shadertoy.com/view/3tB3z3):
+    // walking the R2 sequence along this curve instead of scanline order gives the noise its
+    // blue-noise separation between neighbouring pixels.
     uint32_t HilbertIndex(uint32_t posX, uint32_t posY)
     {
       uint32_t index = 0;
@@ -138,14 +137,9 @@ namespace YAEngine
     float width = float(std::max(uniforms.screenWidth, 1));
     float height = float(std::max(uniforms.screenHeight, 1));
 
-    // Only the two diagonal terms are needed: the projection is a plain symmetric frustum,
-    // and reading them back beats threading the camera FOV and aspect down here.
-    //
-    // The abs is load-bearing. SetUpCamera negates proj[1][1] to flip Y for Vulkan, and the
-    // main pass hard-codes the screen march as vec2(cosPhi, -sinPhi) against a slice direction
-    // of vec3(cosPhi, sinPhi, 0) - that minus sign only holds while GTAO space has Y pointing
-    // up the screen. Taking the sign from the flipped matrix inverts the space and leaves the
-    // two disagreeing, which mirrors every sample vertically.
+    // Diagonals only (symmetric frustum) beats re-deriving FOV/aspect. abs() is load-bearing:
+    // proj[1][1] is Vulkan-Y-flip negated, but the main pass's screen march assumes GTAO space
+    // has Y up - using the raw sign would invert that and mirror every sample.
     float tanHalfFOVX = 1.0f / uniforms.proj[0][0];
     float tanHalfFOVY = 1.0f / std::abs(uniforms.proj[1][1]);
 

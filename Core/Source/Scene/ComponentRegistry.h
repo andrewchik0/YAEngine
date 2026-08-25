@@ -40,9 +40,7 @@ namespace YAEngine
       m_Entries[name] = std::move(entry);
     }
 
-    // Read-only entry for a key that was renamed. It deserializes exactly like the
-    // current key but never reports the component as present, so SerializeAll only
-    // ever writes the new name and an old scene migrates on its next save.
+    // Read-only entry for a renamed key: deserializes like the current key but never reports as present, so SerializeAll always writes the new name and an old scene migrates on its next save.
     void RegisterAlias(const std::string& name, DeserializeFn deserialize)
     {
       Entry entry;

@@ -38,7 +38,6 @@ namespace YAEngine
       std::vector<CpuMipLevel> mips;
       MipGenerator::GenerateWithAlphaCoverage(static_cast<uint8_t*>(inputData), width, height, mipLevels, mips);
 
-      // Compute total staging size
       VkDeviceSize totalSize = 0;
       for (auto& mip : mips)
         totalSize += static_cast<VkDeviceSize>(mip.width) * mip.height * 4;
@@ -84,7 +83,6 @@ namespace YAEngine
     }
     else
     {
-      // GPU blit mip chain (existing path)
       VkDeviceSize imageSize = static_cast<VkDeviceSize>(width) * height * pixelSize;
       VulkanBuffer staging = VulkanBuffer::CreateMapped(ctx, imageSize, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
       staging.Update(0, inputData, static_cast<uint32_t>(imageSize));

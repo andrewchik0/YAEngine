@@ -17,14 +17,12 @@ namespace YAEngine
   {
   public:
 
-    // Pass as worthwhileRatio to keep the welded arrays no matter how little
-    // deduplication saved. The geometry arena needs a position stream for every
-    // mesh: a mesh without one cannot be batched into a shared buffer at all.
+    // Pass as worthwhileRatio to always keep the welded arrays - the geometry arena
+    // requires every mesh to have a position stream to be batched into a shared buffer.
     static constexpr float KEEP_ALWAYS_RATIO = 2.0f;
 
-    // Deduplicates positions bitwise. An epsilon would merge vertices that a
-    // depth-only pass rasterizes at different subpixel coordinates, opening
-    // cracks in shadow maps and the depth prepass.
+    // Deduplicates positions bitwise (no epsilon): merging near-duplicates would let a
+    // depth-only pass rasterize them at different subpixel coordinates, cracking shadow maps.
     static WeldedPositions Weld(const glm::vec3* positions, size_t vertexCount,
       const std::vector<uint32_t>& indices, float worthwhileRatio = 0.85f);
   };

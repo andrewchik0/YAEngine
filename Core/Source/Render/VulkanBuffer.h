@@ -127,10 +127,8 @@ namespace YAEngine
       return total;
     }
 
-    // Swaps in larger storage while keeping the sub-allocation state. The caller
-    // must have copied the old contents to identical offsets in newStorage first,
-    // which keeps every live sub-allocation valid, and must then destroy
-    // newStorage - it holds the retired handles after the swap.
+    // Caller must pre-copy contents into newStorage at matching offsets, then destroy
+    // newStorage after the swap - it holds the retired handles.
     void AdoptStorage(VulkanBuffer& newStorage)
     {
       std::swap(m_Buffer, newStorage.m_Buffer);

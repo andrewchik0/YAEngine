@@ -450,11 +450,8 @@ namespace YAEngine
     return setup;
   }
 
-  // Builds per-instance AABB colliders from scatter instance matrices.
-  // Planes (grass/billboards) are skipped because we don't want to collide with them.
-  // meshMin/meshMax are the actual mesh-space AABB corners from the mesh asset; each
-  // instance matrix already folds in the centering nodeTransform, so transforming the
-  // 8 corners gives a tight world-space AABB that matches the rendered model.
+  // Planes are skipped (not meant to collide); meshMin/meshMax already fold in nodeTransform
+  // via the instance matrices, so transforming the 8 corners gives a tight world-space AABB.
   static void BuildInstancedColliders(entt::registry& registry, entt::entity childEntity,
                                       const ScatterComponent& scatter,
                                       const std::vector<glm::mat4>& matrices,

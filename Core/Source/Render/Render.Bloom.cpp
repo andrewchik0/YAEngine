@@ -15,7 +15,6 @@ namespace YAEngine
 
     uint32_t mipCount = BLOOM_MIP_COUNT;
 
-    // Create bloom image with mip chain
     ImageDesc bloomDesc;
     bloomDesc.width = w;
     bloomDesc.height = h;
@@ -23,7 +22,6 @@ namespace YAEngine
     bloomDesc.usage = VK_IMAGE_USAGE_STORAGE_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     bloomDesc.mipLevels = mipCount;
 
-    // Sampler with linear filtering across mips
     SamplerDesc sampDesc;
     sampDesc.magFilter = VK_FILTER_LINEAR;
     sampDesc.minFilter = VK_FILTER_LINEAR;
@@ -55,7 +53,6 @@ namespace YAEngine
     YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_IMAGE,
       m_BloomImage.GetImage(), "Bloom Mip Chain");
 
-    // Create per-mip image views
     m_BloomMipViews.resize(mipCount);
     for (uint32_t mip = 0; mip < mipCount; mip++)
     {
@@ -80,8 +77,6 @@ namespace YAEngine
         m_BloomMipViews[mip], "Bloom Mip %u", mip);
     }
 
-    // Downsample descriptor sets: one per mip level
-    // set 0: binding 0 = src sampler, binding 1 = dst storage image
     SetDescription bloomSetDesc = {
       .set = 0,
       .bindings = {
@@ -99,7 +94,6 @@ namespace YAEngine
         m_BloomDownsampleDescriptorSets[mip].Init(ctx, m_BloomDownsampleDescriptorSets[0].GetLayout());
     }
 
-    // Upsample descriptor sets: one per upsample step (mipCount - 1)
     m_BloomUpsampleDescriptorSets.resize(mipCount - 1);
     for (uint32_t i = 0; i < mipCount - 1; i++)
     {
@@ -109,7 +103,6 @@ namespace YAEngine
         m_BloomUpsampleDescriptorSets[i].Init(ctx, m_BloomUpsampleDescriptorSets[0].GetLayout());
     }
 
-    // Write downsample descriptors
     // Mip 0: source is the resolved TAA history, which ping-pongs - see m_BloomHistorySrcSets
     // Mip 1+: reads bloom full image via sampler (specific mip via textureLod), writes bloom mip N
     // Index 0 is never written or bound - m_BloomHistorySrcSets covers mip 0. It is kept
@@ -137,7 +130,6 @@ namespace YAEngine
         m_BloomMipViews[0], VK_IMAGE_LAYOUT_GENERAL);
     }
 
-    // Write upsample descriptors
     // Step i reads bloom mip (mipCount-1-i) via sampler, writes to bloom mip (mipCount-2-i)
     for (uint32_t i = 0; i < mipCount - 1; i++)
     {

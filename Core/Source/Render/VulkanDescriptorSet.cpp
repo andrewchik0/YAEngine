@@ -74,8 +74,6 @@ namespace YAEngine
     }
   }
 
-  // DescriptorWriter
-
   DescriptorWriter& DescriptorWriter::WriteUniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size)
   {
     auto& bufferInfo = m_BufferInfos[m_BufferInfoCount++];

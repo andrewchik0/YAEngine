@@ -174,9 +174,8 @@ namespace YAEngine
     if (scene.HasComponent<Name>(entity))
       name = scene.GetName(entity);
 
-    // More specific components come first: terrain, road and scatter entities also
-    // carry a MeshComponent, and a generic mesh icon would hide what they are.
-    // Icons match the ones DetailsPanel uses for the same components.
+    // More specific components first: terrain/road/scatter also carry a MeshComponent,
+    // so a generic mesh icon would hide what they are. Icons match DetailsPanel's.
     const char* icon = " ";
     if (scene.HasComponent<CameraComponent>(entity))
       icon = ICON_FA_VIDEO;
@@ -432,7 +431,6 @@ namespace YAEngine
       ImGui::EndPopup();
     }
 
-    // Click empty space to deselect
     if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsAnyItemHovered())
       context.ClearSelection();
 

@@ -123,7 +123,6 @@ namespace YAEngine
 
     auto& gizmo = m_Context.render->GetGizmoRenderer();
 
-    // Gizmo mode switching (1/2/3) - blocked during drag
     if (m_Context.viewportHovered && !b_DragActive)
     {
       if (input.IsKeyPressed(Key::D1)) m_Context.render->GetGizmoMode() = GizmoMode::Translate;
@@ -142,7 +141,6 @@ namespace YAEngine
       }
     }
 
-    // Build viewport ray
     Ray viewportRay {};
     glm::mat4 viewportView { 1.0f };
     bool hasViewportRay = false;
@@ -166,19 +164,16 @@ namespace YAEngine
       }
     }
 
-    // --- Drag state machine ---
     if (b_DragActive)
     {
       if (input.IsMouseReleased(MouseButton::Left))
       {
-        // End drag
         b_DragActive = false;
         gizmo.SetDraggedAxis(GizmoAxis::None);
         input.SetGizmoDragging(false);
       }
       else if (hasViewportRay)
       {
-        // Continue drag
         auto hitT = RayPlaneIntersect(viewportRay, m_DragStartWorldPos, m_DragPlaneNormal);
         if (hitT)
         {
@@ -188,7 +183,6 @@ namespace YAEngine
           auto& scene = *m_Context.scene;
           auto& localTransform = scene.GetTransform(entity);
 
-          // Get parent inverse world transform for hierarchy support
           auto& hierarchy = scene.GetHierarchy(entity);
           bool hasParent = hierarchy.parent != entt::null
                         && scene.HasComponent<WorldTransform>(hierarchy.parent);
@@ -256,20 +250,17 @@ namespace YAEngine
     }
     else
     {
-      // Hover detection (only when not dragging)
       if (hasViewportRay && m_Context.selectedEntity != entt::null && m_Context.viewportHovered)
         gizmo.UpdateHover(viewportRay);
       else
         gizmo.ClearHover();
 
-      // LMB: begin drag or pick entity
       if (input.IsMousePressed(MouseButton::Left) && hasViewportRay)
       {
         GizmoAxis hoveredAxis = gizmo.GetHoveredAxis();
 
         if (hoveredAxis != GizmoAxis::None && m_Context.selectedEntity != entt::null)
         {
-          // Begin drag
           Entity entity = m_Context.selectedEntity;
           auto& scene = *m_Context.scene;
           auto& wt = scene.GetComponent<WorldTransform>(entity);
@@ -281,27 +272,22 @@ namespace YAEngine
           m_DragStartWorldPos = gizmoPos;
           m_DragAxisDir = AxisToDirection(hoveredAxis);
 
-          // Compute drag plane
           Entity camEntity = GetScene().GetActiveCamera();
           glm::vec3 camPos = GetScene().GetTransform(camEntity).position;
 
           if (m_DragMode == GizmoMode::Rotate)
           {
-            // Rotation ring plane: normal = axis direction
             m_DragPlaneNormal = m_DragAxisDir;
           }
           else
           {
-            // Translate/Scale: plane containing axis, facing camera
             glm::vec3 camDir = glm::normalize(camPos - gizmoPos);
             m_DragPlaneNormal = ComputeDragPlaneNormal(m_DragAxisDir, camDir);
           }
 
-          // Store gizmo scale for scale mode normalization
           float dist = glm::length(camPos - gizmoPos);
           m_DragGizmoScale = dist * 0.15f;
 
-          // Intersect start ray with drag plane
           auto hitT = RayPlaneIntersect(viewportRay, m_DragStartWorldPos, m_DragPlaneNormal);
           if (hitT)
           {
@@ -337,7 +323,6 @@ namespace YAEngine
       }
     }
 
-    // Update selected entity position for gizmo rendering
     if (m_Context.selectedEntity != entt::null && m_Context.scene->HasComponent<WorldTransform>(m_Context.selectedEntity))
     {
       auto& t = m_Context.scene->GetComponent<WorldTransform>(m_Context.selectedEntity);
@@ -368,7 +353,6 @@ namespace YAEngine
       b_LayoutBuilt = true;
     }
 
-    // Keyboard shortcuts
     if (ImGui::IsKeyDown(ImGuiMod_Ctrl))
     {
       if (ImGui::IsKeyPressed(ImGuiKey_N, false))
@@ -422,7 +406,6 @@ namespace YAEngine
       ImGui::EndMainMenuBar();
     }
 
-    // Auto-open Details and auto-select material on entity selection
     if (m_Context.ConsumeSelectionChanged() && m_Context.selectedEntity != entt::null)
     {
       for (auto& panel : m_Panels)
@@ -669,9 +652,8 @@ namespace YAEngine
     return closest;
   }
 
-  // Walks up to the outermost ancestor. A model imported as forty meshes is one object to
-  // work with, so a plain click selects that object and Ctrl drills into the exact mesh
-  // the pixel belongs to.
+  // A model imported as forty meshes is one object to work with, so a plain click selects
+  // that object and Ctrl drills into the exact mesh the pixel belongs to.
   Entity EditorLayer::FindSelectionRoot(Entity entity)
   {
     Entity root = entity;
@@ -809,7 +791,6 @@ namespace YAEngine
 
   static constexpr nfdu8filteritem_t s_SceneFilters[] = { { "Scene", "scene" } };
 
-  // Walk up from startDir until we find a directory containing "Assets/"
   static std::string FindProjectRoot(const std::filesystem::path& startDir)
   {
     auto dir = std::filesystem::weakly_canonical(startDir);

@@ -50,7 +50,6 @@ namespace YAEngine
     uint32_t spotOffset = headerSize + MAX_POINT_LIGHTS * uint32_t(sizeof(PointLight));
     uint32_t spotSize = data.spotLightCount * uint32_t(sizeof(SpotLight));
 
-    // Always upload header (directional + counts)
     m_StorageBuffers[frameIndex].Update(0u, &data, headerSize);
 
     if (data.pointLightCount > 0)

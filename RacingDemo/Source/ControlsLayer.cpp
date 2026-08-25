@@ -84,9 +84,7 @@ void ControlsLayer::Update(double dt)
 
   vehicle->speed = glm::clamp(vehicle->speed, -vehicle->maxSpeedBack, vehicle->maxSpeed);
 
-  // Kinematic bicycle model: the rear axle rolls along the body heading while the front axle
-  // follows the steered direction, so the yaw rate is dictated by geometry rather than a tuned
-  // curve. Yaw vanishes with speed, which removes the pivot-in-place slide at a crawl.
+  // Kinematic bicycle model: yaw rate comes from geometry, not a tuned curve, and vanishes with speed to avoid pivot-in-place slide at a crawl.
   double yawRate = vehicle->speed * std::tan(vehicle->wheelsSteer) / m_WheelBase;
 
   double prevYaw = vehicle->yaw;
@@ -258,10 +256,7 @@ void ControlsLayer::Update(double dt)
   if (translationFullyBlocked)
     vehicle->speed = 0.0;
 
-  // Invariant guard: end-of-frame state must not overlap. If a player-induced turn rotated
-  // the OBB into a wall at a full-stop position, revert yaw to the known-clean previous value.
-  // Without this guard, the next frame's wasOverlapping would disable enforcement, letting
-  // the car tunnel through the collider.
+  // Invariant guard: revert yaw if it rotated the OBB into a wall, else next frame's wasOverlapping check would let the car tunnel through the collider.
   if (hasCollider && !wasOverlapping && obbHit(position, yawRot, nullptr))
   {
     vehicle->yaw = prevYaw;

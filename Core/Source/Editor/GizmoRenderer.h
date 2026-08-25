@@ -14,9 +14,8 @@ namespace YAEngine
 {
   struct RenderContext;
 
-  // Billboard icons for entities with no geometry of their own. Editor picking rebuilds
-  // the same quad from these, so the icon the user sees and the icon that catches the
-  // click cannot drift apart.
+  // Billboard icons for entities without geometry; picking rebuilds the same quad so the
+  // click hitbox never drifts from what's drawn.
   namespace EditorIcon
   {
     constexpr float WORLD_SIZE = 0.5f;
@@ -130,20 +129,17 @@ namespace YAEngine
 
     void LoadGlyphSprite(const RenderContext& ctx, uint32_t codepoint, float pixelHeight);
 
-    // Wire meshes
     GizmoMesh m_SphereMesh;
     GizmoMesh m_BoxMesh;
     GizmoMesh m_ConeMesh;
     GizmoMesh m_ArrowMesh;
 
-    // Solid meshes
     GizmoMesh m_SolidArrowMesh;
     GizmoMesh m_SolidScaleArrowMesh;
     GizmoMesh m_SolidRingMesh;
 
-    // Depth-tested wire draws all use the same handful of meshes, and the volume
-    // node overlay can queue tens of thousands of them, so they go through one
-    // instanced draw per shape instead of one draw call per request.
+    // Volume node overlay can queue tens of thousands of wire draws, so they batch into
+    // one instanced draw per shape instead of one draw call per request.
     static constexpr uint32_t MAX_WIRE_INSTANCES = 32768;
 
     VulkanBuffer m_InstanceBuffer;
@@ -163,7 +159,6 @@ namespace YAEngine
 
     std::unordered_map<uint32_t, SpriteEntry> m_SpriteEntries;
 
-    // Hover and drag state
     GizmoAxis m_HoveredAxis = GizmoAxis::None;
     GizmoAxis m_DraggedAxis = GizmoAxis::None;
     glm::mat4 m_AxisTransforms[3] {};

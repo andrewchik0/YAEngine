@@ -17,7 +17,7 @@ namespace YAEngine
   void ReflectionProbeAtlas::Init(const RenderContext& ctx)
   {
     m_MaxSlots = MAX_REFLECTION_PROBES + 1; // slot 0 = skybox
-    uint32_t totalLayers = m_MaxSlots * 6; // 6 faces per cubemap
+    uint32_t totalLayers = m_MaxSlots * 6;
 
     // Irradiance cubemap array: ONE slot, the skybox. Probes are specular only,
     // diffuse indirect comes from irradiance volumes, and slot 0 is what the
@@ -42,7 +42,6 @@ namespace YAEngine
       m_Irradiance.Init(ctx, desc, &sampler);
     }
 
-    // Prefilter cubemap array: 256x256, 9 mips, all slots
     {
       ImageDesc desc {
         .width = PROBE_PREFILTER_SIZE,
@@ -63,7 +62,6 @@ namespace YAEngine
       m_Prefilter.Init(ctx, desc, &sampler);
     }
 
-    // Transition both to SHADER_READ_ONLY as initial state
     VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
 
     TransitionImageLayout(cmd, m_Irradiance.GetImage(),

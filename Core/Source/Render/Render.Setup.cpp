@@ -18,7 +18,6 @@ namespace YAEngine
 
     m_Graph.Init(ctx, {width, height});
 
-    // G-buffer resources (16 bytes/pixel, down from 30)
     m_GBuffer0 = m_Graph.CreateResource({
       .name = "gbuffer0",
       .format = VK_FORMAT_R8G8B8A8_UNORM
@@ -37,7 +36,6 @@ namespace YAEngine
       .format = VK_FORMAT_R16G16_SFLOAT
     });
 
-    // Deferred lighting output (replaces old mainColor)
     m_LitColor = m_Graph.CreateResource({
       .name = "litColor",
       .format = VK_FORMAT_R16G16B16A16_SFLOAT
@@ -99,7 +97,6 @@ namespace YAEngine
       }
     });
 
-    // 2. G-buffer pass - writes geometry/material data only, no lighting
     m_GBufferPassIndex = m_Graph.AddPass({
       .name = "GBufferPass",
       .inputs = {},
@@ -201,7 +198,6 @@ namespace YAEngine
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
 
-        // Write depth texture into light cull input descriptor set
         m_LightCullInputDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
           mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
@@ -215,7 +211,6 @@ namespace YAEngine
           m_TileLightBuffer.GetTileCountX(),
           m_TileLightBuffer.GetTileCountY(), 1);
 
-        // Buffer barrier: compute write -> fragment read
         VkBufferMemoryBarrier bufferBarrier {};
         bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
         bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -264,7 +259,6 @@ namespace YAEngine
       }
     });
 
-    // 6. Hi-Z mip chain generation (compute)
     m_HiZPassIndex = m_Graph.AddPass({
       .name = "HiZPass",
       .inputs = {m_MainDepth},
@@ -322,7 +316,6 @@ namespace YAEngine
       }
     });
 
-    // 7. SSR - Hi-Z accelerated screen-space reflections
     m_SSRPassIndex = m_Graph.AddPass({
       .name = "SSRPass",
       .inputs = {m_LitColor, m_MainDepth, m_GBuffer1, m_GBuffer0, m_HiZResource},
@@ -401,15 +394,12 @@ namespace YAEngine
       }
     });
 
-    // 8. Bloom - downsample/upsample chain (compute)
     m_BloomPassIndex = m_Graph.AddPass({
       .name = "BloomPass",
-      // Bloom sources the previous frame's resolved image, not the raw lit frame: building it
-      // from a jittered buffer and compositing after the resolve puts unfiltered flicker
-      // straight into the final image, which TAA can no longer remove.
-      // Both histories are declared: History0 has a static writer (TAAPass, ForwardTransparent)
-      // and is what orders this pass after the resolve, History1 is here so the ping-pong
-      // buffer actually sampled on alternate frames still gets its barrier.
+      // Sources the previous frame's resolved image, not the raw jittered lit frame, so
+      // unfiltered flicker never reaches TAA. Both histories are declared as inputs: History0's
+      // static writer orders this pass after the resolve, History1 covers the ping-pong buffer
+      // actually sampled on alternate frames so it still gets a barrier.
       .inputs = {m_TAAHistory0, m_TAAHistory1},
       .isCompute = true,
       .execute = [this](const RGExecuteContext& ctx) {
@@ -422,12 +412,10 @@ namespace YAEngine
         uint32_t baseH = m_Graph.GetExtent().height;
         uint32_t mipCount = BLOOM_MIP_COUNT;
 
-        // Transition bloom image to GENERAL for compute
         TransitionImageLayout(ctx.cmd, m_BloomImage.GetImage(),
           VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_GENERAL,
           VK_IMAGE_ASPECT_COLOR_BIT, 0, mipCount);
 
-        // --- Downsample chain ---
         auto& downPipeline = m_PSOCache.GetCompute(m_BloomDownsamplePipeline);
         downPipeline.Bind(ctx.cmd);
 
@@ -452,7 +440,6 @@ namespace YAEngine
           downPipeline.PushConstants(ctx.cmd, &pc);
           downPipeline.Dispatch(ctx.cmd, (dstW + 15) / 16, (dstH + 15) / 16, 1);
 
-          // Barrier between mips
           VkImageMemoryBarrier imgBarrier{};
           imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
           imgBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -473,7 +460,6 @@ namespace YAEngine
             0, 0, nullptr, 0, nullptr, 1, &imgBarrier);
         }
 
-        // --- Upsample chain ---
         auto& upPipeline = m_PSOCache.GetCompute(m_BloomUpsamplePipeline);
         upPipeline.Bind(ctx.cmd);
 
@@ -493,7 +479,6 @@ namespace YAEngine
           upPipeline.PushConstants(ctx.cmd, &pc);
           upPipeline.Dispatch(ctx.cmd, (dstW + 15) / 16, (dstH + 15) / 16, 1);
 
-          // Barrier for next upsample step
           VkImageMemoryBarrier imgBarrier{};
           imgBarrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
           imgBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -514,7 +499,7 @@ namespace YAEngine
             0, 0, nullptr, 0, nullptr, 1, &imgBarrier);
         }
 
-        // Final transition: bloom mip 0 -> SHADER_READ_ONLY for tonemap
+        // Final transition to SHADER_READ_ONLY for the tonemap pass to sample
         TransitionImageLayout(ctx.cmd, m_BloomImage.GetImage(),
           VK_IMAGE_LAYOUT_GENERAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
           VK_IMAGE_ASPECT_COLOR_BIT, 0, mipCount);
@@ -522,7 +507,6 @@ namespace YAEngine
       }
     });
 
-    // Auto Exposure - histogram build (compute)
     m_HistogramPassIndex = m_Graph.AddPass({
       .name = "HistogramBuild",
       .inputs = {m_TAAHistory0},
@@ -532,7 +516,6 @@ namespace YAEngine
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
 
-        // Clear histogram buffer
         vkCmdFillBuffer(ctx.cmd, m_HistogramBuffer.Get(), 0,
           HISTOGRAM_BIN_COUNT * sizeof(uint32_t), 0);
 
@@ -566,7 +549,6 @@ namespace YAEngine
         uint32_t groupsY = (m_FrameUniformBuffer.uniforms.screenHeight + 15) / 16;
         pipeline.Dispatch(ctx.cmd, groupsX, groupsY, 1);
 
-        // Barrier: histogram compute write -> compute read
         VkBufferMemoryBarrier histBarrier {};
         histBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
         histBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -583,7 +565,6 @@ namespace YAEngine
       }
     });
 
-    // Auto Exposure - adapt (compute)
     m_ExposureAdaptPassIndex = m_Graph.AddPass({
       .name = "ExposureAdapt",
       .isCompute = true,
@@ -611,7 +592,6 @@ namespace YAEngine
         pipeline.PushConstants(ctx.cmd, &pc);
         pipeline.Dispatch(ctx.cmd, 1, 1, 1);
 
-        // Barrier: exposure compute write -> fragment read
         VkBufferMemoryBarrier expBarrier {};
         expBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
         expBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
@@ -637,12 +617,9 @@ namespace YAEngine
       .filter = VK_FILTER_NEAREST
     });
 
-    // Pick ID pass - rasterizes entity ids using the depth the passes above already
-    // produced (no depth write, GEQUAL), which resolves occlusion for free. It has to run
-    // after ForwardTransparent and before the gizmo passes: GizmoPass clears MainDepth,
-    // and past that point the buffer no longer holds scene depth. Declaring MainDepth as
-    // a depth output pins the pass into the write chain and fixes that order. The body
-    // runs only on frames that serve a pick request, and clips to the clicked pixel.
+    // Rasterizes entity ids against the depth already produced (no depth write, GEQUAL) for
+    // free occlusion. Must run before GizmoPass clears MainDepth; declaring MainDepth as a
+    // depth output here pins it into the write chain to guarantee that order.
     m_PickIdPassIndex = m_Graph.AddPass({
       .name = "PickIdPass",
       .colorOutputs = {m_PickId},
@@ -898,7 +875,6 @@ namespace YAEngine
 
     auto cmd = m_Backend.GetCommandBuffer().BeginSingleTimeCommands();
 
-    // Transition depth once
     TransitionImageLayout(cmd, m_TAADepth.GetImage(),
       VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
       VK_IMAGE_ASPECT_DEPTH_BIT);
@@ -908,7 +884,6 @@ namespace YAEngine
       auto handle = (i == 0) ? m_TAAHistory0 : m_TAAHistory1;
       auto& image = m_Graph.GetResource(handle);
 
-      // Render pass with loadOp=CLEAR will clear the contents
       // initialLayout=UNDEFINED is fine here since we don't need previous contents
       VkClearValue clearValues[2] = {};
       clearValues[0].color = {{0.0f, 0.0f, 0.0f, 0.0f}};

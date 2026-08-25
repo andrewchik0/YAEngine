@@ -24,10 +24,7 @@ static glm::dquat DeserializeQuatD(const YAML::Node& n)
 
 void RegisterGameComponentSerializers(YAEngine::ComponentRegistry& registry)
 {
-  // Only the tuning parameters are stored. Speed, steer angle, yaw, contact state and
-  // tilt are simulation state that ControlsLayer rebuilds every frame.
-  // Every field is written unconditionally: an all-default component would otherwise
-  // produce an empty map, which the scene serializer drops as "nothing to store".
+  // Only tuning params are stored (sim state is rebuilt by ControlsLayer each frame); fields are written unconditionally since an all-default component would serialize as an empty map and get dropped as "nothing to store".
   registry.Register<VehicleComponent>("vehicle",
     [](const entt::registry& reg, entt::entity e) -> YAML::Node {
       auto& v = reg.get<VehicleComponent>(e);
@@ -58,10 +55,7 @@ void RegisterGameComponentSerializers(YAEngine::ComponentRegistry& registry)
     }
   );
 
-  // Wheels sit on model nodes, so this component travels in the modelOverrides delta of
-  // the car. baseRot is stored rather than read back from the node transform: ControlsLayer
-  // spins that transform every frame, so a scene saved mid-drive would bake the spin into
-  // the rest pose and drift a little further on every save.
+  // baseRot is stored rather than read back from the node transform: ControlsLayer spins that transform every frame, so a save mid-drive would otherwise bake the spin into the rest pose and drift further each time.
   registry.Register<WheelComponent>("wheel",
     [](const entt::registry& reg, entt::entity e) -> YAML::Node {
       auto& w = reg.get<WheelComponent>(e);

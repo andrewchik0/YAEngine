@@ -94,7 +94,6 @@ namespace YAEngine
     io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/Roboto-Regular.ttf", 16.0f);
 
 #ifdef YA_EDITOR
-    // Merge Font Awesome icons into the default font
     ImFontConfig iconConfig;
     iconConfig.MergeMode = true;
     iconConfig.GlyphMinAdvanceX = 15.0f;

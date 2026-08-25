@@ -63,7 +63,6 @@ namespace YAEngine
       }
     }
 
-    // Unlink from old parent
     if (childH.parent != entt::null)
     {
       auto& oldParent = m_Registry.get<HierarchyComponent>(childH.parent);

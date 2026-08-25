@@ -16,9 +16,9 @@ namespace YAEngine
     float x = normalizedPos.x * 2.0f - 1.0f;
     float y = 1.0f - normalizedPos.y * 2.0f;
 
-    // Reversed-Z puts the near plane at NDC z = 1 and the far plane at infinity, so only
-    // the near point is unprojected. A perspective ray through it also passes through the
-    // view-space origin, which yields the direction without a second finite point.
+    // Reversed-Z puts the near plane at NDC z=1 and the far at infinity, so only the near
+    // point is unprojected; a perspective ray through it also passes through the view-space
+    // origin, giving the direction without a second finite point.
     glm::vec4 viewNear = invProj * glm::vec4(x, y, 1.0f, 1.0f);
     viewNear /= viewNear.w;
 

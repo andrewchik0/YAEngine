@@ -4,12 +4,10 @@
 
 namespace YAEngine
 {
-  // Reversed-Z perspective with the far plane at infinity (right-handed, depth in [0,1],
-  // near maps to 1 and infinity to 0). A float depth buffer spends most of its precision
-  // near zero, which is exactly where 1/z piles up distant geometry, so this distribution
-  // is close to uniform in view distance instead of collapsing past a few hundred meters.
-  // GLM has no reversed variant, hence the hand-built matrix. No Y flip - callers that
-  // feed Vulkan viewports apply it themselves.
+  // Reversed-Z perspective, far plane at infinity (right-handed, depth in [0,1], near->1,
+  // far->0): puts most float depth precision where 1/z needs it, staying close to uniform
+  // in view distance instead of collapsing past a few hundred meters. Hand-built since GLM
+  // has no reversed variant; no Y flip - callers apply that to the Vulkan viewport themselves.
   inline glm::mat4 MakeReversedInfinitePerspective(float fovY, float aspect, float nearPlane)
   {
     float f = 1.0f / std::tan(fovY * 0.5f);

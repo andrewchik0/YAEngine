@@ -169,13 +169,11 @@ namespace YAEngine
   {
     auto& ctx = m_Backend.GetContext();
 
-    // Wait for all GPU work to complete before destroying resources
     vkDeviceWaitIdle(ctx.device);
 
     uint32_t w = m_PendingViewportWidth;
     uint32_t h = m_PendingViewportHeight;
 
-    // Update HiZ mip count for new dimensions
     uint32_t hizMipCount = static_cast<uint32_t>(std::floor(std::log2(std::max(w, h)))) + 1;
     m_Graph.SetResourceMipLevels(m_HiZResource, hizMipCount);
 
@@ -191,7 +189,6 @@ namespace YAEngine
     CreateGTAOResources();
     CreateBloomResources();
 
-    // Resize tile light buffer and update descriptor sets that reference it
     {
       uint32_t tileCountX = (w + TILE_SIZE - 1) / TILE_SIZE;
       uint32_t tileCountY = (h + TILE_SIZE - 1) / TILE_SIZE;
@@ -204,7 +201,6 @@ namespace YAEngine
       }
     }
 
-    // Recreate TAA external framebuffers
     for (auto& fb : m_TAAFramebuffers)
     {
       if (fb != VK_NULL_HANDLE)
@@ -290,14 +286,9 @@ namespace YAEngine
     // to record.
     m_ProbeBuffer.SetUp(0, snapshot.probeBuffer);
 
-    // Neighbouring volumes stay visible so their bounced light reaches this one.
-    // Only the volume being rebaked is dropped, otherwise it would feed on its own
-    // previous output and drift monotonically brighter with every pass.
-    // Unlike probes, slot 0 is a real volume, so the "already in the atlas" test is
-    // baked + a valid slot, not a non-zero slot.
-    // Dropping one entry keeps the remaining order, and the array is sorted by
-    // ascending box volume so nesting still resolves the way the shader expects.
-    // Frame 0 is the slot OffscreenRenderer binds.
+    // Only the volume being rebaked is dropped (by baked + valid-slot, since unlike probes
+    // slot 0 is a real volume) so it can't feed on its own prior output; order is preserved
+    // since the array is sorted by ascending box volume for the shader's nesting logic.
     {
       const IrradianceVolumeBuffer& allVolumes = m_VolumeStorage.GetBufferData();
       IrradianceVolumeBuffer bakeVolumes {};
@@ -315,13 +306,9 @@ namespace YAEngine
       m_VolumeStorage.SetUp(0, bakeVolumes);
     }
 
-    // ONE shadow atlas render for the WHOLE volume. The cascades are fitted around
-    // the volume center and inflated by its radius, so every node reuses them.
-    // Fitting per node would mean nodeCount renders of the 8192x8192 atlas and
-    // would dwarf everything else in the bake.
-    // The radius comes from the LATTICE, not from the box: snapping to the world
-    // lattice pushes the outermost nodes up to one spacing past the box AABB, and
-    // a node outside the fitted cascades would capture unshadowed light.
+    // One shadow atlas render for the whole volume, with cascades fitted to the lattice
+    // radius (not the box - snapping can push nodes past the box AABB) so every node
+    // reuses them instead of paying nodeCount renders of the 8192x8192 atlas.
     {
       glm::vec3 latticeMax = layout.GetWorldPosition(layout.nodeCounts.x - 1,
         layout.nodeCounts.y - 1, layout.nodeCounts.z - 1);
@@ -445,10 +432,8 @@ namespace YAEngine
     YA_LOG_INFO("Render", "Baking all irradiance volumes: %u volumes x %d bounce(s)",
       volumeCount, bounces);
 
-    // Intermediate passes must refresh the atlas without writing to disk, and the
-    // atlas is rebuilt from the whole set every time, so the freshly baked data of
-    // every volume is kept here for the passes that follow. Seeded from disk so a
-    // volume that is never reached still contributes what it contributed before.
+    // Kept here (seeded from disk) since intermediate passes rebuild the atlas from the
+    // whole set without writing to disk, so an unreached volume still contributes its prior bake.
     std::vector<IrradianceVolumeFileData> baked(volumeCount);
     std::vector<uint8_t> hasData(volumeCount, 0);
     for (uint32_t i = 0; i < volumeCount; i++)
@@ -460,12 +445,9 @@ namespace YAEngine
         hasData[i] = 1;
     }
 
-    // Slot assignment is redone by every Upload call - ApplyIrradianceVolumes writes
-    // the fresh slot back into each component, so a reshuffle mid-pass is harmless.
-    //
-    // The list is patched in place rather than rebuilt: an IrradianceVolumeFileData
-    // carries the whole node blob, so rebuilding it after every single bake would
-    // deep copy the entire set N times per pass.
+    // Slot assignment is redone by every Upload call so a mid-pass reshuffle is harmless;
+    // the list is patched in place rather than rebuilt since IrradianceVolumeFileData carries
+    // the whole node blob and rebuilding it every bake would deep copy the set N times.
     std::vector<entt::entity> uploadEntities;
     std::vector<IrradianceVolumeFileData> uploadVolumes;
     std::vector<size_t> uploadIndex(volumeCount, SIZE_MAX);

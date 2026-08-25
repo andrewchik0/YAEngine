@@ -306,7 +306,6 @@ namespace YAEngine
       }
     };
 
-    // Split by '|' into per-binding segments
     uint32_t bindingIndex = 0;
     size_t segStart = 0;
     while (segStart <= vertexInput.size())

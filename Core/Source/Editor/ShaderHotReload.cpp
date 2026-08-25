@@ -21,7 +21,6 @@ namespace YAEngine
 
   void ShaderHotReload::Destroy()
   {
-    // If there's a pending batch, wait for all futures
     if (m_PendingBatch)
     {
       for (auto& entry : m_PendingBatch->entries)
@@ -32,11 +31,9 @@ namespace YAEngine
 
   bool ShaderHotReload::Update(double currentTime)
   {
-    // Check if there's a pending compilation batch to process
     if (m_PendingBatch)
       return ProcessCompilationResults();
 
-    // Throttle polling
     if (currentTime - m_LastPollTime < POLL_INTERVAL)
       return false;
     m_LastPollTime = currentTime;
@@ -48,7 +45,6 @@ namespace YAEngine
     YA_LOG_INFO("ShaderHotReload", "Detected changes, compiling %u shader(s)...",
       static_cast<uint32_t>(tasks.size()));
 
-    // Submit all compilations to the thread pool
     PendingBatch batch;
     for (auto& task : tasks)
     {
@@ -96,14 +92,12 @@ namespace YAEngine
 
   bool ShaderHotReload::ProcessCompilationResults()
   {
-    // Check if all futures are ready
     for (auto& entry : m_PendingBatch->entries)
     {
       if (entry.future.wait_for(std::chrono::seconds(0)) != std::future_status::ready)
         return false;
     }
 
-    // All done - collect results
     bool allSuccess = true;
     std::vector<std::string> successOutputs;
 
@@ -139,7 +133,7 @@ namespace YAEngine
     for (auto& spvName : successOutputs)
     {
       // Strip .spv to get the shader file name used as key in PipelineCache
-      // e.g. "shader.frag.spv" → "shader.frag"
+      // e.g. "shader.frag.spv" -> "shader.frag"
       std::string shaderKey = spvName;
       if (shaderKey.ends_with(".spv"))
         shaderKey.resize(shaderKey.size() - 4);

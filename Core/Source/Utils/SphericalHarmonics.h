@@ -6,16 +6,10 @@ namespace YAEngine
 {
   // Spherical harmonics, band 0 + band 1 (four coefficients per color channel).
   //
-  // STORAGE CONVENTION - the GLSL side must match this exactly.
-  // Finalized coefficients are already convolved with the cosine lobe
-  // (A0 = pi, A1 = 2*pi/3) and divided by pi, so evaluating them is one dot
-  // product and the result is the SAME quantity the irradiance cubemap holds:
-  //
-  //   irradiance(n) = l0 + l1x * n.x + l1y * n.y + l1z * n.z
-  //
-  // Core/Shaders/irradiance.frag outputs E / pi for the same reason, and the
-  // lighting path multiplies it straight by albedo. A constant environment of
-  // radiance 1 therefore projects to l0 = 1 and l1 = 0 on every channel.
+  // STORAGE CONVENTION - the GLSL side must match this exactly. Coefficients are already
+  // convolved with the cosine lobe and divided by pi, so irradiance(n) = l0 + l1x*n.x +
+  // l1y*n.y + l1z*n.z directly - the same quantity Core/Shaders/irradiance.frag outputs as
+  // E/pi. A constant environment of radiance 1 projects to l0 = 1, l1 = 0 on every channel.
   struct SHL1Channel
   {
     float l0 = 0.0f;
@@ -35,9 +29,8 @@ namespace YAEngine
 
   static_assert(sizeof(SHL1RGB) == 48, "SHL1RGB must stay three tightly packed vec4");
 
-  // Raw projection sums. Coefficients here are plain SH coefficients (basis
-  // applied, cosine lobe NOT applied yet) - only Finalize produces the storage
-  // convention documented above.
+  // Raw projection sums: basis applied, cosine lobe NOT applied yet - only Finalize
+  // produces the storage convention documented above.
   struct SHL1Accumulator
   {
     SHL1RGB coefficients {};
@@ -50,9 +43,8 @@ namespace YAEngine
     SHL1RGB Finalize() const;
   };
 
-  // Face order matches the Vulkan cube layer order used by ReflectionProbeBaker:
-  // 0 = +X, 1 = -X, 2 = +Y, 3 = -Y, 4 = +Z, 5 = -Z. Texel (x, y) is addressed
-  // with y growing downwards, like the image rows read back from the GPU.
+  // Face order matches ReflectionProbeBaker's Vulkan cube layer order (0=+X, 1=-X, 2=+Y,
+  // 3=-Y, 4=+Z, 5=-Z); texel (x, y) has y growing downwards, like GPU readback rows.
   glm::vec3 CubeFaceTexelDirection(uint32_t face, uint32_t x, uint32_t y, uint32_t faceSize);
 
   // Differential solid angle of one cube face texel. Independent of the face.

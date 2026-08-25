@@ -174,10 +174,8 @@ namespace YAEngine
   {
     for (auto& pass : m_Passes)
     {
-      // Compute passes don't need render passes
       if (pass.info.isCompute) continue;
 
-      // Depth-only pass: single depth attachment, no color
       if (pass.info.depthOnly)
       {
         VkAttachmentDescription att{};
@@ -235,7 +233,6 @@ namespace YAEngine
       std::vector<VkAttachmentDescription> attachments;
       std::vector<VkAttachmentReference> colorRefs;
 
-      // Determine primary color format
       VkFormat primaryFormat;
       if (!pass.info.colorOutputs.empty())
       {
@@ -246,7 +243,6 @@ namespace YAEngine
         primaryFormat = pass.info.externalFormat;
       }
 
-      // Attachment 0: primary color
       {
         VkAttachmentDescription att{};
         att.format = primaryFormat;
@@ -267,7 +263,6 @@ namespace YAEngine
         colorRefs.push_back(ref);
       }
 
-      // Attachment 1: depth
       {
         VkAttachmentDescription att{};
         att.format = VK_FORMAT_D32_SFLOAT;
@@ -287,7 +282,6 @@ namespace YAEngine
       depthRef.attachment = 1;
       depthRef.layout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
 
-      // Attachments 2+: additional color outputs
       for (size_t i = 1; i < pass.info.colorOutputs.size(); i++)
       {
         VkFormat fmt = m_Resources[pass.info.colorOutputs[i]].desc.format;
@@ -351,10 +345,8 @@ namespace YAEngine
   {
     for (auto& pass : m_Passes)
     {
-      // Compute passes don't need framebuffers
       if (pass.info.isCompute) continue;
 
-      // Depth-only pass
       if (pass.info.depthOnly)
       {
         if (pass.info.depthOutput != RG_INVALID_HANDLE)
@@ -391,7 +383,6 @@ namespace YAEngine
         continue;
       }
 
-      // Compute per-pass extent from first color output (or global extent for external)
       if (!pass.info.colorOutputs.empty() && !pass.info.externalFramebuffer)
       {
         auto& res = m_Resources[pass.info.colorOutputs[0]];
@@ -406,7 +397,6 @@ namespace YAEngine
       if (pass.info.externalFramebuffer) continue;
       if (pass.info.colorOutputs.empty()) continue;
 
-      // Create private depth if no managed depth output (match pass extent)
       if (pass.info.depthOutput == RG_INVALID_HANDLE)
       {
         ImageDesc depthDesc;
@@ -421,10 +411,8 @@ namespace YAEngine
       // Build image view array: [color0, depth, color1, color2, ...]
       std::vector<VkImageView> views;
 
-      // Color 0
       views.push_back(ResolveResource(pass.info.colorOutputs[0]).GetView());
 
-      // Depth
       if (pass.info.depthOutput != RG_INVALID_HANDLE)
       {
         views.push_back(ResolveResource(pass.info.depthOutput).GetView());
@@ -434,7 +422,6 @@ namespace YAEngine
         views.push_back(pass.privateDepth.GetView());
       }
 
-      // Additional colors
       for (size_t i = 1; i < pass.info.colorOutputs.size(); i++)
       {
         views.push_back(ResolveResource(pass.info.colorOutputs[i]).GetView());
@@ -473,7 +460,6 @@ namespace YAEngine
 
     for (uint32_t i = 0; i < n; i++)
     {
-      // Read->write: pass i reads resource written by an earlier pass
       for (auto input : m_Passes[i].info.inputs)
       {
         auto it = lastWriter.find(input);
@@ -484,7 +470,6 @@ namespace YAEngine
         }
       }
 
-      // Write->write: chain consecutive writers of the same resource
       auto trackWrite = [&](RGHandle handle) {
         auto it = lastWriter.find(handle);
         if (it != lastWriter.end() && it->second != i)
@@ -594,22 +579,18 @@ namespace YAEngine
       image.SetLayout(targetLayout);
     };
 
-    // Transition inputs to SHADER_READ_ONLY_OPTIMAL
     for (auto handle : pass.info.inputs)
       emitBarrier(handle, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
-    // For compute passes: transition storage outputs to GENERAL
     if (pass.info.isCompute)
     {
       for (auto handle : pass.info.storageOutputs)
         emitBarrier(handle, VK_IMAGE_LAYOUT_GENERAL);
     }
 
-    // Transition non-clearing depth output to DEPTH_STENCIL_ATTACHMENT_OPTIMAL
     if (!pass.info.isCompute && pass.info.depthOutput != RG_INVALID_HANDLE && !pass.info.clearDepth)
       emitBarrier(pass.info.depthOutput, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
 
-    // Transition non-clearing color outputs to COLOR_ATTACHMENT_OPTIMAL
     if (!pass.info.isCompute && !pass.info.clearColor)
     {
       for (auto handle : pass.info.colorOutputs)
@@ -664,7 +645,6 @@ namespace YAEngine
     {
       auto& pass = m_Passes[passIndex];
 
-      // Use overrideExtent if set, otherwise use pass extent from compilation
       VkExtent2D passExtent = (pass.overrideExtent.width > 0 && pass.overrideExtent.height > 0)
         ? pass.overrideExtent : pass.extent;
       ctx.extent = passExtent;
@@ -674,16 +654,13 @@ namespace YAEngine
       GpuZoneScope gpuZone(m_GpuProfiler, cmd, pass.info.name.c_str());
 #endif
 
-      // Insert barriers for inputs (and storage outputs for compute)
       InsertBarriers(cmd, passIndex);
 
-      // Compute pass: no render pass, just execute
       if (pass.info.isCompute)
       {
         DebugMarker::BeginLabel(cmd, pass.info.name.c_str());
         pass.info.execute(ctx);
 
-        // Update tracked layouts for storage outputs
         for (auto handle : pass.info.storageOutputs)
         {
           m_CurrentLayouts[handle] = VK_IMAGE_LAYOUT_GENERAL;
@@ -693,7 +670,6 @@ namespace YAEngine
         continue;
       }
 
-      // Depth-only pass
       if (pass.info.depthOnly)
       {
         DebugMarker::BeginLabel(cmd, pass.info.name.c_str());
@@ -739,13 +715,11 @@ namespace YAEngine
         continue;
       }
 
-      // Regular graphics pass
       DebugMarker::BeginLabel(cmd, pass.info.name.c_str());
 
       VkFramebuffer fb = pass.overrideFramebuffer != VK_NULL_HANDLE
         ? pass.overrideFramebuffer : pass.framebuffer;
 
-      // Compute attachment count: colors + depth
       uint32_t attachmentCount = static_cast<uint32_t>(
         std::max(pass.info.colorOutputs.size(), static_cast<size_t>(1)) + 1);
 
@@ -770,7 +744,6 @@ namespace YAEngine
 
       vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
 
-      // Set viewport and scissor to match pass extent
       VkViewport viewport{};
       viewport.width = static_cast<float>(passExtent.width);
       viewport.height = static_cast<float>(passExtent.height);
@@ -786,11 +759,9 @@ namespace YAEngine
 
       vkCmdEndRenderPass(cmd);
 
-      // Update tracked layouts after render pass
       for (size_t i = 0; i < pass.info.colorOutputs.size(); i++)
       {
         auto handle = pass.info.colorOutputs[i];
-        // Attachment 0 gets finalColorLayout; additional attachments always end as COLOR_ATTACHMENT_OPTIMAL
         VkImageLayout layout = (i == 0)
           ? pass.info.finalColorLayout
           : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -872,7 +843,6 @@ namespace YAEngine
     vkDeviceWaitIdle(m_Ctx->device);
     m_Extent = newExtent;
 
-    // Destroy managed resources
     for (auto& res : m_Resources)
     {
       if (res.managed && res.image.IsValid())
@@ -881,7 +851,6 @@ namespace YAEngine
       }
     }
 
-    // Destroy non-external framebuffers and private depths
     for (auto& pass : m_Passes)
     {
       if (!pass.info.externalFramebuffer && !pass.info.isCompute && pass.framebuffer != VK_NULL_HANDLE)
@@ -895,11 +864,9 @@ namespace YAEngine
       }
     }
 
-    // Recreate
     AllocateResources();
     BuildFramebuffers();
 
-    // Reset layouts
     std::fill(m_CurrentLayouts.begin(), m_CurrentLayouts.end(), VK_IMAGE_LAYOUT_UNDEFINED);
   }
 }

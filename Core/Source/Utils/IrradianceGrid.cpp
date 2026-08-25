@@ -4,18 +4,14 @@ namespace YAEngine
 {
   namespace
   {
-    // A corner already sitting on the lattice must not gain an extra cell just
-    // because the division landed on 3.0000001 or 2.9999999. The tolerance is in
-    // lattice units, so it scales with the spacing on its own.
+    // Tolerance in lattice units so float rounding doesn't add an extra cell to a corner already on the lattice.
     constexpr float LATTICE_SNAP_EPSILON = 1e-4f;
   }
 
   float SnapIrradianceSpacing(float spacing)
   {
-    // The negated form also catches NaN. Infinity has to be tested separately:
-    // log2(inf / candidate) is inf for every candidate, so the loop below would
-    // never improve on its initializer and would return the FINEST spacing for
-    // the coarsest possible input.
+    // Negated form also catches NaN; infinity needs an explicit check since log2(inf/candidate)
+    // is inf for every candidate, which would wrongly pick the finest spacing.
     if (!(spacing > 0.0f) || !std::isfinite(spacing))
       return IRRADIANCE_SPACINGS[2];
 

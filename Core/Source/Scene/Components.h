@@ -22,19 +22,14 @@ namespace YAEngine
   struct WorldTransform
   {
     glm::mat4 world { 1.0f };
-    // TransformSystem tick of the last world recompute. Derived data like the
-    // matrix itself, never serialized. The shadow cache folds it into its
-    // transform digest, so movement stays detectable after the transient
-    // TransformDirty tag is consumed.
+    // TransformSystem tick of the last world recompute; not serialized. The shadow cache folds it into its digest so movement stays detectable after TransformDirty is consumed.
     uint64_t lastChangeTick = 0;
   };
 
   struct TransformDirty {};
   struct BoundsDirty {};
 
-  // Published into the registry context by TransformSystem on every Update.
-  // Lets BuildSceneSnapshot ask "did this caster move in the tick right
-  // before this snapshot" without threading the system through signatures.
+  // Published into the registry context by TransformSystem each Update; lets BuildSceneSnapshot ask whether a caster moved in the tick right before this snapshot without threading the system through signatures.
   struct TransformTickContext
   {
     uint64_t tick = 0;
@@ -50,13 +45,7 @@ namespace YAEngine
   {
     glm::vec3 min {};
     glm::vec3 max {};
-    // Bounds of the previous recompute - for a per-frame mover, exactly the
-    // footprint the last rendered frame saw. Derived data like min/max, never
-    // serialized; the shadow dirty-rect path unions prev with current to
-    // cover the erase region and the new footprint in one rect.
-    // Defaulted to the empty AABB (inverted extremes), which is the identity
-    // of that union: a writer that fills only min/max still gets a rect
-    // covering exactly the current footprint, not one stretched to the origin.
+    // Bounds from the previous recompute (last rendered frame's footprint); not serialized. The shadow dirty-rect path unions prev with current to cover the erase and new regions; defaulted to an inverted/empty AABB so that union is a no-op until a real value is written.
     glm::vec3 prevMin { std::numeric_limits<float>::max() };
     glm::vec3 prevMax { -std::numeric_limits<float>::max() };
   };
@@ -175,20 +164,11 @@ namespace YAEngine
   struct IrradianceVolumeComponent
   {
     glm::vec3 halfExtents { 5.0f };
-    // Node spacing in meters, uniform on every axis and always one of
-    // IRRADIANCE_SPACINGS (Utils/IrradianceGrid.h). The spacing is exact - the BOX
-    // is snapped to the world lattice, never the other way round. Kept as a float
-    // so the scene format does not change; the value is snapped on load and the
-    // editor only offers valid ones.
+    // Node spacing in meters, always one of IRRADIANCE_SPACINGS (Utils/IrradianceGrid.h); the box snaps to the world lattice, not vice versa. Kept as a float for scene format stability - snapped on load, editor only offers valid values.
     float spacing = 1.0f;
-    // Cube face resolution used while capturing a node. An L1 fit averages over the
-    // whole hemisphere, so 16-32 is plenty and bake time scales with its square.
-    // Must match BakeLimits::VOLUME_DEFAULT_CAPTURE_RESOLUTION, clamped on load.
+    // Cube face resolution for capturing a node; an L1 fit averages the whole hemisphere so 16-32 is plenty and bake time scales with its square. Must match BakeLimits::VOLUME_DEFAULT_CAPTURE_RESOLUTION, clamped on load.
     uint32_t captureResolution = 32;
-    // How much of the sphere a node may see from the inside before the bake rejects
-    // it as buried. Per volume because the right value is a property of the scene:
-    // a dense interior needs a different one from an open landscape.
-    // Must match BakeLimits::VOLUME_DEFAULT_BACKFACE_THRESHOLD, clamped on load.
+    // How much of the sphere a node may see from inside before the bake rejects it as buried; per-volume since a dense interior needs a different value than an open landscape. Must match BakeLimits::VOLUME_DEFAULT_BACKFACE_THRESHOLD, clamped on load.
     float backfaceRatioThreshold = 0.25f;
     bool baked = false;       // runtime only, reset on load
     uint32_t atlasSlot = 0;   // runtime only, index in the volume atlas

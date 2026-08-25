@@ -232,7 +232,6 @@ namespace YAEngine
     auto& ctx = m_Backend.GetContext();
     auto actualExtent = m_Backend.GetSwapChain().GetExt();
 
-    // Wait for all GPU work to complete before destroying resources
     vkDeviceWaitIdle(ctx.device);
 
     DestroyBloomResources();
@@ -242,12 +241,10 @@ namespace YAEngine
     // Resize graph (recreates managed resources and non-external framebuffers)
     m_Graph.Resize(actualExtent);
 
-    // Recreate Hi-Z per-mip views and descriptor sets
     CreateHiZResources();
     CreateGTAOResources();
     CreateBloomResources();
 
-    // Resize tile light buffer and update descriptor sets that reference it
     {
       uint32_t tileCountX = (actualExtent.width + TILE_SIZE - 1) / TILE_SIZE;
       uint32_t tileCountY = (actualExtent.height + TILE_SIZE - 1) / TILE_SIZE;
@@ -260,7 +257,6 @@ namespace YAEngine
       }
     }
 
-    // Recreate TAA external framebuffers
     for (auto& fb : m_TAAFramebuffers)
     {
       if (fb != VK_NULL_HANDLE)
@@ -398,10 +394,9 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaClampSigma = m_TAAClampSigma;
 
-    // The indirect lighting debug views must reach the screen untouched. SSR and TAA
-    // both sit between the lighting pass and tone mapping, and both already pass
-    // through when their flag is zero, so disabling them here needs no extra plumbing.
-    // The camera jitter is handled in SetUpCamera, which runs before this.
+    // Indirect lighting debug views must reach the screen untouched: SSR/TAA already pass
+    // through when disabled, so zeroing the flags here needs no extra plumbing. Camera
+    // jitter is handled separately in SetUpCamera, which runs before this.
     if (IS_INDIRECT_DEBUG_VIEW(m_CurrentTexture))
     {
       m_FrameUniformBuffer.uniforms.ssrEnabled = 0;
@@ -419,7 +414,6 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.fogStartDistance = m_FogStartDistance;
     m_FrameUniformBuffer.uniforms.irradianceNormalBias = m_IrradianceNormalBias;
 
-    // Configure render graph for this frame (TAA ping-pong + swapchain)
     auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
     auto historyRead = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
 
@@ -445,7 +439,6 @@ namespace YAEngine
     m_Graph.SetPassFramebuffer(m_SwapchainPassIndex,
       m_Backend.GetSwapChain().GetFramebuffer(*imageIndex));
 
-    // Upload per-frame data before executing passes
     auto currentFrame = m_Backend.GetCurrentFrameIndex();
     m_FrameUniformBuffer.SetUp(currentFrame);
     // Reads back the projection and viewport SetUpCamera just wrote, so it has to run after it.
@@ -472,10 +465,9 @@ namespace YAEngine
     // are never recreated, so there is nothing to rewrite here per frame.
     m_ProbeBuffer.SetUp(currentFrame, frame.snapshot.probeBuffer);
 
-    // Upload irradiance volume UBO. Turning volumes off is the same as having
-    // none - the shader then takes skybox irradiance from atlas slot 0 everywhere.
-    // Unlike the probe buffer this is not rebuilt from the snapshot, so it only
-    // changes on upload or on the toggle: one dirty frame per frame in flight.
+    // Turning volumes off means the shader falls back to skybox irradiance from atlas slot 0
+    // everywhere. Unlike the probe buffer this isn't rebuilt from the snapshot, so it only
+    // changes on upload or toggle - one dirty frame per frame in flight.
     if (m_VolumeUploadDirty > 0 || b_IrradianceVolumesEnabled != b_VolumeUniformsEnabled)
     {
       if (b_IrradianceVolumesEnabled != b_VolumeUniformsEnabled)
@@ -523,7 +515,6 @@ namespace YAEngine
         m_GizmoRenderer.DrawArrow(dirLightPos, dirLightDir, 3.0f, glm::vec4(dirCol, 0.85f));
       }
 
-      // Reflection probe influence volumes
       if (b_ProbeVolumesVisible)
       {
         for (int i = 0; i < frame.snapshot.probeBuffer.probeCount; i++)
@@ -574,7 +565,6 @@ namespace YAEngine
     }
 #endif
 
-    // Render shadow maps before main passes
     {
 #ifdef YA_EDITOR
       // Scoped here and not inside RenderShadowMaps: the probe bakers call it with
@@ -584,7 +574,6 @@ namespace YAEngine
       RenderShadowMaps(frame, cmd, currentFrame);
     }
 
-    // Execute all passes
     m_Graph.Execute(cmd, &frame);
 
     YA_PROFILE_CPU_END(record);
@@ -641,7 +630,6 @@ namespace YAEngine
     glm::vec3 position = glm::vec3(wt.world[3]);
     std::string entityName = scene.GetName(entity);
 
-    // Find next free atlas slot (1..MAX_REFLECTION_PROBES, slot 0 = skybox)
     uint32_t atlasSlot = lp.atlasSlot;
     if (atlasSlot == 0)
     {
@@ -668,7 +656,6 @@ namespace YAEngine
       BakeLimits::PROBE_MIN_CAPTURE_RESOLUTION,
       BakeLimits::PROBE_MAX_CAPTURE_RESOLUTION);
 
-    // Build temporary scene snapshot + light buffer
     SceneSnapshot snapshot;
     LightBuffer lights {};
     BuildSceneSnapshot(snapshot, lights, scene, assets.Meshes(), assets.Materials());
@@ -687,7 +674,6 @@ namespace YAEngine
     // the SwapchainPass because ImGui's draw list may still reference them
     m_PendingInvalidateSlot = atlasSlot;
 
-    // Upload light data to LightStorageBuffer so OffscreenRenderer can use it
     m_LightBuffer.SetUp(0, lights);
 
     // Neighbouring probes stay visible so their light can bounce into this one.
@@ -704,10 +690,9 @@ namespace YAEngine
     }
     m_ProbeBuffer.SetUp(0, bakeProbes);
 
-    // Irradiance volumes are switched off for the capture. They are fed by the
-    // very probes being rebaked, so leaving them on would close a feedback loop:
-    // every bake pass would read the previous one back in and drift brighter.
-    // Frame 0 is the slot OffscreenRenderer binds.
+    // Irradiance volumes are switched off for the capture: they're fed by the very probes
+    // being rebaked, so leaving them on would close a feedback loop and drift brighter each
+    // bake. Frame 0 is the slot OffscreenRenderer binds.
     {
       IrradianceVolumeBuffer noVolumes {};
       noVolumes.atlasInvSize = m_VolumeStorage.GetBufferData().atlasInvSize;
@@ -731,7 +716,6 @@ namespace YAEngine
     m_ProbeBaker.Bake(m_CubicResources, frame, m_ProbeAtlas,
       position, captureResolution, atlasSlot, pfPath);
 
-    // Update component
     lp.baked = true;
     lp.atlasSlot = atlasSlot;
     if (writeToDisk)

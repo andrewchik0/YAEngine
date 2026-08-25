@@ -6,7 +6,6 @@
 #include "Editor/EditorContext.h"
 #include "Render/GeometryArena.h"
 #include "Render/Render.h"
-#include "Scene/SceneSnapshot.h"
 #include "Utils/MeshSimplifier.h"
 #include "Utils/Timer.h"
 
@@ -249,13 +248,6 @@ namespace YAEngine
     ImGui::Text("max    %.2f ms", m_GpuPercentiles.max);
 
     ImGui::Spacing();
-    ImGui::TextDisabled("Shadows GPU, last %u frames", m_ShadowPercentiles.samples);
-    ImGui::Text("p50    %.3f ms", m_ShadowPercentiles.p50);
-    ImGui::Text("p99    %.3f ms", m_ShadowPercentiles.p99);
-    ImGui::Text("p99.9  %.3f ms", m_ShadowPercentiles.p999);
-    ImGui::Text("max    %.3f ms", m_ShadowPercentiles.max);
-
-    ImGui::Spacing();
     ImGui::Separator();
     ImGui::Spacing();
 
@@ -265,162 +257,6 @@ namespace YAEngine
       ImGui::Text("Draws  %u", stats.drawCalls);
       ImGui::Text("Tris   %u", stats.triangles);
       ImGui::Text("Verts  %u", stats.vertices);
-
-      ImGui::Spacing();
-      ImGui::Text("Shadow draws  %u", stats.shadowDrawCalls);
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Recorded draw commands in the shadow atlas pass.\n"
-          "The indirect path collapses these to two per atlas tile\n"
-          "plus one per alpha-test caster.");
-      ImGui::Text("Shadow batched  %u", stats.shadowIndirectCommands);
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Casters packed inside those indirect draws.\n"
-          "Zero means the legacy per-draw shadow path is running.");
-      ImGui::Text("Shadow tris  %u", stats.shadowTriangles);
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Triangles that survived frustum culling and reached a draw,\n"
-          "summed over every atlas tile. A caster inside four cascades\n"
-          "is counted four times, which is what the GPU actually sees.");
-
-      uint32_t lodSaved = stats.shadowTrianglesAtLod0 - stats.shadowTriangles;
-      float lodSavedPercent = stats.shadowTrianglesAtLod0 > 0
-        ? 100.0f * float(lodSaved) / float(stats.shadowTrianglesAtLod0)
-        : 0.0f;
-      ImGui::Text("Shadow LOD saved  %u (%.1f%%)", lodSaved, lodSavedPercent);
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Triangles the cascade LOD kept out of the pass, against what\n"
-          "the same tiles would have submitted with every caster at LOD 0.\n"
-          "Zero means the feature is off or nothing reached a simplified level.");
-
-      // Indices must match ShadowClearMode in Render.h
-      static constexpr const char* CLEAR_MODE_NAMES[] = { "FullClear", "PerTilePasses", "LoadAndClearRects" };
-      ImGui::Text("Shadow clear  %s", CLEAR_MODE_NAMES[std::min(stats.shadowClearMode, 2u)]);
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Active atlas clear strategy, set by the Shadow Clear Mode combo\n"
-          "in Render Settings. Shown here so screenshots are self-describing.");
-
-      if (ImGui::TreeNode("Shadow tiles"))
-      {
-        if (ImGui::IsItemHovered())
-          ImGui::SetTooltip("Per tile group: kind of the last redraw (full, partial or rect),\n"
-            "how long\n"
-            "ago it happened, the invalidation reason that forced it and the\n"
-            "triangles it submitted. Untouched tiles keep their last redraw's\n"
-            "values - the age is how stale the cached atlas content is.\n"
-            "Cascade rows append fit urgency: how close the cascade is to\n"
-            "escaping its frozen sphere (100% = the escape boundary).");
-        double tileNowSeconds = glfwGetTime();
-        auto tileStateRow = [&](const char* label, const ShadowTileState& tile,
-          float fitUrgency = -1.0f)
-        {
-          if (!tile.valid)
-          {
-            ImGui::Text("%s  -", label);
-            return;
-          }
-          char fitSuffix[16] = "";
-          if (fitUrgency >= 0.0f)
-            snprintf(fitSuffix, sizeof(fitSuffix), "  fit %.0f%%", double(fitUrgency) * 100.0);
-          static constexpr const char* TILE_KIND_NAMES[] = { "full", "partial", "rect" };
-          ImGui::Text("%s  %s  %.1f s ago  %s  %u tris%s", label,
-            TILE_KIND_NAMES[uint32_t(tile.kind)],
-            tileNowSeconds - tile.lastDrawTime,
-            ShadowInvalidationName(tile.lastReason),
-            tile.lastTriangles, fitSuffix);
-        };
-        char tileLabel[8];
-        auto& shadowManager = context.render->GetShadowManager();
-        for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
-        {
-          snprintf(tileLabel, sizeof(tileLabel), "C%u", i);
-          tileStateRow(tileLabel, context.render->GetShadowCascadeTileState(i),
-            shadowManager.GetCascadeUrgency(i));
-        }
-        tileStateRow("Spots", context.render->GetShadowSpotTileState());
-        tileStateRow("Points", context.render->GetShadowPointTileState());
-        for (uint32_t i = 0; i < MAX_SHADOW_SPOTS; i++)
-        {
-          if (stats.shadowTrianglesPerSpot[i] > 0)
-            ImGui::Text("Spot %u  %u", i, stats.shadowTrianglesPerSpot[i]);
-        }
-        for (uint32_t i = 0; i < MAX_SHADOW_POINTS; i++)
-        {
-          if (stats.shadowTrianglesPerPoint[i] > 0)
-            ImGui::Text("Point %u  %u", i, stats.shadowTrianglesPerPoint[i]);
-        }
-        ImGui::TreePop();
-      }
-
-      ImGui::Spacing();
-      ImGui::TextDisabled("cascade refits");
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Per cascade: total refit count, seconds since the last refit and its\n"
-          "reason. The Stage 2 measurable - refit frequency under camera motion\n"
-          "predicts how often the future tile cache could reuse a cascade tile.\n"
-          "A stationary camera should sit at zero refits.");
-      {
-        double nowSeconds = glfwGetTime();
-        auto& shadowManager = context.render->GetShadowManager();
-        for (uint32_t i = 0; i < CSM_CASCADE_COUNT; i++)
-        {
-          const auto& fit = shadowManager.GetCascadeFitStats(i);
-          if (fit.refitCount == 0)
-            ImGui::Text("C%u  0", i);
-          else
-            ImGui::Text("C%u  %u  %.1f s ago  %s", i, fit.refitCount,
-              nowSeconds - fit.lastRefitTime, ShadowInvalidationName(fit.lastReason));
-        }
-
-        ImGui::Text("refits scheduled %llu  forced %llu",
-          (unsigned long long)shadowManager.GetScheduledRefitCount(),
-          (unsigned long long)shadowManager.GetForcedRefitCount());
-        if (ImGui::IsItemHovered())
-          ImGui::SetTooltip("Stage 5 scheduler split of organic refits. Scheduled: performed\n"
-            "early, while the cascade still fit inside its frozen sphere,\n"
-            "budgeted per frame. Forced: hard escapes the scheduler failed to\n"
-            "preempt. Forced climbing during normal camera motion means the\n"
-            "threshold or budget cannot keep up. Full refits (sun, params,\n"
-            "toggles) count in neither.");
-      }
-
-      ImGui::Spacing();
-      if (stats.shadowCacheHit != 0)
-        ImGui::Text("Shadow cache  HIT x%u", stats.shadowCacheConsecutiveHits);
-      else if (stats.shadowCacheRect != 0)
-        ImGui::Text("Shadow cache  RECT %u tiles %.1f%%",
-          stats.shadowCacheRectTiles, double(stats.shadowCacheRectAreaPercent));
-      else if (stats.shadowCachePartial != 0)
-        ImGui::Text("Shadow cache  PARTIAL %u tiles", stats.shadowCachePartialTiles);
-      else
-        ImGui::Text("Shadow cache  REBUILD %s",
-          ShadowInvalidationName(ShadowInvalidation(stats.shadowCacheRebuildReason)));
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Shadow cache state this frame. HIT: the entire shadow pass was\n"
-          "skipped, with the streak length. RECT: movers patched only their\n"
-          "footprint rects (stage 6, Dirty Rect Updates), with the touched\n"
-          "tile count and the redrawn share of those tiles' area. PARTIAL:\n"
-          "only the refitted cascade tiles were redrawn (stage 4, Per-Tile\n"
-          "Rebuilds). REBUILD: the whole atlas rendered, with the reason\n"
-          "that forced it. Needs Shadow Caching plus Cascade Fit Hysteresis\n"
-          "in Render Settings.");
-      ImGui::Text("hits %llu  rect %llu  partial %llu  full %llu",
-        (unsigned long long)stats.shadowCacheTotalHits,
-        (unsigned long long)stats.shadowCacheTotalRects,
-        (unsigned long long)stats.shadowCacheTotalPartials,
-        (unsigned long long)stats.shadowCacheTotalRebuilds);
-
-      if (ImGui::Button("Dump cache blockers"))
-        g_ShadowCacheBlockerDumpPending = true;
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Logs every shadow caster whose transform was stamped within the\n"
-          "last 2 ticks on the next snapshot - the entities keeping the cache\n"
-          "in REBUILD caster-moved. One shot, nothing is tracked until pressed.");
-
-      if (ImGui::Button("Dump cascade breakdown"))
-        context.render->RequestShadowBreakdownDump();
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Logs the top 20 meshes by triangle count in the heaviest\n"
-          "cascade on the next frame. One shot, nothing is tracked until pressed.");
 
       if (const GeometryArena* arena = context.render->GetContext().geometryArena)
       {
@@ -533,24 +369,6 @@ namespace YAEngine
     if (gpuFrames > 0)
       storage.CopyFrameTotals(ProfileDomain::GPU, gpuFrames, m_PercentileScratch);
     compute(m_GpuPercentiles);
-
-    // The profiler ring already retains per-frame zone history, so the shadow
-    // pass gets the same treatment without any extra recording machinery.
-    uint32_t shadowZone = UINT32_MAX;
-    uint32_t gpuZones = storage.GetZoneCount(ProfileDomain::GPU);
-    for (uint32_t zone = 0; zone < gpuZones; zone++)
-    {
-      if (std::string_view(storage.GetZoneName(ProfileDomain::GPU, zone)) == "Shadows")
-      {
-        shadowZone = zone;
-        break;
-      }
-    }
-
-    m_PercentileScratch.assign(gpuFrames, 0.0f);
-    if (shadowZone != UINT32_MAX && gpuFrames > 0)
-      storage.CopyZoneHistory(ProfileDomain::GPU, shadowZone, gpuFrames, m_PercentileScratch);
-    compute(m_ShadowPercentiles);
   }
 
   void PerformancePanel::UpdateFrameTimeStats()

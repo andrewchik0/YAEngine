@@ -34,10 +34,8 @@ namespace YAEngine
   {
     auto& input = GetInput();
 
-    // Releasing the cursor is handled before every early-out below: a release that lands
-    // outside the viewport, or one that arrives after the active camera changed, would
-    // otherwise leave the cursor captured with no way to get it back. Testing the button
-    // state rather than the release edge also covers a release lost to focus change.
+    // Checked before every early-out, else a release outside the viewport, after a camera
+    // change, or lost to focus change would leave the cursor stuck captured.
     if (input.IsMouseCaptured() && !input.IsMouseDown(MouseButton::Right))
       input.SetMouseCaptured(false);
 

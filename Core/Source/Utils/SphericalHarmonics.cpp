@@ -10,9 +10,8 @@ namespace YAEngine
     constexpr float SH_Y0 = 0.2820947918f;  // 0.5 * sqrt(1 / pi)
     constexpr float SH_Y1 = 0.4886025119f;  // 0.5 * sqrt(3 / pi)
 
-    // Cosine lobe convolution (Ramamoorthi & Hanrahan 2001): A0 = pi, A1 = 2*pi/3.
-    // Both are divided by pi here so Finalize lands on the E / pi convention
-    // documented in the header.
+    // Cosine lobe convolution (Ramamoorthi & Hanrahan 2001): A0 = pi, A1 = 2*pi/3, both
+    // divided by pi to match the E/pi convention documented in the header.
     constexpr float SH_COS_A0 = 1.0f;
     constexpr float SH_COS_A1 = 2.0f / 3.0f;
 
@@ -83,9 +82,8 @@ namespace YAEngine
     if (totalSolidAngle <= 0.0f)
       return SHL1RGB {};
 
-    // The texel solid angles of a full cube sum to 4*pi analytically; rescaling
-    // by the measured sum absorbs the residual float error so a constant
-    // environment projects to exactly l0 = 1.
+    // Texel solid angles of a full cube sum to 4*pi analytically; rescaling by the
+    // measured sum absorbs float error so a constant environment projects to exactly l0 = 1.
     float normalization = (4.0f * SH_PI) / totalSolidAngle;
 
     return SHL1RGB {
