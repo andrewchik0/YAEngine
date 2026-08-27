@@ -11,6 +11,8 @@ namespace YAEngine
   using Entity = entt::entity;
   using Name = std::string;
 
+  class ComponentRegistry;
+
   struct EditorCameraState
   {
     glm::vec3 position { 0.0f, 0.0f, 3.0f };
@@ -25,6 +27,16 @@ namespace YAEngine
     [[nodiscard]] Entity CreateEntity(std::string_view name);
     void DestroyEntity(Entity e);
     void SetParent(Entity child, Entity parent);
+
+    // Deep copy of an entity and its subtree, placed next to the source. Copies are plain
+    // entities: a nested model root loses its ModelSourceComponent, since a Model asset
+    // points back at exactly one root entity and cannot be shared by two.
+    Entity DuplicateEntity(Entity source, const ComponentRegistry& registry);
+
+    // The scene file addresses every entity that is not a model node by name, and resolves
+    // parent references through one flat name map - so a repeat there silently reparents
+    // somebody on load. Returns base, or base with a numeric suffix.
+    Name MakeUniqueEntityName(const Name& base);
 
     LocalTransform& GetTransform(Entity e);
     const LocalTransform& GetTransform(Entity e) const;
@@ -133,6 +145,13 @@ namespace YAEngine
     const EditorCameraState& GetEditorCameraState() const { return m_EditorCameraState; }
 
   private:
+
+    Entity DuplicateInto(Entity source, Entity parent, const ComponentRegistry& registry,
+      std::unordered_set<Name>& taken, bool asCopy);
+    void CopyEntityData(Entity source, Entity target, const ComponentRegistry& registry);
+    void CollectEntityNames(std::unordered_set<Name>& out);
+    Name MakeUniqueEntityName(const Name& base, std::unordered_set<Name>& taken);
+
     entt::registry m_Registry;
 
     entt::entity m_ActiveCamera = entt::null;

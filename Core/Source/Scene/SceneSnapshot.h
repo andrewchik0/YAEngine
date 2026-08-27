@@ -182,8 +182,14 @@ namespace YAEngine
         // to go in separately. Nothing else from the material reaches a shadow
         // shader - folding roughness, albedo or an emissive map here would
         // rebuild the atlas for edits it cannot see.
+        // uvScale rides along for the same reason: materialUV() folds it into the
+        // coordinate alphatest_discard.frag samples, so retiling a cutout moves the
+        // hole and the cached tile has to be redrawn.
         if (obj.isAlphaTest)
+        {
           identityDigest.AddPair(mat.baseColorTexture.index, mat.baseColorTexture.generation);
+          identityDigest.Add(mat.uvScale);
+        }
 
         transformDigest.AddWord(wt.lastChangeTick);
 

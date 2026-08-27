@@ -13,6 +13,7 @@ set(SOURCE_FILES
   Source/Render/Render.Draw.cpp
   Source/Render/Render.HiZ.cpp
   Source/Render/Render.GTAO.cpp
+  Source/Render/Render.SSGI.cpp
   Source/Render/Render.Bloom.cpp
   Source/Render/Render.Capture.cpp
   Source/Render/VulkanInstance.cpp

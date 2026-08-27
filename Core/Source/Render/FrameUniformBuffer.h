@@ -13,7 +13,7 @@ namespace YAEngine
   // boundary purely because the scalar runs before them happen to be the right
   // length, so appending one more scalar in front of either silently desyncs the
   // block. These turn that into a build error.
-  static_assert(sizeof(FrameUniforms) == 544, "FrameUniforms no longer matches its std140 layout");
+  static_assert(sizeof(FrameUniforms) == 548, "FrameUniforms no longer matches its std140 layout");
   static_assert(offsetof(FrameUniforms, cameraPosition) % 16 == 0, "vec3 cameraPosition must be 16 byte aligned");
   static_assert(offsetof(FrameUniforms, cameraDirection) % 16 == 0, "vec3 cameraDirection must be 16 byte aligned");
   static_assert(offsetof(FrameUniforms, invView) % 16 == 0, "mat4 invView must be 16 byte aligned");

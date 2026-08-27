@@ -80,7 +80,8 @@ namespace YAEngine
         "Off", "Albedo", "Metallic", "Roughness", "Normals", "AO", "SSR", "Wireframe",
         "TAA Delta", "Velocity",
         "Ambient Only", "Ambient Diffuse", "Ambient Specular",
-        "Reflection Probe Index", "Reflection Probe Fallback", "Volume Coverage"
+        "Reflection Probe Index", "Reflection Probe Fallback", "Volume Coverage",
+        "SSGI Validity", "SSGI Screen Part", "SSGI Fallback Weight"
       };
       if (ImGui::Combo("Debug View", &debugViewIndex, debugViews, IM_ARRAYSIZE(debugViews)))
         context.render->SetDebugView(debugViewIndex);
@@ -96,9 +97,20 @@ namespace YAEngine
           aoQualityLevels, IM_ARRAYSIZE(aoQualityLevels));
         ImGui::Checkbox("AO Denoise", &context.render->GetAODenoiseEnabled());
         ImGui::DragFloat("AO Radius", &context.render->GetAORadius(), 0.01f, 0.0f, 20.0f);
+
+        // With SSGI on, the diffuse indirect term is gathered for real and neither of
+        // these two ever reaches it - only specular occlusion still listens to AO.
+        ImGui::BeginDisabled(context.render->GetSSGIEnabled());
         ImGui::DragFloat("AO Strength", &context.render->GetAOStrength(), 0.01f, 0.0f, 1.0f);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip("Fades diffuse ambient occlusion. Disabled while SSGI is on:\nSSGI replaces the diffuse occlusion approximation entirely.");
+        ImGui::EndDisabled();
         ImGui::DragFloat("AO Specular Strength", &context.render->GetAOSpecularStrength(), 0.01f, 0.0f, 1.0f);
+        ImGui::BeginDisabled(context.render->GetSSGIEnabled());
         ImGui::DragFloat("AO Multi Bounce", &context.render->GetAOMultiBounce(), 0.01f, 0.0f, 1.0f);
+        if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+          ImGui::SetTooltip("Approximated interreflection inside occluded areas. Disabled while\nSSGI is on: SSGI computes that bounce for real.");
+        ImGui::EndDisabled();
 
         // Fitted by Intel against a ray traced ground truth. Worth exposing, not worth
         // touching without a reference image to compare against.
@@ -112,6 +124,21 @@ namespace YAEngine
           ImGui::DragFloat("Depth Mip Sampling Offset", &context.render->GetAODepthMipSamplingOffset(), 0.01f, 0.0f, 30.0f);
           ImGui::TreePop();
         }
+      }
+      ImGui::Checkbox("SSGI", &context.render->GetSSGIEnabled());
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Screen-space diffuse bounce on the GTAO visibility bitmask.\nRequires GTAO: it rides the same pass and the same samples.");
+      if (context.render->GetSSGIEnabled())
+      {
+        ImGui::DragFloat("SSGI Radius", &context.render->GetSSGIRadius(), 0.05f, 0.1f, 20.0f, "%.2f m");
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("World-space gather radius of the bounce. Wider than the AO radius:\nAO keeps its own falloff at AO Radius from the same samples.");
+        ImGui::DragFloat("SSGI Thickness", &context.render->GetSSGIThickness(), 0.01f, 0.01f, 2.0f, "%.2f m");
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Assumed occluder depth behind every screen sample. Thin geometry\n(railings, poles, foliage) stops over-occluding as this goes down.");
+        ImGui::DragFloat("SSGI Intensity", &context.render->GetSSGIIntensity(), 0.01f, 0.0f, 4.0f);
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Multiplier on the screen-gathered part only. The volume fallback\nis untouched, so 1.0 is the energy-conserving value.");
       }
       ImGui::Checkbox("SSR", &context.render->GetSSREnabled());
       if (context.render->GetSSREnabled())

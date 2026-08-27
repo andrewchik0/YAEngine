@@ -19,7 +19,7 @@ layout(location = 2) out vec2 outVelocity;
 
 void main() {
   float base = float(u_Material.textureMask & 1);
-  vec4 albedo = texture(baseColorTexture, inTexCoord) * base + vec4(u_Material.albedo, 1.0) * (1.0 - base);
+  vec4 albedo = texture(baseColorTexture, materialUV(inTexCoord)) * base + vec4(u_Material.albedo, 1.0) * (1.0 - base);
 
   vec2 velocity = computeVelocity(inCurClipPos, inPrevClipPos);
 

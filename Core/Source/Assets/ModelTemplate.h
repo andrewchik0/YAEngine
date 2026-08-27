@@ -52,6 +52,7 @@ namespace YAEngine
     bool transparent = false;
     float opacity = 1.0f;
     ShadingModel shadingModel = ShadingModel::Lit;
+    glm::vec2 uvScale { 1.0f, 1.0f };
 
     TextureHandle baseColorTexture;
     TextureHandle metallicTexture;

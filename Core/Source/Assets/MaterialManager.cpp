@@ -36,6 +36,7 @@ namespace YAEngine
     dst.transparent = src.transparent;
     dst.opacity = src.opacity;
     dst.shadingModel = src.shadingModel;
+    dst.uvScale = src.uvScale;
     dst.baseColorTexture = src.baseColorTexture;
     dst.metallicTexture = src.metallicTexture;
     dst.roughnessTexture = src.roughnessTexture;

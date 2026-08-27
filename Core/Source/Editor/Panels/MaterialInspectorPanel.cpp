@@ -110,6 +110,8 @@ namespace YAEngine
         changed |= ImGui::SliderFloat("Opacity", &mat.opacity, 0.0f, 1.0f);
       changed |= ImGui::Checkbox("Double Sided", &mat.doubleSided);
       changed |= ImGui::Checkbox("Combined Textures", &mat.combinedTextures);
+      // Floor above zero: a zero factor collapses the whole texture into one texel
+      changed |= ImGui::DragFloat2("UV Scale", &mat.uvScale.x, 0.05f, 0.001f, 1000.0f);
     }
 
     if (ImGui::CollapsingHeader(ICON_FA_IMAGE " Textures", ImGuiTreeNodeFlags_DefaultOpen))

@@ -170,6 +170,11 @@ namespace YAEngine
     QualityLevelToSampleCounts(m_AOQualityLevel, consts.sliceCount, consts.stepsPerSlice);
     consts.padding0 = 0;
 
+    consts.ssgiRadius = m_SSGIRadius;
+    consts.ssgiThickness = m_SSGIThickness;
+    consts.ssgiIntensity = m_SSGIIntensity;
+    consts.padding1 = 0;
+
     m_GTAOConstantsUBOs[frameIndex].Update(consts);
   }
 }

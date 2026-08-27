@@ -3,6 +3,7 @@ layout(location = 0) out vec4 outColor;
 
 #include "common.glsl"
 #include "octahedron.glsl"
+#include "debug_ramps.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D frame;
 layout(set = 1, binding = 1) uniform sampler2D aoTexture;
@@ -10,6 +11,10 @@ layout(set = 1, binding = 2) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 3) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 4) uniform sampler2D velocityTexture;
 layout(set = 1, binding = 5) uniform sampler2D preResolveTexture;
+// SSGI diagnostics: the denoised screen irradiance + fallback weight, and the
+// reprojected radiance whose alpha is the reprojection validity.
+layout(set = 1, binding = 6) uniform sampler2D ssgiTexture;
+layout(set = 1, binding = 7) uniform sampler2D ssgiRadianceTexture;
 
 layout(std430, set = 2, binding = 0) readonly buffer ExposureSSBO
 {
@@ -25,8 +30,8 @@ void main()
   // Debug views - raw G-buffer, no tone mapping
   switch (u_Frame.currentTexture)
   {
-  case 1: // Albedo
-    outColor = vec4(texture(gbuffer0Texture, uv).rgb, 1.0);
+  case 1: // Albedo (linear g-buffer value, needs gamma encoding like the final image)
+    outColor = vec4(pow(texture(gbuffer0Texture, uv).rgb, vec3(1.0 / u_Frame.gamma)), 1.0);
     return;
   case 2: // Metallic (from GBuffer0.a)
     outColor = vec4(vec3(texture(gbuffer0Texture, uv).a), 1.0);
@@ -75,14 +80,36 @@ void main()
       outColor = vec4(abs(velocity) * 200.0, 0.0, 1.0);
     }
     return;
+  case DEBUG_VIEW_SSGI_VALIDITY: // white = history reprojects cleanly, black = disocclusion
+    {
+      float validity = texture(ssgiRadianceTexture, uv).a;
+      outColor = vec4(vec3(validity), 1.0);
+    }
+    return;
+  case DEBUG_VIEW_SSGI_SCREEN: // screen-gathered irradiance alone, HDR so tone-mapped
+    {
+      vec3 color = texture(ssgiTexture, uv).rgb;
+      float ssgiExposure = autoExposure * u_Frame.exposure;
+      color = applyTonemap(color * ssgiExposure);
+      color = pow(color, vec3(1.0 / u_Frame.gamma));
+      outColor = vec4(color, 1.0);
+    }
+    return;
+  case DEBUG_VIEW_SSGI_FALLBACK: // white = all volume fallback, black = all screen
+    outColor = vec4(debugFallbackHeat(texture(ssgiTexture, uv).a), 1.0);
+    return;
   case DEBUG_VIEW_AMBIENT_ONLY:     // raw linear ambient term, no direct light
   case DEBUG_VIEW_AMBIENT_DIFFUSE:  // diffuse half of it - irradiance volumes
   case DEBUG_VIEW_AMBIENT_SPECULAR: // specular half of it - reflection probes
+    // deferred_lighting.frag already wrote the final value, and Render forces SSR
+    // and TAA off for these views, so `frame` still holds it unmodified. Still
+    // linear light though, so it needs the same gamma encoding as the final image.
+    outColor = vec4(pow(texture(frame, uv).rgb, vec3(1.0 / u_Frame.gamma)), 1.0);
+    return;
   case DEBUG_VIEW_PROBE_INDEX:      // one color per dominant probe, black = no local probe
   case DEBUG_VIEW_PROBE_FALLBACK:   // heat ramp of the skybox fallback share
   case DEBUG_VIEW_VOLUME_COVERAGE:  // one color per irradiance volume, black = skybox
-    // deferred_lighting.frag already wrote the final value, and Render forces SSR
-    // and TAA off for these views, so `frame` still holds it unmodified.
+    // These are synthetic display-space colors, not linear light - no gamma encoding.
     outColor = vec4(texture(frame, uv).rgb, 1.0);
     return;
   }

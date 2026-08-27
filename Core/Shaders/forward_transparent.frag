@@ -14,8 +14,10 @@ void main()
 {
   float gamma = u_Frame.gamma;
 
+  vec2 uv = materialUV(inTexCoord);
+
   float hasAlbedoTexture = float(u_Material.textureMask & 1);
-  vec4 albedoTex = mix(vec4(1.0), texture(baseColorTexture, inTexCoord), hasAlbedoTexture);
+  vec4 albedoTex = mix(vec4(1.0), texture(baseColorTexture, uv), hasAlbedoTexture);
   vec4 albedo = vec4(u_Material.albedo, 1.0) * albedoTex;
 
   float alpha = albedo.a * u_Material.opacity;
@@ -25,18 +27,18 @@ void main()
   albedo.rgb = pow(albedo.rgb, vec3(gamma));
 
   float hasNormalMap = float((u_Material.textureMask >> 5) & 1);
-  vec3 n_ts = sampleMaterialNormal(inTexCoord);
+  vec3 n_ts = sampleMaterialNormal(uv);
   vec3 normal = mix(normalize(inNormal), normalize(inTBN * n_ts), hasNormalMap);
 
   float hasMetallicTexture = float((u_Material.textureMask >> 1) & 1);
-  vec4 metallicSample = texture(metallicTexture, inTexCoord);
+  vec4 metallicSample = texture(metallicTexture, uv);
   float metallic = u_Material.metallic * mix(1.0, metallicSample.b, hasMetallicTexture);
 
   float combinedTextures = float((u_Material.textureMask >> 8) & 1);
 
   float hasRoughnessTexture = float((u_Material.textureMask >> 2) & 1);
   float roughness = u_Material.roughness * mix(
-    mix(1.0, texture(roughnessTexture, inTexCoord).r, hasRoughnessTexture),
+    mix(1.0, texture(roughnessTexture, uv).r, hasRoughnessTexture),
     metallicSample.g,
     combinedTextures
   );
@@ -51,7 +53,7 @@ void main()
   vec3 ambient = computeAmbientIBL(worldPos, normal, R, roughness, NdotV, f0, albedo.rgb, metallic);
   vec3 Lo = computeDirectLighting(worldPos, viewPos, normal, viewVec, albedo.rgb, metallic, roughness, f0, NdotV, ivec2(gl_FragCoord.xy));
 
-  vec3 resultColor = max(ambient + Lo + materialEmissive(inTexCoord), vec3(0.0));
+  vec3 resultColor = max(ambient + Lo + materialEmissive(uv), vec3(0.0));
 
   if (u_Frame.fogEnabled != 0)
   {

@@ -1,0 +1,132 @@
+layout(local_size_x = 8, local_size_y = 8) in;
+
+#include "common.glsl"
+#include "reprojection.glsl"
+
+layout(set = 1, binding = 0) uniform sampler2D historyTexture;
+layout(set = 1, binding = 1) uniform sampler2D velocityTexture;
+layout(set = 1, binding = 2) uniform sampler2D depthTexture;
+layout(set = 1, binding = 3, rgba16f) uniform writeonly image2D outRadianceMip0;
+layout(set = 1, binding = 4, rgba16f) uniform writeonly image2D outRadianceMip1;
+layout(set = 1, binding = 5, rgba16f) uniform writeonly image2D outRadianceMip2;
+layout(set = 1, binding = 6, rgba16f) uniform writeonly image2D outRadianceMip3;
+layout(set = 1, binding = 7, rgba16f) uniform writeonly image2D outRadianceMip4;
+
+// Forces validity to zero for one frame: first frame, TAA history reset, resize.
+// The cleared history itself is a valid black image, so without this flag SSGI
+// would gather darkness with full confidence instead of falling back to volumes.
+layout(push_constant) uniform PushConstants { int invalidateHistory; } u_Push;
+
+// Reprojected history is last frame's lit scene: a single specular sparkle can be
+// hundreds of units bright and would smear into a firework along the march. The
+// clamp runs once here rather than per sample in the GTAO loop.
+const float SSGI_RADIANCE_CLAMP = 8.0;
+
+const float BACKGROUND_DEPTH = 0.0;
+
+// Same reduction structure as the GTAO depth prefilter: each invocation owns a
+// 2x2 block, one 8x8 group covers a 16x16 tile and folds four mips through
+// shared memory in a single dispatch.
+shared vec4 g_ScratchRadiance[8][8];
+
+// The rgb of a mip texel is the mean of its VALID sources only, the alpha the
+// mean validity. A plain average would drag disocclusion-edge texels toward
+// zero and the march would gather darkness from the invalid half.
+vec4 ssgiRadianceMipFilter(vec4 s0, vec4 s1, vec4 s2, vec4 s3)
+{
+  float weightSum = s0.a + s1.a + s2.a + s3.a;
+  vec3 rgb = weightSum > 1e-4
+    ? (s0.rgb * s0.a + s1.rgb * s1.a + s2.rgb * s2.a + s3.rgb * s3.a) / weightSum
+    : vec3(0.0);
+  return vec4(rgb, weightSum * 0.25);
+}
+
+vec4 ReprojectPixel(ivec2 coord, ivec2 maxCoord)
+{
+  ivec2 clamped = min(coord, maxCoord);
+  vec2 uv = (vec2(clamped) + 0.5)
+    / vec2(u_Frame.screenWidth, u_Frame.screenHeight);
+
+  // Identical reprojection rule to taa.frag, background pixels included: the
+  // radiance must come from where TAA put this pixel's history, nowhere else.
+  float depth = texelFetch(depthTexture, clamped, 0).r;
+  vec2 velocity = depth <= BACKGROUND_DEPTH
+    ? backgroundVelocity(uv * 2.0 - 1.0)
+    : texelFetch(velocityTexture, clamped, 0).rg;
+
+  vec2 historyUV = uv - velocity;
+
+  bool inBounds = historyUV.x >= 0.0 && historyUV.x <= 1.0
+               && historyUV.y >= 0.0 && historyUV.y <= 1.0;
+  float validity = (inBounds && u_Push.invalidateHistory == 0) ? 1.0 : 0.0;
+
+  if (validity == 0.0)
+    return vec4(0.0);
+
+  vec3 radiance = texture(historyTexture, historyUV).rgb;
+
+  float peak = max(radiance.r, max(radiance.g, radiance.b));
+  radiance *= min(1.0, SSGI_RADIANCE_CLAMP / max(peak, 1e-4));
+
+  return vec4(radiance, validity);
+}
+
+void main()
+{
+  ivec2 baseCoord = ivec2(gl_GlobalInvocationID.xy);
+  ivec2 pixCoord = baseCoord * 2;
+  ivec2 groupThreadID = ivec2(gl_LocalInvocationID.xy);
+  ivec2 maxCoord = ivec2(u_Frame.screenWidth, u_Frame.screenHeight) - 1;
+
+  vec4 rad0 = ReprojectPixel(pixCoord + ivec2(0, 0), maxCoord);
+  vec4 rad1 = ReprojectPixel(pixCoord + ivec2(1, 0), maxCoord);
+  vec4 rad2 = ReprojectPixel(pixCoord + ivec2(0, 1), maxCoord);
+  vec4 rad3 = ReprojectPixel(pixCoord + ivec2(1, 1), maxCoord);
+
+  imageStore(outRadianceMip0, pixCoord + ivec2(0, 0), rad0);
+  imageStore(outRadianceMip0, pixCoord + ivec2(1, 0), rad1);
+  imageStore(outRadianceMip0, pixCoord + ivec2(0, 1), rad2);
+  imageStore(outRadianceMip0, pixCoord + ivec2(1, 1), rad3);
+
+  vec4 rm1 = ssgiRadianceMipFilter(rad0, rad1, rad2, rad3);
+  imageStore(outRadianceMip1, baseCoord, rm1);
+  g_ScratchRadiance[groupThreadID.x][groupThreadID.y] = rm1;
+
+  barrier();
+
+  if (all(equal(groupThreadID % 2, ivec2(0))))
+  {
+    vec4 rm2 = ssgiRadianceMipFilter(
+      g_ScratchRadiance[groupThreadID.x + 0][groupThreadID.y + 0],
+      g_ScratchRadiance[groupThreadID.x + 1][groupThreadID.y + 0],
+      g_ScratchRadiance[groupThreadID.x + 0][groupThreadID.y + 1],
+      g_ScratchRadiance[groupThreadID.x + 1][groupThreadID.y + 1]);
+    imageStore(outRadianceMip2, baseCoord / 2, rm2);
+    g_ScratchRadiance[groupThreadID.x][groupThreadID.y] = rm2;
+  }
+
+  barrier();
+
+  if (all(equal(groupThreadID % 4, ivec2(0))))
+  {
+    vec4 rm3 = ssgiRadianceMipFilter(
+      g_ScratchRadiance[groupThreadID.x + 0][groupThreadID.y + 0],
+      g_ScratchRadiance[groupThreadID.x + 2][groupThreadID.y + 0],
+      g_ScratchRadiance[groupThreadID.x + 0][groupThreadID.y + 2],
+      g_ScratchRadiance[groupThreadID.x + 2][groupThreadID.y + 2]);
+    imageStore(outRadianceMip3, baseCoord / 4, rm3);
+    g_ScratchRadiance[groupThreadID.x][groupThreadID.y] = rm3;
+  }
+
+  barrier();
+
+  if (all(equal(groupThreadID % 8, ivec2(0))))
+  {
+    vec4 rm4 = ssgiRadianceMipFilter(
+      g_ScratchRadiance[groupThreadID.x + 0][groupThreadID.y + 0],
+      g_ScratchRadiance[groupThreadID.x + 4][groupThreadID.y + 0],
+      g_ScratchRadiance[groupThreadID.x + 0][groupThreadID.y + 4],
+      g_ScratchRadiance[groupThreadID.x + 4][groupThreadID.y + 4]);
+    imageStore(outRadianceMip4, baseCoord / 8, rm4);
+  }
+}

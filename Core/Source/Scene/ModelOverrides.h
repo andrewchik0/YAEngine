@@ -32,6 +32,10 @@ namespace YAEngine
     // "Cafe::0/3" for a node inside a model, plain entity name otherwise
     std::string MakeEntityReference(Scene& scene, AssetManager& assets, Entity entity);
 
+    // Same reference built from a template node index instead of a live entity. Empty for the
+    // model root, which is addressable by its own name, and for an index the model does not have.
+    std::string MakeNodeReference(Scene& scene, AssetManager& assets, Entity modelRoot, uint32_t nodeIndex);
+
     // Splits "Cafe::0/3" into the model root name and the node path. False for a plain name.
     bool SplitEntityReference(const std::string& reference, std::string& outName, std::string& outNodePath);
 

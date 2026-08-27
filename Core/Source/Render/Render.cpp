@@ -80,6 +80,7 @@ namespace YAEngine
     InitPipelines();
     CreateHiZResources();
     CreateGTAOResources();
+    CreateSSGIResources();
     CreateBloomResources();
 
     m_Backend.InitImGui(window, m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
@@ -147,6 +148,7 @@ namespace YAEngine
     DestroyBloomResources();
     DestroyHiZResources();
     DestroyGTAOResources();
+    DestroySSGIResources();
 
     for (auto& fb : m_TAAFramebuffers)
     {
@@ -173,6 +175,8 @@ namespace YAEngine
     for (auto& set : m_SSRPassDescriptorSets)
       set.Destroy();
     for (auto& set : m_GTAOPrefilterDescriptorSets)
+      set.Destroy();
+    for (auto& set : m_SSGIPrefilterDescriptorSets)
       set.Destroy();
     for (auto& set : m_GTAOPassDescriptorSets)
       set.Destroy();
@@ -237,12 +241,14 @@ namespace YAEngine
     DestroyBloomResources();
     DestroyHiZResources();
     DestroyGTAOResources();
+    DestroySSGIResources();
 
     // Resize graph (recreates managed resources and non-external framebuffers)
     m_Graph.Resize(actualExtent);
 
     CreateHiZResources();
     CreateGTAOResources();
+    CreateSSGIResources();
     CreateBloomResources();
 
     {
@@ -391,6 +397,8 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.aoMultiBounce = m_AOMultiBounce;
     m_FrameUniformBuffer.uniforms.ssrEnabled = b_SSREnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.ssrIntensity = m_SSRIntensity;
+    // SSGI rides the GTAO pass, so it cannot outlive the AO toggle.
+    m_FrameUniformBuffer.uniforms.ssgiEnabled = (b_SSGIEnabled && b_AOEnabled) ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaClampSigma = m_TAAClampSigma;
 
@@ -416,6 +424,10 @@ namespace YAEngine
 
     auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
     auto historyRead = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
+
+    // SSGI reprojects the resolved image of the PREVIOUS frame, which is exactly
+    // the history the TAA resolve below reads.
+    m_Graph.SetPassInput(m_SSGIRadiancePrefilterPassIndex, 0, historyRead);
 
     m_Graph.SetPassInput(m_TAAPassIndex, 1, historyRead);
     m_Graph.SetPassColorOutput(m_TAAPassIndex, 0, historyWrite);

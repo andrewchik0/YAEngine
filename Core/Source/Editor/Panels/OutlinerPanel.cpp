@@ -22,6 +22,72 @@ namespace YAEngine
     return it != haystack.end();
   }
 
+  // Covers the model root, its nodes, and anything the user parented under them, so the
+  // node-authoring items stay available on hand-made children too
+  static bool IsInsideModel(Scene& scene, Entity entity)
+  {
+    for (Entity e = entity; e != entt::null; e = scene.GetHierarchy(e).parent)
+    {
+      if (scene.HasComponent<ModelSourceComponent>(e))
+        return true;
+    }
+    return false;
+  }
+
+  void OutlinerPanel::TakeRevealRequest(EditorContext& context)
+  {
+    Entity reveal = context.ConsumeRevealRequest();
+    if (reveal == entt::null || context.scene == nullptr)
+      return;
+
+    if (!context.scene->GetRegistry().valid(reveal))
+      return;
+
+    m_RevealTarget = reveal;
+    m_RevealChain.clear();
+    for (Entity a = context.scene->GetHierarchy(reveal).parent; a != entt::null;
+      a = context.scene->GetHierarchy(a).parent)
+    {
+      m_RevealChain.push_back(a);
+    }
+
+    // A target the filter hides would not be drawn at all, and the button would look dead
+    m_FilterText[0] = '\0';
+    ImGui::SetWindowFocus("Outliner");
+  }
+
+  Entity OutlinerPanel::DuplicateModel(EditorContext& context, Entity entity)
+  {
+    auto& scene = *context.scene;
+
+    // A Model asset points back at exactly one root entity, so a second instance can only
+    // come from loading the file again - copying the components would give two roots one asset
+    auto& source = scene.GetComponent<ModelSourceComponent>(entity);
+    std::string path = source.path;
+    bool combined = source.combinedTextures;
+
+    Entity parent = scene.GetHierarchy(entity).parent;
+    LocalTransform transform = scene.GetTransform(entity);
+    Name name = scene.MakeUniqueEntityName(scene.GetName(entity) + " (Copy)");
+
+    auto handle = context.assetManager->Models().Load(path, combined);
+    if (!handle)
+    {
+      YA_LOG_WARN("Assets", "Duplicate failed: model '%s' could not be loaded", path.c_str());
+      return entt::null;
+    }
+
+    Entity copy = context.assetManager->Models().Get(handle).rootEntity;
+    scene.GetName(copy) = name;
+    scene.GetTransform(copy) = transform;
+
+    if (parent != entt::null)
+      scene.SetParent(copy, parent);
+
+    scene.MarkDirty(copy);
+    return copy;
+  }
+
   bool OutlinerPanel::MatchesFilter(EditorContext& context, Entity entity)
   {
     if (m_FilterText[0] == '\0')
@@ -219,6 +285,12 @@ namespace YAEngine
     if (isRenaming)
       flags |= ImGuiTreeNodeFlags_AllowOverlap;
 
+    if (m_RevealTarget != entt::null
+      && std::find(m_RevealChain.begin(), m_RevealChain.end(), entity) != m_RevealChain.end())
+    {
+      ImGui::SetNextItemOpen(true);
+    }
+
     ImGui::SetNextItemAllowOverlap();
     bool opened = ImGui::TreeNodeEx(
       (void*)(uint64_t)entity,
@@ -226,6 +298,9 @@ namespace YAEngine
       "%s",
       isRenaming ? icon : label
     );
+
+    if (entity == m_RevealTarget)
+      ImGui::SetScrollHereY(0.5f);
 
     if (isRenaming)
     {
@@ -274,6 +349,45 @@ namespace YAEngine
     {
       if (ImGui::MenuItem(ICON_FA_PEN " Rename"))
         BeginRename(context, entity);
+
+      // Both branches invalidate hc and opened by creating entities, so they finish the
+      // popup and the tree node from the values captured here and bail out of the frame
+      bool hadChildren = (hc.firstChild != entt::null);
+
+      bool isModelInstance = scene.HasComponent<ModelSourceComponent>(entity);
+
+      if ((isModelInstance || context.componentRegistry != nullptr)
+        && ImGui::MenuItem(ICON_FA_CLONE " Duplicate"))
+      {
+        Entity copy = isModelInstance
+          ? DuplicateModel(context, entity)
+          : scene.DuplicateEntity(entity, *context.componentRegistry);
+
+        ImGui::EndPopup();
+        if (opened && hadChildren)
+          ImGui::TreePop();
+
+        if (copy != entt::null)
+        {
+          context.SelectEntity(copy);
+          BeginRename(context, copy);
+        }
+        return;
+      }
+
+      if (IsInsideModel(scene, entity) && ImGui::MenuItem(ICON_FA_SQUARE_PLUS " Add Node"))
+      {
+        Entity node = scene.CreateEntity(scene.MakeUniqueEntityName("Node"));
+        scene.SetParent(node, entity);
+
+        ImGui::EndPopup();
+        if (opened && hadChildren)
+          ImGui::TreePop();
+
+        context.SelectEntity(node);
+        BeginRename(context, node);
+        return;
+      }
 
       if (scene.HasComponent<MeshComponent>(entity))
       {
@@ -373,9 +487,13 @@ namespace YAEngine
       ImGui::PopID();
     }
 
-    if (opened && hc.firstChild != entt::null)
+    // The Create menu above can spawn entities, which reallocates the hierarchy pool and
+    // leaves the hc taken at the top of this function dangling
+    auto& tailHc = scene.GetComponent<HierarchyComponent>(entity);
+
+    if (opened && tailHc.firstChild != entt::null)
     {
-      Entity child = hc.firstChild;
+      Entity child = tailHc.firstChild;
       while (child != entt::null)
       {
         auto& childHc = scene.GetComponent<HierarchyComponent>(child);
@@ -390,6 +508,10 @@ namespace YAEngine
 
   void OutlinerPanel::OnRender(EditorContext& context)
   {
+    TakeRevealRequest(context);
+
+    // A pending reveal survives a collapsed window: the request above already pulled the
+    // panel forward, and the chain is only cleared once it has actually been drawn
     if (!ImGui::Begin("Outliner"))
     {
       ImGui::End();
@@ -413,6 +535,9 @@ namespace YAEngine
       ImGuiTreeNodeFlags_OpenOnArrow |
       ImGuiTreeNodeFlags_SpanFullWidth;
 
+    if (m_RevealTarget != entt::null)
+      ImGui::SetNextItemOpen(true);
+
     if (ImGui::TreeNodeEx(ICON_FA_GLOBE " Scene", sceneFlags))
     {
       auto hierarchyView = context.scene->GetView<LocalTransform, HierarchyComponent>();
@@ -433,6 +558,9 @@ namespace YAEngine
 
     if (ImGui::IsWindowHovered() && ImGui::IsMouseClicked(ImGuiMouseButton_Left) && !ImGui::IsAnyItemHovered())
       context.ClearSelection();
+
+    m_RevealTarget = entt::null;
+    m_RevealChain.clear();
 
     ImGui::End();
   }

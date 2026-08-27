@@ -9,6 +9,10 @@ layout(set = 1, binding = 0) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 1) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 2) uniform sampler2D depthTexture;
 layout(set = 1, binding = 3) uniform sampler2D aoTexture;
+// Denoised SSGI: screen irradiance rgb + volume fallback weight in alpha, and
+// the bent normal the fallback is looked up with. Read only while SSGI is on.
+layout(set = 1, binding = 4) uniform sampler2D ssgiTexture;
+layout(set = 1, binding = 5) uniform sampler2D ssgiBentTexture;
 
 const float SKY_DEPTH = 0.0;
 
@@ -100,10 +104,27 @@ void main()
   vec3 f0 = mix(vec3(0.04), albedo, metallic);
   vec3 R = reflect(-viewVec, normal);
 
+  bool useSSGI = u_Frame.ssgiEnabled != 0;
+
   vec3 ambientDiffuse;
   vec3 ambientSpecular;
-  vec3 ambient = computeAmbientIBLSplit(worldPos, normal, R, roughness, NdotV,
-    f0, albedo, metallic, ambientDiffuse, ambientSpecular);
+  vec3 ambient;
+  if (useSSGI)
+  {
+    // Screen part plus weighted volume fallback - the two complete each other to
+    // a full hemisphere, see computeAmbientIBLSplit. The fallback is sampled
+    // along the bent normal: near a wall the open sky sits to the side, not
+    // "on average up".
+    vec4 ssgi = texture(ssgiTexture, uv);
+    vec3 bentNormal = octDecode(texture(ssgiBentTexture, uv).rg * 2.0 - 1.0);
+    ambient = computeAmbientIBLSplit(worldPos, normal, bentNormal, R, roughness, NdotV,
+      f0, albedo, metallic, ssgi, ambientDiffuse, ambientSpecular);
+  }
+  else
+  {
+    ambient = computeAmbientIBLSplit(worldPos, normal, R, roughness, NdotV,
+      f0, albedo, metallic, ambientDiffuse, ambientSpecular);
+  }
 
   // Indirect debug views return the raw diagnostic value and stop here. AO, fog,
   // tone mapping, exposure and bloom are all downstream of this point, and SSR/TAA
@@ -152,10 +173,18 @@ void main()
   {
     float ao = texture(aoTexture, uv).r;
 
-    vec3 diffuseOcclusion = mix(vec3(ao), gtaoMultiBounce(ao, albedo), u_Frame.aoMultiBounce);
-    float specularOcclusion = computeSpecularOcclusion(NdotV, ao, roughness);
+    // With SSGI on, the diffuse occlusion block is skipped ENTIRELY: the screen
+    // gather already carries per-direction visibility, so multiplying AO in would
+    // shadow the diffuse twice, and multi-bounce was an approximation of exactly
+    // the interreflection SSGI now computes for real. Specular occlusion stays:
+    // the reflection probes know nothing about screen geometry either way.
+    if (!useSSGI)
+    {
+      vec3 diffuseOcclusion = mix(vec3(ao), gtaoMultiBounce(ao, albedo), u_Frame.aoMultiBounce);
+      ambientDiffuse *= mix(vec3(1.0), diffuseOcclusion, u_Frame.aoStrength);
+    }
 
-    ambientDiffuse *= mix(vec3(1.0), diffuseOcclusion, u_Frame.aoStrength);
+    float specularOcclusion = computeSpecularOcclusion(NdotV, ao, roughness);
     ambientSpecular *= mix(1.0, specularOcclusion, u_Frame.aoSpecularStrength);
   }
 

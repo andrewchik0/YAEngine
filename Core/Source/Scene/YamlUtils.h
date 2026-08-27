@@ -6,6 +6,20 @@
 
 namespace YAEngine
 {
+  inline YAML::Node SerializeVec2(const glm::vec2& v)
+  {
+    YAML::Node n;
+    n.push_back(v.x);
+    n.push_back(v.y);
+    n.SetStyle(YAML::EmitterStyle::Flow);
+    return n;
+  }
+
+  inline glm::vec2 DeserializeVec2(const YAML::Node& n)
+  {
+    return { n[0].as<float>(), n[1].as<float>() };
+  }
+
   inline YAML::Node SerializeVec3(const glm::vec3& v)
   {
     YAML::Node n;

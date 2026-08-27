@@ -129,6 +129,10 @@ namespace YAEngine
     float& GetAOThinOccluderCompensation() { return m_AOThinOccluderCompensation; }
     float& GetAOFinalValuePower() { return m_AOFinalValuePower; }
     float& GetAODepthMipSamplingOffset() { return m_AODepthMipSamplingOffset; }
+    bool& GetSSGIEnabled() { return b_SSGIEnabled; }
+    float& GetSSGIRadius() { return m_SSGIRadius; }
+    float& GetSSGIThickness() { return m_SSGIThickness; }
+    float& GetSSGIIntensity() { return m_SSGIIntensity; }
     bool& GetSSREnabled() { return b_SSREnabled; }
     float& GetSSRIntensity() { return m_SSRIntensity; }
     bool& GetTAAEnabled() { return b_TAAEnabled; }
@@ -190,6 +194,21 @@ namespace YAEngine
     float m_AOThinOccluderCompensation = 0.0f;
     float m_AOFinalValuePower = 2.2f;
     float m_AODepthMipSamplingOffset = 3.3f;
+    bool b_SSGIEnabled = false;
+    // World-space gather radius of the SSGI march, in meters. Deliberately wider than
+    // the AO radius: the diffuse bounce needs to reach lit surfaces several meters away,
+    // while the contact occlusion integral keeps its own falloff at m_AORadius.
+    float m_SSGIRadius = 3.0f;
+    // World-space depth extent assumed behind every screen sample, in meters. The depth
+    // buffer only knows front surfaces; this is how far each one occludes behind itself.
+    float m_SSGIThickness = 0.3f;
+    // Artistic multiplier on the screen-gathered irradiance only. The volume fallback
+    // weight is untouched, so values above 1 break energy conservation knowingly.
+    float m_SSGIIntensity = 1.0f;
+    // Forces the reprojection validity to zero for one frame: set whenever the TAA
+    // history was cleared or resized, so SSGI never gathers radiance from a cleared
+    // or stale history image.
+    bool b_SSGIInvalidatePending = true;
     bool b_SSREnabled = true;
     // Artistic multiplier on the SSR mask. Fresnel keeps dielectric reflections near 4%,
     // so values above 1 are the usual way to make them readable.
@@ -291,6 +310,8 @@ namespace YAEngine
     void CreateGTAOResources();
     void DestroyGTAOResources();
     void UpdateGTAOConstants(uint32_t frameIndex);
+    void CreateSSGIResources();
+    void DestroySSGIResources();
     void CreateBloomResources();
     void DestroyBloomResources();
 
@@ -325,6 +346,14 @@ namespace YAEngine
     RGHandle m_GTAOWorkingAO {};  // R8_UNORM: raw visibility, scaled down for packing
     RGHandle m_GTAOEdges {};      // R8_UNORM: 2 bits of edge strength per neighbour
     RGHandle m_AOFinal {};        // R8_UNORM: denoised occlusion consumed by the lighting pass
+    // SSGI resources. Radiance is last frame's TAA history reprojected to this frame,
+    // validity in alpha; Working/Final carry screen irradiance rgb + fallback weight
+    // in alpha; the bent targets hold the mean unoccluded direction, octahedral.
+    RGHandle m_SSGIRadiance {};    // RGBA16F, GTAO_DEPTH_MIP_LEVELS mips
+    RGHandle m_SSGIWorking {};     // RGBA16F: raw main pass output
+    RGHandle m_SSGIFinal {};       // RGBA16F: denoised, consumed by deferred lighting
+    RGHandle m_SSGIBentWorking {}; // R8G8_UNORM: octahedral bent normal, raw
+    RGHandle m_SSGIBentFinal {};   // R8G8_UNORM: octahedral bent normal, denoised
     RGHandle m_TAAHistory0 {};
     RGHandle m_TAAHistory1 {};
 
@@ -393,6 +422,7 @@ namespace YAEngine
     uint32_t m_DepthPrepassIndex {};
     uint32_t m_GBufferPassIndex {};
     uint32_t m_GTAODepthPrefilterPassIndex {};
+    uint32_t m_SSGIRadiancePrefilterPassIndex {};
     uint32_t m_GTAOPassIndex {};
     uint32_t m_HiZPassIndex {};
     uint32_t m_GTAODenoisePassIndex {};
@@ -434,6 +464,7 @@ namespace YAEngine
     std::vector<VulkanDescriptorSet> m_SSRPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_TAADescriptorSets;
     std::vector<VulkanDescriptorSet> m_GTAOPrefilterDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_SSGIPrefilterDescriptorSets;
     std::vector<VulkanDescriptorSet> m_GTAOPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_GTAODenoiseDescriptorSets;
     std::vector<VulkanDescriptorSet> m_LightCullInputDescriptorSets;
@@ -455,6 +486,8 @@ namespace YAEngine
     PipelineHandle m_SSRPipeline {};
     PipelineHandle m_GTAOPrefilterPipeline {};
     PipelineHandle m_GTAOPipeline {};
+    PipelineHandle m_GTAOSSGIPipeline {};
+    PipelineHandle m_SSGIRadiancePrefilterPipeline {};
     PipelineHandle m_GTAODenoisePipeline {};
     PipelineHandle m_HiZPipeline {};
     PipelineHandle m_LightCullPipeline {};
@@ -472,6 +505,7 @@ namespace YAEngine
     VulkanTexture m_GTAOHilbertLUT;
     std::vector<VulkanUniformBuffer> m_GTAOConstantsUBOs;
     std::vector<VkImageView> m_GTAODepthMipViews;
+    std::vector<VkImageView> m_SSGIRadianceMipViews;
     CubicTextureResources m_CubicResources;
 
     std::vector<VkImageView> m_HiZMipViews;

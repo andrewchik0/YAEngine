@@ -57,22 +57,28 @@ namespace YAEngine::ModelOverrides
     return true;
   }
 
+  std::string MakeNodeReference(Scene& scene, AssetManager& assets, Entity modelRoot, uint32_t nodeIndex)
+  {
+    // The model root is addressable by its own name - it is a regular scene entry
+    if (modelRoot == entt::null || nodeIndex == 0)
+      return {};
+
+    auto* model = FindModel(scene, assets, modelRoot);
+    if (model == nullptr || nodeIndex >= model->modelTemplate->nodes.size())
+      return {};
+
+    return scene.GetName(modelRoot) + NODE_SEPARATOR
+         + model->modelTemplate->nodes[nodeIndex].indexPath;
+  }
+
   std::string MakeEntityReference(Scene& scene, AssetManager& assets, Entity entity)
   {
     if (!scene.HasComponent<ModelNodeComponent>(entity))
       return scene.GetName(entity);
 
     auto& node = scene.GetComponent<ModelNodeComponent>(entity);
-    // The model root is addressable by its own name - it is a regular scene entry
-    if (node.nodeIndex == 0 || node.modelRoot == entt::null)
-      return scene.GetName(entity);
-
-    auto* model = FindModel(scene, assets, node.modelRoot);
-    if (model == nullptr || node.nodeIndex >= model->modelTemplate->nodes.size())
-      return scene.GetName(entity);
-
-    return scene.GetName(node.modelRoot) + NODE_SEPARATOR
-         + model->modelTemplate->nodes[node.nodeIndex].indexPath;
+    auto reference = MakeNodeReference(scene, assets, node.modelRoot, node.nodeIndex);
+    return reference.empty() ? scene.GetName(entity) : reference;
   }
 
   Entity ResolveNodeReference(Scene& scene, AssetManager& assets, Entity modelRoot,
@@ -146,6 +152,7 @@ namespace YAEngine::ModelOverrides
     if (material.doubleSided != pristine.doubleSided) n["doubleSided"] = material.doubleSided;
     if (material.transparent != pristine.transparent) n["transparent"] = material.transparent;
     if (material.opacity != pristine.opacity) n["opacity"] = material.opacity;
+    if (material.uvScale != pristine.uvScale) n["uvScale"] = SerializeVec2(material.uvScale);
     if (material.shadingModel != pristine.shadingModel)
       n["shadingModel"] = (material.shadingModel == ShadingModel::Unlit) ? "unlit" : "lit";
 
@@ -203,6 +210,7 @@ namespace YAEngine::ModelOverrides
     if (n["doubleSided"]) material.doubleSided = n["doubleSided"].as<bool>();
     if (n["transparent"]) material.transparent = n["transparent"].as<bool>();
     if (n["opacity"]) material.opacity = n["opacity"].as<float>();
+    if (n["uvScale"]) material.uvScale = DeserializeVec2(n["uvScale"]);
     if (n["shadingModel"])
     {
       auto mode = n["shadingModel"].as<std::string>();

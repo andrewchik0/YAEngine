@@ -213,6 +213,8 @@ namespace YAEngine
           n["transparent"] = true;
         if (mat.opacity != 1.0f)
           n["opacity"] = mat.opacity;
+        if (mat.uvScale != glm::vec2(1.0f))
+          n["uvScale"] = SerializeVec2(mat.uvScale);
 
         auto& textures = assets.Textures();
         SerializeTextureField(n, "baseColorTexture", mat.baseColorTexture, textures, assets);
@@ -244,6 +246,7 @@ namespace YAEngine
         if (n["combinedTextures"]) mat.combinedTextures = n["combinedTextures"].as<bool>();
         if (n["transparent"]) mat.transparent = n["transparent"].as<bool>();
         if (n["opacity"]) mat.opacity = n["opacity"].as<float>();
+        if (n["uvScale"]) mat.uvScale = DeserializeVec2(n["uvScale"]);
         if (n["shadingModel"])
         {
           auto sm = n["shadingModel"].as<std::string>();

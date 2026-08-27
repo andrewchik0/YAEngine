@@ -168,7 +168,7 @@ namespace YAEngine
 
   void OffscreenRenderer::InitDescriptors()
   {
-    // Deferred lighting set 1: GBuffer textures + AO (4 samplers, matching deferred_lighting.frag)
+    // Deferred lighting set 1: GBuffer textures + AO + SSGI (6 samplers, matching deferred_lighting.frag)
     SetDescription dlGBufferDesc = {
       .set = 1,
       .bindings = {
@@ -177,13 +177,21 @@ namespace YAEngine
           { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
     m_DeferredGBufferDescriptorSet.Init(*m_Ctx, dlGBufferDesc);
 
-    // AO is disabled for probe bakes - bind a dummy so the set stays layout-compatible
+    // AO and SSGI are disabled for probe bakes - bind dummies so the set stays layout-compatible
     m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(3,
+      m_Render->m_NoneTexture.GetView(), m_Render->m_NoneTexture.GetSampler(),
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(4,
+      m_Render->m_NoneTexture.GetView(), m_Render->m_NoneTexture.GetSampler(),
+      VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(5,
       m_Render->m_NoneTexture.GetView(), m_Render->m_NoneTexture.GetSampler(),
       VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
@@ -267,6 +275,9 @@ namespace YAEngine
     uniforms.aoStrength = 0.0f;
     uniforms.aoSpecularStrength = 0.0f;
     uniforms.aoMultiBounce = 0.0f;
+    // Forced off like AO and SSR above: probe and volume bakes must not read
+    // screen-space GI that the cube faces never rendered.
+    uniforms.ssgiEnabled = 0;
     uniforms.ssrEnabled = 0;
     uniforms.ssrIntensity = 0.0f;
     uniforms.taaEnabled = 0;

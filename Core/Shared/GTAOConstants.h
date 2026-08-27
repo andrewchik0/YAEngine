@@ -48,6 +48,14 @@ struct GTAOConstants
   int sliceCount;
   int stepsPerSlice;
   int padding0;
+
+  // SSGI (visibility bitmask) extension of the same pass. Radius and thickness are
+  // world-space meters; intensity is an artistic multiplier on the screen-gathered
+  // irradiance only, never on the volume fallback.
+  float ssgiRadius;
+  float ssgiThickness;
+  float ssgiIntensity;
+  int padding1;
 };
 
 #ifdef __cplusplus

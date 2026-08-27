@@ -4,6 +4,7 @@
 #include "common.glsl"
 #include "utils.glsl"
 #include "pbr.glsl"
+#include "debug_ramps.glsl"
 
 // Lights (set 2)
 #include "../Shared/LightData.h"
@@ -220,15 +221,11 @@ vec3 probeDebugColor(int arrayIndex)
   return vec3(0.65, 0.25, 1.0);
 }
 
-// Heat ramp for the amount that fell through to the skybox:
-// black = 0.0 (probes cover the pixel fully), red = 0.33, yellow = 0.66,
-// white = 1.0 (nothing but the skybox contributed).
+// Heat ramp for the amount that fell through to the skybox - shared ramp,
+// see debug_ramps.glsl.
 vec3 probeFallbackHeat(float amount)
 {
-  float t = clamp(amount, 0.0, 1.0) * 3.0;
-  vec3 c = mix(vec3(0.0), vec3(1.0, 0.0, 0.0), clamp(t, 0.0, 1.0));
-  c = mix(c, vec3(1.0, 1.0, 0.0), clamp(t - 1.0, 0.0, 1.0));
-  return mix(c, vec3(1.0), clamp(t - 2.0, 0.0, 1.0));
+  return debugFallbackHeat(amount);
 }
 
 // Skybox irradiance, atlas slot 0. This is the fallback everywhere no volume
@@ -436,18 +433,37 @@ vec3 computeSpecularIBL(vec3 worldPos, vec3 R, float roughness)
 // Same work as computeAmbientIBL, with the two halves also handed back on their own
 // for the diffuse/specular debug views. They always add up to the returned value,
 // so a view can never show a term the normal path does not shade.
-vec3 computeAmbientIBLSplit(vec3 worldPos, vec3 normal, vec3 R, float roughness, float NdotV,
-  vec3 f0, vec3 albedo, float metallic, out vec3 ambientDiffuse, out vec3 ambientSpecular)
+//
+// This overload additionally takes a diffuse irradiance override from SSGI:
+// rgb is the screen-gathered part, alpha the weight of the volume fallback.
+// computeDiffuseIBL is then a fallback source, not a replacement - the two terms
+// complete each other to a full hemisphere. diffuseNormal is the direction the
+// fallback is looked up with (the bent normal when SSGI runs), and this function
+// stays the single point that reads the volumes, as promised in
+// docs/render-pipeline.md.
+vec3 computeAmbientIBLSplit(vec3 worldPos, vec3 normal, vec3 diffuseNormal, vec3 R,
+  float roughness, float NdotV, vec3 f0, vec3 albedo, float metallic,
+  vec4 ssgiOverride, out vec3 ambientDiffuse, out vec3 ambientSpecular)
 {
   // shadeDiffuseIBL scales by (1 - metallic), so on pure metal the three volume
   // fetches plus the skybox fetch inside computeDiffuseIBL are all multiplied away.
   ambientDiffuse = metallic >= 1.0
     ? vec3(0.0)
-    : shadeDiffuseIBL(computeDiffuseIBL(worldPos, normal),
+    : shadeDiffuseIBL(
+        ssgiOverride.rgb + ssgiOverride.a * computeDiffuseIBL(worldPos, diffuseNormal),
         roughness, NdotV, f0, albedo, metallic);
   ambientSpecular = shadeSpecularIBL(computeSpecularIBL(worldPos, R, roughness),
     roughness, NdotV, f0);
   return ambientDiffuse + ambientSpecular;
+}
+
+// No-override variant: vec4(0, 0, 0, 1) is the identity - no screen part, the
+// volume fallback carries the whole hemisphere.
+vec3 computeAmbientIBLSplit(vec3 worldPos, vec3 normal, vec3 R, float roughness, float NdotV,
+  vec3 f0, vec3 albedo, float metallic, out vec3 ambientDiffuse, out vec3 ambientSpecular)
+{
+  return computeAmbientIBLSplit(worldPos, normal, normal, R, roughness, NdotV,
+    f0, albedo, metallic, vec4(0.0, 0.0, 0.0, 1.0), ambientDiffuse, ambientSpecular);
 }
 
 // Kept so both fragment shaders stay one call away from the full ambient term and

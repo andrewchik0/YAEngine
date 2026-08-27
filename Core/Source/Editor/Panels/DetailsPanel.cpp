@@ -1155,6 +1155,12 @@ namespace YAEngine
     else
       ImGui::Text("Entity %d", (int)entity);
 
+    const char* revealLabel = ICON_FA_SITEMAP " Show in Outliner";
+    float revealWidth = ImGui::CalcTextSize(revealLabel).x + ImGui::GetStyle().FramePadding.x * 2.0f;
+    ImGui::SameLine(ImGui::GetWindowWidth() - revealWidth - ImGui::GetStyle().WindowPadding.x);
+    if (ImGui::SmallButton(revealLabel))
+      context.RevealEntity(entity);
+
     ImGui::Separator();
 
     DrawModelNode(context, entity);

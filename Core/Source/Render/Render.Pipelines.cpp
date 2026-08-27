@@ -443,6 +443,9 @@ namespace YAEngine
           // TAA diagnostics: motion vectors and the pre-resolve frame
           { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          // SSGI diagnostics: denoised screen GI and the reprojected radiance
+          { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
@@ -560,6 +563,37 @@ namespace YAEngine
       0,
       pipelineCache);
 
+    // SSGI radiance prefilter (compute): reprojected TAA history in, five radiance
+    // mips out. The push constant is the one-frame history invalidation flag.
+    m_SSGIPrefilterDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      SetDescription ssgiPrefilterDesc = {
+        .set = 1,
+        .bindings = {
+          {
+            { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 5, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 6, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 7, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+          }
+        }
+      };
+      m_SSGIPrefilterDescriptorSets[i].Init(ctx, ssgiPrefilterDesc);
+    }
+
+    m_SSGIRadiancePrefilterPipeline = m_PSOCache.RegisterCompute(ctx.device, "ssgi_radiance_prefilter.comp",
+      {
+        m_FrameUniformBuffer.GetLayout(),
+        m_SSGIPrefilterDescriptorSets[0].GetLayout(),
+      },
+      sizeof(int),
+      pipelineCache);
+
     VkRenderPass gtaoRP = m_Graph.GetPassRenderPass(m_GTAOPassIndex);
 
     m_GTAOPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
@@ -573,6 +607,9 @@ namespace YAEngine
             { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            // Reprojected radiance - only the SSGI permutation declares it in GLSL,
+            // but the shared set layout carries it for both.
+            { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
@@ -588,7 +625,7 @@ namespace YAEngine
       .fragmentShaderFile = "gtao.frag",
       .vertexShaderFile = "fullscreen.vert",
       .depthTesting = false,
-      .colorAttachmentCount = 2,
+      .colorAttachmentCount = 4,
       .vertexInputFormat = "",
       .sets = std::vector({
         m_FrameUniformBuffer.GetLayout(),
@@ -596,6 +633,11 @@ namespace YAEngine
       })
     };
     m_GTAOPipeline = m_PSOCache.Register(ctx.device, gtaoRP, gtaoInfo, pipelineCache);
+
+    // Same pass, same attachments, same sets - only the fragment permutation differs.
+    // The execute callback picks one of the two by b_SSGIEnabled.
+    gtaoInfo.fragmentShaderFile = "gtao_ssgi.frag";
+    m_GTAOSSGIPipeline = m_PSOCache.Register(ctx.device, gtaoRP, gtaoInfo, pipelineCache);
 
     VkRenderPass gtaoDenoiseRP = m_Graph.GetPassRenderPass(m_GTAODenoisePassIndex);
 
@@ -609,6 +651,9 @@ namespace YAEngine
             { 0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            // SSGI working targets, filtered with the same weights as AO
+            { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
@@ -621,6 +666,7 @@ namespace YAEngine
       .fragmentShaderFile = "gtao_denoise.frag",
       .vertexShaderFile = "fullscreen.vert",
       .depthTesting = false,
+      .colorAttachmentCount = 3,
       .vertexInputFormat = "",
       .sets = std::vector({
         m_FrameUniformBuffer.GetLayout(),
@@ -674,6 +720,9 @@ namespace YAEngine
             { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            // Denoised SSGI + bent normal
+            { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };

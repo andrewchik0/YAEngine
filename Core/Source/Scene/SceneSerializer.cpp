@@ -83,6 +83,14 @@ namespace YAEngine
         entityNode["parent"] = ModelOverrides::MakeEntityReference(scene, assets, hc.parent);
     }
 
+    if (scene.HasComponent<ModelNodeCloneComponent>(entity))
+    {
+      auto& clone = scene.GetComponent<ModelNodeCloneComponent>(entity);
+      auto reference = ModelOverrides::MakeNodeReference(scene, assets, clone.modelRoot, clone.nodeIndex);
+      if (!reference.empty())
+        entityNode["modelNodeClone"] = reference;
+    }
+
     auto& t = scene.GetTransform(entity);
     if (!IsDefaultTransform(t))
     {
@@ -160,6 +168,10 @@ namespace YAEngine
     settings["aoDepthMipSamplingOffset"] = render.GetAODepthMipSamplingOffset();
     settings["ssr"] = render.GetSSREnabled();
     settings["ssrIntensity"] = render.GetSSRIntensity();
+    settings["ssgi"] = render.GetSSGIEnabled();
+    settings["ssgiRadius"] = render.GetSSGIRadius();
+    settings["ssgiThickness"] = render.GetSSGIThickness();
+    settings["ssgiIntensity"] = render.GetSSGIIntensity();
     settings["taa"] = render.GetTAAEnabled();
     settings["taaClampSigma"] = render.GetTAAClampSigma();
     settings["shadows"] = render.GetShadowsEnabled();
@@ -270,6 +282,10 @@ namespace YAEngine
     if (settings["aoDepthMipSamplingOffset"]) render.GetAODepthMipSamplingOffset() = settings["aoDepthMipSamplingOffset"].as<float>();
     if (settings["ssr"]) render.GetSSREnabled() = settings["ssr"].as<bool>();
     if (settings["ssrIntensity"]) render.GetSSRIntensity() = settings["ssrIntensity"].as<float>();
+    if (settings["ssgi"]) render.GetSSGIEnabled() = settings["ssgi"].as<bool>();
+    if (settings["ssgiRadius"]) render.GetSSGIRadius() = settings["ssgiRadius"].as<float>();
+    if (settings["ssgiThickness"]) render.GetSSGIThickness() = settings["ssgiThickness"].as<float>();
+    if (settings["ssgiIntensity"]) render.GetSSGIIntensity() = settings["ssgiIntensity"].as<float>();
     if (settings["taa"]) render.GetTAAEnabled() = settings["taa"].as<bool>();
     if (settings["taaClampSigma"]) render.GetTAAClampSigma() = settings["taaClampSigma"].as<float>();
     if (settings["shadows"]) render.GetShadowsEnabled() = settings["shadows"].as<bool>();
@@ -465,7 +481,7 @@ namespace YAEngine
     for (auto it = entityNode.begin(); it != entityNode.end(); ++it)
     {
       auto key = it->first.as<std::string>();
-      if (key == "name" || key == "parent" || key == "transform")
+      if (key == "name" || key == "parent" || key == "transform" || key == "modelNodeClone")
         continue;
       if (!registry.Deserialize(key, scene.GetRegistry(), entity, it->second))
         YA_LOG_WARN("Scene", "Unknown component '%s' on entity '%s'", key.c_str(), name.c_str());
@@ -539,6 +555,51 @@ namespace YAEngine
     }
   }
 
+  // Shared: pass 4, hand a copy of a model node its mesh and slot material back. Those live
+  // inside the model instance and never reach the scene file, so the copy is written with a
+  // reference to the node it was made from and restocked from it here.
+  static void ResolveCloneRequests(Scene& scene, AssetManager& assets,
+    const std::unordered_map<std::string, Entity>& nameMap,
+    const std::vector<std::pair<Entity, std::string>>& cloneRequests)
+  {
+    for (auto& [entity, reference] : cloneRequests)
+    {
+      std::string rootName;
+      std::string nodePath;
+      Entity source = entt::null;
+
+      if (ModelOverrides::SplitEntityReference(reference, rootName, nodePath))
+      {
+        auto it = nameMap.find(rootName);
+        if (it != nameMap.end())
+          source = ModelOverrides::ResolveNodeReference(scene, assets, it->second, nodePath);
+      }
+
+      if (source == entt::null)
+      {
+        YA_LOG_WARN("Scene", "Source node '%s' not found, copy '%s' stays without a mesh",
+          reference.c_str(), scene.GetName(entity).c_str());
+        continue;
+      }
+
+      if (scene.HasComponent<MeshComponent>(source))
+        scene.AddComponent<MeshComponent>(entity, scene.GetComponent<MeshComponent>(source));
+
+      if (scene.HasComponent<MaterialComponent>(source))
+        scene.AddComponent<MaterialComponent>(entity, scene.GetComponent<MaterialComponent>(source));
+
+      if (scene.HasComponent<LocalBounds>(source))
+      {
+        scene.AddComponent<LocalBounds>(entity, scene.GetComponent<LocalBounds>(source));
+        scene.AddComponent<BoundsDirty>(entity);
+      }
+
+      auto& node = scene.GetComponent<ModelNodeComponent>(source);
+      scene.AddComponent<ModelNodeCloneComponent>(entity,
+        ModelNodeCloneComponent { .modelRoot = node.modelRoot, .nodeIndex = node.nodeIndex });
+    }
+  }
+
   void SceneSerializer::Load(const std::string& path,
     Scene& scene, AssetManager& assets,
     const ComponentRegistry& registry, Render& render,
@@ -593,6 +654,7 @@ namespace YAEngine
   {
     std::unordered_map<std::string, Entity> nameMap;
     std::vector<std::pair<Entity, std::string>> parentRequests;
+    std::vector<std::pair<Entity, std::string>> cloneRequests;
 
     for (size_t i = 0; i < entities.size(); i++)
     {
@@ -635,10 +697,15 @@ namespace YAEngine
 
       if (entityNode["parent"])
         parentRequests.push_back({ entity, entityNode["parent"].as<std::string>() });
+
+      if (entityNode["modelNodeClone"])
+        cloneRequests.push_back({ entity, entityNode["modelNodeClone"].as<std::string>() });
     }
 
     // Pass 3: Establish hierarchy
     ResolveParentRequests(scene, assets, nameMap, parentRequests);
+
+    ResolveCloneRequests(scene, assets, nameMap, cloneRequests);
   }
 
   void SceneSerializer::LoadParallel(const YAML::Node& root, const YAML::Node& entities,
@@ -759,6 +826,7 @@ namespace YAEngine
     // Textures are now cached - ModelBuilder::Build() will hit cache for all texture loads
     std::unordered_map<std::string, Entity> nameMap;
     std::vector<std::pair<Entity, std::string>> parentRequests;
+    std::vector<std::pair<Entity, std::string>> cloneRequests;
     size_t modelIdx = 0;
 
     for (size_t i = 0; i < entities.size(); i++)
@@ -807,9 +875,14 @@ namespace YAEngine
 
       if (entityNode["parent"])
         parentRequests.push_back({ entity, entityNode["parent"].as<std::string>() });
+
+      if (entityNode["modelNodeClone"])
+        cloneRequests.push_back({ entity, entityNode["modelNodeClone"].as<std::string>() });
     }
 
     // Pass 3: Establish hierarchy
     ResolveParentRequests(scene, assets, nameMap, parentRequests);
+
+    ResolveCloneRequests(scene, assets, nameMap, cloneRequests);
   }
 }

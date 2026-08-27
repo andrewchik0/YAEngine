@@ -180,6 +180,7 @@ namespace YAEngine
     DestroyBloomResources();
     DestroyHiZResources();
     DestroyGTAOResources();
+    DestroySSGIResources();
     DestroySceneImGuiDescriptor();
 
     m_Graph.Resize({w, h});
@@ -187,6 +188,7 @@ namespace YAEngine
     CreateSceneImGuiDescriptor();
     CreateHiZResources();
     CreateGTAOResources();
+    CreateSSGIResources();
     CreateBloomResources();
 
     {

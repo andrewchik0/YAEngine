@@ -27,6 +27,7 @@ namespace YAEngine
     uint32_t viewportHeight = 0;
     glm::vec2 mouseInViewport { 0.0f };
     bool mouseInViewportValid = false;
+    Entity revealEntityRequest = entt::null;
 
     void SelectEntity(Entity e)
     {
@@ -45,6 +46,21 @@ namespace YAEngine
       bool changed = selectionChangedFlag;
       selectionChangedFlag = false;
       return changed;
+    }
+
+    // Asks the outliner to expand down to this entity and scroll to it. The outliner is
+    // rendered before the details panel, so a request raised there lands one frame later.
+    void RevealEntity(Entity e)
+    {
+      revealEntityRequest = e;
+      SelectEntity(e);
+    }
+
+    Entity ConsumeRevealRequest()
+    {
+      Entity e = revealEntityRequest;
+      revealEntityRequest = entt::null;
+      return e;
     }
 
     void SelectMaterial(MaterialHandle h)

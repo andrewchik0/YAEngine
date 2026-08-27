@@ -44,6 +44,10 @@ namespace YAEngine
     float opacity{1.0f};
     ShadingModel shadingModel{ShadingModel::Lit};
 
+    // Tiling factor folded into the mesh UVs before every material texture fetch, the
+    // alpha-test cutouts of the shadow and picking passes included.
+    glm::vec2 uvScale{1.0f, 1.0f};
+
     TextureHandle baseColorTexture;
     TextureHandle metallicTexture;
     TextureHandle roughnessTexture;

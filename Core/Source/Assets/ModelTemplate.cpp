@@ -117,6 +117,7 @@ namespace YAEngine
       .transparent = material.transparent,
       .opacity = material.opacity,
       .shadingModel = material.shadingModel,
+      .uvScale = material.uvScale,
       .baseColorTexture = material.baseColorTexture,
       .metallicTexture = material.metallicTexture,
       .roughnessTexture = material.roughnessTexture,
@@ -147,6 +148,7 @@ namespace YAEngine
     material.transparent = snapshot.transparent;
     material.opacity = snapshot.opacity;
     material.shadingModel = snapshot.shadingModel;
+    material.uvScale = snapshot.uvScale;
     material.baseColorTexture = snapshot.baseColorTexture;
     material.metallicTexture = snapshot.metallicTexture;
     material.roughnessTexture = snapshot.roughnessTexture;

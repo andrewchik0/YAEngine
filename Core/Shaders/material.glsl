@@ -1,6 +1,5 @@
-#include "../Shared/MaterialUniforms.h"
+#include "material_uniforms.glsl"
 #include "normal_map.glsl"
-layout(set = 1, binding = 0) uniform MaterialUniformsBlock { MaterialUniforms u_Material; };
 layout(set = 1, binding = 1) uniform sampler2D baseColorTexture;
 layout(set = 1, binding = 2) uniform sampler2D metallicTexture;
 layout(set = 1, binding = 3) uniform sampler2D roughnessTexture;

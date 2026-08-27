@@ -27,6 +27,11 @@ namespace YAEngine
   };
 
   struct TransformDirty {};
+  // Does not mean the descendants are dirty - only that the traversal must keep
+  // descending past this node to reach one that is. Treating it as "subtree is
+  // dirty" and repainting children from it would walk the whole model, which is
+  // exactly the cost this tag exists to avoid.
+  struct DescendantTransformDirty {};
   struct BoundsDirty {};
 
   // Published into the registry context by TransformSystem each Update; lets BuildSceneSnapshot ask whether a caster moved in the tick right before this snapshot without threading the system through signatures.
@@ -120,6 +125,17 @@ namespace YAEngine
   // Links an entity of a model subtree back to its node in the source ModelTemplate.
   // Derived data: ModelBuilder rebuilds it on every load, so it is never serialized.
   struct ModelNodeComponent
+  {
+    entt::entity modelRoot { entt::null };
+    uint32_t nodeIndex = 0;
+  };
+
+  // A hand-made copy of a node of an imported model. The copy is a regular scene entity and
+  // must not carry ModelNodeComponent - two entities on one node index collapse the override
+  // layer down to whichever one it happens to see last. Its mesh and slot material exist only
+  // inside the model though, and no component serializer can round-trip them, so this records
+  // where to fetch them from when the scene is loaded again.
+  struct ModelNodeCloneComponent
   {
     entt::entity modelRoot { entt::null };
     uint32_t nodeIndex = 0;
