@@ -165,9 +165,16 @@ namespace YAEngine
     // Must match BakeLimits::PROBE_DEFAULT_CAPTURE_RESOLUTION. Kept as a literal so
     // this header stays free of render includes; the value is clamped on load.
     uint32_t resolution = 128;
-    // Reproject reflections onto the influence volume. Only correct while the volume
+    // Reproject reflections onto the proxy volume. Only correct while the volume
     // is a decent stand-in for the real geometry, so it stays a per-probe choice.
     bool parallaxCorrection = false;
+    // Parallax proxy volume, in probe local space. The influence volume above picks
+    // who uses the probe, this one picks where their rays land, so a thin influence
+    // slab on a shop window can still reproject onto a deep box. Off -> the proxy
+    // falls back to the influence volume, which is how the probe behaved before.
+    bool customProxyVolume = false;
+    glm::vec3 proxyOffset { 0.0f };
+    glm::vec3 proxyExtents { 5.0f };
     bool baked = false;
     uint32_t atlasSlot = 0;
     // Specular only - the diffuse half of a probe moved to irradiance volumes,

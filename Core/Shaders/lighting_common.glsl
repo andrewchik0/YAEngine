@@ -99,22 +99,32 @@ float evaluateProbeWeight(vec3 worldPos, ReflectionProbeInfo probe)
 }
 
 // Lagarde's parallax-corrected cubemap: walk the reflection ray until it hits the
-// probe's proxy volume, then look the prefilter map up along probe centre -> hit
+// probe's proxy volume, then look the prefilter map up along capture point -> hit
 // point. Without this every probe reflects as if it were infinitely far away and
 // the reflection stays glued to the view direction as the camera moves.
+//
+// The proxy is a volume of its own, independent of the influence volume: influence
+// decides which pixels use the probe, the proxy decides where their rays land. A
+// shop window can therefore keep a thin influence slab hugging the glass while
+// reprojecting onto a deep box, instead of trading parallax for stray users.
+// The lookup direction is measured from the capture point, not from the proxy
+// centre, so an offset proxy stays correct.
 vec3 parallaxCorrectReflection(vec3 worldPos, vec3 R, ReflectionProbeInfo probe)
 {
   if (probe.parallaxCorrection == 0) return R;
 
   vec3 probePos = probe.positionShape.xyz;
   float shape = probe.positionShape.w;
-  vec3 extents = probe.extentsFade.xyz;
+  vec3 extents = probe.proxyExtents.xyz;
+  vec4 q = probe.orientation;
+  vec3 proxyOffset = probe.proxyOffset.xyz;
 
   if (shape < 0.5)
   {
-    // Sphere proxy - solved in world space, rotation cannot affect it
+    // Sphere proxy - the shape is rotation invariant, but the offset still rides
+    // the probe orientation so the volume tracks the entity when it is rotated
     float radius = extents.x;
-    vec3 toCenter = worldPos - probePos;
+    vec3 toCenter = worldPos - (probePos + quatRotate(q, proxyOffset));
     float b = dot(toCenter, R);
     float c = dot(toCenter, toCenter) - radius * radius;
     float disc = b * b - c;
@@ -123,14 +133,13 @@ vec3 parallaxCorrectReflection(vec3 worldPos, vec3 R, ReflectionProbeInfo probe)
     float t = -b + sqrt(disc);
     if (t <= 0.0) return R;
 
-    return normalize(toCenter + R * t);
+    return normalize((worldPos - probePos) + R * t);
   }
 
-  // Box proxy - solved in probe-local space so a rotated probe corrects against its
-  // own axes. The probe centre is the local origin, so the hit point doubles as the
-  // corrected direction once it is rotated back into world space.
-  vec4 q = probe.orientation;
-  vec3 localPos = quatRotateInverse(q, worldPos - probePos);
+  // Box proxy - solved in proxy-local space so a rotated probe corrects against its
+  // own axes. Adding proxyOffset back to the hit turns it into a vector from the
+  // capture point, which is what the prefilter map was baked around.
+  vec3 localPos = quatRotateInverse(q, worldPos - probePos) - proxyOffset;
   vec3 localR = quatRotateInverse(q, R);
 
   // Rays exactly parallel to a slab would produce 0 * inf, so keep every component finite
@@ -146,7 +155,7 @@ vec3 parallaxCorrectReflection(vec3 worldPos, vec3 R, ReflectionProbeInfo probe)
   if (t <= 0.0) return R;
 
   vec3 localHit = localPos + localR * t;
-  return normalize(quatRotate(q, localHit));
+  return normalize(quatRotate(q, localHit + proxyOffset));
 }
 
 vec3 fetchProbePrefilter(vec3 R, float roughness, int arrayIndex)

@@ -277,7 +277,41 @@ namespace YAEngine
 
       ImGui::Checkbox("Parallax Correction", &lp.parallaxCorrection);
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Reproject reflections onto the influence volume.\nOnly correct while the volume matches the real geometry.");
+        ImGui::SetTooltip("Reproject reflections onto the proxy volume.\nOnly correct while the volume matches the real geometry.");
+
+      if (lp.parallaxCorrection)
+      {
+        // Seeded from the influence volume so switching the override on is a no-op
+        // until the values are actually moved - otherwise the reflection jumps.
+        if (ImGui::Checkbox("Custom Proxy Volume", &lp.customProxyVolume) && lp.customProxyVolume)
+        {
+          lp.proxyOffset = glm::vec3(0.0f);
+          lp.proxyExtents = lp.extents;
+        }
+        if (ImGui::IsItemHovered())
+          ImGui::SetTooltip("Give parallax its own volume, separate from the influence volume.\nLets a thin influence slab reproject onto a deep proxy box.");
+
+        if (lp.customProxyVolume)
+        {
+          ImGui::Indent();
+          ImGui::DragFloat3("Proxy Offset", &lp.proxyOffset.x, 0.1f, -1000.0f, 1000.0f);
+          if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Proxy centre relative to the probe, in probe local space.");
+
+          if (lp.shape == ProbeShape::Sphere)
+          {
+            ImGui::DragFloat("Proxy Radius", &lp.proxyExtents.x, 0.1f, 0.1f, 1000.0f);
+            lp.proxyExtents.y = lp.proxyExtents.x;
+            lp.proxyExtents.z = lp.proxyExtents.x;
+          }
+          else
+          {
+            ImGui::DragFloat3("Proxy Extents", &lp.proxyExtents.x, 0.1f, 0.1f, 1000.0f);
+          }
+          ImGui::TextDisabled("Drawn in green by the probe volume gizmo.");
+          ImGui::Unindent();
+        }
+      }
 
       // Options come from the baker range, so the combo can never offer a value
       // the bake path would clamp away.

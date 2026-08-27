@@ -320,6 +320,9 @@ namespace YAEngine
           BakeLimits::PROBE_MIN_CAPTURE_RESOLUTION,
           BakeLimits::PROBE_MAX_CAPTURE_RESOLUTION);
       if (n["parallaxCorrection"]) lp.parallaxCorrection = n["parallaxCorrection"].as<bool>();
+      if (n["customProxyVolume"]) lp.customProxyVolume = n["customProxyVolume"].as<bool>();
+      if (n["proxyOffset"]) lp.proxyOffset = DeserializeVec3(n["proxyOffset"]);
+      if (n["proxyExtents"]) lp.proxyExtents = DeserializeVec3(n["proxyExtents"]);
       // "bakedIrradiance" is dead but present in every pre-volume scene; ignored silently since warning per probe on every old scene would be noise.
       if (n["bakedPrefilter"])
         lp.bakedPrefilterPath = n["bakedPrefilter"].as<std::string>();
@@ -337,6 +340,11 @@ namespace YAEngine
         n["priority"] = lp.priority;
         n["resolution"] = lp.resolution;
         n["parallaxCorrection"] = lp.parallaxCorrection;
+        // Written unconditionally so toggling the override off is a real edit and not
+        // a silent fall back to whatever the loader defaults to.
+        n["customProxyVolume"] = lp.customProxyVolume;
+        n["proxyOffset"] = SerializeVec3(lp.proxyOffset);
+        n["proxyExtents"] = SerializeVec3(lp.proxyExtents);
         // Not gated on lp.baked - that flag is false when the .yacm failed to load or the atlas was full, and dropping the path then would erase authored data on next save.
         if (!lp.bakedPrefilterPath.empty())
           n["bakedPrefilter"] = lp.bakedPrefilterPath;

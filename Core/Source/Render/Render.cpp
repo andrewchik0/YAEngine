@@ -536,6 +536,8 @@ namespace YAEngine
           float shape = probe.positionShape.w;
           glm::vec3 extents(probe.extentsFade);
           glm::vec4 col(0.2f, 0.7f, 0.9f, 0.5f);
+          glm::quat rot(probe.orientation.w, probe.orientation.x,
+            probe.orientation.y, probe.orientation.z);
 
           if (shape < 0.5f)
           {
@@ -543,9 +545,25 @@ namespace YAEngine
           }
           else
           {
-            glm::quat rot(probe.orientation.w, probe.orientation.x,
-              probe.orientation.y, probe.orientation.z);
             m_GizmoRenderer.DrawWireBoxDepthTested(pos, extents, rot, col);
+          }
+
+          // Parallax proxy in green, so the two volumes stay tellable apart. Drawn
+          // only when it actually differs - a probe that falls back to the influence
+          // volume would otherwise paint a second wireframe over the first one.
+          glm::vec3 proxyOffset(probe.proxyOffset);
+          glm::vec3 proxyExtents(probe.proxyExtents);
+          bool proxyDiffers = probe.parallaxCorrection != 0
+            && (proxyOffset != glm::vec3(0.0f) || proxyExtents != extents);
+          if (proxyDiffers)
+          {
+            glm::vec3 proxyPos = pos + rot * proxyOffset;
+            glm::vec4 proxyCol(0.3f, 0.9f, 0.4f, 0.5f);
+
+            if (shape < 0.5f)
+              m_GizmoRenderer.DrawWireSphereDepthTested(proxyPos, proxyExtents.x, proxyCol);
+            else
+              m_GizmoRenderer.DrawWireBoxDepthTested(proxyPos, proxyExtents, rot, proxyCol);
           }
         }
       }

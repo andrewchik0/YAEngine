@@ -5,7 +5,7 @@
 
 namespace YAEngine
 {
-  static_assert(sizeof(ReflectionProbeInfo) == 64, "ReflectionProbeInfo no longer matches its std430 layout");
+  static_assert(sizeof(ReflectionProbeInfo) == 96, "ReflectionProbeInfo no longer matches its std430 layout");
   static_assert(offsetof(ReflectionProbeBuffer, probes) == 16, "ReflectionProbeBuffer array must start on a 16 byte boundary");
 
   struct RenderContext;

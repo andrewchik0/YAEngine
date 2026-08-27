@@ -272,10 +272,17 @@ namespace YAEngine
       }
       glm::quat rotation = glm::normalize(glm::quat_cast(basis));
 
+      // Fallback resolved here rather than in the shader: a probe without its own
+      // proxy reprojects onto the influence volume, exactly as it did before.
+      glm::vec3 proxyOffset = probe.customProxyVolume ? probe.proxyOffset : glm::vec3(0.0f);
+      glm::vec3 proxyExtents = probe.customProxyVolume ? probe.proxyExtents : probe.extents;
+
       auto& info = snapshot.probeBuffer.probes[snapshot.probeBuffer.probeCount];
       info.positionShape = glm::vec4(position, probe.shape == ProbeShape::Box ? 1.0f : 0.0f);
       info.extentsFade = glm::vec4(probe.extents, probe.fadeDistance);
       info.orientation = glm::vec4(rotation.x, rotation.y, rotation.z, rotation.w);
+      info.proxyOffset = glm::vec4(proxyOffset, 0.0f);
+      info.proxyExtents = glm::vec4(proxyExtents, 0.0f);
       info.arrayIndex = probe.atlasSlot;
       info.priority = probe.priority;
       info.parallaxCorrection = probe.parallaxCorrection ? 1 : 0;
