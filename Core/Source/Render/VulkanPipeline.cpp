@@ -74,7 +74,7 @@ namespace YAEngine
     multisampling.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
 
     VkPipelineColorBlendAttachmentState blendTemplate{};
-    blendTemplate.blendEnable = (info.blending || info.additiveBlend) ? VK_TRUE : VK_FALSE;
+    blendTemplate.blendEnable = (info.blending || info.additiveBlend || info.premultipliedAlpha) ? VK_TRUE : VK_FALSE;
     if (info.additiveBlend)
     {
       blendTemplate.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
@@ -82,6 +82,15 @@ namespace YAEngine
       blendTemplate.colorBlendOp = VK_BLEND_OP_ADD;
       blendTemplate.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
       blendTemplate.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      blendTemplate.alphaBlendOp = VK_BLEND_OP_ADD;
+    }
+    else if (info.premultipliedAlpha)
+    {
+      blendTemplate.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+      blendTemplate.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+      blendTemplate.colorBlendOp = VK_BLEND_OP_ADD;
+      blendTemplate.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+      blendTemplate.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
       blendTemplate.alphaBlendOp = VK_BLEND_OP_ADD;
     }
     else
@@ -119,6 +128,8 @@ namespace YAEngine
     };
     if (info.depthBiasEnable)
       dynamicStates.push_back(VK_DYNAMIC_STATE_DEPTH_BIAS);
+    if (info.dynamicCullMode)
+      dynamicStates.push_back(VK_DYNAMIC_STATE_CULL_MODE);
     VkPipelineDynamicStateCreateInfo dynamicState{};
     dynamicState.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
     dynamicState.dynamicStateCount = static_cast<uint32_t>(dynamicStates.size());

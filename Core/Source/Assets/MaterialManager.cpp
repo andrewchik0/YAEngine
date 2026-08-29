@@ -35,6 +35,7 @@ namespace YAEngine
     dst.doubleSided = src.doubleSided;
     dst.transparent = src.transparent;
     dst.opacity = src.opacity;
+    dst.fresnelOpacity = src.fresnelOpacity;
     dst.shadingModel = src.shadingModel;
     dst.uvScale = src.uvScale;
     dst.baseColorTexture = src.baseColorTexture;

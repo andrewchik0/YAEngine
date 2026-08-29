@@ -51,6 +51,7 @@ namespace YAEngine
     bool doubleSided = false;
     bool transparent = false;
     float opacity = 1.0f;
+    float fresnelOpacity = 0.0f;
     ShadingModel shadingModel = ShadingModel::Lit;
     glm::vec2 uvScale { 1.0f, 1.0f };
 

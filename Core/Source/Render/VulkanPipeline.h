@@ -17,12 +17,14 @@ namespace YAEngine
     bool depthWrite = true;
     bool blending = false;
     bool additiveBlend = false;
+    bool premultipliedAlpha = false;
     bool doubleSided = false;
     uint32_t colorAttachmentCount = 1;
     VkCompareOp compareOp = VK_COMPARE_OP_GREATER;
     VkPrimitiveTopology topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
     VkPolygonMode polygonMode = VK_POLYGON_MODE_FILL;
     bool depthBiasEnable = false;
+    bool dynamicCullMode = false;
     // Disables near/far clipping as well, clamping fragment depth to the viewport range.
     bool depthClampEnable = false;
 

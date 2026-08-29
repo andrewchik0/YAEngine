@@ -2161,9 +2161,19 @@ namespace YAEngine
       }
 
       auto& vb = meshManager.GetVertexBuffer(meshHandle);
-      m_Stats.drawCalls++;
-      m_Stats.triangles += uint32_t(vb.GetIndexCount() / 3) * instanceCount;
-      m_Stats.vertices += uint32_t(vb.GetIndexCount()) * instanceCount;
+      const uint32_t passes = dc.doubleSided ? 2u : 1u;
+      m_Stats.drawCalls += passes;
+      m_Stats.triangles += uint32_t(vb.GetIndexCount() / 3) * instanceCount * passes;
+      m_Stats.vertices += uint32_t(vb.GetIndexCount()) * instanceCount * passes;
+
+      // Reversed-Z with COUNTER_CLOCKWISE front faces: on an almost convex shell the back
+      // faces are the far ones, so culling fronts first lays them down before the near side.
+      if (dc.doubleSided)
+      {
+        vkCmdSetCullMode(cmd, VK_CULL_MODE_FRONT_BIT);
+        vb.Draw(cmd, instanceCount);
+      }
+      vkCmdSetCullMode(cmd, VK_CULL_MODE_BACK_BIT);
       vb.Draw(cmd, instanceCount);
     }
 

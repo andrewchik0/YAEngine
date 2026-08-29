@@ -20,8 +20,10 @@ void main()
   vec4 albedoTex = mix(vec4(1.0), texture(baseColorTexture, uv), hasAlbedoTexture);
   vec4 albedo = vec4(u_Material.albedo, 1.0) * albedoTex;
 
-  float alpha = albedo.a * u_Material.opacity;
-  if (alpha <= 0.001)
+  float baseAlpha = albedo.a * u_Material.opacity;
+  // The Fresnel term can only be evaluated once the normal is known, far below this point,
+  // so a fully see-through centre must not take the whole surface - rim included - with it.
+  if (max(baseAlpha, u_Material.fresnelOpacity) <= 0.001)
     discard;
 
   albedo.rgb = pow(albedo.rgb, vec3(gamma));
@@ -50,18 +52,33 @@ void main()
   vec3 f0 = mix(vec3(0.04), albedo.rgb, metallic);
   vec3 R = reflect(-viewVec, normal);
 
-  vec3 ambient = computeAmbientIBL(worldPos, normal, R, roughness, NdotV, f0, albedo.rgb, metallic);
-  vec3 Lo = computeDirectLighting(worldPos, viewPos, normal, viewVec, albedo.rgb, metallic, roughness, f0, NdotV, ivec2(gl_FragCoord.xy));
+  float alpha = mix(baseAlpha, 1.0, u_Material.fresnelOpacity * pow(1.0 - NdotV, 5.0));
 
-  vec3 resultColor = max(ambient + Lo + materialEmissive(uv), vec3(0.0));
+  vec3 ambientDiffuse;
+  vec3 ambientSpecular;
+  computeAmbientIBLSplit(worldPos, normal, R, roughness, NdotV, f0, albedo.rgb, metallic,
+    ambientDiffuse, ambientSpecular);
+
+  vec3 directDiffuse;
+  vec3 directSpecular;
+  computeDirectLightingSplit(worldPos, viewPos, normal, viewVec, albedo.rgb, metallic, roughness,
+    f0, NdotV, ivec2(gl_FragCoord.xy), directDiffuse, directSpecular);
+
+  vec3 attenuated = max(ambientDiffuse + directDiffuse, vec3(0.0));
+  vec3 additive = max(ambientSpecular + directSpecular + materialEmissive(uv), vec3(0.0));
+  vec3 resultColor = attenuated * alpha + additive;
+  float outAlpha = alpha;
 
   if (u_Frame.fogEnabled != 0)
   {
     vec3 toPixel = worldPos - u_Frame.cameraPosition;
     float rayLength = length(toPixel);
     float fogAmount = computeHeightFog(u_Frame.cameraPosition, toPixel / rayLength, rayLength);
+    // Fog is opaque, so it has to raise the coverage as well: under ONE / ONE_MINUS_SRC_ALPHA
+    // a fogged surface that kept its old alpha would let the unfogged background back through.
     resultColor = mix(resultColor, u_Frame.fogColor, fogAmount);
+    outAlpha = mix(alpha, 1.0, fogAmount);
   }
 
-  outColor = vec4(resultColor, alpha);
+  outColor = vec4(resultColor, outAlpha);
 }

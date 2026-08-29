@@ -16,8 +16,8 @@ struct MaterialUniforms
   int sg;
   float opacity;
   vec2 uvScale;
-  float _pad0;            // keeps the struct at 64 bytes (std140 needs a multiple of 16)
-  float _pad1;
+  float fresnelOpacity;
+  float _pad1;            // keeps the struct at 64 bytes (std140 needs a multiple of 16)
 };
 
 #ifdef __cplusplus

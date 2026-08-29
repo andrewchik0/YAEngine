@@ -152,6 +152,7 @@ namespace YAEngine::ModelOverrides
     if (material.doubleSided != pristine.doubleSided) n["doubleSided"] = material.doubleSided;
     if (material.transparent != pristine.transparent) n["transparent"] = material.transparent;
     if (material.opacity != pristine.opacity) n["opacity"] = material.opacity;
+    if (material.fresnelOpacity != pristine.fresnelOpacity) n["fresnelOpacity"] = material.fresnelOpacity;
     if (material.uvScale != pristine.uvScale) n["uvScale"] = SerializeVec2(material.uvScale);
     if (material.shadingModel != pristine.shadingModel)
       n["shadingModel"] = (material.shadingModel == ShadingModel::Unlit) ? "unlit" : "lit";
@@ -210,6 +211,7 @@ namespace YAEngine::ModelOverrides
     if (n["doubleSided"]) material.doubleSided = n["doubleSided"].as<bool>();
     if (n["transparent"]) material.transparent = n["transparent"].as<bool>();
     if (n["opacity"]) material.opacity = n["opacity"].as<float>();
+    if (n["fresnelOpacity"]) material.fresnelOpacity = n["fresnelOpacity"].as<float>();
     if (n["uvScale"]) material.uvScale = DeserializeVec2(n["uvScale"]);
     if (n["shadingModel"])
     {

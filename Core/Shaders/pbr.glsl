@@ -99,9 +99,10 @@ vec3 gtaoMultiBounce(float visibility, vec3 albedo)
     vec3(visibility), vec3(1.0));
 }
 
-vec3 evaluateDirectLight(
+vec3 evaluateDirectLightSplit(
   vec3 N, vec3 V, vec3 L, vec3 radiance,
-  vec3 albedo, float metallic, float roughness, float alpha, vec3 f0, float NdotV)
+  vec3 albedo, float metallic, float roughness, float alpha, vec3 f0, float NdotV,
+  out vec3 outDiffuse, out vec3 outSpecular)
 {
   vec3 H = normalize(V + L);
   float NdotL = max(dot(N, L), 0.0);
@@ -118,5 +119,17 @@ vec3 evaluateDirectLight(
   vec3 spec = numerator / denominator;
 
   vec3 kD = (1.0 - F) * (1.0 - metallic);
-  return (kD * albedo / PI + spec) * radiance * NdotL;
+  outDiffuse = kD * albedo / PI * radiance * NdotL;
+  outSpecular = spec * radiance * NdotL;
+  return outDiffuse + outSpecular;
+}
+
+vec3 evaluateDirectLight(
+  vec3 N, vec3 V, vec3 L, vec3 radiance,
+  vec3 albedo, float metallic, float roughness, float alpha, vec3 f0, float NdotV)
+{
+  vec3 diffuse;
+  vec3 specular;
+  return evaluateDirectLightSplit(N, V, L, radiance, albedo, metallic, roughness,
+    alpha, f0, NdotV, diffuse, specular);
 }

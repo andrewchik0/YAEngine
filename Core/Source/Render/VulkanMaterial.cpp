@@ -143,6 +143,7 @@ namespace YAEngine
     uniforms.textureMask = textureMask;
     uniforms.sg = material.sg;
     uniforms.opacity = material.opacity;
+    uniforms.fresnelOpacity = material.fresnelOpacity;
     uniforms.uvScale = material.uvScale;
 
     m_UniformBuffers[currentFrame].Update(uniforms);

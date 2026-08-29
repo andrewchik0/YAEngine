@@ -14,11 +14,14 @@ namespace YAEngine
     if (depthTesting != other.depthTesting) return false;
     if (depthWrite != other.depthWrite) return false;
     if (blending != other.blending) return false;
+    if (additiveBlend != other.additiveBlend) return false;
+    if (premultipliedAlpha != other.premultipliedAlpha) return false;
     if (doubleSided != other.doubleSided) return false;
     if (compareOp != other.compareOp) return false;
     if (topology != other.topology) return false;
     if (depthBiasEnable != other.depthBiasEnable) return false;
     if (depthClampEnable != other.depthClampEnable) return false;
+    if (dynamicCullMode != other.dynamicCullMode) return false;
     if (colorAttachmentCount != other.colorAttachmentCount) return false;
     if (pushConstantSize != other.pushConstantSize) return false;
     if (vertexInputFormat != other.vertexInputFormat) return false;
@@ -44,11 +47,14 @@ namespace YAEngine
     combine(std::hash<bool>{}(key.depthTesting));
     combine(std::hash<bool>{}(key.depthWrite));
     combine(std::hash<bool>{}(key.blending));
+    combine(std::hash<bool>{}(key.additiveBlend));
+    combine(std::hash<bool>{}(key.premultipliedAlpha));
     combine(std::hash<bool>{}(key.doubleSided));
     combine(std::hash<uint32_t>{}(static_cast<uint32_t>(key.compareOp)));
     combine(std::hash<uint32_t>{}(static_cast<uint32_t>(key.topology)));
     combine(std::hash<bool>{}(key.depthBiasEnable));
     combine(std::hash<bool>{}(key.depthClampEnable));
+    combine(std::hash<bool>{}(key.dynamicCullMode));
     combine(std::hash<uint32_t>{}(key.colorAttachmentCount));
     combine(std::hash<uint32_t>{}(key.pushConstantSize));
     combine(std::hash<std::string>{}(key.vertexInputFormat));
@@ -99,11 +105,14 @@ namespace YAEngine
       .depthTesting = info.depthTesting,
       .depthWrite = info.depthWrite,
       .blending = info.blending,
+      .additiveBlend = info.additiveBlend,
+      .premultipliedAlpha = info.premultipliedAlpha,
       .doubleSided = info.doubleSided,
       .compareOp = info.compareOp,
       .topology = info.topology,
       .depthBiasEnable = info.depthBiasEnable,
       .depthClampEnable = info.depthClampEnable,
+      .dynamicCullMode = info.dynamicCullMode,
       .colorAttachmentCount = info.colorAttachmentCount,
       .pushConstantSize = info.pushConstantSize,
       .vertexInputFormat = info.vertexInputFormat,

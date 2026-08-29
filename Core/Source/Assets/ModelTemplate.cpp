@@ -116,6 +116,7 @@ namespace YAEngine
       .doubleSided = material.doubleSided,
       .transparent = material.transparent,
       .opacity = material.opacity,
+      .fresnelOpacity = material.fresnelOpacity,
       .shadingModel = material.shadingModel,
       .uvScale = material.uvScale,
       .baseColorTexture = material.baseColorTexture,
@@ -147,6 +148,7 @@ namespace YAEngine
     material.doubleSided = snapshot.doubleSided;
     material.transparent = snapshot.transparent;
     material.opacity = snapshot.opacity;
+    material.fresnelOpacity = snapshot.fresnelOpacity;
     material.shadingModel = snapshot.shadingModel;
     material.uvScale = snapshot.uvScale;
     material.baseColorTexture = snapshot.baseColorTexture;

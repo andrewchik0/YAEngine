@@ -486,11 +486,17 @@ vec3 computeAmbientIBL(vec3 worldPos, vec3 normal, vec3 R, float roughness, floa
     f0, albedo, metallic, ambientDiffuse, ambientSpecular);
 }
 
-vec3 computeDirectLighting(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 viewVec,
+// Same work as computeDirectLighting, with the two halves also handed back on their own.
+// Transparency needs them apart: the diffuse half fades out with the surface alpha while
+// highlights and reflections stay at full strength, so a thin surface keeps its specular.
+vec3 computeDirectLightingSplit(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 viewVec,
   vec3 albedo, float metallic, float roughness, vec3 f0, float NdotV,
-  ivec2 fragCoord)
+  ivec2 fragCoord, out vec3 directDiffuse, out vec3 directSpecular)
 {
-  vec3 Lo = vec3(0.0);
+  directDiffuse = vec3(0.0);
+  directSpecular = vec3(0.0);
+  vec3 lightDiffuse;
+  vec3 lightSpecular;
   float alpha = roughness * roughness;
 
   // Directional light (not tile-culled)
@@ -502,7 +508,10 @@ vec3 computeDirectLighting(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 viewVe
     float shadowFactor = calculateCSMShadow(worldPos, -viewPos.z, normal);
     radiance *= shadowFactor;
 
-    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV);
+    evaluateDirectLightSplit(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV,
+      lightDiffuse, lightSpecular);
+    directDiffuse += lightDiffuse;
+    directSpecular += lightSpecular;
   }
 
   // Tile light lookup
@@ -530,7 +539,10 @@ vec3 computeDirectLighting(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 viewVe
     if (pointShadowIdx >= 0)
       radiance *= calculatePointShadow(worldPos, normal, lightPos, pointShadowIdx);
 
-    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV);
+    evaluateDirectLightSplit(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV,
+      lightDiffuse, lightSpecular);
+    directDiffuse += lightDiffuse;
+    directSpecular += lightSpecular;
   }
 
   for (uint t = 0; t < tileSpCount; t++)
@@ -558,10 +570,23 @@ vec3 computeDirectLighting(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 viewVe
     if (spotShadowIdx >= 0)
       radiance *= calculateSpotShadow(worldPos, normal, lightPos, spotShadowIdx);
 
-    Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV);
+    evaluateDirectLightSplit(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV,
+      lightDiffuse, lightSpecular);
+    directDiffuse += lightDiffuse;
+    directSpecular += lightSpecular;
   }
 
-  return Lo;
+  return directDiffuse + directSpecular;
+}
+
+vec3 computeDirectLighting(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 viewVec,
+  vec3 albedo, float metallic, float roughness, vec3 f0, float NdotV,
+  ivec2 fragCoord)
+{
+  vec3 directDiffuse;
+  vec3 directSpecular;
+  return computeDirectLightingSplit(worldPos, viewPos, normal, viewVec, albedo, metallic,
+    roughness, f0, NdotV, fragCoord, directDiffuse, directSpecular);
 }
 
 float computeHeightFog(vec3 rayOrigin, vec3 rayDir, float rayLength)

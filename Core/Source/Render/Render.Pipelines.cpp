@@ -873,7 +873,7 @@ namespace YAEngine
     m_DeferredLightingPipeline = m_PSOCache.Register(ctx.device, deferredRP, deferredInfo, pipelineCache);
 
     // Forward Transparent pipelines - same lights/IBL/material descriptor sets as deferred,
-    // depth LOAD/test/GEQUAL, src-alpha blending, output to SSRColor so the resolve sees it.
+    // depth LOAD/test/GEQUAL, premultiplied-alpha blending, output to SSRColor so the resolve sees it.
     {
       VkRenderPass transparentRP = m_Graph.GetPassRenderPass(m_ForwardTransparentPassIndex);
 
@@ -886,9 +886,13 @@ namespace YAEngine
         // Depth stays opaque-only: everything downstream samples m_MainDepth, and
         // transparent surfaces are already sorted back to front on the CPU.
         .depthWrite = false,
-        .blending = true,
+        .premultipliedAlpha = true,
         .colorAttachmentCount = 1,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
+        // DrawTransparent picks the cull mode per draw so a double sided mesh can shade its
+        // back faces first. The doubleSided variants below stay as they are: the static
+        // cullMode no longer applies, but the index scheme and bind grouping ride on them.
+        .dynamicCullMode = true,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({
           m_FrameUniformBuffer.GetLayout(),

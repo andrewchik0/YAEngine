@@ -107,7 +107,10 @@ namespace YAEngine
       changed |= ImGui::Checkbox("Alpha Test", &mat.alphaTest);
       changed |= ImGui::Checkbox("Transparent", &mat.transparent);
       if (mat.transparent)
+      {
         changed |= ImGui::SliderFloat("Opacity", &mat.opacity, 0.0f, 1.0f);
+        changed |= ImGui::SliderFloat("Fresnel Opacity", &mat.fresnelOpacity, 0.0f, 1.0f);
+      }
       changed |= ImGui::Checkbox("Double Sided", &mat.doubleSided);
       changed |= ImGui::Checkbox("Combined Textures", &mat.combinedTextures);
       // Floor above zero: a zero factor collapses the whole texture into one texel

@@ -13,6 +13,8 @@ namespace YAEngine
   class TextureManager;
   class CubeMapManager;
 
+  static_assert(sizeof(MaterialUniforms) == 64, "MaterialUniforms no longer matches its std140 layout");
+
   class VulkanMaterial
   {
   public:

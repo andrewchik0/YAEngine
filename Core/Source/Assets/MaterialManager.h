@@ -42,6 +42,7 @@ namespace YAEngine
     bool doubleSided{false};
     bool transparent{false};
     float opacity{1.0f};
+    float fresnelOpacity{0.0f};
     ShadingModel shadingModel{ShadingModel::Lit};
 
     // Tiling factor folded into the mesh UVs before every material texture fetch, the
