@@ -203,6 +203,9 @@ set(SOURCE_FILES
   Source/Scene/ModelColliderSystem.cpp
   Source/Scene/CollisionQueryService.h
   Source/Scene/CollisionQueryService.cpp
+  Source/Scene/CameraTrackPlayer.h
+  Source/Scene/CameraTrackPlayer.cpp
+  Source/Utils/CameraTrack.h
 )
 
 if(YA_EDITOR)
@@ -236,6 +239,8 @@ if(YA_EDITOR)
     Source/Editor/Panels/MaterialBrowserPanel.cpp
     Source/Editor/Panels/MaterialInspectorPanel.h
     Source/Editor/Panels/MaterialInspectorPanel.cpp
+    Source/Editor/Panels/SequencerPanel.h
+    Source/Editor/Panels/SequencerPanel.cpp
     Source/Editor/Utils/EditorIcons.h
     Source/Editor/Utils/EditorTextureCache.h
     Source/Editor/Utils/EditorTextureCache.cpp

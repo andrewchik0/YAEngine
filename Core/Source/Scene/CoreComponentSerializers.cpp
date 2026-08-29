@@ -65,6 +65,59 @@ namespace YAEngine
       }
     );
 
+    registry.Register<CameraTrackComponent>("cameraTrack",
+      [](const entt::registry& reg, entt::entity e) -> YAML::Node {
+        auto& t = reg.get<CameraTrackComponent>(e);
+        YAML::Node n;
+        // Unconditional: SceneSerializer drops a component whose node is an empty map,
+        // and a freshly added track with no keys yet is exactly that.
+        n["rotationMode"] = (t.rotationMode == CameraTrackComponent::RotationMode::AimAt)
+          ? "aimAt" : "keyframed";
+        n["resetPostFXOnStart"] = t.resetPostFXOnStart;
+        if (!t.aimTargetName.empty())
+          n["aimTarget"] = t.aimTargetName;
+
+        YAML::Node keysNode;
+        for (auto& key : t.keys)
+        {
+          YAML::Node keyNode;
+          keyNode["time"] = key.time;
+          keyNode["position"] = SerializeVec3(key.position);
+          keyNode["rotation"] = SerializeQuat(key.rotation);
+          keyNode["fov"] = key.fov;
+          keysNode.push_back(keyNode);
+        }
+        if (!t.keys.empty())
+          n["keys"] = keysNode;
+        return n;
+      },
+      [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
+        CameraTrackComponent t;
+        if (n["rotationMode"] && n["rotationMode"].as<std::string>() == "aimAt")
+          t.rotationMode = CameraTrackComponent::RotationMode::AimAt;
+        if (n["resetPostFXOnStart"]) t.resetPostFXOnStart = n["resetPostFXOnStart"].as<bool>();
+        if (n["aimTarget"]) t.aimTargetName = n["aimTarget"].as<std::string>();
+        if (n["keys"])
+        {
+          for (size_t i = 0; i < n["keys"].size(); i++)
+          {
+            auto keyNode = n["keys"][i];
+            CameraTrackKey key;
+            if (keyNode["time"]) key.time = keyNode["time"].as<float>();
+            if (keyNode["position"]) key.position = DeserializeVec3(keyNode["position"]);
+            if (keyNode["rotation"]) key.rotation = DeserializeQuat(keyNode["rotation"]);
+            if (keyNode["fov"]) key.fov = keyNode["fov"].as<float>();
+            t.keys.push_back(key);
+          }
+          // The evaluator assumes ascending times; a hand-edited scene must not be able
+          // to break it.
+          std::sort(t.keys.begin(), t.keys.end(),
+            [](const CameraTrackKey& a, const CameraTrackKey& b) { return a.time < b.time; });
+        }
+        reg.emplace_or_replace<CameraTrackComponent>(e, std::move(t));
+      }
+    );
+
     registry.Register<LightComponent>("light",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& l = reg.get<LightComponent>(e);

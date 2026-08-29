@@ -241,6 +241,7 @@ namespace YAEngine
             "for some normals and the shader clamps them to black.");
       }
       ImGui::Checkbox("Colliders", &context.render->GetCollidersVisible());
+      ImGui::Checkbox("Camera Frustums", &context.render->GetCameraFrustumsVisible());
 
       ImGui::Separator();
       ImGui::Checkbox("Shadow Cascade LOD", &context.render->GetShadowLodEnabled());

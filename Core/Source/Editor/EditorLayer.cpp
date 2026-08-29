@@ -13,6 +13,7 @@
 #include "Editor/Panels/DetailsPanel.h"
 #include "Editor/Panels/MaterialBrowserPanel.h"
 #include "Editor/Panels/MaterialInspectorPanel.h"
+#include "Editor/Panels/SequencerPanel.h"
 #include "Editor/EditorCameraLayer.h"
 #include "Editor/Utils/FileDialog.h"
 
@@ -20,6 +21,7 @@
 #include "Render/Render.h"
 #include "Utils/Projection.h"
 #include "Scene/SceneSerializer.h"
+#include "Scene/CameraTrackPlayer.h"
 #include "Scene/ComponentRegistry.h"
 #include "Utils/ServiceRegistry.h"
 #include "Utils/ThreadPool.h"
@@ -42,6 +44,7 @@ namespace YAEngine
     m_Panels.push_back(std::make_unique<PerformancePanel>());
     m_Panels.push_back(std::make_unique<MaterialBrowserPanel>());
     m_Panels.push_back(std::make_unique<MaterialInspectorPanel>());
+    m_Panels.push_back(std::make_unique<SequencerPanel>());
   }
 
   void EditorLayer::OnSceneReady()
@@ -51,6 +54,7 @@ namespace YAEngine
     m_Context.render = &GetRender();
     m_Context.timer = &GetTimer();
     m_Context.componentRegistry = &m_Registry->Get<ComponentRegistry>();
+    m_Context.cameraTrackPlayer = &m_Registry->Get<CameraTrackPlayer>();
 
     m_TextureCache.Init(m_Context.assetManager);
     m_Context.textureCache = &m_TextureCache;
@@ -100,6 +104,14 @@ namespace YAEngine
       m_PendingScenePath.clear();
     }
 
+    // Deleting the previewed camera would leave the viewport on a dead entity
+    if (m_Context.IsPreviewingCamera()
+      && (!GetScene().GetRegistry().valid(m_Context.previewCamera)
+        || !GetScene().HasComponent<CameraComponent>(m_Context.previewCamera)))
+    {
+      m_Context.StopCameraPreview();
+    }
+
     uint32_t w = m_Context.viewportWidth;
     uint32_t h = m_Context.viewportHeight;
     if (w > 0 && h > 0 && (w != m_LastViewportWidth || h != m_LastViewportHeight))
@@ -122,6 +134,16 @@ namespace YAEngine
       io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
 
     auto& gizmo = m_Context.render->GetGizmoRenderer();
+
+    // Blender-style: grabbing the viewport while looking through a scene camera hands
+    // control back to the editor camera instead of locking navigation
+    if (m_Context.IsPreviewingCamera() && m_Context.viewportHovered && !b_DragActive
+      && (input.IsMousePressed(MouseButton::Right) || input.IsMousePressed(MouseButton::Middle)
+        || input.IsKeyPressed(Key::W) || input.IsKeyPressed(Key::A)
+        || input.IsKeyPressed(Key::S) || input.IsKeyPressed(Key::D)))
+    {
+      m_Context.StopCameraPreview();
+    }
 
     if (m_Context.viewportHovered && !b_DragActive)
     {
@@ -169,6 +191,7 @@ namespace YAEngine
       if (input.IsMouseReleased(MouseButton::Left))
       {
         b_DragActive = false;
+        b_DragTargetKey = false;
         gizmo.SetDraggedAxis(GizmoAxis::None);
         input.SetGizmoDragging(false);
       }
@@ -179,72 +202,80 @@ namespace YAEngine
         {
           glm::vec3 currentHit = viewportRay.origin + *hitT * viewportRay.direction;
           glm::vec3 delta = currentHit - m_DragStartHitPoint;
-          Entity entity = m_Context.selectedEntity;
-          auto& scene = *m_Context.scene;
-          auto& localTransform = scene.GetTransform(entity);
 
-          auto& hierarchy = scene.GetHierarchy(entity);
-          bool hasParent = hierarchy.parent != entt::null
-                        && scene.HasComponent<WorldTransform>(hierarchy.parent);
-          glm::mat4 parentWorldInv(1.0f);
-          if (hasParent)
-            parentWorldInv = glm::inverse(scene.GetComponent<WorldTransform>(hierarchy.parent).world);
-
-          if (m_DragMode == GizmoMode::Translate)
+          if (b_DragTargetKey)
           {
-            float projectedDist = glm::dot(delta, m_DragAxisDir);
-            glm::vec3 worldDelta = projectedDist * m_DragAxisDir;
-            glm::vec3 newWorldPos = m_DragStartWorldPos + worldDelta;
-
-            if (hasParent)
-              localTransform.position = glm::vec3(parentWorldInv * glm::vec4(newWorldPos, 1.0f));
-            else
-              localTransform.position = newWorldPos;
+            DragSequencerKey(delta, currentHit);
           }
-          else if (m_DragMode == GizmoMode::Rotate)
+          else
           {
-            glm::vec3 v1 = m_DragStartHitPoint - m_DragStartWorldPos;
-            glm::vec3 v2 = currentHit - m_DragStartWorldPos;
+            Entity entity = m_Context.selectedEntity;
+            auto& scene = *m_Context.scene;
+            auto& localTransform = scene.GetTransform(entity);
 
-            float l1 = glm::length(v1);
-            float l2 = glm::length(v2);
-            if (l1 > 1e-6f && l2 > 1e-6f)
+            auto& hierarchy = scene.GetHierarchy(entity);
+            bool hasParent = hierarchy.parent != entt::null
+                          && scene.HasComponent<WorldTransform>(hierarchy.parent);
+            glm::mat4 parentWorldInv(1.0f);
+            if (hasParent)
+              parentWorldInv = glm::inverse(scene.GetComponent<WorldTransform>(hierarchy.parent).world);
+
+            if (m_DragMode == GizmoMode::Translate)
             {
-              v1 /= l1;
-              v2 /= l2;
-              float cosAngle = glm::clamp(glm::dot(v1, v2), -1.0f, 1.0f);
-              float sinAngle = glm::dot(glm::cross(v1, v2), m_DragAxisDir);
-              float angle = std::atan2(sinAngle, cosAngle);
-
-              glm::quat worldRotDelta = glm::angleAxis(angle, m_DragAxisDir);
+              float projectedDist = glm::dot(delta, m_DragAxisDir);
+              glm::vec3 worldDelta = projectedDist * m_DragAxisDir;
+              glm::vec3 newWorldPos = m_DragStartWorldPos + worldDelta;
 
               if (hasParent)
-              {
-                glm::quat parentRot = glm::quat_cast(glm::mat3(
-                  scene.GetComponent<WorldTransform>(hierarchy.parent).world));
-                localTransform.rotation = glm::normalize(
-                  glm::inverse(parentRot) * worldRotDelta * parentRot
-                  * m_DragStartLocalTransform.rotation);
-              }
+                localTransform.position = glm::vec3(parentWorldInv * glm::vec4(newWorldPos, 1.0f));
               else
+                localTransform.position = newWorldPos;
+            }
+            else if (m_DragMode == GizmoMode::Rotate)
+            {
+              glm::vec3 v1 = m_DragStartHitPoint - m_DragStartWorldPos;
+              glm::vec3 v2 = currentHit - m_DragStartWorldPos;
+
+              float l1 = glm::length(v1);
+              float l2 = glm::length(v2);
+              if (l1 > 1e-6f && l2 > 1e-6f)
               {
-                localTransform.rotation = glm::normalize(
-                  worldRotDelta * m_DragStartLocalTransform.rotation);
+                v1 /= l1;
+                v2 /= l2;
+                float cosAngle = glm::clamp(glm::dot(v1, v2), -1.0f, 1.0f);
+                float sinAngle = glm::dot(glm::cross(v1, v2), m_DragAxisDir);
+                float angle = std::atan2(sinAngle, cosAngle);
+
+                glm::quat worldRotDelta = glm::angleAxis(angle, m_DragAxisDir);
+
+                if (hasParent)
+                {
+                  glm::quat parentRot = glm::quat_cast(glm::mat3(
+                    scene.GetComponent<WorldTransform>(hierarchy.parent).world));
+                  localTransform.rotation = glm::normalize(
+                    glm::inverse(parentRot) * worldRotDelta * parentRot
+                    * m_DragStartLocalTransform.rotation);
+                }
+                else
+                {
+                  localTransform.rotation = glm::normalize(
+                    worldRotDelta * m_DragStartLocalTransform.rotation);
+                }
               }
             }
-          }
-          else if (m_DragMode == GizmoMode::Scale)
-          {
-            float projectedDist = glm::dot(delta, m_DragAxisDir);
-            float scaleFactor = 1.0f + projectedDist / m_DragGizmoScale;
-            scaleFactor = glm::max(scaleFactor, 0.01f);
+            else if (m_DragMode == GizmoMode::Scale)
+            {
+              float projectedDist = glm::dot(delta, m_DragAxisDir);
+              float scaleFactor = 1.0f + projectedDist / m_DragGizmoScale;
+              scaleFactor = glm::max(scaleFactor, 0.01f);
 
-            int axisIdx = static_cast<int>(m_DragAxis) - 1;
-            localTransform.scale[axisIdx] =
-              m_DragStartLocalTransform.scale[axisIdx] * scaleFactor;
-          }
+              int axisIdx = static_cast<int>(m_DragAxis) - 1;
+              localTransform.scale[axisIdx] =
+                m_DragStartLocalTransform.scale[axisIdx] * scaleFactor;
+            }
 
-          scene.MarkDirty(entity);
+            scene.MarkDirty(entity);
+          }
         }
       }
     }
@@ -263,47 +294,80 @@ namespace YAEngine
         {
           Entity entity = m_Context.selectedEntity;
           auto& scene = *m_Context.scene;
-          auto& wt = scene.GetComponent<WorldTransform>(entity);
-          glm::vec3 gizmoPos(wt.world[3]);
+          GizmoMode mode = m_Context.render->GetGizmoMode();
 
-          m_DragAxis = hoveredAxis;
-          m_DragMode = m_Context.render->GetGizmoMode();
-          m_DragStartLocalTransform = scene.GetTransform(entity);
-          m_DragStartWorldPos = gizmoPos;
-          m_DragAxisDir = AxisToDirection(hoveredAxis);
-
-          Entity camEntity = GetScene().GetActiveCamera();
-          glm::vec3 camPos = GetScene().GetTransform(camEntity).position;
-
-          if (m_DragMode == GizmoMode::Rotate)
+          // Scale has no meaning for a track key; the click is swallowed rather than
+          // scaling the entity under a key-anchored gizmo
+          CameraTrackKey* key = ActiveSequencerKey();
+          bool scaleOnKey = key != nullptr && mode == GizmoMode::Scale;
+          if (!scaleOnKey)
           {
-            m_DragPlaneNormal = m_DragAxisDir;
-          }
-          else
-          {
-            glm::vec3 camDir = glm::normalize(camPos - gizmoPos);
-            m_DragPlaneNormal = ComputeDragPlaneNormal(m_DragAxisDir, camDir);
-          }
+            glm::vec3 gizmoPos;
+            if (key != nullptr)
+            {
+              gizmoPos = key->position;
+              m_DragStartLocalTransform = LocalTransform {};
+              m_DragStartLocalTransform.position = key->position;
+              m_DragStartLocalTransform.rotation = key->rotation;
+            }
+            else
+            {
+              auto& wt = scene.GetComponent<WorldTransform>(entity);
+              gizmoPos = glm::vec3(wt.world[3]);
+              m_DragStartLocalTransform = scene.GetTransform(entity);
+            }
 
-          float dist = glm::length(camPos - gizmoPos);
-          m_DragGizmoScale = dist * 0.15f;
+            b_DragTargetKey = key != nullptr;
+            m_DragAxis = hoveredAxis;
+            m_DragMode = mode;
+            m_DragStartWorldPos = gizmoPos;
+            m_DragAxisDir = AxisToDirection(hoveredAxis);
 
-          auto hitT = RayPlaneIntersect(viewportRay, m_DragStartWorldPos, m_DragPlaneNormal);
-          if (hitT)
-          {
-            m_DragStartHitPoint = viewportRay.origin + *hitT * viewportRay.direction;
-            b_DragActive = true;
-            gizmo.SetDraggedAxis(hoveredAxis);
-            input.SetGizmoDragging(true);
+            Entity camEntity = GetScene().GetActiveCamera();
+            glm::vec3 camPos = GetScene().GetTransform(camEntity).position;
+
+            if (m_DragMode == GizmoMode::Rotate)
+            {
+              m_DragPlaneNormal = m_DragAxisDir;
+            }
+            else
+            {
+              glm::vec3 camDir = glm::normalize(camPos - gizmoPos);
+              m_DragPlaneNormal = ComputeDragPlaneNormal(m_DragAxisDir, camDir);
+            }
+
+            float dist = glm::length(camPos - gizmoPos);
+            m_DragGizmoScale = dist * 0.15f;
+
+            auto hitT = RayPlaneIntersect(viewportRay, m_DragStartWorldPos, m_DragPlaneNormal);
+            if (hitT)
+            {
+              m_DragStartHitPoint = viewportRay.origin + *hitT * viewportRay.direction;
+              b_DragActive = true;
+              gizmo.SetDraggedAxis(hoveredAxis);
+              input.SetGizmoDragging(true);
+            }
           }
         }
         else
         {
-          // Icons first - they are drawn as an unoccluded overlay and never reach the id
-          // buffer, so anything else winning over them would make a visible icon
-          // unclickable. An icon always selects its own entity, with no root walk.
-          Entity icon = PickIconEntity(viewportRay, viewportView);
-          if (icon != entt::null)
+          // Track keys first: they are the smallest targets on screen and sit on top of
+          // the path the user is editing. Then icons - they are drawn as an unoccluded
+          // overlay and never reach the id buffer, so anything else winning over them
+          // would make a visible icon unclickable. An icon always selects its own
+          // entity, with no root walk.
+          Entity keyTrack = entt::null;
+          int keyIndex = -1;
+          Entity icon = entt::null;
+          if (PickTrackKey(viewportRay, keyTrack, keyIndex))
+          {
+            b_PickRequestActive = false;
+            m_Context.SelectEntity(keyTrack);
+            m_Context.sequencerTrack = keyTrack;
+            m_Context.sequencerSelectedKey = keyIndex;
+            m_Context.sequencerKeyPickRequest = keyIndex;
+          }
+          else if ((icon = PickIconEntity(viewportRay, viewportView)) != entt::null)
           {
             b_PickRequestActive = false;
             m_Context.SelectEntity(icon);
@@ -323,7 +387,13 @@ namespace YAEngine
       }
     }
 
-    if (m_Context.selectedEntity != entt::null && m_Context.scene->HasComponent<WorldTransform>(m_Context.selectedEntity))
+    // The gizmo (and its hover test) anchors to the selected sequencer key when there is
+    // one, and to the selected entity otherwise
+    if (CameraTrackKey* anchorKey = ActiveSequencerKey())
+    {
+      m_Context.render->SetSelectedEntityPosition(anchorKey->position);
+    }
+    else if (m_Context.selectedEntity != entt::null && m_Context.scene->HasComponent<WorldTransform>(m_Context.selectedEntity))
     {
       auto& t = m_Context.scene->GetComponent<WorldTransform>(m_Context.selectedEntity);
       glm::vec3 pos(t.world[3]);
@@ -649,6 +719,15 @@ namespace YAEngine
     for (auto [entity, probe, wt] : GetScene().GetView<ReflectionProbeComponent, WorldTransform>().each())
       testIcon(entity, glm::vec3(wt.world[3]), EditorIcon::PROBE);
 
+    // Mirrors DebugDrawSceneCameras: the editor camera draws no icon, so it catches no
+    // clicks either
+    for (auto [entity, camera, wt] : GetScene().GetView<CameraComponent, WorldTransform>().each())
+    {
+      if (GetScene().HasComponent<EditorOnlyTag>(entity))
+        continue;
+      testIcon(entity, glm::vec3(wt.world[3]), EditorIcon::CAMERA);
+    }
+
     return closest;
   }
 
@@ -718,6 +797,210 @@ namespace YAEngine
     return closest;
   }
 
+  namespace
+  {
+    // Scene cameras normally see a kilometre; drawing that would fill the level with one
+    // wireframe, so the visualization stops early. The near end stays exact.
+    constexpr float CAMERA_FRUSTUM_VIS_FAR = 1.0f;
+    const glm::vec4 kCameraIconColor(0.7f, 0.8f, 0.9f, 0.85f);
+    const glm::vec4 kCameraFrustumColor(0.45f, 0.6f, 0.75f, 0.45f);
+    const glm::vec4 kCameraFrustumSelectedColor(1.0f, 0.75f, 0.25f, 0.9f);
+    const glm::vec4 kTrackPathColor(0.35f, 0.75f, 0.95f, 0.8f);
+    const glm::vec4 kTrackKeyColor(0.45f, 0.6f, 0.75f, 0.7f);
+    // Enough to show the Hermite curvature between two keys without flooding the instance
+    // buffer on a long track
+    constexpr uint32_t TRACK_SAMPLES_PER_SEGMENT = 16;
+    constexpr float TRACK_KEY_RADIUS = 0.12f;
+    // Slightly padded relative to the drawn sphere so the small targets are comfortable to hit
+    constexpr float TRACK_KEY_PICK_RADIUS = 0.18f;
+
+    // World matrix with the scale divided out: the frustum shape comes from fov and the
+    // plane distances, so a scaled camera entity must not stretch it into something the
+    // renderer would never produce.
+    glm::mat4 CameraOrientationMatrix(const glm::mat4& world)
+    {
+      glm::mat4 result = world;
+      for (int i = 0; i < 3; i++)
+      {
+        glm::vec3 axis(result[i]);
+        float length = glm::length(axis);
+        if (length > 1e-6f)
+          result[i] = glm::vec4(axis / length, 0.0f);
+      }
+      return result;
+    }
+  }
+
+  void EditorLayer::DebugDrawSceneCameras()
+  {
+    if (!m_Context.render)
+      return;
+
+    auto& gizmo = m_Context.render->GetGizmoRenderer();
+    bool drawFrustums = m_Context.render->GetCameraFrustumsVisible();
+
+    for (auto [entity, camera, wt] : GetScene().GetView<CameraComponent, WorldTransform>().each())
+    {
+      if (GetScene().HasComponent<EditorOnlyTag>(entity))
+        continue;
+
+      gizmo.DrawSprite(glm::vec3(wt.world[3]), EditorIcon::WORLD_SIZE, EditorIcon::CAMERA,
+        kCameraIconColor);
+
+      if (!drawFrustums)
+        continue;
+      // Previewing this camera puts the viewport inside its own frustum
+      if (m_Context.previewCamera == entity)
+        continue;
+
+      float farDist = std::min(camera.farPlane, CAMERA_FRUSTUM_VIS_FAR);
+      bool selected = m_Context.selectedEntity == entity;
+      gizmo.DrawWireFrustum(CameraOrientationMatrix(wt.world), camera.fov, camera.aspectRatio,
+        camera.nearPlane, farDist,
+        selected ? kCameraFrustumSelectedColor : kCameraFrustumColor);
+    }
+  }
+
+  void EditorLayer::DebugDrawCameraTrack()
+  {
+    if (!m_Context.render)
+      return;
+
+    auto hasTrack = [this](Entity e) {
+      return e != entt::null && GetScene().GetRegistry().valid(e)
+        && GetScene().HasComponent<CameraTrackComponent>(e);
+    };
+
+    // The sequencer's binding wins: it survives selecting something else, which is what
+    // keeps the path on screen while the aim target or a light is being adjusted.
+    Entity trackEntity = hasTrack(m_Context.sequencerTrack)
+      ? m_Context.sequencerTrack
+      : m_Context.selectedEntity;
+    if (!hasTrack(trackEntity))
+      return;
+
+    // Looking through the track camera puts the whole path behind its near plane
+    if (m_Context.previewCamera == trackEntity)
+      return;
+
+    auto& track = GetScene().GetComponent<CameraTrackComponent>(trackEntity);
+    if (track.keys.empty())
+      return;
+
+    auto& gizmo = m_Context.render->GetGizmoRenderer();
+
+    glm::vec3 previous = track.keys.front().position;
+    for (size_t seg = 0; seg + 1 < track.keys.size(); seg++)
+    {
+      for (uint32_t sample = 1; sample <= TRACK_SAMPLES_PER_SEGMENT; sample++)
+      {
+        float t = glm::mix(track.keys[seg].time, track.keys[seg + 1].time,
+          float(sample) / float(TRACK_SAMPLES_PER_SEGMENT));
+        glm::vec3 point = EvaluateCameraTrack(track.keys, t).position;
+        gizmo.DrawLine(previous, point, kTrackPathColor);
+        previous = point;
+      }
+    }
+
+    int selectedKey = trackEntity == m_Context.sequencerTrack ? m_Context.sequencerSelectedKey : -1;
+    for (size_t i = 0; i < track.keys.size(); i++)
+    {
+      gizmo.DrawWireSphereDepthTested(track.keys[i].position, TRACK_KEY_RADIUS,
+        int(i) == selectedKey ? kCameraFrustumSelectedColor : kTrackKeyColor);
+    }
+  }
+
+  CameraTrackKey* EditorLayer::ActiveSequencerKey()
+  {
+    Entity track = m_Context.sequencerTrack;
+    int index = m_Context.sequencerSelectedKey;
+    // Only while the track entity itself is selected: any other selection keeps the
+    // regular entity gizmo
+    if (track == entt::null || index < 0 || m_Context.selectedEntity != track)
+      return nullptr;
+    if (!GetScene().GetRegistry().valid(track) || !GetScene().HasComponent<CameraTrackComponent>(track))
+      return nullptr;
+
+    auto& trackComponent = GetScene().GetComponent<CameraTrackComponent>(track);
+    if (index >= int(trackComponent.keys.size()))
+      return nullptr;
+    return &trackComponent.keys[index];
+  }
+
+  void EditorLayer::DragSequencerKey(const glm::vec3& delta, const glm::vec3& currentHit)
+  {
+    CameraTrackKey* key = ActiveSequencerKey();
+    if (key == nullptr)
+      return;
+
+    if (m_DragMode == GizmoMode::Translate)
+    {
+      // Keys live in world space, so no parent conversion is involved
+      key->position = m_DragStartWorldPos + glm::dot(delta, m_DragAxisDir) * m_DragAxisDir;
+    }
+    else if (m_DragMode == GizmoMode::Rotate)
+    {
+      glm::vec3 v1 = m_DragStartHitPoint - m_DragStartWorldPos;
+      glm::vec3 v2 = currentHit - m_DragStartWorldPos;
+      float l1 = glm::length(v1);
+      float l2 = glm::length(v2);
+      if (l1 > 1e-6f && l2 > 1e-6f)
+      {
+        v1 /= l1;
+        v2 /= l2;
+        float cosAngle = glm::clamp(glm::dot(v1, v2), -1.0f, 1.0f);
+        float sinAngle = glm::dot(glm::cross(v1, v2), m_DragAxisDir);
+        float angle = std::atan2(sinAngle, cosAngle);
+        key->rotation = glm::normalize(
+          glm::angleAxis(angle, m_DragAxisDir) * m_DragStartLocalTransform.rotation);
+      }
+    }
+
+    // The camera entity follows the dragged key, exactly like a scrub to its time; the
+    // panel is asked to move its playhead there so the two stay in step
+    CameraTrackPlayer::ApplyTrackPose(*m_Context.scene, m_Context.sequencerTrack, key->time);
+    m_Context.sequencerScrubRequest = key->time;
+  }
+
+  bool EditorLayer::PickTrackKey(const Ray& ray, Entity& outTrack, int& outKey)
+  {
+    if (!m_Context.render || !m_Context.render->GetGizmosEnabled())
+      return false;
+
+    // Clickable exactly when visible, so this mirrors DebugDrawCameraTrack's track
+    // resolution and guards
+    auto hasTrack = [this](Entity e) {
+      return e != entt::null && GetScene().GetRegistry().valid(e)
+        && GetScene().HasComponent<CameraTrackComponent>(e);
+    };
+
+    Entity trackEntity = hasTrack(m_Context.sequencerTrack)
+      ? m_Context.sequencerTrack
+      : m_Context.selectedEntity;
+    if (!hasTrack(trackEntity) || m_Context.previewCamera == trackEntity)
+      return false;
+
+    auto& track = GetScene().GetComponent<CameraTrackComponent>(trackEntity);
+    float closestDist = std::numeric_limits<float>::max();
+    int closest = -1;
+    for (size_t i = 0; i < track.keys.size(); i++)
+    {
+      auto hit = RaySphereIntersect(ray, track.keys[i].position, TRACK_KEY_PICK_RADIUS);
+      if (hit && *hit < closestDist)
+      {
+        closestDist = *hit;
+        closest = int(i);
+      }
+    }
+
+    if (closest < 0)
+      return false;
+
+    outTrack = trackEntity;
+    outKey = closest;
+    return true;
+  }
+
   void EditorLayer::DebugDrawGizmos()
   {
     DebugDrawIrradianceVolumeNodes();
@@ -732,6 +1015,9 @@ namespace YAEngine
         probeGizmo.DrawSprite(glm::vec3(wt.world[3]), EditorIcon::WORLD_SIZE, EditorIcon::PROBE,
           glm::vec4(0.2f, 0.7f, 0.9f, 0.85f));
     }
+
+    DebugDrawSceneCameras();
+    DebugDrawCameraTrack();
 
     if (!m_Context.render || !m_Context.render->GetCollidersVisible())
       return;
@@ -813,6 +1099,7 @@ namespace YAEngine
 
   void EditorLayer::NewScene()
   {
+    m_Context.StopCameraPreview();
     m_Context.ClearSelection();
     m_Context.ClearMaterialSelection();
 
@@ -884,6 +1171,7 @@ namespace YAEngine
 
   void EditorLayer::LoadSceneDeferred(const std::string& path)
   {
+    m_Context.StopCameraPreview();
     m_Context.ClearSelection();
     m_Context.ClearMaterialSelection();
 
@@ -945,8 +1233,8 @@ namespace YAEngine
     ImGui::DockBuilderDockWindow("Details", dockRightTop);
     ImGui::DockBuilderDockWindow("Render Settings", dockRightTop);
     ImGui::DockBuilderDockWindow("Materials", dockRightTop);
-    ImGui::DockBuilderDockWindow("Debug Viz", dockRightTop);
     ImGui::DockBuilderDockWindow("Material Inspector", dockRightBottom);
+    ImGui::DockBuilderDockWindow("Sequencer", dockBottom);
     ImGui::DockBuilderDockWindow("Performance", dockBottom);
     ImGui::DockBuilderDockWindow("Console", dockBottom);
     ImGui::DockBuilderDockWindow("Content Browser", dockBottom);

@@ -177,6 +177,12 @@ namespace YAEngine
     return 2.0f * radius / float(CASCADE_TILE_SIZE);
   }
 
+  bool ShadowManager::FitParamDrifted(float current, float frozen)
+  {
+    return std::abs(current - frozen)
+      > FIT_PARAM_THRESHOLD * std::max(std::abs(frozen), 1e-3f);
+  }
+
   void ShadowManager::ComputeCascades(
     const glm::mat4& cameraView,
     float cameraFov, float cameraAspect,
@@ -208,14 +214,16 @@ namespace YAEngine
     glm::vec3 sunDir = glm::normalize(lightDirection);
 
     // Full-refit triggers shared by all cascades, compared against the inputs
-    // the frozen matrices were built from.
+    // the frozen matrices were built from. Both comparisons carry hysteresis:
+    // an input that animates continuously would otherwise cross an exact
+    // compare on every frame and refit all four cascades forever.
     ShadowInvalidation fullReason = ShadowInvalidation::None;
     if (b_FrozenParamsValid)
     {
-      if (shadowDistance != m_FrozenShadowDistance
-        || cameraFov != m_FrozenFov
-        || cameraAspect != m_FrozenAspect
-        || cameraNear != m_FrozenNear)
+      if (FitParamDrifted(shadowDistance, m_FrozenShadowDistance)
+        || FitParamDrifted(cameraFov, m_FrozenFov)
+        || FitParamDrifted(cameraAspect, m_FrozenAspect)
+        || FitParamDrifted(cameraNear, m_FrozenNear))
         fullReason = ShadowInvalidation::ShadowParamsChanged;
       else if (sunDir != m_FrozenSunDir
         && glm::dot(sunDir, m_FrozenSunDir) < std::cos(glm::radians(SUN_THRESHOLD_DEG)))

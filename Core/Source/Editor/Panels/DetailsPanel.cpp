@@ -927,15 +927,84 @@ namespace YAEngine
     }
   }
 
-  static void DrawCamera(CameraComponent& cc)
+  static void SetCameraToEditorView(Scene& scene, Entity entity)
   {
-    if (ImGui::CollapsingHeader(ICON_FA_VIDEO " Camera", ImGuiTreeNodeFlags_DefaultOpen))
+    Entity editorCamera = entt::null;
+    for (auto e : scene.GetView<EditorOnlyTag, CameraComponent>())
     {
-      ImGui::Text("FOV: %.1f", glm::degrees(cc.fov));
-      ImGui::Text("Aspect: %.2f", cc.aspectRatio);
-      ImGui::Text("Near: %.3f", cc.nearPlane);
-      ImGui::Text("View distance: %.1f", cc.farPlane);
+      editorCamera = e;
+      break;
     }
+    if (editorCamera == entt::null)
+      return;
+
+    // The editor camera is a root entity, so its LocalTransform is already world space
+    const LocalTransform& view = scene.GetTransform(editorCamera);
+
+    Entity parent = scene.HasComponent<HierarchyComponent>(entity)
+      ? scene.GetHierarchy(entity).parent
+      : Entity(entt::null);
+
+    auto& transform = scene.GetTransform(entity);
+    if (parent != entt::null && scene.HasComponent<WorldTransform>(parent))
+    {
+      const glm::mat4& parentWorld = scene.GetComponent<WorldTransform>(parent).world;
+      glm::mat3 basis(parentWorld);
+      for (int i = 0; i < 3; i++)
+      {
+        float length = glm::length(basis[i]);
+        if (length > 1e-6f)
+          basis[i] /= length;
+      }
+      glm::quat parentRotation = glm::normalize(glm::quat_cast(basis));
+      transform.position = glm::vec3(glm::inverse(parentWorld) * glm::vec4(view.position, 1.0f));
+      transform.rotation = glm::normalize(glm::inverse(parentRotation) * view.rotation);
+    }
+    else
+    {
+      transform.position = view.position;
+      transform.rotation = view.rotation;
+    }
+    scene.MarkDirty(entity);
+  }
+
+  static void DrawCamera(EditorContext& context, Entity entity, CameraComponent& cc)
+  {
+    if (!ImGui::CollapsingHeader(ICON_FA_VIDEO " Camera", ImGuiTreeNodeFlags_DefaultOpen))
+      return;
+
+    ImGui::PushID("Camera");
+
+    float fovDegrees = glm::degrees(cc.fov);
+    if (ImGui::DragFloat("FOV", &fovDegrees, 0.25f, 10.0f, 120.0f, "%.1f deg"))
+      cc.fov = glm::radians(fovDegrees);
+
+    ImGui::DragFloat("Near", &cc.nearPlane, 0.01f, 0.01f, 10.0f, "%.3f");
+    ImGui::DragFloat("View distance", &cc.farPlane, 1.0f, 10.0f, 10000.0f, "%.1f");
+    // Forced to the viewport every frame, so it is reported rather than offered
+    ImGui::Text("Aspect: %.2f", cc.aspectRatio);
+
+    if (!context.scene->HasComponent<EditorOnlyTag>(entity))
+    {
+      ImGui::Separator();
+      if (context.previewCamera == entity)
+      {
+        if (ImGui::Button(ICON_FA_XMARK " Stop Preview"))
+          context.StopCameraPreview();
+      }
+      else if (ImGui::Button(ICON_FA_VIDEO " Preview"))
+      {
+        context.StartCameraPreview(entity);
+      }
+
+      ImGui::SameLine();
+      if (ImGui::Button(ICON_FA_LOCATION_CROSSHAIRS " Set To View"))
+        SetCameraToEditorView(*context.scene, entity);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Move this camera to the editor camera position");
+    }
+
+    ImGui::PopID();
   }
 
   static bool DrawCollider(ColliderComponent& collider)
@@ -1314,7 +1383,7 @@ namespace YAEngine
       DrawModel(context, scene.GetComponent<ModelSourceComponent>(entity));
 
     if (scene.HasComponent<CameraComponent>(entity))
-      DrawCamera(scene.GetComponent<CameraComponent>(entity));
+      DrawCamera(context, entity, scene.GetComponent<CameraComponent>(entity));
 
     if (scene.HasComponent<ColliderComponent>(entity))
     {

@@ -2,6 +2,7 @@
 
 #include "Assets/MaterialManager.h"
 #include "Assets/MeshManager.h"
+#include "Utils/CameraTrack.h"
 
 namespace YAEngine
 {
@@ -74,6 +75,28 @@ namespace YAEngine
       if (height > 0.0f)
         aspectRatio = width / height;
     }
+  };
+
+  // Authored camera move, played back by CameraTrackPlayer. Lives next to a
+  // CameraComponent on the same entity - playback drives that entity's transform.
+  struct CameraTrackComponent
+  {
+    enum class RotationMode : uint8_t
+    {
+      Keyframed,
+      AimAt
+    };
+
+    // Invariant: sorted by ascending time. The evaluator and every editor tool that
+    // inserts a key rely on it; an unsorted list silently produces garbage segments.
+    std::vector<CameraTrackKey> keys;
+    RotationMode rotationMode = RotationMode::Keyframed;
+    // Entity to look at while rotationMode is AimAt; keyframed rotation is used when it
+    // resolves to nothing.
+    std::string aimTargetName;
+    // A move that starts from a completely different viewpoint carries over a history
+    // and an exposure that belong to the old one.
+    bool resetPostFXOnStart = true;
   };
 
   struct MeshComponent

@@ -95,6 +95,7 @@ namespace YAEngine
     m_BoxMesh = UploadTopology(ctx, Topology::WireBox());
     m_ConeMesh = UploadTopology(ctx, Topology::WireCone());
     m_ArrowMesh = UploadTopology(ctx, Topology::Arrow());
+    m_LineMesh = UploadTopology(ctx, Topology::Line());
 
     // Solid meshes
     m_SolidArrowMesh = UploadTopology(ctx, Topology::SolidArrow());
@@ -203,6 +204,7 @@ namespace YAEngine
     LoadGlyphSprite(ctx, EditorIcon::LIGHT_BULB, 128);
     LoadGlyphSprite(ctx, EditorIcon::SUN, 128);
     LoadGlyphSprite(ctx, EditorIcon::PROBE, 128);
+    LoadGlyphSprite(ctx, EditorIcon::CAMERA, 128);
   }
 
   void GizmoRenderer::Destroy(const RenderContext& ctx)
@@ -215,6 +217,8 @@ namespace YAEngine
     m_ConeMesh.indexBuffer.Destroy(ctx);
     m_ArrowMesh.vertexBuffer.Destroy(ctx);
     m_ArrowMesh.indexBuffer.Destroy(ctx);
+    m_LineMesh.vertexBuffer.Destroy(ctx);
+    m_LineMesh.indexBuffer.Destroy(ctx);
 
     m_SolidArrowMesh.vertexBuffer.Destroy(ctx);
     m_SolidArrowMesh.indexBuffer.Destroy(ctx);
@@ -286,6 +290,57 @@ namespace YAEngine
                          * glm::mat4_cast(rotation)
                          * glm::scale(glm::mat4(1.0f), extents);
     m_Requests.push_back({ GizmoShape::Box, GizmoRenderMode::WireDepthTested, transform, color });
+  }
+
+  void GizmoRenderer::DrawWireBoxDepthTested(const glm::mat4& transform, const glm::vec4& color)
+  {
+    m_Requests.push_back({ GizmoShape::Box, GizmoRenderMode::WireDepthTested, transform, color });
+  }
+
+  void GizmoRenderer::DrawWireFrustum(const glm::mat4& cameraWorld, float fovY, float aspect,
+    float nearDist, float farDist, const glm::vec4& color)
+  {
+    if (farDist <= nearDist || nearDist <= 0.0f)
+      return;
+
+    float tanV = std::tan(fovY * 0.5f);
+    float tanH = tanV * aspect;
+
+    // A frustum is not an affine image of a cube - the near cap is smaller than the far
+    // one - but it IS a projective one, and the gizmo shaders multiply this matrix into
+    // homogeneous coordinates, so the unit box mesh can carry it. Mapping the box' z from
+    // -1 to +1 onto view depth n..f needs the depth to be a reciprocal of a linear ramp,
+    // which is exactly what putting the ramp in the w row does:
+    //   x' = tanH*x / w,  y' = tanV*y / w,  z' = -1 / w,  w = a*z + b
+    // with a and b solved from 1/w(-1) = near and 1/w(+1) = far. w stays positive over
+    // the whole box, so no edge crosses the camera plane.
+    float a = (1.0f / farDist - 1.0f / nearDist) * 0.5f;
+    float b = (1.0f / farDist + 1.0f / nearDist) * 0.5f;
+
+    glm::mat4 frustum(0.0f);
+    frustum[0][0] = tanH;
+    frustum[1][1] = tanV;
+    frustum[2][3] = a;
+    frustum[3][2] = -1.0f;
+    frustum[3][3] = b;
+
+    DrawWireBoxDepthTested(cameraWorld * frustum, color);
+  }
+
+  void GizmoRenderer::DrawLine(const glm::vec3& a, const glm::vec3& b, const glm::vec4& color)
+  {
+    // The mesh only occupies the x axis, so the other two columns can stay identity: they
+    // multiply zeros. First column maps (1,0,0) onto b - a, translation puts the start at a.
+    glm::mat4 transform(1.0f);
+    transform[0] = glm::vec4(b - a, 0.0f);
+    transform[3] = glm::vec4(a, 1.0f);
+    m_Requests.push_back({ GizmoShape::Line, GizmoRenderMode::WireDepthTested, transform, color });
+  }
+
+  void GizmoRenderer::DrawPolyline(const std::vector<glm::vec3>& points, const glm::vec4& color)
+  {
+    for (size_t i = 0; i + 1 < points.size(); i++)
+      DrawLine(points[i], points[i + 1], color);
   }
 
   void GizmoRenderer::DrawWireCone(const glm::vec3& origin, const glm::vec3& direction, float height, float angle, const glm::vec4& color)
@@ -492,17 +547,18 @@ namespace YAEngine
       case GizmoShape::Box:    return &m_BoxMesh;
       case GizmoShape::Cone:   return &m_ConeMesh;
       case GizmoShape::Arrow:  return &m_ArrowMesh;
+      case GizmoShape::Line:   return &m_LineMesh;
       default:                 return nullptr;
     }
   }
 
   void GizmoRenderer::FlushDepthTested(VkCommandBuffer cmd, VkDescriptorSet frameDescriptor)
   {
-    // Grouped by shape: four wire meshes cover every depth-tested request, so the
-    // whole overlay is at most four instanced draws no matter how many nodes the
+    // Grouped by shape: five wire meshes cover every depth-tested request, so the
+    // whole overlay is at most five instanced draws no matter how many nodes the
     // selected irradiance volume has.
     static constexpr GizmoShape SHAPES[] = {
-      GizmoShape::Sphere, GizmoShape::Box, GizmoShape::Cone, GizmoShape::Arrow
+      GizmoShape::Sphere, GizmoShape::Box, GizmoShape::Cone, GizmoShape::Arrow, GizmoShape::Line
     };
 
     bool bound = false;
@@ -608,6 +664,7 @@ namespace YAEngine
         case GizmoShape::Box:    mesh = &m_BoxMesh; break;
         case GizmoShape::Cone:   mesh = &m_ConeMesh; break;
         case GizmoShape::Arrow:  mesh = &m_ArrowMesh; break;
+        case GizmoShape::Line:   mesh = &m_LineMesh; break;
         default: continue;
       }
 

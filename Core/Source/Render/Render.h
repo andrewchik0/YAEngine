@@ -444,6 +444,7 @@ namespace YAEngine
     bool b_VolumeInvalidNodesVisible = false;
     VolumeNodeColorMode m_VolumeNodeColorMode = VolumeNodeColorMode::Irradiance;
     bool b_CollidersVisible = false;
+    bool b_CameraFrustumsVisible = true;
     bool b_HasSelectedEntity = false;
     glm::vec3 m_SelectedEntityPosition { 0.0f };
     GizmoMode m_GizmoMode = GizmoMode::Translate;
@@ -797,6 +798,7 @@ namespace YAEngine
     bool& GetVolumeInvalidNodesVisible() { return b_VolumeInvalidNodesVisible; }
     VolumeNodeColorMode& GetVolumeNodeColorMode() { return m_VolumeNodeColorMode; }
     bool& GetCollidersVisible() { return b_CollidersVisible; }
+    bool& GetCameraFrustumsVisible() { return b_CameraFrustumsVisible; }
     GizmoRenderer& GetGizmoRenderer() { return m_GizmoRenderer; }
     void SetSelectedEntityPosition(const glm::vec3& pos) { b_HasSelectedEntity = true; m_SelectedEntityPosition = pos; }
     void ClearSelectedEntity() { b_HasSelectedEntity = false; }

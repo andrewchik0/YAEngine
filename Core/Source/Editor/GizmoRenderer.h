@@ -22,6 +22,7 @@ namespace YAEngine
     constexpr uint32_t LIGHT_BULB = 0xf0eb;
     constexpr uint32_t SUN = 0xf185;
     constexpr uint32_t PROBE = 0xf0ac;
+    constexpr uint32_t CAMERA = 0xf03d;
   }
 
   enum class GizmoShape : uint8_t
@@ -30,6 +31,7 @@ namespace YAEngine
     Box,
     Cone,
     Arrow,
+    Line,
     SolidArrow,
     SolidScaleArrow,
     SolidRing
@@ -57,6 +59,17 @@ namespace YAEngine
     void DrawWireSphereDepthTested(const glm::vec3& center, float radius, const glm::vec4& color);
     void DrawWireBoxDepthTested(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color);
     void DrawWireBoxDepthTested(const glm::vec3& center, const glm::vec3& extents, const glm::quat& rotation, const glm::vec4& color);
+    // Raw transform for the unit box, for shapes an affine translate/rotate/scale cannot
+    // express - see DrawWireFrustum.
+    void DrawWireBoxDepthTested(const glm::mat4& transform, const glm::vec4& color);
+    // Perspective frustum of a camera whose world matrix is cameraWorld (looking down -Z,
+    // scale already removed), drawn from nearDist out to farDist.
+    void DrawWireFrustum(const glm::mat4& cameraWorld, float fovY, float aspect,
+      float nearDist, float farDist, const glm::vec4& color);
+    // Depth-tested segment on the instanced path: a sampled spline is hundreds of them,
+    // and one draw call per segment would not survive that.
+    void DrawLine(const glm::vec3& a, const glm::vec3& b, const glm::vec4& color);
+    void DrawPolyline(const std::vector<glm::vec3>& points, const glm::vec4& color);
     void DrawWireCone(const glm::vec3& origin, const glm::vec3& direction, float height, float angle, const glm::vec4& color);
     void DrawArrow(const glm::vec3& origin, const glm::vec3& direction, float length, const glm::vec4& color);
 
@@ -133,6 +146,7 @@ namespace YAEngine
     GizmoMesh m_BoxMesh;
     GizmoMesh m_ConeMesh;
     GizmoMesh m_ArrowMesh;
+    GizmoMesh m_LineMesh;
 
     GizmoMesh m_SolidArrowMesh;
     GizmoMesh m_SolidScaleArrowMesh;

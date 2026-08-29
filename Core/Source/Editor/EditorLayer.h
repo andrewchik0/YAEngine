@@ -13,6 +13,7 @@ namespace YAEngine
 {
   enum class GizmoAxis : uint8_t;
   enum class GizmoMode : uint8_t;
+  struct CameraTrackKey;
 
   class EditorLayer : public Layer
   {
@@ -36,6 +37,8 @@ namespace YAEngine
     void EnsureBasePath(const std::string& scenePath);
     void SyncEditorCameraState();
     void DebugDrawIrradianceVolumeNodes();
+    void DebugDrawSceneCameras();
+    void DebugDrawCameraTrack();
 
     // Picking, most specific first: overlay icons, then the entity id the renderer
     // rasterized into the clicked pixel, then the ray test for what has no geometry.
@@ -43,6 +46,12 @@ namespace YAEngine
     Entity PickByRay(const Ray& ray);
     Entity FindSelectionRoot(Entity entity);
     void ApplyPickResult(const PickResult& result);
+
+    // Sequencer key manipulation: while the track entity itself is selected and the
+    // sequencer has a selected key, the viewport gizmo grabs that key instead
+    CameraTrackKey* ActiveSequencerKey();
+    void DragSequencerKey(const glm::vec3& delta, const glm::vec3& currentHit);
+    bool PickTrackKey(const Ray& ray, Entity& outTrack, int& outKey);
 
     EditorContext m_Context;
     std::string m_CurrentScenePath;
@@ -71,6 +80,7 @@ namespace YAEngine
     Ray m_PickFallbackRay {};
 
     bool b_DragActive = false;
+    bool b_DragTargetKey = false;
     GizmoAxis m_DragAxis {};
     GizmoMode m_DragMode {};
     LocalTransform m_DragStartLocalTransform;

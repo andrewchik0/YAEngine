@@ -20,6 +20,16 @@ namespace YAEngine
     return data;
   }
 
+  // Origin to +X, so a transform whose first column is (b - a) and whose translation is a
+  // draws the segment a..b - see GizmoRenderer::DrawLine.
+  TopologyData Topology::Line()
+  {
+    TopologyData data;
+    data.positions = { {0, 0, 0}, {1, 0, 0} };
+    data.indices = { 0, 1 };
+    return data;
+  }
+
   TopologyData Topology::WireSphere(uint32_t segments)
   {
     TopologyData data;

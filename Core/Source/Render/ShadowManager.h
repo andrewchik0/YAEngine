@@ -104,6 +104,8 @@ namespace YAEngine
       float nearDist, float farDist,
       glm::vec3& outCenter, float& outRadius);
 
+    static bool FitParamDrifted(float current, float frozen);
+
     static constexpr float SPLIT_LAMBDA = 0.75f;
     static constexpr uint32_t CASCADE_TILE_SIZE = SHADOW_CASCADE_SIZE;
     static constexpr float SHADOW_NEAR_PLANE = 0.01f;
@@ -115,6 +117,14 @@ namespace YAEngine
     static constexpr float FIT_MARGIN = 1.15f;
     // Degrees the sun may drift from the frozen direction before all cascades refit.
     static constexpr float SUN_THRESHOLD_DEG = 0.5f;
+    // Relative drift a fit input (shadow distance, fov, aspect, near plane) may
+    // accumulate before all cascades refit. Those inputs reach nothing but the
+    // frustum slice spheres, and the containment test rebuilds those from the
+    // CURRENT values every frame, so a frozen matrix stays correct at any drift -
+    // this bounds how far a frozen fit may lag the ideal texel density, nothing
+    // more. An exact compare instead refits all four cascades on every frame an
+    // input is animated, which is what a camera track's eased fov does.
+    static constexpr float FIT_PARAM_THRESHOLD = 0.02f;
     // Proactive refits per frame while a cascade is close to escaping its frozen
     // sphere but still inside it.
     static constexpr int REFIT_BUDGET = 1;

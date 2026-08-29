@@ -12,7 +12,9 @@
 #include "Scene/Components.h"
 #include "Scene/SceneSerializer.h"
 #include "Scene/ComponentRegistry.h"
+#include "Scene/CameraTrackPlayer.h"
 #include "Utils/ThreadPool.h"
+#include "Utils/Log.h"
 #include "Render/Render.h"
 #include "Assets/AssetManager.h"
 #include "SparkPool.h"
@@ -21,8 +23,8 @@
 #endif
 
 // #define TEST
-// #define BISTRO_RACING
-#define BISTRO_INTERIOR
+#define BISTRO_RACING
+// #define BISTRO_INTERIOR
 
 class AppLayer : public YAEngine::Layer
 {
@@ -140,6 +142,9 @@ public:
 
   void Update(double deltaTime) override
   {
+    if (GetInput().IsKeyPressed(YAEngine::Key::F9))
+      ToggleCameraTrackPlayback();
+
 #ifdef TEST
     if (m_TestSparkEmitter != entt::null)
     {
@@ -190,6 +195,35 @@ public:
   }
 
 private:
+  void ToggleCameraTrackPlayback()
+  {
+    auto& player = m_Registry->Get<YAEngine::CameraTrackPlayer>();
+
+    if (player.IsPlaying())
+    {
+      player.Stop(GetScene());
+      YA_LOG_INFO("Render", "Camera track playback stopped");
+      return;
+    }
+
+    YAEngine::Entity track = entt::null;
+    for (auto e : GetScene().GetView<YAEngine::CameraTrackComponent>())
+    {
+      track = e;
+      break;
+    }
+
+    if (track == entt::null)
+    {
+      YA_LOG_INFO("Render", "No entity with a camera track in the scene");
+      return;
+    }
+
+    YA_LOG_INFO("Render", "Camera track playback started on '%s'",
+      GetScene().GetName(track).c_str());
+    player.Start(GetScene(), track);
+  }
+
 #ifdef BISTRO_RACING
   // No terrain in BistroExterior, so the car rides a constant plane; kAsphaltY is the roadway level (pavement sits at 0.37), offset by the wheel's lowest point (0.0039 model space) so tires land on it.
   static constexpr double kAsphaltY = 0.32;

@@ -61,6 +61,7 @@ namespace YAEngine
     m_Registry.Register<AssetManager>(&m_AssetManager);
     m_Registry.Register<Scene>(&m_Scene);
     m_Registry.Register<CollisionQueryService>(&m_CollisionQueryService);
+    m_Registry.Register<CameraTrackPlayer>(&m_CameraTrackPlayer);
     m_Registry.Register<SystemScheduler>(&m_Scheduler);
     m_Registry.Register<ComponentRegistry>(&m_ComponentRegistry);
     m_Registry.Register<LayerManager>(&m_LayerManager);
@@ -181,6 +182,14 @@ namespace YAEngine
             m_Accumulator -= FIXED_DT;
           }
         }
+      }
+
+      {
+        // Real delta on purpose: a camera track is meant to be sampled at whatever frame
+        // rate the machine reaches, not at the fixed step reel playback pins frameDt to.
+        // Runs before the systems so TransformSystem picks the pose up in this same frame.
+        YA_PROFILE_CPU("CameraTrack");
+        m_CameraTrackPlayer.Update(m_Scene, m_Timer.GetDeltaTime());
       }
 
       {
