@@ -110,6 +110,7 @@ namespace YAEngine
           .meshIndex = obj.mesh.index,
           .meshGeneration = obj.mesh.generation,
           .worldTransform = obj.worldTransform,
+          .prevWorldTransform = obj.prevWorldTransform,
           .instanceData = obj.instanceData,
           .instanceOffset = obj.instanceOffset,
           .cameraDistanceSq = glm::dot(d, d),
@@ -128,6 +129,7 @@ namespace YAEngine
         .meshIndex = obj.mesh.index,
         .meshGeneration = obj.mesh.generation,
         .worldTransform = obj.worldTransform,
+        .prevWorldTransform = obj.prevWorldTransform,
         .instanceData = obj.instanceData,
         .instanceOffset = obj.instanceOffset,
       });
@@ -176,6 +178,20 @@ namespace YAEngine
     uint32_t lastMaterialGen = UINT32_MAX;
     VulkanPipeline* currentPipeline = nullptr;
 
+    // Slot handed to each draw in this frame's previous-world matrix buffer. The
+    // wireframe transparent loop below keeps counting from where this one stops.
+    uint32_t prevWorldCount = 0;
+    auto pushPrevWorld = [&](const DrawCommand& dc) -> uint32_t
+    {
+      if (prevWorldCount >= MAX_PREV_WORLD_MATRICES)
+        return 0;
+
+      uint32_t index = prevWorldCount++;
+      m_PrevWorldBuffers[frameIndex].Update(index * uint32_t(sizeof(glm::mat4)),
+        &dc.prevWorldTransform, uint32_t(sizeof(glm::mat4)));
+      return index;
+    };
+
     for (auto& dc : m_DrawCommands)
     {
       MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
@@ -208,10 +224,12 @@ namespace YAEngine
       {
         glm::mat4 model;
         int offset = 0;
+        uint32_t prevIndex = 0;
       } data;
       data.model = dc.worldTransform;
       if (dc.instanced)
         data.offset = dc.instanceOffset / sizeof(glm::mat4);
+      data.prevIndex = pushPrevWorld(dc);
       currentPipeline->PushConstants(cmd, &data);
 
       uint32_t instanceCount = 1;
@@ -221,6 +239,9 @@ namespace YAEngine
         currentPipeline->BindDescriptorSets(cmd, { m_InstanceDescriptorSet.Get() }, 2);
         m_InstanceBuffer.Update(dc.instanceOffset, dc.instanceData->data(), uint32_t(instanceCount * sizeof(glm::mat4)));
       }
+
+      currentPipeline->BindDescriptorSets(cmd, { m_PrevWorldDescriptorSets[frameIndex].Get() },
+        dc.instanced ? 3 : 2);
 
       auto& vb = meshManager.GetVertexBuffer(meshHandle);
       m_Stats.drawCalls++;
@@ -281,10 +302,12 @@ namespace YAEngine
         {
           glm::mat4 model;
           int offset = 0;
+          uint32_t prevIndex = 0;
         } data;
         data.model = dc.worldTransform;
         if (dc.instanced)
           data.offset = dc.instanceOffset / sizeof(glm::mat4);
+        data.prevIndex = pushPrevWorld(dc);
         currentPipeline->PushConstants(cmd, &data);
 
         uint32_t instanceCount = 1;
@@ -296,6 +319,9 @@ namespace YAEngine
             uint32_t(instanceCount * sizeof(glm::mat4)));
         }
 
+        currentPipeline->BindDescriptorSets(cmd, { m_PrevWorldDescriptorSets[frameIndex].Get() },
+          dc.instanced ? 3 : 2);
+
         auto& vb = meshManager.GetVertexBuffer(meshHandle);
         m_Stats.drawCalls++;
         m_Stats.triangles += uint32_t(vb.GetIndexCount() / 3) * instanceCount;
@@ -303,6 +329,178 @@ namespace YAEngine
         vb.Draw(cmd, instanceCount);
       }
     }
+  }
+
+  namespace
+  {
+    DLSSQuality ToDLSSQuality(AntialiasingMode mode)
+    {
+      switch (mode)
+      {
+        case AntialiasingMode::DLSSQuality: return DLSSQuality::Quality;
+        case AntialiasingMode::DLSSBalanced: return DLSSQuality::Balanced;
+        case AntialiasingMode::DLSSPerformance: return DLSSQuality::Performance;
+        case AntialiasingMode::DLSSUltraPerformance: return DLSSQuality::UltraPerformance;
+        default: return DLSSQuality::DLAA;
+      }
+    }
+  }
+
+  void Render::ResolveAntialiasingMode()
+  {
+    AntialiasingMode previous = m_EffectiveAntialiasingMode;
+    m_EffectiveAntialiasingMode = m_AntialiasingMode;
+
+    bool usable = m_Backend.GetStreamline().IsDLSSAvailable()
+      && !m_DLSSModeRejected[size_t(m_AntialiasingMode)];
+
+    if (IsDLSSMode(m_AntialiasingMode) && !usable)
+    {
+      // The selection stays as the user left it: plugging in a capable GPU or driver
+      // should bring the chosen mode back without them having to pick it again.
+      m_EffectiveAntialiasingMode = AntialiasingMode::TAA;
+
+      if (!b_DLSSFallbackWarned)
+      {
+        b_DLSSFallbackWarned = true;
+        YA_LOG_WARN("Render", "%s is selected but DLSS is unavailable, falling back to TAA",
+          GetAntialiasingModeName(m_AntialiasingMode));
+      }
+    }
+
+    // Both resolves carry accumulated history that is meaningless in the other mode.
+    if (m_EffectiveAntialiasingMode != previous)
+    {
+      b_ResetTAAPending = true;
+      b_ResetDLSSPending = true;
+    }
+  }
+
+  VkExtent2D Render::ComputeRenderExtent(AntialiasingMode mode, VkExtent2D outputExtent)
+  {
+    // DLAA is defined as 1:1, so there is nothing to ask the driver about.
+    if (!IsDLSSMode(mode) || mode == AntialiasingMode::DLAA)
+      return outputExtent;
+
+    DLSSSettings settings {};
+    bool queried = m_Backend.GetStreamline().GetDLSSSettings(ToDLSSQuality(mode),
+      outputExtent.width, outputExtent.height, settings);
+
+    if (queried && settings.renderWidth > 0 && settings.renderHeight > 0)
+      return { settings.renderWidth, settings.renderHeight };
+
+    // Remembered so the query is not repeated every frame; the next
+    // ResolveAntialiasingMode drops this mode to TAA.
+    m_DLSSModeRejected[size_t(mode)] = true;
+    m_EffectiveAntialiasingMode = AntialiasingMode::TAA;
+    YA_LOG_WARN("Render", "%s reports no render resolution for %ux%u, falling back to TAA",
+      GetAntialiasingModeName(mode), outputExtent.width, outputExtent.height);
+
+    return outputExtent;
+  }
+
+  bool Render::UpdateResolutionForMode(VkExtent2D outputExtent)
+  {
+    if (outputExtent.width == 0 || outputExtent.height == 0)
+      return false;
+
+    // Nothing the render extent depends on moved, so the driver is not asked again -
+    // an editor viewport that is merely being redrawn must not thrash the graph.
+    if (m_EffectiveAntialiasingMode == m_ResolutionMode
+      && outputExtent.width == m_ResolutionOutputExtent.width
+      && outputExtent.height == m_ResolutionOutputExtent.height)
+      return false;
+
+    VkExtent2D renderExtent = ComputeRenderExtent(m_EffectiveAntialiasingMode, outputExtent);
+
+    m_ResolutionMode = m_EffectiveAntialiasingMode;
+    m_ResolutionOutputExtent = outputExtent;
+
+    VkExtent2D currentRender = m_Graph.GetExtent();
+    VkExtent2D currentOutput = m_Graph.GetOutputExtent();
+    if (renderExtent.width == currentRender.width && renderExtent.height == currentRender.height
+      && outputExtent.width == currentOutput.width && outputExtent.height == currentOutput.height)
+      return false;
+
+    YA_LOG_INFO("Render", "%s: render %ux%u, output %ux%u",
+      GetAntialiasingModeName(m_EffectiveAntialiasingMode),
+      renderExtent.width, renderExtent.height, outputExtent.width, outputExtent.height);
+
+    ResizeGraph(renderExtent, outputExtent);
+    return true;
+  }
+
+  void Render::RunDLSSEvaluate(VkCommandBuffer cmd, FrameContext& frame)
+  {
+    StreamlineFrameToken token = m_Backend.GetStreamline().GetFrameToken(
+      static_cast<uint32_t>(m_GlobalFrameIndex));
+    if (token == nullptr)
+      return;
+
+    VkExtent2D renderExtent = m_Graph.GetExtent();
+
+    auto describe = [this](RGHandle handle, VkImageLayout layout) {
+      auto& image = m_Graph.GetResource(handle);
+      const RGResourceDesc& desc = m_Graph.GetResourceDesc(handle);
+      VkExtent2D extent = desc.resolution == RGResolution::Output
+        ? m_Graph.GetOutputExtent() : m_Graph.GetExtent();
+
+      return DLSSImage {
+        .image = image.GetImage(),
+        .view = image.GetView(),
+        .layout = layout,
+        .format = desc.format,
+        .aspect = desc.aspect,
+        .width = extent.width,
+        .height = extent.height
+      };
+    };
+
+    const glm::mat4& view = m_FrameUniformBuffer.uniforms.view;
+    glm::mat4 world = glm::inverse(view);
+
+    DLSSEvaluateDesc desc {
+      .cmd = cmd,
+      .frameToken = token,
+      .quality = ToDLSSQuality(m_EffectiveAntialiasingMode),
+      // The graph put the three inputs in SHADER_READ_ONLY and the output in GENERAL
+      // right before this callback; Streamline transitions from there and back.
+      .colorIn = describe(m_SSRColor, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+      .colorOut = describe(m_DLSSOutput, VK_IMAGE_LAYOUT_GENERAL),
+      .depth = describe(m_MainDepth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+      .motionVectors = describe(m_MainVelocity, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+      .view = view,
+      // SetUpCamera keeps the jitter out of the stored matrices, which is exactly what
+      // Streamline wants, but m_FrameUniformBuffer.proj carries it.
+      .proj = m_UnjitteredProj,
+      .prevView = m_FrameUniformBuffer.uniforms.prevView,
+      .prevProj = m_FrameUniformBuffer.uniforms.prevProj,
+      .cameraPosition = frame.snapshot.camera.position,
+      .cameraRight = glm::normalize(glm::vec3(world[0])),
+      .cameraUp = glm::normalize(glm::vec3(world[1])),
+      .cameraForward = glm::normalize(-glm::vec3(world[2])),
+      // FrameUniforms::jitter is what SetUpCamera added to proj[2][0..1]; because GLM's
+      // perspective divide uses w = -viewZ, that shifts NDC by MINUS the stored value.
+      // Half the extent turns an NDC shift into a pixel shift, and the Y flip already
+      // baked into proj makes NDC +Y point down, matching the screen space DLSS expects.
+      .jitterPixels = {
+        -m_FrameUniformBuffer.uniforms.jitterX * 0.5f * float(renderExtent.width),
+        -m_FrameUniformBuffer.uniforms.jitterY * 0.5f * float(renderExtent.height)
+      },
+      // m_MainVelocity holds a UV-space delta pointing from the previous position to
+      // the current one. Streamline hands NGX mvecScale * renderExtent as the factor
+      // that turns a tagged value into render pixels, so unit magnitude is already
+      // right and only the direction has to be flipped.
+      .mvecScale = { -1.0f, -1.0f },
+      .nearPlane = frame.snapshot.camera.nearPlane,
+      .farPlane = frame.snapshot.camera.farPlane,
+      .fov = frame.snapshot.camera.fov,
+      .aspectRatio = frame.snapshot.camera.aspectRatio,
+      .reset = b_ResetDLSSPending
+    };
+
+    if (m_Backend.GetStreamline().EvaluateDLSS(desc))
+      b_ResetDLSSPending = false;
   }
 
   void Render::SetUpCamera(FrameContext& frame)
@@ -324,25 +522,32 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.prevProj = m_PrevProj;
     m_PrevView = view;
     m_PrevProj = proj;
+    // Streamline wants the same jitter-free projection the reprojection above uses, but
+    // for the CURRENT frame, so it is kept apart from the uniform that carries the jitter.
+    m_UnjitteredProj = proj;
+
+    VkExtent2D renderExtent = m_Graph.GetExtent();
+    VkExtent2D outputExtent = m_Graph.GetOutputExtent();
 
     // Jitter without a resolve just makes the image crawl, and the indirect debug
     // views run with TAA forced off - see the matching block in Render::Draw.
-    if (b_TAAEnabled && !IS_INDIRECT_DEBUG_VIEW(m_CurrentTexture))
+    if (IsTemporalAA(m_EffectiveAntialiasingMode) && !IS_INDIRECT_DEBUG_VIEW(m_CurrentTexture))
     {
-      glm::vec2 jitter = GetTAAJitter(m_GlobalFrameIndex);
+      float upscaleRatio = float(outputExtent.width) / float(std::max(1u, renderExtent.width));
+      JitterParameters jitterParams = GetJitterParameters(m_EffectiveAntialiasingMode, upscaleRatio);
+      glm::vec2 jitter = GetTAAJitter(m_GlobalFrameIndex, jitterParams.phaseCount);
 
-      // Dividing by the full extent gives a +-0.25 px sweep, half the textbook +-0.5 px.
-      // This is deliberate, not an oversight: measured on the racing scene, +-0.5 px raised
+      // A Halton sample spans one NDC unit per pixel of extent, which is two pixels wide,
+      // so 4 * amplitude is what turns the half-sweep in pixels into an NDC offset.
+      //
+      // The engine TAA runs at amplitude 0.25, half the textbook +-0.5 px. This is
+      // deliberate, not an oversight: measured on the racing scene, +-0.5 px raised
       // unstable pixels in the final image from 0.22% to 0.36% and widening the
       // reconstruction filter did not recover it. Narrower jitter trades a little
       // edge coverage for visibly less flicker.
-#ifdef YA_EDITOR
-      jitter.x /= float(m_ViewportWidth);
-      jitter.y /= float(m_ViewportHeight);
-#else
-      jitter.x /= float(frame.windowWidth);
-      jitter.y /= float(frame.windowHeight);
-#endif
+      float jitterScale = 4.0f * jitterParams.amplitude;
+      jitter.x = jitter.x * jitterScale / float(renderExtent.width);
+      jitter.y = jitter.y * jitterScale / float(renderExtent.height);
 
       m_FrameUniformBuffer.uniforms.jitterX = jitter.x;
       m_FrameUniformBuffer.uniforms.jitterY = jitter.y;
@@ -358,6 +563,7 @@ namespace YAEngine
 
     m_FrameUniformBuffer.uniforms.view = view;
     m_FrameUniformBuffer.uniforms.proj = proj;
+    m_FrameUniformBuffer.uniforms.unjitteredProj = m_UnjitteredProj;
     m_FrameUniformBuffer.uniforms.invProj = glm::inverse(proj);
     m_FrameUniformBuffer.uniforms.invView = glm::inverse(view);
     m_FrameUniformBuffer.uniforms.nearPlane = cam.nearPlane;

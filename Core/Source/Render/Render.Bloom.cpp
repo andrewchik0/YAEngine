@@ -10,8 +10,9 @@ namespace YAEngine
   void Render::CreateBloomResources()
   {
     auto& ctx = m_Backend.GetContext();
-    uint32_t w = m_Graph.GetExtent().width / 2;
-    uint32_t h = m_Graph.GetExtent().height / 2;
+    // The chain starts from the resolved image, which lives at output resolution.
+    uint32_t w = m_Graph.GetOutputExtent().width / 2;
+    uint32_t h = m_Graph.GetOutputExtent().height / 2;
 
     uint32_t mipCount = BLOOM_MIP_COUNT;
 
@@ -115,11 +116,12 @@ namespace YAEngine
         m_BloomMipViews[mip], VK_IMAGE_LAYOUT_GENERAL);
     }
 
-    // One pre-written set per TAA history buffer. Rewriting a single set every frame races
-    // with the previous frame still reading it - the sets are not per frame-in-flight.
-    const RGHandle historyHandles[2] = { m_TAAHistory0, m_TAAHistory1 };
-    m_BloomHistorySrcSets.resize(2);
-    for (uint32_t i = 0; i < 2; i++)
+    // One pre-written set per source the chain can start from: the two TAA history
+    // buffers and the DLSS output. Rewriting a single set every frame races with the
+    // previous frame still reading it - the sets are not per frame-in-flight.
+    const RGHandle historyHandles[3] = { m_TAAHistory0, m_TAAHistory1, m_DLSSOutput };
+    m_BloomHistorySrcSets.resize(3);
+    for (uint32_t i = 0; i < 3; i++)
     {
       m_BloomHistorySrcSets[i].Init(ctx, m_BloomDownsampleDescriptorSets[0].GetLayout());
 

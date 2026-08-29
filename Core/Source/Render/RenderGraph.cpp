@@ -13,10 +13,25 @@
 
 namespace YAEngine
 {
-  void RenderGraph::Init(const RenderContext& ctx, VkExtent2D extent)
+  void RenderGraph::Init(const RenderContext& ctx, VkExtent2D renderExtent, VkExtent2D outputExtent)
   {
     m_Ctx = &ctx;
-    m_Extent = extent;
+    m_Extent = renderExtent;
+    m_OutputExtent = outputExtent;
+  }
+
+  VkExtent2D RenderGraph::BaseExtent(RGResolution resolution) const
+  {
+    return resolution == RGResolution::Output ? m_OutputExtent : m_Extent;
+  }
+
+  VkExtent2D RenderGraph::ScaledExtent(const RGResourceDesc& desc) const
+  {
+    VkExtent2D base = BaseExtent(desc.resolution);
+    return {
+      std::max(1u, static_cast<uint32_t>(base.width * desc.widthScale)),
+      std::max(1u, static_cast<uint32_t>(base.height * desc.heightScale))
+    };
   }
 
   void RenderGraph::Destroy()
@@ -131,12 +146,11 @@ namespace YAEngine
     {
       if (!res.managed) continue;
 
-      uint32_t width = std::max(1u, static_cast<uint32_t>(m_Extent.width * res.desc.widthScale));
-      uint32_t height = std::max(1u, static_cast<uint32_t>(m_Extent.height * res.desc.heightScale));
+      VkExtent2D extent = ScaledExtent(res.desc);
 
       ImageDesc imageDesc;
-      imageDesc.width = width;
-      imageDesc.height = height;
+      imageDesc.width = extent.width;
+      imageDesc.height = extent.height;
       imageDesc.format = res.desc.format;
       // TRANSFER_SRC so debug frame capture can copy any graph resource out
       imageDesc.usage = res.usage | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
@@ -345,19 +359,23 @@ namespace YAEngine
   {
     for (auto& pass : m_Passes)
     {
-      if (pass.info.isCompute) continue;
+      // A compute pass has no framebuffer, but its extent is still what the graph
+      // reports to the callback, so it is sized from its declared resolution.
+      if (pass.info.isCompute)
+      {
+        pass.extent = BaseExtent(pass.info.resolution);
+        continue;
+      }
 
       if (pass.info.depthOnly)
       {
         if (pass.info.depthOutput != RG_INVALID_HANDLE)
         {
-          auto& res = m_Resources[pass.info.depthOutput];
-          pass.extent.width = std::max(1u, static_cast<uint32_t>(m_Extent.width * res.desc.widthScale));
-          pass.extent.height = std::max(1u, static_cast<uint32_t>(m_Extent.height * res.desc.heightScale));
+          pass.extent = ScaledExtent(m_Resources[pass.info.depthOutput].desc);
         }
         else
         {
-          pass.extent = m_Extent;
+          pass.extent = BaseExtent(pass.info.resolution);
         }
 
         VkImageView views[1] = {
@@ -385,13 +403,11 @@ namespace YAEngine
 
       if (!pass.info.colorOutputs.empty() && !pass.info.externalFramebuffer)
       {
-        auto& res = m_Resources[pass.info.colorOutputs[0]];
-        pass.extent.width = std::max(1u, static_cast<uint32_t>(m_Extent.width * res.desc.widthScale));
-        pass.extent.height = std::max(1u, static_cast<uint32_t>(m_Extent.height * res.desc.heightScale));
+        pass.extent = ScaledExtent(m_Resources[pass.info.colorOutputs[0]].desc);
       }
       else
       {
-        pass.extent = m_Extent;
+        pass.extent = BaseExtent(pass.info.resolution);
       }
 
       if (pass.info.externalFramebuffer) continue;
@@ -645,6 +661,9 @@ namespace YAEngine
     {
       auto& pass = m_Passes[passIndex];
 
+      if (pass.info.isEnabled && !pass.info.isEnabled())
+        continue;
+
       VkExtent2D passExtent = (pass.overrideExtent.width > 0 && pass.overrideExtent.height > 0)
         ? pass.overrideExtent : pass.extent;
       ctx.extent = passExtent;
@@ -838,10 +857,11 @@ namespace YAEngine
     return res.managed ? res.image : *res.externalImage;
   }
 
-  void RenderGraph::Resize(VkExtent2D newExtent)
+  void RenderGraph::Resize(VkExtent2D renderExtent, VkExtent2D outputExtent)
   {
     vkDeviceWaitIdle(m_Ctx->device);
-    m_Extent = newExtent;
+    m_Extent = renderExtent;
+    m_OutputExtent = outputExtent;
 
     for (auto& res : m_Resources)
     {

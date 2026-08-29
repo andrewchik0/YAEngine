@@ -119,10 +119,17 @@ namespace YAEngine
 
       bool hasTerrain = reg.all_of<TerrainMaterialComponent>(entity);
 
+      // An entity seen for the first time reprojects onto itself: prev must be the
+      // very same matrix, not a recomputed one, or a static object would drift.
+      const PrevWorldTransform* prevTransform = reg.try_get<PrevWorldTransform>(entity);
+      glm::mat4 prevWorld = prevTransform ? prevTransform->world : wt.world;
+      reg.emplace_or_replace<PrevWorldTransform>(entity, PrevWorldTransform { .world = wt.world });
+
       RenderObject obj {
         .mesh = mesh.asset,
         .material = material.asset,
         .worldTransform = wt.world,
+        .prevWorldTransform = prevWorld,
         .instanceData = meshManager.GetInstanceData(mesh.asset),
         .instanceOffset = meshManager.GetInstanceOffset(mesh.asset),
         .doubleSided = mat.doubleSided,

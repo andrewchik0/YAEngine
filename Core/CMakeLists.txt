@@ -24,6 +24,18 @@ target_link_libraries(Core PUBLIC
 find_package(Vulkan REQUIRED)
 target_link_libraries(Core PUBLIC Vulkan::Vulkan EnTT::EnTT)
 
+# Streamline must come after Vulkan::Vulkan: sl.interposer.lib exports the same Vulkan
+# entry points and the engine keeps calling the ones from vulkan-1.
+if(YA_DLSS)
+  target_compile_definitions(Core PUBLIC YA_DLSS)
+  target_include_directories(Core PUBLIC ${STREAMLINE_DIR}/include)
+  target_link_libraries(Core PUBLIC ${STREAMLINE_DIR}/lib/x64/sl.interposer.lib delayimp)
+  # Delay-load keeps sl.interposer.dll out of the process until the first sl* call:
+  # the NVIDIA driver meters presents (2 per vblank) as soon as it sees the module
+  # loaded, so with --no-dlss the DLL must never load at all.
+  target_link_options(Core PUBLIC "/DELAYLOAD:sl.interposer.dll")
+endif()
+
 # Precompiled header
 target_precompile_headers(Core PRIVATE Source/Pch.h)
 
@@ -53,6 +65,8 @@ add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   mesh.vert mesh_depth_alphatest.vert.spv -DDEPTH_ONLY -DALPHA_TEST)
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   mesh.vert mesh_instanced_depth_alphatest.vert.spv -DINSTANCED -DDEPTH_ONLY -DALPHA_TEST)
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  mesh.vert mesh_transparent.vert.spv -DTRANSPARENT)
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   mesh.vert mesh_transparent_instanced.vert.spv -DINSTANCED -DTRANSPARENT)
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders

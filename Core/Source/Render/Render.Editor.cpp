@@ -167,64 +167,16 @@ namespace YAEngine
 
   void Render::ResizeViewport()
   {
-    auto& ctx = m_Backend.GetContext();
+    // The panel size is the output resolution; the render half follows from the mode.
+    VkExtent2D outputExtent { m_PendingViewportWidth, m_PendingViewportHeight };
+    VkExtent2D renderExtent = ComputeRenderExtent(m_EffectiveAntialiasingMode, outputExtent);
 
-    vkDeviceWaitIdle(ctx.device);
+    ResizeGraph(renderExtent, outputExtent);
 
-    uint32_t w = m_PendingViewportWidth;
-    uint32_t h = m_PendingViewportHeight;
-
-    uint32_t hizMipCount = static_cast<uint32_t>(std::floor(std::log2(std::max(w, h)))) + 1;
-    m_Graph.SetResourceMipLevels(m_HiZResource, hizMipCount);
-
-    DestroyBloomResources();
-    DestroyHiZResources();
-    DestroyGTAOResources();
-    DestroySSGIResources();
-    DestroySceneImGuiDescriptor();
-
-    m_Graph.Resize({w, h});
-
-    CreateSceneImGuiDescriptor();
-    CreateHiZResources();
-    CreateGTAOResources();
-    CreateSSGIResources();
-    CreateBloomResources();
-
-    {
-      uint32_t tileCountX = (w + TILE_SIZE - 1) / TILE_SIZE;
-      uint32_t tileCountY = (h + TILE_SIZE - 1) / TILE_SIZE;
-      m_TileLightBuffer.Resize(ctx, tileCountX, tileCountY);
-      VkDeviceSize tileBufferSize = tileCountX * tileCountY * sizeof(TileData);
-      for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
-      {
-        m_DeferredLightingLightDescriptorSets[i].WriteStorageBuffer(1,
-          m_TileLightBuffer.GetBuffer(uint32_t(i)), tileBufferSize);
-      }
-    }
-
-    for (auto& fb : m_TAAFramebuffers)
-    {
-      if (fb != VK_NULL_HANDLE)
-      {
-        vkDestroyFramebuffer(ctx.device, fb, nullptr);
-        fb = VK_NULL_HANDLE;
-      }
-    }
-    for (auto& fb : m_TransparentFramebuffers)
-    {
-      if (fb != VK_NULL_HANDLE)
-      {
-        vkDestroyFramebuffer(ctx.device, fb, nullptr);
-        fb = VK_NULL_HANDLE;
-      }
-    }
-    m_TAADepth.Destroy(ctx);
-    CreateTAAFramebuffers();
-    ClearHistoryBuffers();
-
-    m_ViewportWidth = w;
-    m_ViewportHeight = h;
+    m_ViewportWidth = outputExtent.width;
+    m_ViewportHeight = outputExtent.height;
+    m_ResolutionMode = m_EffectiveAntialiasingMode;
+    m_ResolutionOutputExtent = outputExtent;
   }
 
   bool Render::BakeIrradianceVolume(entt::entity entity, Scene& scene, AssetManager& assets,

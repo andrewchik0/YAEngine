@@ -12,6 +12,9 @@ namespace YAEngine
     MeshHandle mesh;
     MaterialHandle material;
     glm::mat4 worldTransform;
+    // Equal to worldTransform the first time an entity shows up, so a static object
+    // reprojects onto itself exactly and its velocity stays zero.
+    glm::mat4 prevWorldTransform;
     glm::vec3 boundsMin { std::numeric_limits<float>::max() };
     glm::vec3 boundsMax { std::numeric_limits<float>::lowest() };
     std::vector<glm::mat4>* instanceData = nullptr;

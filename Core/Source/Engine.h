@@ -25,6 +25,7 @@ namespace YAEngine
     WindowSpecs windowSpecs;
     bool validationLayers = false;
     bool debugUtils = false;
+    bool enableDLSS = true;
   };
 
   class Engine

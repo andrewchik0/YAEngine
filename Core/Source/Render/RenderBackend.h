@@ -4,6 +4,7 @@
 #include "GeometryArena.h"
 #include "RenderContext.h"
 #include "RenderSpecs.h"
+#include "StreamlineIntegration.h"
 #include "VulkanCommandBuffer.h"
 #include "VulkanDescriptorPool.h"
 #include "VulkanDevice.h"
@@ -11,6 +12,7 @@
 #include "VulkanInstance.h"
 #include "VulkanMemoryAllocator.h"
 #include "VulkanPhysicalDevice.h"
+#include "VulkanRequirements.h"
 #include "VulkanSurface.h"
 #include "VulkanSwapchain.h"
 #include "VulkanSync.h"
@@ -31,6 +33,9 @@ namespace YAEngine
 
     const RenderContext& GetContext() const { return m_Context; }
 
+    StreamlineIntegration& GetStreamline() { return m_Streamline; }
+    const StreamlineIntegration& GetStreamline() const { return m_Streamline; }
+
     VulkanSwapChain& GetSwapChain() { return m_SwapChain; }
     VulkanCommandBuffer& GetCommandBuffer() { return m_CommandBuffer; }
     VulkanDescriptorPool& GetDescriptorPool() { return m_DescriptorPool; }
@@ -43,6 +48,8 @@ namespace YAEngine
 
   private:
 
+    StreamlineIntegration m_Streamline;
+    VulkanRequirements m_Requirements;
     VulkanInstance m_VulkanInstance;
     VulkanPhysicalDevice m_PhysicalDevice;
     VulkanDevice m_Device;

@@ -85,6 +85,16 @@ struct FrameUniforms
   // Appended at the end for the same reason. Selects the SSGI composition path
   // in deferred lighting; the pass permutation itself is chosen on the CPU.
   int ssgiEnabled;
+  // Display resolution. screenWidth/screenHeight above is the resolution the scene is
+  // rasterized and shaded at; the two only differ while a DLSS upscale mode is active,
+  // and only passes downstream of the upscaler may use these.
+  int outputWidth;
+  int outputHeight;
+  // proj without the camera jitter folded in. Passes downstream of the temporal
+  // resolve (editor gizmos) draw over an already stabilized image and must use
+  // this one. padding0 keeps the mat4 on the 16 byte boundary std140 expects.
+  int padding0;
+  mat4 unjitteredProj;
 };
 
 #ifdef __cplusplus

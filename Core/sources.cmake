@@ -20,9 +20,12 @@ set(SOURCE_FILES
   Source/Render/VulkanInstance.h
   Source/Render/VulkanDebugExtension.cpp
   Source/Render/VulkanDebugExtension.h
+  Source/Render/AntialiasingMode.h
   Source/Render/RenderSpecs.h
   Source/Render/VulkanPhysicalDevice.cpp
   Source/Render/VulkanPhysicalDevice.h
+  Source/Render/VulkanRequirements.cpp
+  Source/Render/VulkanRequirements.h
   Source/Render/VulkanDevice.cpp
   Source/Render/VulkanDevice.h
   Source/Render/VulkanSurface.cpp
@@ -138,6 +141,8 @@ set(SOURCE_FILES
   Source/Render/VulkanImage.h
   Source/Render/RenderBackend.cpp
   Source/Render/RenderBackend.h
+  Source/Render/StreamlineIntegration.cpp
+  Source/Render/StreamlineIntegration.h
   Source/Render/GeometryArena.cpp
   Source/Render/GeometryArena.h
   Source/Render/DescriptorLayoutCache.cpp

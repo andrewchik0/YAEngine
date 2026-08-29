@@ -4,7 +4,7 @@
 
 namespace YAEngine
 {
-  void VulkanInstance::Init(const RenderSpecs& specs)
+  void VulkanInstance::Init(const RenderSpecs& specs, VulkanRequirements& requirements)
   {
     VkApplicationInfo appInfo{};
     appInfo.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -25,6 +25,32 @@ namespace YAEngine
     extensions.push_back(VK_KHR_GET_PHYSICAL_DEVICE_PROPERTIES_2_EXTENSION_NAME);
     extensions.push_back(VK_EXT_SURFACE_MAINTENANCE_1_EXTENSION_NAME);
     extensions.push_back(VK_KHR_GET_SURFACE_CAPABILITIES_2_EXTENSION_NAME);
+
+    if (!requirements.GetInstanceExtensions().empty())
+    {
+      std::set<std::string> supported = GetSupportedExtensions();
+      for (auto& request : requirements.GetInstanceExtensions())
+      {
+        bool alreadyListed = std::any_of(extensions.begin(), extensions.end(),
+          [&](const char* name) { return request.name == name; });
+
+        if (alreadyListed)
+        {
+          request.enabled = true;
+          continue;
+        }
+
+        if (!supported.contains(request.name))
+        {
+          YA_LOG_WARN("Vulkan", "Optional instance extension %s is not supported, skipping it", request.name.c_str());
+          continue;
+        }
+
+        request.enabled = true;
+        extensions.push_back(request.name.c_str());
+        YA_LOG_INFO("Vulkan", "Enabling optional instance extension %s", request.name.c_str());
+      }
+    }
 
     createInfo.enabledExtensionCount = static_cast<uint32_t>(extensions.size());
     createInfo.ppEnabledExtensionNames = extensions.data();
@@ -54,5 +80,20 @@ namespace YAEngine
     std::vector extensions(glfwExtensions, glfwExtensions + glfwExtensionCount);
 
     return extensions;
+  }
+
+  std::set<std::string> VulkanInstance::GetSupportedExtensions()
+  {
+    uint32_t extensionCount = 0;
+    vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, nullptr);
+
+    std::vector<VkExtensionProperties> available(extensionCount);
+    vkEnumerateInstanceExtensionProperties(nullptr, &extensionCount, available.data());
+
+    std::set<std::string> names;
+    for (const auto& extension : available)
+      names.insert(extension.extensionName);
+
+    return names;
   }
 }

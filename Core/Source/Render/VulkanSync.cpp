@@ -99,7 +99,11 @@ namespace YAEngine
     submitInfo.commandBufferCount = 1;
     submitInfo.pCommandBuffers = &commandBuffer;
 
-    VkSemaphore signalSemaphores[] = {m_RenderFinishedSemaphores[m_SemaphoreIndex]};
+    // Presentation is the only waiter of this semaphore and it is never re-signaled
+    // before the image comes back from vkAcquireNextImageKHR, so it has to be indexed by
+    // the acquired image and not by the rotating acquire index
+    // (VUID-vkQueueSubmit-pSignalSemaphores-00067).
+    VkSemaphore signalSemaphores[] = {m_RenderFinishedSemaphores[imageIndex]};
     submitInfo.signalSemaphoreCount = 1;
     submitInfo.pSignalSemaphores = signalSemaphores;
 

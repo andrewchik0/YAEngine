@@ -39,7 +39,7 @@ namespace YAEngine
 
   void OffscreenRenderer::SetupGraph(uint32_t resolution)
   {
-    m_Graph.Init(*m_Ctx, { resolution, resolution });
+    m_Graph.Init(*m_Ctx, { resolution, resolution }, { resolution, resolution });
 
     // Same formats as main graph - guarantees VkRenderPass compatibility with main pipelines
     m_GBuffer0 = m_Graph.CreateResource({
@@ -259,6 +259,7 @@ namespace YAEngine
     uniforms.invView = glm::inverse(view);
     uniforms.prevView = view;
     uniforms.prevProj = proj;
+    uniforms.unjitteredProj = proj;
     uniforms.nearPlane = 0.01f;
     uniforms.farPlane = 1000.0f;
     uniforms.cameraPosition = position;

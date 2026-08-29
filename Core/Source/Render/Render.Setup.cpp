@@ -11,12 +11,12 @@
 
 namespace YAEngine
 {
-  void Render::SetupRenderGraph(uint32_t width, uint32_t height)
+  void Render::SetupRenderGraph(VkExtent2D renderExtent, VkExtent2D outputExtent)
   {
     auto& ctx = m_Backend.GetContext();
     auto swapFormat = m_Backend.GetSwapChain().GetFormat();
 
-    m_Graph.Init(ctx, {width, height});
+    m_Graph.Init(ctx, renderExtent, outputExtent);
 
     m_GBuffer0 = m_Graph.CreateResource({
       .name = "gbuffer0",
@@ -103,7 +103,19 @@ namespace YAEngine
       .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT
     });
 
-    uint32_t hizMipCount = static_cast<uint32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+    // DLSS writes this through a storage view, so the swapchain image can never be the
+    // target: it is created without STORAGE usage. TRANSFER_DST is there because
+    // Streamline clears the tagged output itself when it (re)builds its instance.
+    m_DLSSOutput = m_Graph.CreateResource({
+      .name = "dlssOutput",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+        | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .resolution = RGResolution::Output
+    });
+
+    uint32_t hizMipCount = static_cast<uint32_t>(
+      std::floor(std::log2(std::max(renderExtent.width, renderExtent.height)))) + 1;
     m_HiZResource = m_Graph.CreateResource({
       .name = "hiZ",
       .format = VK_FORMAT_R32_SFLOAT,
@@ -179,8 +191,9 @@ namespace YAEngine
         if (!b_AOEnabled || !b_SSGIEnabled) return;
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
-        auto historyReadHandle = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
-        auto& history = m_Graph.GetResource(historyReadHandle);
+        // Sampled purely through normalized UVs, so an output-resolution source needs
+        // nothing beyond this binding change.
+        auto& history = m_Graph.GetResource(GetPreviousResolvedColorHandle());
         auto& velocity = m_Graph.GetResource(m_MainVelocity);
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
 
@@ -439,11 +452,32 @@ namespace YAEngine
     });
 
 
+    // Transparency draws into the anti-aliasing input rather than on top of the resolve,
+    // so it finally goes through the same temporal filter as opaque geometry. Depth is
+    // tested against the opaque result but never written, which keeps m_MainDepth
+    // opaque-only for every consumer that samples it afterwards.
+    m_ForwardTransparentPassIndex = m_Graph.AddPass({
+      .name = "ForwardTransparent",
+      .inputs = {m_MainDepth},
+      .colorOutputs = {m_SSRColor},
+      .depthOutput = m_MainDepth,
+      .clearColor = false,
+      .clearDepth = false,
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
+        DrawTransparent(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame);
+      }
+    });
+
     m_TAAPassIndex = m_Graph.AddPass({
       .name = "TAAPass",
       .inputs = {m_SSRColor, m_TAAHistory1, m_MainVelocity, m_MainDepth},
       .colorOutputs = {m_TAAHistory0},
       .externalFramebuffer = true,
+      // None also runs the pass: taa.frag falls back to a passthrough copy when the
+      // taaEnabled uniform is 0, which keeps the resolved image written for downstream
+      // consumers. Only the DLSS evaluate replaces the pass outright.
+      .isEnabled = [this]() { return !IsDLSSMode(m_EffectiveAntialiasingMode); },
       .execute = [this](const RGExecuteContext& ctx) {
         auto& ssrColor = m_Graph.GetResource(m_SSRColor);
         auto historyReadHandle = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
@@ -468,38 +502,42 @@ namespace YAEngine
       }
     });
 
-    // Forward transparent pass - blends transparent meshes on top of TAA result
-    // using existing MainDepth (LOAD, write, GEQUAL) so depth matches deferred.
-    m_ForwardTransparentPassIndex = m_Graph.AddPass({
-      .name = "ForwardTransparent",
-      .inputs = {m_MainDepth},
-      .colorOutputs = {m_TAAHistory0},
-      .depthOutput = m_MainDepth,
-      .clearColor = false,
-      .clearDepth = false,
-      .externalFramebuffer = true,
+    // Streamline's own upscale, the alternative to the pass above. Compute-flagged so
+    // the graph runs it outside a VkRenderPass instance and puts the tagged inputs in
+    // SHADER_READ_ONLY and the output in GENERAL before the callback records anything.
+    m_DLSSEvaluatePassIndex = m_Graph.AddPass({
+      .name = "DLSSEvaluate",
+      .inputs = {m_SSRColor, m_MainDepth, m_MainVelocity},
+      .storageOutputs = {m_DLSSOutput},
+      .isCompute = true,
+      .isEnabled = [this]() { return IsDLSSMode(m_EffectiveAntialiasingMode); },
       .execute = [this](const RGExecuteContext& ctx) {
         auto* frame = static_cast<FrameContext*>(ctx.userData);
-        DrawTransparent(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame);
+        RunDLSSEvaluate(ctx.cmd, *frame);
       }
     });
 
     m_BloomPassIndex = m_Graph.AddPass({
       .name = "BloomPass",
-      // Sources the previous frame's resolved image, not the raw jittered lit frame, so
-      // unfiltered flicker never reaches TAA. Both histories are declared as inputs: History0's
-      // static writer orders this pass after the resolve, History1 covers the ping-pong buffer
-      // actually sampled on alternate frames so it still gets a barrier.
-      .inputs = {m_TAAHistory0, m_TAAHistory1},
+      // In TAA modes this sources the previous frame's resolved image, not the raw
+      // jittered lit frame, so unfiltered flicker never reaches TAA. Both histories are
+      // declared as inputs: History0's static writer orders this pass after the resolve,
+      // History1 covers the ping-pong buffer actually sampled on alternate frames so it
+      // still gets a barrier. The DLSS output orders it after the evaluate.
+      .inputs = {m_TAAHistory0, m_TAAHistory1, m_DLSSOutput},
       .isCompute = true,
+      .resolution = RGResolution::Output,
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_BloomEnabled) return;
 
-        // Previous frame's resolved image: index 1 holds History1, index 0 holds History0
-        uint32_t bloomSrcSet = m_TAAIndex == 0 ? 1 : 0;
+        // Previous frame's resolved image: index 1 holds History1, index 0 holds History0.
+        // DLSS has already written this frame's image by now, so index 2 has no latency.
+        uint32_t bloomSrcSet = IsDLSSMode(m_EffectiveAntialiasingMode)
+          ? BLOOM_SRC_DLSS
+          : (m_TAAIndex == 0 ? 1 : 0);
 
-        uint32_t baseW = m_Graph.GetExtent().width;
-        uint32_t baseH = m_Graph.GetExtent().height;
+        uint32_t baseW = m_Graph.GetOutputExtent().width;
+        uint32_t baseH = m_Graph.GetOutputExtent().height;
         uint32_t mipCount = BLOOM_MIP_COUNT;
 
         TransitionImageLayout(ctx.cmd, m_BloomImage.GetImage(),
@@ -599,8 +637,11 @@ namespace YAEngine
 
     m_HistogramPassIndex = m_Graph.AddPass({
       .name = "HistogramBuild",
-      .inputs = {m_TAAHistory0},
+      // Slot 0 is retargeted every frame to whichever image the resolve wrote; the
+      // DLSS output is also named statically so this pass is ordered after the evaluate.
+      .inputs = {m_TAAHistory0, m_DLSSOutput},
       .isCompute = true,
+      .resolution = RGResolution::Output,
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_AutoExposureEnabled || m_GlobalFrameIndex < 4) return;
 
@@ -624,10 +665,9 @@ namespace YAEngine
           0, 0, nullptr, 1, &clearBarrier, 0, nullptr);
 
         // Write HDR texture into descriptor (input[0] set via SetPassInput for ping-pong)
-        auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
-        auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
+        auto& resolved = m_Graph.GetResource(GetResolvedColorHandle());
         m_HistogramPassDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
-          historyCurrent.GetView(), historyCurrent.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+          resolved.GetView(), resolved.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         auto& pipeline = m_PSOCache.GetCompute(m_ExposureHistogramPipeline);
         pipeline.Bind(ctx.cmd);
@@ -635,8 +675,8 @@ namespace YAEngine
         pipeline.BindDescriptorSets(ctx.cmd, {m_HistogramPassDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_HistogramOutputDescriptorSet.Get()}, 2);
 
-        uint32_t groupsX = (m_FrameUniformBuffer.uniforms.screenWidth + 15) / 16;
-        uint32_t groupsY = (m_FrameUniformBuffer.uniforms.screenHeight + 15) / 16;
+        uint32_t groupsX = (m_FrameUniformBuffer.uniforms.outputWidth + 15) / 16;
+        uint32_t groupsY = (m_FrameUniformBuffer.uniforms.outputHeight + 15) / 16;
         pipeline.Dispatch(ctx.cmd, groupsX, groupsY, 1);
 
         VkBufferMemoryBarrier histBarrier {};
@@ -707,9 +747,9 @@ namespace YAEngine
       .filter = VK_FILTER_NEAREST
     });
 
-    // Rasterizes entity ids against the depth already produced (no depth write, GEQUAL) for
-    // free occlusion. Must run before GizmoPass clears MainDepth; declaring MainDepth as a
-    // depth output here pins it into the write chain to guarantee that order.
+    // Rasterizes entity ids against the depth already produced (no depth write, GEQUAL)
+    // for free occlusion. Declaring MainDepth as a depth output pins it into the write
+    // chain so the depth resampled for the gizmos below is the one this pass saw.
     m_PickIdPassIndex = m_Graph.AddPass({
       .name = "PickIdPass",
       .colorOutputs = {m_PickId},
@@ -739,17 +779,46 @@ namespace YAEngine
     m_SceneColor = m_Graph.CreateResource({
       .name = "sceneColor",
       .format = VK_FORMAT_R8G8B8A8_UNORM,
-      .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT
+      .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT,
+      .resolution = RGResolution::Output
+    });
+
+    m_ComposeDepth = m_Graph.CreateResource({
+      .name = "composeDepth",
+      .format = VK_FORMAT_D32_SFLOAT,
+      .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
+      .resolution = RGResolution::Output
+    });
+
+    // Point-resamples the scene depth to output resolution so the gizmo passes, which
+    // draw into the output-res scene color, still occlude against real geometry.
+    m_SceneDepthUpscalePassIndex = m_Graph.AddPass({
+      .name = "SceneDepthUpscale",
+      .inputs = {m_MainDepth},
+      .depthOutput = m_ComposeDepth,
+      .clearDepth = true,
+      .depthOnly = true,
+      .isEnabled = [this]() { return b_GizmosEnabled; },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+
+        auto& pipeline = m_PSOCache.Get(m_DepthCopyPipeline);
+        pipeline.Bind(ctx.cmd);
+        m_DepthCopyDescriptorSets[currentFrame].WriteCombinedImageSampler(0,
+          mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_DepthCopyDescriptorSets[currentFrame].Get()}, 0);
+        DrawQuad(ctx.cmd);
+      }
     });
 
     m_SceneComposePassIndex = m_Graph.AddPass({
       .name = "SceneComposePass",
       .inputs = {m_TAAHistory0, m_AOFinal, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor,
-        m_SSGIFinal, m_SSGIRadiance},
+        m_SSGIFinal, m_SSGIRadiance, m_DLSSOutput},
       .colorOutputs = {m_SceneColor},
       .execute = [this](const RGExecuteContext& ctx) {
-        auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
-        auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
+        auto& historyCurrent = m_Graph.GetResource(GetResolvedColorHandle());
         auto& aoFinal = m_Graph.GetResource(m_AOFinal);
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
@@ -789,7 +858,7 @@ namespace YAEngine
     m_GizmoScenePassIndex = m_Graph.AddPass({
       .name = "GizmoScenePass",
       .colorOutputs = {m_SceneColor},
-      .depthOutput = m_MainDepth,
+      .depthOutput = m_ComposeDepth,
       .clearColor = false,
       .clearDepth = false,
       .execute = [this](const RGExecuteContext& ctx) {
@@ -803,7 +872,7 @@ namespace YAEngine
     m_GizmoPassIndex = m_Graph.AddPass({
       .name = "GizmoPass",
       .colorOutputs = {m_SceneColor},
-      .depthOutput = m_MainDepth,
+      .depthOutput = m_ComposeDepth,
       .clearColor = false,
       .clearDepth = true,
       .execute = [this](const RGExecuteContext& ctx) {
@@ -821,6 +890,7 @@ namespace YAEngine
       .externalFramebuffer = true,
       .externalFormat = swapFormat,
       .finalColorLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+      .resolution = RGResolution::Output,
       .execute = [this](const RGExecuteContext& ctx) {
         auto* frame = static_cast<FrameContext*>(ctx.userData);
 
@@ -837,16 +907,16 @@ namespace YAEngine
     m_SwapchainPassIndex = m_Graph.AddPass({
       .name = "SwapchainPass",
       .inputs = {m_TAAHistory0, m_AOFinal, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor,
-        m_SSGIFinal, m_SSGIRadiance},
+        m_SSGIFinal, m_SSGIRadiance, m_DLSSOutput},
       .colorOutputs = {},
       .externalFramebuffer = true,
       .externalFormat = swapFormat,
       .finalColorLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+      .resolution = RGResolution::Output,
       .execute = [this](const RGExecuteContext& ctx) {
         auto* frame = static_cast<FrameContext*>(ctx.userData);
 
-        auto historyWriteHandle = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
-        auto& historyCurrent = m_Graph.GetResource(historyWriteHandle);
+        auto& historyCurrent = m_Graph.GetResource(GetResolvedColorHandle());
         auto& aoFinal = m_Graph.GetResource(m_AOFinal);
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
@@ -939,36 +1009,6 @@ namespace YAEngine
 
       YA_DEBUG_NAMEF(ctx.device, VK_OBJECT_TYPE_FRAMEBUFFER,
         m_TAAFramebuffers[i], "TAA FB %u", i);
-    }
-
-    VkRenderPass transparentRP = m_Graph.GetPassRenderPass(m_ForwardTransparentPassIndex);
-
-    for (uint32_t i = 0; i < 2; i++)
-    {
-      RGHandle historyHandle = (i == 0) ? m_TAAHistory0 : m_TAAHistory1;
-
-      VkImageView views[2] = {
-        m_Graph.GetResource(historyHandle).GetView(),
-        m_Graph.GetResource(m_MainDepth).GetView()
-      };
-
-      VkFramebufferCreateInfo fbInfo{};
-      fbInfo.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-      fbInfo.renderPass = transparentRP;
-      fbInfo.attachmentCount = 2;
-      fbInfo.pAttachments = views;
-      fbInfo.width = m_Graph.GetExtent().width;
-      fbInfo.height = m_Graph.GetExtent().height;
-      fbInfo.layers = 1;
-
-      if (vkCreateFramebuffer(ctx.device, &fbInfo, nullptr, &m_TransparentFramebuffers[i]) != VK_SUCCESS)
-      {
-        YA_LOG_ERROR("Render", "Failed to create transparent framebuffer %d", i);
-        throw std::runtime_error("Failed to create transparent framebuffer!");
-      }
-
-      YA_DEBUG_NAMEF(ctx.device, VK_OBJECT_TYPE_FRAMEBUFFER,
-        m_TransparentFramebuffers[i], "Transparent FB %u", i);
     }
   }
 

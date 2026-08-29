@@ -22,10 +22,11 @@ void main()
     s_localHistogram[i] = 0;
   barrier();
 
+  // The source is the resolved image, which lives at output resolution.
   ivec2 pixelCoord = ivec2(gl_GlobalInvocationID.xy);
-  if (pixelCoord.x < u_Frame.screenWidth && pixelCoord.y < u_Frame.screenHeight)
+  if (pixelCoord.x < u_Frame.outputWidth && pixelCoord.y < u_Frame.outputHeight)
   {
-    vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(u_Frame.screenWidth, u_Frame.screenHeight);
+    vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(u_Frame.outputWidth, u_Frame.outputHeight);
     vec3 color = texture(hdrTexture, uv).rgb;
 
     float lum = dot(color, vec3(0.2126, 0.7152, 0.0722));

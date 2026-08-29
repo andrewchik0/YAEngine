@@ -4,7 +4,7 @@
 
 namespace YAEngine
 {
-  void VulkanPhysicalDevice::Init(VkInstance instance, VkSurfaceKHR surface)
+  void VulkanPhysicalDevice::Init(VkInstance instance, VkSurfaceKHR surface, VulkanRequirements& requirements)
   {
     m_Instance = instance;
     m_Surface = surface;
@@ -34,6 +34,57 @@ namespace YAEngine
     {
       YA_LOG_ERROR("Render", "No suitable GPU found");
       throw std::runtime_error("failed to find a suitable GPU!");
+    }
+
+    ResolveExtensions(requirements);
+  }
+
+  void VulkanPhysicalDevice::ResolveExtensions(VulkanRequirements& requirements)
+  {
+    m_EnabledExtensions.assign(m_DeviceExtensions.begin(), m_DeviceExtensions.end());
+
+    if (requirements.GetDeviceExtensions().empty())
+      return;
+
+    uint32_t extensionCount = 0;
+    vkEnumerateDeviceExtensionProperties(m_PhysicalDevice, nullptr, &extensionCount, nullptr);
+
+    std::vector<VkExtensionProperties> availableExtensions(extensionCount);
+    vkEnumerateDeviceExtensionProperties(m_PhysicalDevice, nullptr, &extensionCount, availableExtensions.data());
+
+    std::set<std::string> supported;
+    for (const auto& extension : availableExtensions)
+      supported.insert(extension.extensionName);
+
+    for (auto& request : requirements.GetDeviceExtensions())
+    {
+      // VUID-VkDeviceCreateInfo-pNext-04748 forbids listing the pre-promotion extension
+      // next to a VkPhysicalDeviceVulkan12Features with bufferDeviceAddress enabled, and
+      // the device always carries that struct. The core feature covers the request.
+      if (request.name == VK_EXT_BUFFER_DEVICE_ADDRESS_EXTENSION_NAME
+        && requirements.GetVulkan12Features().bufferDeviceAddress == VK_TRUE)
+      {
+        request.enabled = true;
+        YA_LOG_INFO("Vulkan", "Skipping %s, the core Vulkan 1.2 bufferDeviceAddress feature replaces it",
+          request.name.c_str());
+        continue;
+      }
+
+      if (std::find(m_EnabledExtensions.begin(), m_EnabledExtensions.end(), request.name) != m_EnabledExtensions.end())
+      {
+        request.enabled = true;
+        continue;
+      }
+
+      if (!supported.contains(request.name))
+      {
+        YA_LOG_WARN("Vulkan", "Optional device extension %s is not supported, skipping it", request.name.c_str());
+        continue;
+      }
+
+      request.enabled = true;
+      m_EnabledExtensions.push_back(request.name);
+      YA_LOG_INFO("Vulkan", "Enabling optional device extension %s", request.name.c_str());
     }
   }
 

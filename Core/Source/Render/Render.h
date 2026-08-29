@@ -1,5 +1,6 @@
 #pragma once
 
+#include "AntialiasingMode.h"
 #include "FrameContext.h"
 #include "FrameUniformBuffer.h"
 #include "RenderBackend.h"
@@ -61,7 +62,12 @@ namespace YAEngine
   {
   public:
     static constexpr uint32_t MAX_INSTANCES = 100000;
+    // Ceiling on G-buffer draws whose object motion can reach the velocity buffer;
+    // draws past it fall back to camera-only motion instead of overrunning the buffer.
+    static constexpr uint32_t MAX_PREV_WORLD_MATRICES = 32768;
     static constexpr uint32_t MAX_PARTICLES_PER_FRAME = 8192;
+    // Slot in m_BloomHistorySrcSets that reads the DLSS output instead of a TAA history.
+    static constexpr uint32_t BLOOM_SRC_DLSS = 2;
     static constexpr uint32_t MAX_PARTICLE_BATCHES_PER_FRAME = 16;
     static constexpr int32_t DEBUG_VIEW_WIREFRAME = 7;
     static constexpr int MIN_PROBE_BOUNCES = 1;
@@ -135,7 +141,19 @@ namespace YAEngine
     float& GetSSGIIntensity() { return m_SSGIIntensity; }
     bool& GetSSREnabled() { return b_SSREnabled; }
     float& GetSSRIntensity() { return m_SSRIntensity; }
-    bool& GetTAAEnabled() { return b_TAAEnabled; }
+    // What the user picked. The mode rendering actually runs in can differ when the
+    // selection needs hardware that is not there - see GetEffectiveAntialiasingMode.
+    AntialiasingMode& GetAntialiasingMode() { return m_AntialiasingMode; }
+    AntialiasingMode GetEffectiveAntialiasingMode() const { return m_EffectiveAntialiasingMode; }
+    bool IsDLSSAvailable() const { return m_Backend.GetStreamline().IsDLSSAvailable(); }
+    const std::string& GetDLSSUnavailableReason() const
+    {
+      return m_Backend.GetStreamline().GetUnavailableReason(StreamlineFeature::DLSS);
+    }
+    // What the scene is rasterized at, and what reaches the screen. Equal outside the
+    // DLSS upscale modes.
+    VkExtent2D GetRenderExtent() const { return m_Graph.GetExtent(); }
+    VkExtent2D GetOutputExtent() const { return m_Graph.GetOutputExtent(); }
     float& GetTAAClampSigma() { return m_TAAClampSigma; }
     bool& GetShadowsEnabled() { return b_ShadowsEnabled; }
     bool& GetShadowLodEnabled() { return b_ShadowLodEnabled; }
@@ -213,7 +231,17 @@ namespace YAEngine
     // Artistic multiplier on the SSR mask. Fresnel keeps dielectric reflections near 4%,
     // so values above 1 are the usual way to make them readable.
     float m_SSRIntensity = 1.0f;
-    bool b_TAAEnabled = true;
+    AntialiasingMode m_AntialiasingMode = AntialiasingMode::TAA;
+    // Resolved once per frame from the selection and what the hardware can actually do.
+    AntialiasingMode m_EffectiveAntialiasingMode = AntialiasingMode::TAA;
+    bool b_DLSSFallbackWarned = false;
+    // Mode and output size the current render extent was queried for. A mismatch is
+    // what triggers the render-resolution half of the graph to be rebuilt.
+    AntialiasingMode m_ResolutionMode = AntialiasingMode::TAA;
+    VkExtent2D m_ResolutionOutputExtent {};
+    // Modes whose optimal settings the driver refused, so the query is not repeated
+    // every frame. Indexed by AntialiasingMode.
+    std::array<bool, size_t(AntialiasingMode::Count)> m_DLSSModeRejected {};
     // Width of the variance clipping box in sigmas. Low values collapse the box on locally
     // uniform neighbourhoods and throw away converged history on sub-pixel geometry.
     float m_TAAClampSigma = 0.979f;
@@ -290,6 +318,8 @@ namespace YAEngine
       uint32_t frameIndex, const glm::vec3* probeCenter = nullptr,
       float probeRadius = 0.0f);
     void SetUpCamera(FrameContext& frame);
+    // Turns the selected mode into the one this frame can really run.
+    void ResolveAntialiasingMode();
     void InitPipelines();
 
     // Per-frame-in-flight model SSBOs and indirect command buffers for the batched
@@ -301,7 +331,35 @@ namespace YAEngine
     // views change and stale ones would dangle.
     void WriteIrradianceVolumeDescriptors();
 
-    void SetupRenderGraph(uint32_t width, uint32_t height);
+    void SetupRenderGraph(VkExtent2D renderExtent, VkExtent2D outputExtent);
+    // Tears down and rebuilds everything sized against the graph. The only entry point
+    // that moves either extent.
+    void ResizeGraph(VkExtent2D renderExtent, VkExtent2D outputExtent);
+    // Render extent DLSS wants for an output extent. Falls back to 1:1 and warns when
+    // the driver refuses the mode.
+    VkExtent2D ComputeRenderExtent(AntialiasingMode mode, VkExtent2D outputExtent);
+    // Re-queries the render extent when the mode or the output size changed and resizes
+    // the render-resolution half of the graph. Returns true when anything moved.
+    bool UpdateResolutionForMode(VkExtent2D outputExtent);
+    void RunDLSSEvaluate(VkCommandBuffer cmd, FrameContext& frame);
+    // The image this frame's anti-aliasing resolved into: the DLSS output, or the TAA
+    // history slot the resolve just filled.
+    RGHandle GetResolvedColorHandle() const
+    {
+      if (IsDLSSMode(m_EffectiveAntialiasingMode))
+        return m_DLSSOutput;
+
+      return m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
+    }
+    // The previous frame's resolved image. DLSS keeps a single output image, which still
+    // holds the previous frame everywhere the evaluate has not run yet.
+    RGHandle GetPreviousResolvedColorHandle() const
+    {
+      if (IsDLSSMode(m_EffectiveAntialiasingMode))
+        return m_DLSSOutput;
+
+      return m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
+    }
     void CreateTAAFramebuffers();
     void ClearHistoryBuffers();
     void CreateHiZResources();
@@ -356,9 +414,17 @@ namespace YAEngine
     RGHandle m_SSGIBentFinal {};   // R8G8_UNORM: octahedral bent normal, denoised
     RGHandle m_TAAHistory0 {};
     RGHandle m_TAAHistory1 {};
+    // RGBA16F at output resolution, written by slEvaluateFeature as a storage image and
+    // read by everything the TAA history would otherwise feed. Persists across frames so
+    // the SSGI prefilter can reproject the previous frame's stabilized image.
+    RGHandle m_DLSSOutput {};
 
 #ifdef YA_EDITOR
     RGHandle m_SceneColor {};
+    // Scene depth resampled to output resolution. The gizmo passes draw into the
+    // output-res m_SceneColor and a framebuffer cannot mix the two sizes.
+    RGHandle m_ComposeDepth {};
+    uint32_t m_SceneDepthUpscalePassIndex {};
     uint32_t m_SceneComposePassIndex {};
     uint32_t m_GizmoScenePassIndex {};
     uint32_t m_GizmoPassIndex {};
@@ -368,6 +434,8 @@ namespace YAEngine
     uint32_t m_PendingViewportWidth = 0;
     uint32_t m_PendingViewportHeight = 0;
     void ResizeViewport();
+    PipelineHandle m_DepthCopyPipeline {};
+    std::vector<VulkanDescriptorSet> m_DepthCopyDescriptorSets;
     GizmoRenderer m_GizmoRenderer;
     bool b_GizmosEnabled = true;
     bool b_ProbeVolumesVisible = true;
@@ -431,6 +499,7 @@ namespace YAEngine
     uint32_t m_SSRPassIndex {};
     uint32_t m_BloomPassIndex {};
     uint32_t m_TAAPassIndex {};
+    uint32_t m_DLSSEvaluatePassIndex {};
     uint32_t m_ForwardTransparentPassIndex {};
     uint32_t m_HistogramPassIndex {};
     uint32_t m_ExposureAdaptPassIndex {};
@@ -439,16 +508,20 @@ namespace YAEngine
     // TAA external framebuffers (ping-pong)
     VulkanImage m_TAADepth;
     std::array<VkFramebuffer, 2> m_TAAFramebuffers {};
-    std::array<VkFramebuffer, 2> m_TransparentFramebuffers {};
 
     uint64_t m_GlobalFrameIndex = 0;
     uint32_t m_TAAIndex = 0;
     bool b_Resized = false;
     bool b_ResetTAAPending = false;
     bool b_ResetAutoExposurePending = false;
+    // Tells DLSS to drop its accumulated history: set at startup, on every resize and
+    // whenever the effective mode changes.
+    bool b_ResetDLSSPending = true;
 
     glm::mat4 m_PrevView = glm::mat4(1.0f);
     glm::mat4 m_PrevProj = glm::mat4(1.0f);
+    // This frame's projection before the camera jitter is folded in.
+    glm::mat4 m_UnjitteredProj = glm::mat4(1.0f);
 
     CubeMapHandle m_BoundSkybox {};
 
@@ -474,6 +547,11 @@ namespace YAEngine
 
     VulkanDescriptorSet m_InstanceDescriptorSet;
     VulkanStorageBuffer m_InstanceBuffer;
+
+    // One previous-frame world matrix per G-buffer draw, refilled from scratch every
+    // frame. Kept per frame in flight because frame N-1 is still reading its copy.
+    std::vector<VulkanDescriptorSet> m_PrevWorldDescriptorSets;
+    std::vector<VulkanStorageBuffer> m_PrevWorldBuffers;
 
     PipelineCache m_PSOCache;
     PipelineHandle m_ForwardPipelines[8] {};
@@ -540,6 +618,7 @@ namespace YAEngine
       uint32_t meshIndex;
       uint32_t meshGeneration;
       glm::mat4 worldTransform;
+      glm::mat4 prevWorldTransform;
       glm::vec3 boundsMin { std::numeric_limits<float>::max() };
       glm::vec3 boundsMax { std::numeric_limits<float>::lowest() };
       std::vector<glm::mat4>* instanceData;

@@ -12,7 +12,8 @@ layout(push_constant) uniform PushConstantBlock { GizmoPushConstants pc; };
 void main()
 {
   vec4 worldPos = pc.world * vec4(inPosition, 1.0);
-  gl_Position = u_Frame.proj * u_Frame.view * worldPos;
-  gl_Position.xy += vec2(u_Frame.jitterX, u_Frame.jitterY) * gl_Position.w;
+  // Gizmos draw after the temporal resolve over an already stabilized image,
+  // so the camera jitter that u_Frame.proj carries must not reach them.
+  gl_Position = u_Frame.unjitteredProj * u_Frame.view * worldPos;
   outColor = pc.color;
 }

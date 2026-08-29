@@ -9,10 +9,22 @@ namespace YAEngine
   {
     m_MaxFramesInFlight = specs.maxFramesInFlight;
 
-    m_VulkanInstance.Init(specs);
+    // Streamline loads its plugins inside slInit and that has to happen before the very
+    // first Vulkan call, then it dictates what the instance and the device must carry.
+    if (specs.enableDLSS)
+    {
+      m_Streamline.Init({ StreamlineFeature::DLSS });
+      m_Streamline.ApplyRequirements(m_Requirements);
+    }
+    else
+    {
+      YA_LOG_INFO("Render", "DLSS disabled by launch option, Streamline not initialized");
+    }
+
+    m_VulkanInstance.Init(specs, m_Requirements);
     DebugMarker::Init(m_VulkanInstance.Get(), specs.debugUtils);
     m_Surface.Init(m_VulkanInstance.Get(), window);
-    m_PhysicalDevice.Init(m_VulkanInstance.Get(), m_Surface.Get());
+    m_PhysicalDevice.Init(m_VulkanInstance.Get(), m_Surface.Get(), m_Requirements);
 
     {
       VkPhysicalDeviceProperties props;
@@ -27,7 +39,20 @@ namespace YAEngine
       YA_LOG_INFO("Render", "Vulkan %u.%u - %s", major, minor, props.deviceName);
     }
 
-    m_Device.Init(m_VulkanInstance, m_PhysicalDevice, m_Surface.Get());
+    m_Device.Init(m_VulkanInstance, m_PhysicalDevice, m_Surface.Get(), m_Requirements);
+
+    {
+      // SL is told where its own queues start, falling back to the engine queue when it
+      // asked for none.
+      VulkanQueueLocation graphicsForSL = m_Device.GetExtraGraphicsQueues().empty()
+        ? m_Device.GetGraphicsQueueLocation() : m_Device.GetExtraGraphicsQueues().front();
+      VulkanQueueLocation computeForSL = m_Device.GetExtraComputeQueues().empty()
+        ? m_Device.GetGraphicsQueueLocation() : m_Device.GetExtraComputeQueues().front();
+
+      m_Streamline.SetVulkanInfo(m_VulkanInstance.Get(), m_PhysicalDevice.Get(), m_Device.Get(),
+        graphicsForSL.family, graphicsForSL.index, computeForSL.family, computeForSL.index);
+    }
+
     m_Allocator.Init(m_VulkanInstance.Get(), m_Device.Get(), m_PhysicalDevice.Get());
     m_SwapChain.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), window, m_Allocator.Get());
 
@@ -135,6 +160,9 @@ namespace YAEngine
         }
       }
     }
+
+    // Streamline still holds Vulkan resources of its own at this point.
+    m_Streamline.Shutdown();
 
     m_Sync.Destroy();
     m_ImGUI.Destroy();

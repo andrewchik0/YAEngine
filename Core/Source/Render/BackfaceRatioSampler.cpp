@@ -39,7 +39,7 @@ namespace YAEngine
 
   void BackfaceRatioSampler::SetupGraph(uint32_t resolution)
   {
-    m_Graph.Init(*m_Ctx, { resolution, resolution });
+    m_Graph.Init(*m_Ctx, { resolution, resolution }, { resolution, resolution });
 
     m_Depth = m_Graph.CreateResource({
       .name = "backfaceDepth",

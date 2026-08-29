@@ -143,9 +143,46 @@ namespace YAEngine
       ImGui::Checkbox("SSR", &context.render->GetSSREnabled());
       if (context.render->GetSSREnabled())
         ImGui::DragFloat("SSR Intensity", &context.render->GetSSRIntensity(), 0.05f, 0.0f, 20.0f);
-      ImGui::Checkbox("TAA", &context.render->GetTAAEnabled());
-      if (context.render->GetTAAEnabled())
-        ImGui::DragFloat("TAA Clamp Sigma", &context.render->GetTAAClampSigma(), 0.01f, 0.0f, 8.0f);
+      {
+        AntialiasingMode& mode = context.render->GetAntialiasingMode();
+        bool dlssAvailable = context.render->IsDLSSAvailable();
+        const std::string& reason = context.render->GetDLSSUnavailableReason();
+        const char* unavailableReason = reason.empty() ? "not supported on this device" : reason.c_str();
+
+        if (ImGui::BeginCombo("Antialiasing", GetAntialiasingModeName(mode)))
+        {
+          for (uint32_t i = 0; i < uint32_t(AntialiasingMode::Count); i++)
+          {
+            AntialiasingMode option = AntialiasingMode(i);
+            bool selectable = dlssAvailable || !IsDLSSMode(option);
+
+            ImGui::BeginDisabled(!selectable);
+            if (ImGui::Selectable(GetAntialiasingModeName(option), option == mode) && selectable)
+              mode = option;
+            ImGui::EndDisabled();
+
+            if (!selectable && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+              ImGui::SetTooltip("DLSS is unavailable: %s", unavailableReason);
+          }
+          ImGui::EndCombo();
+        }
+
+        if (!dlssAvailable)
+          ImGui::TextDisabled("DLSS is unavailable: %s", unavailableReason);
+
+        AntialiasingMode effective = context.render->GetEffectiveAntialiasingMode();
+
+        // Only the upscale modes make the two differ; showing it always would just be
+        // the viewport size printed twice.
+        VkExtent2D renderExtent = context.render->GetRenderExtent();
+        VkExtent2D outputExtent = context.render->GetOutputExtent();
+        if (renderExtent.width != outputExtent.width || renderExtent.height != outputExtent.height)
+          ImGui::Text("Render %ux%u -> output %ux%u",
+            renderExtent.width, renderExtent.height, outputExtent.width, outputExtent.height);
+
+        if (UsesTAAPass(effective))
+          ImGui::DragFloat("TAA Clamp Sigma", &context.render->GetTAAClampSigma(), 0.01f, 0.0f, 8.0f);
+      }
 
       ImGui::Checkbox("Bloom", &context.render->GetBloomEnabled());
       if (context.render->GetBloomEnabled())

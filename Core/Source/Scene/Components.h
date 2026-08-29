@@ -26,6 +26,13 @@ namespace YAEngine
     uint64_t lastChangeTick = 0;
   };
 
+  // World matrix this entity had when the previous snapshot was built. Owned by
+  // BuildSceneSnapshot, never serialized: it only feeds per-object motion vectors.
+  struct PrevWorldTransform
+  {
+    glm::mat4 world { 1.0f };
+  };
+
   struct TransformDirty {};
   // Does not mean the descendants are dirty - only that the traversal must keep
   // descending past this node to reach one that is. Treating it as "subtree is

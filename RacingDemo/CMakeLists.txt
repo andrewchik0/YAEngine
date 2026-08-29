@@ -24,6 +24,16 @@ target_compile_definitions(RacingDemo PRIVATE
   APP_WORKING_DIR="${APP_WORKING_DIR}/RacingDemo"
 )
 
+if(YA_DLSS)
+  # Streamline looks for its plugins next to the host executable.
+  add_custom_command(TARGET RacingDemo POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      ${STREAMLINE_RUNTIME_DLLS}
+      "$<TARGET_FILE_DIR:RacingDemo>"
+    COMMENT "Copying Streamline runtime next to RacingDemo.exe"
+  )
+endif()
+
 # Match VS filters to directory structure on disk
 source_group(TREE "${CMAKE_CURRENT_SOURCE_DIR}" FILES ${SOURCES})
 # Set working directory for VS debugger

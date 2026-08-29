@@ -77,6 +77,7 @@ namespace YAEngine
     RenderSpecs renderSpecs;
     renderSpecs.validationLayers = specs.validationLayers;
     renderSpecs.debugUtils = specs.debugUtils;
+    renderSpecs.enableDLSS = specs.enableDLSS;
     renderSpecs.applicationName = specs.windowSpecs.title;
 
     m_Render.Init(m_Window.Get(), renderSpecs);

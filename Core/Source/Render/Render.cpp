@@ -72,7 +72,13 @@ namespace YAEngine
     m_ProbeBuffer.Init(ctx);
     m_VolumeStorage.Init(ctx);
 
-    SetupRenderGraph(width, height);
+    // Both extents start equal: the selected mode is only known once a scene has been
+    // deserialized, and the first Draw resizes the render half if it needs to.
+    VkExtent2D initialExtent { uint32_t(width), uint32_t(height) };
+    m_ResolutionOutputExtent = initialExtent;
+    m_ResolutionMode = m_EffectiveAntialiasingMode;
+
+    SetupRenderGraph(initialExtent, initialExtent);
     CreateTAAFramebuffers();
     m_Backend.GetSwapChain().CreateFrameBuffers(
       m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
@@ -134,6 +140,8 @@ namespace YAEngine
     m_VolumeBaker.Destroy();
     DestroySceneImGuiDescriptor();
     DestroyPickResources();
+    for (auto& set : m_DepthCopyDescriptorSets)
+      set.Destroy();
     m_GizmoRenderer.Destroy(ctx);
 #endif
 
@@ -151,14 +159,6 @@ namespace YAEngine
     DestroySSGIResources();
 
     for (auto& fb : m_TAAFramebuffers)
-    {
-      if (fb != VK_NULL_HANDLE)
-      {
-        vkDestroyFramebuffer(ctx.device, fb, nullptr);
-        fb = VK_NULL_HANDLE;
-      }
-    }
-    for (auto& fb : m_TransparentFramebuffers)
     {
       if (fb != VK_NULL_HANDLE)
       {
@@ -207,6 +207,10 @@ namespace YAEngine
       ubo.Destroy(ctx);
     m_InstanceDescriptorSet.Destroy();
     m_InstanceBuffer.Destroy(ctx);
+    for (auto& set : m_PrevWorldDescriptorSets)
+      set.Destroy();
+    for (auto& buffer : m_PrevWorldBuffers)
+      buffer.Destroy(ctx);
     DestroyShadowIndirectResources();
     m_HistogramBuffer.Destroy(ctx);
     m_ExposureBuffer.Destroy(ctx);
@@ -221,39 +225,42 @@ namespace YAEngine
     m_Backend.Destroy();
   }
 
-  void Render::Resize()
+  void Render::ResizeGraph(VkExtent2D renderExtent, VkExtent2D outputExtent)
   {
-    b_Resized = false;
-
-    // Recreate swapchain first to get actual surface dimensions
-    m_Backend.GetSwapChain().Recreate(
-      m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
-
-#ifdef YA_EDITOR
-    // In editor mode, graph extent = viewport size (independent of window size).
-    // Only swapchain is recreated here; viewport resize handled by ResizeViewport().
-#else
     auto& ctx = m_Backend.GetContext();
-    auto actualExtent = m_Backend.GetSwapChain().GetExt();
 
     vkDeviceWaitIdle(ctx.device);
+
+    uint32_t hizMipCount = static_cast<uint32_t>(
+      std::floor(std::log2(std::max(renderExtent.width, renderExtent.height)))) + 1;
+    m_Graph.SetResourceMipLevels(m_HiZResource, hizMipCount);
+
+    // A DLSS instance is built for one pair of extents and has to be rebuilt for the new one.
+    m_Backend.GetStreamline().ReleaseDLSSResources();
+    b_ResetDLSSPending = true;
 
     DestroyBloomResources();
     DestroyHiZResources();
     DestroyGTAOResources();
     DestroySSGIResources();
+#ifdef YA_EDITOR
+    DestroySceneImGuiDescriptor();
+#endif
 
-    // Resize graph (recreates managed resources and non-external framebuffers)
-    m_Graph.Resize(actualExtent);
+    // Recreates managed resources and non-external framebuffers
+    m_Graph.Resize(renderExtent, outputExtent);
 
+#ifdef YA_EDITOR
+    CreateSceneImGuiDescriptor();
+#endif
     CreateHiZResources();
     CreateGTAOResources();
     CreateSSGIResources();
     CreateBloomResources();
 
     {
-      uint32_t tileCountX = (actualExtent.width + TILE_SIZE - 1) / TILE_SIZE;
-      uint32_t tileCountY = (actualExtent.height + TILE_SIZE - 1) / TILE_SIZE;
+      uint32_t tileCountX = (renderExtent.width + TILE_SIZE - 1) / TILE_SIZE;
+      uint32_t tileCountY = (renderExtent.height + TILE_SIZE - 1) / TILE_SIZE;
       m_TileLightBuffer.Resize(ctx, tileCountX, tileCountY);
       VkDeviceSize tileBufferSize = tileCountX * tileCountY * sizeof(TileData);
       for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
@@ -271,23 +278,37 @@ namespace YAEngine
         fb = VK_NULL_HANDLE;
       }
     }
-    for (auto& fb : m_TransparentFramebuffers)
-    {
-      if (fb != VK_NULL_HANDLE)
-      {
-        vkDestroyFramebuffer(ctx.device, fb, nullptr);
-        fb = VK_NULL_HANDLE;
-      }
-    }
     m_TAADepth.Destroy(ctx);
     CreateTAAFramebuffers();
 
     ClearHistoryBuffers();
+  }
+
+  void Render::Resize()
+  {
+    b_Resized = false;
+
+    // Recreate swapchain first to get actual surface dimensions
+    m_Backend.GetSwapChain().Recreate(
+      m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
+
+#ifdef YA_EDITOR
+    // In editor mode, graph extent = viewport size (independent of window size).
+    // Only swapchain is recreated here; viewport resize handled by ResizeViewport().
+#else
+    VkExtent2D outputExtent = m_Backend.GetSwapChain().GetExt();
+    ResizeGraph(ComputeRenderExtent(m_EffectiveAntialiasingMode, outputExtent), outputExtent);
+
+    m_ResolutionMode = m_EffectiveAntialiasingMode;
+    m_ResolutionOutputExtent = outputExtent;
 #endif
   }
 
   void Render::Draw(FrameContext& frame)
   {
+    // Runs first: the resolution the rest of the frame is set up for depends on it.
+    ResolveAntialiasingMode();
+
 #ifdef YA_EDITOR
     // Handle deferred viewport resize BEFORE acquiring the frame -
     // no command buffer is recording at this point, safe to wait for GPU and recreate resources
@@ -322,6 +343,12 @@ namespace YAEngine
 #endif
 
     YA_PROFILE_CPU_BEGIN(setup, "FrameSetup");
+
+#ifdef YA_EDITOR
+    UpdateResolutionForMode({m_ViewportWidth, m_ViewportHeight});
+#else
+    UpdateResolutionForMode(m_Backend.GetSwapChain().GetExt());
+#endif
 
     if (b_ResetTAAPending)
     {
@@ -382,13 +409,15 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.gamma = m_Gamma;
     m_FrameUniformBuffer.uniforms.exposure = m_Exposure;
     m_FrameUniformBuffer.uniforms.currentTexture = m_CurrentTexture;
-#ifdef YA_EDITOR
-    m_FrameUniformBuffer.uniforms.screenWidth = int(m_ViewportWidth);
-    m_FrameUniformBuffer.uniforms.screenHeight = int(m_ViewportHeight);
-#else
-    m_FrameUniformBuffer.uniforms.screenWidth = int(frame.windowWidth);
-    m_FrameUniformBuffer.uniforms.screenHeight = int(frame.windowHeight);
-#endif
+    // screenWidth/Height is the resolution the scene is rasterized and shaded at;
+    // outputWidth/Height is what reaches the screen. They only differ while a DLSS
+    // upscale mode is active.
+    VkExtent2D renderExtent = m_Graph.GetExtent();
+    VkExtent2D outputExtent = m_Graph.GetOutputExtent();
+    m_FrameUniformBuffer.uniforms.screenWidth = int(renderExtent.width);
+    m_FrameUniformBuffer.uniforms.screenHeight = int(renderExtent.height);
+    m_FrameUniformBuffer.uniforms.outputWidth = int(outputExtent.width);
+    m_FrameUniformBuffer.uniforms.outputHeight = int(outputExtent.height);
     m_FrameUniformBuffer.uniforms.tileCountX = (m_FrameUniformBuffer.uniforms.screenWidth + TILE_SIZE - 1) / TILE_SIZE;
     m_FrameUniformBuffer.uniforms.tileCountY = (m_FrameUniformBuffer.uniforms.screenHeight + TILE_SIZE - 1) / TILE_SIZE;
     m_FrameUniformBuffer.uniforms.aoEnabled = b_AOEnabled ? 1 : 0;
@@ -399,7 +428,7 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.ssrIntensity = m_SSRIntensity;
     // SSGI rides the GTAO pass, so it cannot outlive the AO toggle.
     m_FrameUniformBuffer.uniforms.ssgiEnabled = (b_SSGIEnabled && b_AOEnabled) ? 1 : 0;
-    m_FrameUniformBuffer.uniforms.taaEnabled = b_TAAEnabled ? 1 : 0;
+    m_FrameUniformBuffer.uniforms.taaEnabled = UsesTAAPass(m_EffectiveAntialiasingMode) ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaClampSigma = m_TAAClampSigma;
 
     // Indirect lighting debug views must reach the screen untouched: SSR/TAA already pass
@@ -424,29 +453,31 @@ namespace YAEngine
 
     auto historyWrite = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
     auto historyRead = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
+    auto resolvedColor = GetResolvedColorHandle();
 
-    // SSGI reprojects the resolved image of the PREVIOUS frame, which is exactly
-    // the history the TAA resolve below reads.
-    m_Graph.SetPassInput(m_SSGIRadiancePrefilterPassIndex, 0, historyRead);
+    // SSGI reprojects the resolved image of the PREVIOUS frame. With DLSS that is the
+    // single output image, still holding the previous frame here because the evaluate
+    // that overwrites it runs much later in the graph.
+    m_Graph.SetPassInput(m_SSGIRadiancePrefilterPassIndex, 0, GetPreviousResolvedColorHandle());
 
-    m_Graph.SetPassInput(m_TAAPassIndex, 1, historyRead);
-    m_Graph.SetPassColorOutput(m_TAAPassIndex, 0, historyWrite);
-    m_Graph.SetPassFramebuffer(m_TAAPassIndex, m_TAAFramebuffers[m_TAAIndex]);
+    // Nothing reads the histories while DLSS resolves, so the ping-pong stays untouched.
+    if (!IsDLSSMode(m_EffectiveAntialiasingMode))
+    {
+      m_Graph.SetPassInput(m_TAAPassIndex, 1, historyRead);
+      m_Graph.SetPassColorOutput(m_TAAPassIndex, 0, historyWrite);
+      m_Graph.SetPassFramebuffer(m_TAAPassIndex, m_TAAFramebuffers[m_TAAIndex]);
+    }
 
-    // Forward transparent renders into the same TAA history target written this frame.
-    m_Graph.SetPassColorOutput(m_ForwardTransparentPassIndex, 0, historyWrite);
-    m_Graph.SetPassFramebuffer(m_ForwardTransparentPassIndex, m_TransparentFramebuffers[m_TAAIndex]);
-
-    m_Graph.SetPassInput(m_HistogramPassIndex, 0, historyWrite);
+    m_Graph.SetPassInput(m_HistogramPassIndex, 0, resolvedColor);
 
 #ifdef YA_EDITOR
-    m_Graph.SetPassInput(m_SceneComposePassIndex, 0, historyWrite);
+    m_Graph.SetPassInput(m_SceneComposePassIndex, 0, resolvedColor);
 
     // SwapchainPass renders ImGui at full window size, override extent
     auto swapExtent = m_Backend.GetSwapChain().GetExt();
     m_Graph.SetPassExtent(m_SwapchainPassIndex, swapExtent);
 #else
-    m_Graph.SetPassInput(m_SwapchainPassIndex, 0, historyWrite);
+    m_Graph.SetPassInput(m_SwapchainPassIndex, 0, resolvedColor);
 #endif
     m_Graph.SetPassFramebuffer(m_SwapchainPassIndex,
       m_Backend.GetSwapChain().GetFramebuffer(*imageIndex));

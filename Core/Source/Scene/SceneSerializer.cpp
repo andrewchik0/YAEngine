@@ -172,7 +172,7 @@ namespace YAEngine
     settings["ssgiRadius"] = render.GetSSGIRadius();
     settings["ssgiThickness"] = render.GetSSGIThickness();
     settings["ssgiIntensity"] = render.GetSSGIIntensity();
-    settings["taa"] = render.GetTAAEnabled();
+    settings["antialiasing"] = static_cast<uint32_t>(render.GetAntialiasingMode());
     settings["taaClampSigma"] = render.GetTAAClampSigma();
     settings["shadows"] = render.GetShadowsEnabled();
     settings["shadowLod"] = render.GetShadowLodEnabled();
@@ -286,7 +286,18 @@ namespace YAEngine
     if (settings["ssgiRadius"]) render.GetSSGIRadius() = settings["ssgiRadius"].as<float>();
     if (settings["ssgiThickness"]) render.GetSSGIThickness() = settings["ssgiThickness"].as<float>();
     if (settings["ssgiIntensity"]) render.GetSSGIIntensity() = settings["ssgiIntensity"].as<float>();
-    if (settings["taa"]) render.GetTAAEnabled() = settings["taa"].as<bool>();
+    if (settings["antialiasing"])
+    {
+      uint32_t mode = settings["antialiasing"].as<uint32_t>();
+      if (mode < static_cast<uint32_t>(AntialiasingMode::Count))
+        render.GetAntialiasingMode() = static_cast<AntialiasingMode>(mode);
+    }
+    else if (settings["taa"])
+    {
+      // Scenes written before the antialiasing enum only knew TAA on or off.
+      render.GetAntialiasingMode() = settings["taa"].as<bool>()
+        ? AntialiasingMode::TAA : AntialiasingMode::None;
+    }
     if (settings["taaClampSigma"]) render.GetTAAClampSigma() = settings["taaClampSigma"].as<float>();
     if (settings["shadows"]) render.GetShadowsEnabled() = settings["shadows"].as<bool>();
     if (settings["shadowLod"]) render.GetShadowLodEnabled() = settings["shadowLod"].as<bool>();

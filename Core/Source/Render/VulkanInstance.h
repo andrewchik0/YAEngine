@@ -3,6 +3,7 @@
 #include "VulkanDebugExtension.h"
 #include "Pch.h"
 #include "RenderSpecs.h"
+#include "VulkanRequirements.h"
 
 namespace YAEngine
 {
@@ -11,7 +12,7 @@ namespace YAEngine
   public:
     VulkanDebugExtension m_DebugExtension;
 
-    void Init(const RenderSpecs& specs);
+    void Init(const RenderSpecs& specs, VulkanRequirements& requirements);
     void Destroy();
 
     VkInstance& Get()
@@ -24,5 +25,6 @@ namespace YAEngine
 
 
     std::vector<const char*> GetGLFWExtensions();
+    static std::set<std::string> GetSupportedExtensions();
   };
 }

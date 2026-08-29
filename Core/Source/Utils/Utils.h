@@ -17,9 +17,9 @@ namespace YAEngine
     return r;
   }
 
-  inline glm::vec2 GetTAAJitter(uint64_t frame)
+  inline glm::vec2 GetTAAJitter(uint64_t frame, uint32_t phaseCount = 1024)
   {
-    uint32_t index = static_cast<uint32_t>(frame & 1023);
+    uint32_t index = phaseCount > 0 ? static_cast<uint32_t>(frame % phaseCount) : 0;
     return {
       Halton(index, 2) - 0.5f,
       Halton(index, 3) - 0.5f

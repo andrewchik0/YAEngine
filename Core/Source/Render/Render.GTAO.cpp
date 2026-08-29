@@ -166,7 +166,7 @@ namespace YAEngine
 
     // Without TAA there is nothing to integrate the rotating noise, so it has to stay put
     // or the image crawls.
-    consts.noiseIndex = b_TAAEnabled ? int(m_GlobalFrameIndex % 64) : 0;
+    consts.noiseIndex = IsTemporalAA(m_EffectiveAntialiasingMode) ? int(m_GlobalFrameIndex % 64) : 0;
     QualityLevelToSampleCounts(m_AOQualityLevel, consts.sliceCount, consts.stepsPerSlice);
     consts.padding0 = 0;
 

@@ -39,12 +39,28 @@ layout(set = 2, binding = 0) readonly buffer Instances
 } instances;
 #endif
 
+// Last frame's world matrix of this draw, the only source of object motion in the
+// velocity buffer. Transparency never writes velocity, so it stays out of this.
+#if !defined(DEPTH_ONLY) && !defined(TRANSPARENT)
+  #ifdef INSTANCED
+layout(set = 3, binding = 0) readonly buffer PrevWorldMatrices
+  #else
+layout(set = 2, binding = 0) readonly buffer PrevWorldMatrices
+  #endif
+{
+  mat4 data[];
+} prevWorld;
+#endif
+
 layout(push_constant) uniform PushConstants
 {
   mat4 world;
   int offset;
 #ifdef PICK_ID
   uint pickId;
+#endif
+#if !defined(DEPTH_ONLY) && !defined(TRANSPARENT)
+  uint prevIndex;
 #endif
 } pc;
 
@@ -68,7 +84,18 @@ void main() {
 
 #ifndef DEPTH_ONLY
   outCurClipPos = gl_Position;
-  outPrevClipPos = u_Frame.prevProj * u_Frame.prevView * worldPos;
+
+#if defined(TRANSPARENT)
+  vec4 prevWorldPos = worldPos;
+#elif defined(INSTANCED)
+  // Instances are treated as static, only the parent transform can move.
+  mat4 prevWorldMatrix = prevWorld.data[pc.prevIndex] * instances.data[gl_InstanceIndex + pc.offset];
+  vec4 prevWorldPos = prevWorldMatrix * vec4(inPosition, 1.0);
+#else
+  vec4 prevWorldPos = prevWorld.data[pc.prevIndex] * vec4(inPosition, 1.0);
+#endif
+
+  outPrevClipPos = u_Frame.prevProj * u_Frame.prevView * prevWorldPos;
   outPosition = vec3(worldPos);
 
   mat3 normalMatrix = transpose(inverse(mat3(worldMatrix)));
