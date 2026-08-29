@@ -12,9 +12,12 @@
 #define DEBUG_VIEW_SSGI_VALIDITY    16
 #define DEBUG_VIEW_SSGI_SCREEN      17
 #define DEBUG_VIEW_SSGI_FALLBACK    18
+#define DEBUG_VIEW_DIRECT_ONLY      19
 
 // Shared by the shaders and by Render, which has to switch off everything that
-// would modify these values on their way to the screen.
+// would modify these values on their way to the screen. Despite the name the test
+// is not about indirect light - it is about a view whose value must reach the
+// screen untouched, which is why DEBUG_VIEW_DIRECT_ONLY belongs here too.
 // The SSGI views are deliberately NOT in this list: it switches TAA off, and the
 // TAA history is an input of SSGI - the views would then show a pipeline state
 // the engine never actually runs.
@@ -24,7 +27,8 @@
   || (view) == DEBUG_VIEW_AMBIENT_SPECULAR \
   || (view) == DEBUG_VIEW_PROBE_INDEX \
   || (view) == DEBUG_VIEW_PROBE_FALLBACK \
-  || (view) == DEBUG_VIEW_VOLUME_COVERAGE)
+  || (view) == DEBUG_VIEW_VOLUME_COVERAGE \
+  || (view) == DEBUG_VIEW_DIRECT_ONLY)
 
 #ifdef __cplusplus
 #pragma once

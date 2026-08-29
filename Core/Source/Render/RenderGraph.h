@@ -66,6 +66,11 @@ namespace YAEngine
     // still begins its render pass, which an alternative resolve must not do: its
     // framebuffer is not even rebound while the other one owns the frame.
     std::function<bool()> isEnabled;
+    // Label the GPU zone and the debug marker carry while useAltName returns true.
+    // Only the per-frame labels swap - render pass and framebuffer object names are
+    // built once at setup and keep the primary name.
+    std::string altName;
+    std::function<bool()> useAltName;
     RGCallback execute;
   };
 

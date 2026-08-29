@@ -11,7 +11,7 @@ namespace YAEngine {
 #define MAX_SHADOW_SPOTS 8
 #define MAX_SHADOW_POINTS 4
 #define SHADOW_SPOT_SIZE 1024
-#define SHADOW_POINT_FACE_SIZE 512
+#define SHADOW_POINT_FACE_SIZE 1024
 
 struct ShadowCascade
 {
@@ -24,7 +24,7 @@ struct SpotShadow
 {
   mat4 viewProj;
   vec4 atlasViewport;      // xy = offset (normalized), zw = size (normalized)
-  vec4 biasData;           // x = bias, y = normalBias, zw = unused
+  vec4 biasData;           // x = bias, y = normalBias per unit distance, zw = unused
 };
 
 struct PointShadow
@@ -32,7 +32,7 @@ struct PointShadow
   mat4 faceViewProj[6];
   vec4 faceAtlasViewport[6];
   vec4 positionFarPlane;   // xyz = light position, w = farPlane (radius)
-  vec4 biasData;           // x = bias, y = normalBias, zw = unused
+  vec4 biasData;           // x = bias, y = normalBias per unit distance, zw = unused
 };
 
 struct ShadowBuffer

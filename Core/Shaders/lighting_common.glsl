@@ -556,7 +556,7 @@ vec3 computeDirectLighting(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 viewVe
 
     int spotShadowIdx = floatBitsToInt(u_Lights.spotLights[i].intensityShadow.y);
     if (spotShadowIdx >= 0)
-      radiance *= calculateSpotShadow(worldPos, normal, spotShadowIdx);
+      radiance *= calculateSpotShadow(worldPos, normal, lightPos, spotShadowIdx);
 
     Lo += evaluateDirectLight(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV);
   }

@@ -92,6 +92,21 @@ const float SPOT_SHADOW_FILTER_RADIUS = 2.0;
 const int POINT_SHADOW_SAMPLES = 8;
 const float POINT_SHADOW_FILTER_RADIUS = 2.0;
 
+// Grazing light needs a bigger normal offset than head-on light: across the PCF footprint
+// the receiver's own depth changes by w * tan(theta), and offsetting along the normal only
+// buys back cos(theta) of it, so the requirement grows as sin(theta) / cos(theta)^2. The
+// filter radius is in there because the taps reach that many texels out, not one. Capped
+// because the term runs away towards 90 degrees, where the surface is barely lit anyway
+// and the cap costs nothing a caster could have shown.
+const float SHADOW_MAX_SLOPE_SCALE = 8.0;
+
+float shadowSlopeScale(float NdotL, float filterRadius)
+{
+  float cosSq = max(NdotL * NdotL, 1e-4);
+  float slope = sqrt(max(1.0 - NdotL * NdotL, 0.0)) / cosSq;
+  return clamp(filterRadius * slope, 1.0, SHADOW_MAX_SLOPE_SCALE);
+}
+
 float sampleShadowAtlasPCF(vec3 worldPos, mat4 lightViewProj, vec4 viewport, int numSamples, float filterRadius, bool clampEdges)
 {
   vec4 clipPos = lightViewProj * vec4(worldPos, 1.0);
@@ -125,9 +140,15 @@ float sampleShadowAtlasPCF(vec3 worldPos, mat4 lightViewProj, vec4 viewport, int
   return shadow / float(numSamples);
 }
 
-float calculateSpotShadow(vec3 worldPos, vec3 normal, int spotIndex)
+float calculateSpotShadow(vec3 worldPos, vec3 normal, vec3 lightPos, int spotIndex)
 {
-  float normalBias = u_Shadow.spotShadows[spotIndex].biasData.y;
+  // biasData.y is the texel world size one unit from the light, so it only means
+  // anything in world space once scaled by how far the receiver actually is.
+  vec3 toLight = lightPos - worldPos;
+  float lightDist = max(length(toLight), 1e-6);
+  float NdotL = dot(normal, toLight / lightDist);
+  float normalBias = u_Shadow.spotShadows[spotIndex].biasData.y * lightDist
+    * shadowSlopeScale(NdotL, SPOT_SHADOW_FILTER_RADIUS);
   vec3 biasedPos = worldPos + normal * normalBias;
 
   return sampleShadowAtlasPCF(
@@ -152,7 +173,14 @@ float calculatePointShadow(vec3 worldPos, vec3 normal, vec3 lightPos, int pointI
   else
     face = dir.z > 0.0 ? 4 : 5;
 
-  float normalBias = u_Shadow.pointShadows[pointIndex].biasData.y;
+  // A cube face projects along its major axis, so that component is what the texel
+  // size scales with - not the full distance, which is up to sqrt(3) longer in a
+  // face corner and would over-bias there.
+  float faceDepth = max(absDir.x, max(absDir.y, absDir.z));
+  float lightDist = max(length(dir), 1e-6);
+  float NdotL = dot(normal, -dir / lightDist);
+  float normalBias = u_Shadow.pointShadows[pointIndex].biasData.y * faceDepth
+    * shadowSlopeScale(NdotL, POINT_SHADOW_FILTER_RADIUS);
   vec3 biasedPos = worldPos + normal * normalBias;
 
   return sampleShadowAtlasPCF(

@@ -664,20 +664,24 @@ namespace YAEngine
       if (pass.info.isEnabled && !pass.info.isEnabled())
         continue;
 
+      // Resolved once so the GPU zone and every marker below agree on one label.
+      const char* passLabel = (pass.info.useAltName && pass.info.useAltName())
+        ? pass.info.altName.c_str() : pass.info.name.c_str();
+
       VkExtent2D passExtent = (pass.overrideExtent.width > 0 && pass.overrideExtent.height > 0)
         ? pass.overrideExtent : pass.extent;
       ctx.extent = passExtent;
 
 #ifdef YA_EDITOR
       // Declared before the barriers so the wait a pass causes is charged to that pass.
-      GpuZoneScope gpuZone(m_GpuProfiler, cmd, pass.info.name.c_str());
+      GpuZoneScope gpuZone(m_GpuProfiler, cmd, passLabel);
 #endif
 
       InsertBarriers(cmd, passIndex);
 
       if (pass.info.isCompute)
       {
-        DebugMarker::BeginLabel(cmd, pass.info.name.c_str());
+        DebugMarker::BeginLabel(cmd, passLabel);
         pass.info.execute(ctx);
 
         for (auto handle : pass.info.storageOutputs)
@@ -691,7 +695,7 @@ namespace YAEngine
 
       if (pass.info.depthOnly)
       {
-        DebugMarker::BeginLabel(cmd, pass.info.name.c_str());
+        DebugMarker::BeginLabel(cmd, passLabel);
 
         VkFramebuffer fb = pass.overrideFramebuffer != VK_NULL_HANDLE
           ? pass.overrideFramebuffer : pass.framebuffer;
@@ -734,7 +738,7 @@ namespace YAEngine
         continue;
       }
 
-      DebugMarker::BeginLabel(cmd, pass.info.name.c_str());
+      DebugMarker::BeginLabel(cmd, passLabel);
 
       VkFramebuffer fb = pass.overrideFramebuffer != VK_NULL_HANDLE
         ? pass.overrideFramebuffer : pass.framebuffer;

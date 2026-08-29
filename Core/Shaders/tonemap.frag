@@ -101,6 +101,7 @@ void main()
   case DEBUG_VIEW_AMBIENT_ONLY:     // raw linear ambient term, no direct light
   case DEBUG_VIEW_AMBIENT_DIFFUSE:  // diffuse half of it - irradiance volumes
   case DEBUG_VIEW_AMBIENT_SPECULAR: // specular half of it - reflection probes
+  case DEBUG_VIEW_DIRECT_ONLY:      // direct light alone, comparable with the three above
     // deferred_lighting.frag already wrote the final value, and Render forces SSR
     // and TAA off for these views, so `frame` still holds it unmodified. Still
     // linear light though, so it needs the same gamma encoding as the final image.

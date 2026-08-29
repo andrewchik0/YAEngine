@@ -190,6 +190,16 @@ void main()
 
   vec3 Lo = computeDirectLighting(worldPos, viewPos, normal, viewVec, albedo, metallic, roughness, f0, NdotV, ivec2(gl_FragCoord.xy));
 
+  // Direct light alone. The shadow term multiplies nothing but Lo, so this is the
+  // view where a shadow shows up without the probe and volume fill on top of it -
+  // and it is in the same linear units as the ambient views above, so flipping
+  // between the two says which of them actually owns a pixel.
+  if (u_Frame.currentTexture == DEBUG_VIEW_DIRECT_ONLY)
+  {
+    outColor = vec4(Lo, 1.0);
+    return;
+  }
+
   vec3 resultColor = max(ambientDiffuse + ambientSpecular + Lo, vec3(0.0));
 
   if (u_Frame.fogEnabled != 0)

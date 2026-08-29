@@ -183,7 +183,11 @@ namespace YAEngine
 
   ShadowViewport ShadowAtlas::GetPointFaceViewport(uint32_t pointIndex, uint32_t faceIndex)
   {
-    // Bottom region: 8x3 grid of 512x512 tiles starting at (0, 4096)
+    // Bottom region: 8x3 grid of SHADOW_POINT_FACE_SIZE tiles starting at (0, 4096).
+    // The rows run the full atlas width, so raising the face size has to stay inside it.
+    static_assert(8 * SHADOW_POINT_FACE_SIZE <= SHADOW_ATLAS_SIZE
+      && 4096 + ((MAX_SHADOW_POINTS * 6 + 7) / 8) * SHADOW_POINT_FACE_SIZE <= SHADOW_ATLAS_SIZE,
+      "Point shadow tiles no longer fit the atlas");
     uint32_t linearIndex = pointIndex * 6 + faceIndex;
     uint32_t col = linearIndex % 8;
     uint32_t row = linearIndex / 8;

@@ -156,6 +156,8 @@ namespace YAEngine
       .inputs = {m_MainDepth},
       .storageOutputs = {m_GTAODepth},
       .isCompute = true,
+      .altName = "SSGIDepthPrefilter",
+      .useAltName = [this]() { return b_SSGIEnabled && b_AOEnabled; },
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_AOEnabled) return;
 
@@ -229,6 +231,8 @@ namespace YAEngine
       .name = "GTAOPass",
       .inputs = {m_GTAODepth, m_GBuffer1, m_SSGIRadiance},
       .colorOutputs = {m_GTAOWorkingAO, m_GTAOEdges, m_SSGIWorking, m_SSGIBentWorking},
+      .altName = "SSGIPass",
+      .useAltName = [this]() { return b_SSGIEnabled && b_AOEnabled; },
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_AOEnabled) return;
 
@@ -262,6 +266,8 @@ namespace YAEngine
       .name = "GTAODenoise",
       .inputs = {m_GTAOWorkingAO, m_GTAOEdges, m_SSGIWorking, m_SSGIBentWorking},
       .colorOutputs = {m_AOFinal, m_SSGIFinal, m_SSGIBentFinal},
+      .altName = "SSGIDenoise",
+      .useAltName = [this]() { return b_SSGIEnabled && b_AOEnabled; },
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_AOEnabled) return;
 

@@ -81,7 +81,8 @@ namespace YAEngine
         "TAA Delta", "Velocity",
         "Ambient Only", "Ambient Diffuse", "Ambient Specular",
         "Reflection Probe Index", "Reflection Probe Fallback", "Volume Coverage",
-        "SSGI Validity", "SSGI Screen Part", "SSGI Fallback Weight"
+        "SSGI Validity", "SSGI Screen Part", "SSGI Fallback Weight",
+        "Direct Only"
       };
       if (ImGui::Combo("Debug View", &debugViewIndex, debugViews, IM_ARRAYSIZE(debugViews)))
         context.render->SetDebugView(debugViewIndex);

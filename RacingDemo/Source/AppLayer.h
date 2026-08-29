@@ -21,8 +21,8 @@
 #endif
 
 // #define TEST
-// #define BISTRO
-#define BISTRO_RACING
+// #define BISTRO_RACING
+#define BISTRO_INTERIOR
 
 class AppLayer : public YAEngine::Layer
 {
@@ -64,9 +64,9 @@ public:
     camState.yaw = glm::radians(180.0f);
 #endif
 
-#elif defined(BISTRO)
+#elif defined(BISTRO_INTERIOR)
     YAEngine::SceneSerializer::Load(
-      APP_WORKING_DIR "/Assets/Scenes/cafe.scene",
+      APP_WORKING_DIR "/Assets/Scenes/cafe_interior.scene",
       GetScene(), GetAssets(), registry, GetRender(),
       APP_WORKING_DIR, &threadPool);
 

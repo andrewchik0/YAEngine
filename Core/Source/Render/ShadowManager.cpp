@@ -413,8 +413,12 @@ namespace YAEngine
     spot.viewProj = viewProj;
     spot.atlasViewport = sv.atlasUV;
 
-    float texelWorldSize = 2.0f * std::tan(outerCone) * radius / float(SHADOW_SPOT_SIZE);
-    spot.biasData = glm::vec4(0.0f, texelWorldSize * 1.5f, 0.0f, 0.0f);
+    // Texel world size one unit from the light, not at the far plane: the shader
+    // scales it by the receiver's own distance. Sizing it at the far plane instead
+    // over-biases the near field by radius/distance, which erases the shadow of
+    // every caster shorter than that bias.
+    float texelSizePerUnit = 2.0f * std::tan(outerCone) / float(SHADOW_SPOT_SIZE);
+    spot.biasData = glm::vec4(0.0f, texelSizePerUnit * 1.5f, 0.0f, 0.0f);
   }
 
   void ShadowManager::ComputePointShadow(
@@ -439,8 +443,9 @@ namespace YAEngine
     auto& point = m_ShadowData.pointShadows[pointIndex];
     point.positionFarPlane = glm::vec4(position, radius);
 
-    float texelWorldSize = 2.0f * radius / float(SHADOW_POINT_FACE_SIZE);
-    point.biasData = glm::vec4(0.0f, texelWorldSize * 1.5f, 0.0f, 0.0f);
+    // Per unit distance from the light, see ComputeSpotShadow above.
+    float texelSizePerUnit = 2.0f / float(SHADOW_POINT_FACE_SIZE);
+    point.biasData = glm::vec4(0.0f, texelSizePerUnit * 1.5f, 0.0f, 0.0f);
 
     for (uint32_t f = 0; f < 6; f++)
     {

@@ -38,7 +38,7 @@ namespace YAEngine
     // Spot: up to 8 tiles 1024x1024 in top-right 4096x4096 (4x2 grid)
     static ShadowViewport GetSpotViewport(uint32_t spotIndex);
 
-    // Point: up to 4x6=24 tiles 512x512 in bottom-left (8x3 grid starting at y=4096)
+    // Point: up to 4x6=24 tiles SHADOW_POINT_FACE_SIZE (8x3 grid starting at y=4096)
     static ShadowViewport GetPointFaceViewport(uint32_t pointIndex, uint32_t faceIndex);
 
   private:
