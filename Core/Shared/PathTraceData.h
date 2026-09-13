@@ -70,6 +70,13 @@ namespace YAEngine {
 // tops out at 65504, so the trace's 100000 would be stored as infinity.
 #define PT_SPECULAR_MISS_DISTANCE 60000.0
 
+// How far from the depth-reconstructed primary point the camera ray that looks up the reflector
+// instance may land and still count as that surface: distance * relative + absolute, in world
+// units. Covers the depth reconstruction's precision; a rejection only degrades the specular
+// motion vectors to the static-reflector assumption.
+#define PT_REFLECTOR_LOOKUP_RELATIVE_TOLERANCE 0.005
+#define PT_REFLECTOR_LOOKUP_ABSOLUTE_TOLERANCE 0.02
+
 struct PathTraceConstants
 {
   int maxBounces;

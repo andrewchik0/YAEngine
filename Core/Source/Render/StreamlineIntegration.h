@@ -70,6 +70,29 @@ namespace YAEngine
     return "Unknown";
   }
 
+  // The specular guide ray reconstruction is tagged with. Section 4.1.9 of NVIDIA's DLSS-RR
+  // guide needs the hit distance only when specular motion vectors are not provided, so the two
+  // are alternatives and exactly one is pushed. A temporary developer toggle while the better
+  // input is being determined.
+  enum class RayReconstructionSpecularGuide : uint32_t
+  {
+    MotionVectors,  // ptSpecularMotion, computed by pt_main.rgen
+    HitDistance,    // ptHitDistance, which RR synthesizes its own from
+    Count
+  };
+
+  inline const char* GetRayReconstructionSpecularGuideName(RayReconstructionSpecularGuide guide)
+  {
+    switch (guide)
+    {
+      case RayReconstructionSpecularGuide::MotionVectors: return "Specular Motion Vectors";
+      case RayReconstructionSpecularGuide::HitDistance: return "Specular Hit Distance";
+      case RayReconstructionSpecularGuide::Count: break;
+    }
+
+    return "Unknown";
+  }
+
   // What the ray reconstruction panel section drives. Not serialized: section 3.13 of the
   // DLSS-RR Integration Guide recommends shipping the default and offering the named presets
   // for experimentation only, so this is a session-lifetime choice.
@@ -91,6 +114,7 @@ namespace YAEngine
     // whatever the installed model considers current, which is also what section 3.13
     // recommends shipping.
     RayReconstructionPreset preset = RayReconstructionPreset::Default;
+    RayReconstructionSpecularGuide specularGuide = RayReconstructionSpecularGuide::MotionVectors;
   };
 
   // Opaque sl::FrameToken*, only valid while Streamline is initialized.
@@ -131,11 +155,13 @@ namespace YAEngine
 
     // Ray reconstruction only. All render-res; EvaluateRayReconstruction tags whichever
     // of them carries a live VkImage and treats an empty one as "not provided", which is
-    // legal for the optional hit distance and nothing else.
-    DLSSImage diffuseAlbedo;        // demodulation guide
-    DLSSImage specularAlbedo;       // demodulation guide
-    DLSSImage normalRoughness;      // world normal xyz + roughness w, one image
-    DLSSImage specularHitDistance;  // optional
+    // legal for the two optional specular guides and nothing else. Of those two only the
+    // one rrSettings.specularGuide names is tagged.
+    DLSSImage diffuseAlbedo;          // demodulation guide
+    DLSSImage specularAlbedo;         // demodulation guide
+    DLSSImage normalRoughness;        // world normal xyz + roughness w, one image
+    DLSSImage specularHitDistance;    // optional
+    DLSSImage specularMotionVectors;  // optional, MainVelocity's convention and mvecScale
 
     glm::mat4 view { 1.0f };
     glm::mat4 proj { 1.0f };

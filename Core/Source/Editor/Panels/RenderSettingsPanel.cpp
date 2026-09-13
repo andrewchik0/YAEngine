@@ -85,7 +85,7 @@ namespace YAEngine
         "Direct Only", "Ray Query", "RT Pipeline",
         "PT Noisy", "PT Reference", "PT Guides",
         "PT Max Contribution", "PT NEE", "PT Environment", "PT Non-Finite",
-        "HDR Magnitude"
+        "HDR Magnitude", "PT Specular Motion"
       };
 
       // Spelled out rather than an ImGui::Combo because several entries need device
@@ -117,7 +117,7 @@ namespace YAEngine
             selectable = false;
             unavailableReason = "The path tracer is unavailable on this device.\nIt needs hardware ray tracing and bindless descriptors.";
           }
-          else if (i == DEBUG_VIEW_PT_GUIDES && !pathTracingActive)
+          else if ((i == DEBUG_VIEW_PT_GUIDES || i == DEBUG_VIEW_PT_SPECULAR_MOTION) && !pathTracingActive)
           {
             selectable = false;
             unavailableReason = "The guide buffers are only written while the Path Tracing\nrender path is the effective one.";
@@ -372,7 +372,23 @@ namespace YAEngine
               "whatever the installed nvngx_dlssd.dll considers current. The named\n"
               "presets are for experimentation and pin an older network.");
 
-          ImGui::TextDisabled("Changing the preset restarts the RR history.");
+          if (ImGui::BeginCombo("Specular Guide", GetRayReconstructionSpecularGuideName(rr.specularGuide)))
+          {
+            for (uint32_t i = 0; i < uint32_t(RayReconstructionSpecularGuide::Count); i++)
+            {
+              RayReconstructionSpecularGuide option = RayReconstructionSpecularGuide(i);
+              if (ImGui::Selectable(GetRayReconstructionSpecularGuideName(option), option == rr.specularGuide))
+                rr.specularGuide = option;
+            }
+            ImGui::EndCombo();
+          }
+          if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Which specular guide RR is tagged with - never both. Motion vectors\n"
+              "are computed by the tracer and cover a moving reflector and a moving\n"
+              "reflected object; from the hit distance RR builds its own from the\n"
+              "camera alone. Developer toggle, not saved with the scene.");
+
+          ImGui::TextDisabled("Changing the preset or the specular guide restarts the RR history.");
         }
       }
 

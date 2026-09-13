@@ -26,6 +26,8 @@ layout(set = 1, binding = 10) uniform sampler2D pathTraceAccumTexture;
 layout(set = 1, binding = 11) uniform sampler2D ptDiffuseAlbedoTexture;
 layout(set = 1, binding = 12) uniform sampler2D ptSpecularAlbedoTexture;
 layout(set = 1, binding = 13) uniform sampler2D ptNormalRoughnessTexture;
+// The tracer's specular motion vectors, read only by the PT Specular Motion view.
+layout(set = 1, binding = 14) uniform sampler2D ptSpecularMotionTexture;
 
 layout(std430, set = 2, binding = 0) readonly buffer ExposureSSBO
 {
@@ -182,6 +184,12 @@ void main()
         value = vec3(texture(ptNormalRoughnessTexture, tileUV).a);
 
       outColor = vec4(value, 1.0);
+    }
+    return;
+  case DEBUG_VIEW_PT_SPECULAR_MOTION: // on the Velocity view's scale, so the two compare directly
+    {
+      vec2 specularMotion = texture(ptSpecularMotionTexture, uv).rg;
+      outColor = vec4(abs(specularMotion) * 200.0, 0.0, 1.0);
     }
     return;
   case DEBUG_VIEW_AMBIENT_ONLY:     // raw linear ambient term, no direct light

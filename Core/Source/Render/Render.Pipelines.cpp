@@ -490,6 +490,8 @@ namespace YAEngine
           { 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          // PT Specular Motion view
+          { 14, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
@@ -1113,6 +1115,10 @@ namespace YAEngine
             // Primary hit distance, the one ray reconstruction guide the G-buffer cannot
             // produce - it is a property of the ray, not of the surface it landed on.
             { 10, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            // Specular motion vectors out, and MainVelocity in for the texels whose virtual
+            // image sits on the surface itself
+            { 11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            { 12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, rtSceneStages },
           }
         };
 

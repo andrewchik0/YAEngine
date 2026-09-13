@@ -14,6 +14,9 @@ namespace YAEngine
   class MeshManager;
   class VulkanVertexBuffer;
 
+  static_assert(sizeof(RayTracingInstanceRecord) == 80,
+    "RayTracingInstanceRecord no longer matches its std430 layout");
+
   // The scene's top level acceleration structure, rebuilt every frame, together with the
   // parallel record buffer that tells a shader what a hit belongs to.
   //
@@ -59,13 +62,13 @@ namespace YAEngine
 
   private:
 
-    // 64 bytes per VkAccelerationStructureInstanceKHR and 32 per record, so 4096 covers
-    // the racing scene's ~2300 structure-bearing objects before instancing for 384 KB per
+    // 64 bytes per VkAccelerationStructureInstanceKHR and 80 per record, so 4096 covers
+    // the racing scene's ~2300 structure-bearing objects before instancing for 576 KB per
     // frame slot. Growth doubles from here rather than starting at a fixed generous cap:
     // scatter instancing multiplies the object count by an amount only the scene knows,
     // so a cap large enough to be safe would be resident memory nothing usually needs.
     static constexpr uint32_t INITIAL_INSTANCE_CAPACITY = 4096;
-    // 16 MB of instance array plus 8 MB of records per frame slot. A ceiling against a
+    // 16 MB of instance array plus 20 MB of records per frame slot. A ceiling against a
     // runaway scene, not a budget the scene is expected to reach; instances past it are
     // dropped with one warning.
     static constexpr uint32_t MAX_INSTANCE_CAPACITY = 256 * 1024;

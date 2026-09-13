@@ -517,7 +517,8 @@ namespace YAEngine
     {
       m_FrameUniformBuffer.uniforms.currentTexture = 0;
     }
-    if (m_CurrentTexture == DEBUG_VIEW_PT_GUIDES && !IsPathTracingActive())
+    if ((m_CurrentTexture == DEBUG_VIEW_PT_GUIDES || m_CurrentTexture == DEBUG_VIEW_PT_SPECULAR_MOTION)
+      && !IsPathTracingActive())
     {
       m_FrameUniformBuffer.uniforms.currentTexture = 0;
     }

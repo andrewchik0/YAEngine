@@ -640,9 +640,11 @@ namespace YAEngine
 
     // A preset change swaps the network, so what the accumulated history describes changes
     // with it and the denoiser has to start over - otherwise the first frames after the flip
-    // are a blend of two models. Detected before the desc is built, because that is where the
-    // reset flag is read.
-    if (m_RRSettings.preset != m_RRAppliedSettings.preset)
+    // are a blend of two models. A specular guide change is the same story for the history
+    // the reflections were reprojected with. Detected before the desc is built, because that
+    // is where the reset flag is read.
+    if (m_RRSettings.preset != m_RRAppliedSettings.preset
+      || m_RRSettings.specularGuide != m_RRAppliedSettings.specularGuide)
       b_ResetDLSSPending = true;
 
     m_RRAppliedSettings = m_RRSettings;
@@ -656,11 +658,13 @@ namespace YAEngine
     desc.diffuseAlbedo = DescribeStreamlineImage(m_PTDiffuseAlbedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     desc.specularAlbedo = DescribeStreamlineImage(m_PTSpecularAlbedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     desc.normalRoughness = DescribeStreamlineImage(m_PTNormalRoughness, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-    // The world-space length of the first bounce ray, measured from the primary surface, on
-    // the frames that bounce took the specular lobe - which is what section 3.4.9 of the
-    // DLSS-RR Integration Guide asks for. Streamline turns it into the specular motion
-    // vectors together with the world to view matrix and sl::Constants::cameraViewToClip.
+    // Both specular guides are described and EvaluateRayReconstruction tags the one
+    // rrSettings.specularGuide names. The hit distance is the mirror probe's world-space length
+    // from the primary surface, section 3.4.9 of the DLSS-RR Integration Guide, which RR turns
+    // into specular motion vectors with the camera matrices alone; the motion vectors are
+    // computed by pt_main.rgen and also follow a moving reflector and reflected object.
     desc.specularHitDistance = DescribeStreamlineImage(m_PTHitDistance, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    desc.specularMotionVectors = DescribeStreamlineImage(m_PTSpecularMotion, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     if (m_Backend.GetStreamline().EvaluateRayReconstruction(desc))
       b_ResetDLSSPending = false;

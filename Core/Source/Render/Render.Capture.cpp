@@ -650,7 +650,7 @@ namespace YAEngine
     YA_LOG_INFO("Render", "Capture:   pt_accum       -> pathTraceAccum");
     YA_LOG_INFO("Render", "Capture:   gbuffer        -> gbuffer0,gbuffer1,mainDepth,mainVelocity");
     YA_LOG_INFO("Render", "Capture:   pt             -> pt_noisy,pt_accum,ptHitDistance,"
-      "ptDiffuseAlbedo,ptSpecularAlbedo,ptNormalRoughness");
+      "ptSpecularMotion,ptDiffuseAlbedo,ptSpecularAlbedo,ptNormalRoughness");
     YA_LOG_INFO("Render", "Capture:   default        -> final,resolved");
     YA_LOG_INFO("Render", "Capture:   all            -> every capturable graph resource");
 
@@ -753,7 +753,7 @@ namespace YAEngine
 
       if (name == "pt")
         return addTarget("pt_noisy") && addTarget("pt_accum") && addTarget("ptHitDistance")
-          && addTarget("ptDiffuseAlbedo") && addTarget("ptSpecularAlbedo")
+          && addTarget("ptSpecularMotion") && addTarget("ptDiffuseAlbedo") && addTarget("ptSpecularAlbedo")
           && addTarget("ptNormalRoughness");
 
       if (name == "default")

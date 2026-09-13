@@ -48,9 +48,10 @@ namespace YAEngine
       { "pt-environment",       "PT Environment" },
       { "pt-nonfinite",         "PT Non-Finite" },
       { "hdr-magnitude",        "HDR Magnitude" },
+      { "pt-specular-motion",   "PT Specular Motion" },
     };
 
-    static_assert(std::size(DEBUG_VIEWS) == DEBUG_VIEW_HDR_MAGNITUDE + 1,
+    static_assert(std::size(DEBUG_VIEWS) == DEBUG_VIEW_PT_SPECULAR_MOTION + 1,
       "Debug view table is out of sync with the DEBUG_VIEW_* ids in FrameUniforms.h");
 
     struct NamedMode

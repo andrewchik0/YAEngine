@@ -40,6 +40,8 @@ namespace YAEngine
     auto& noisy = m_Graph.GetResource(m_PathTraceNoisy);
     auto& accumulation = m_Graph.GetResource(m_PathTraceAccum);
     auto& hitDistance = m_Graph.GetResource(m_PTHitDistance);
+    auto& specularMotion = m_Graph.GetResource(m_PTSpecularMotion);
+    auto& velocity = m_Graph.GetResource(m_MainVelocity);
 
     m_PathTraceDescriptorSets[frameIndex].Writer()
       .WriteAccelerationStructure(0, m_TlasBuilder.Get(frameIndex))
@@ -60,6 +62,9 @@ namespace YAEngine
       .WriteStorageImage(8, noisy.GetView())
       .WriteStorageImage(9, accumulation.GetView())
       .WriteStorageImage(10, hitDistance.GetView())
+      .WriteStorageImage(11, specularMotion.GetView())
+      .WriteCombinedImageSampler(12, velocity.GetView(), velocity.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
       .Flush();
   }
 
@@ -272,6 +277,14 @@ namespace YAEngine
       .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
       .filter = VK_FILTER_NEAREST
     });
+    // The alternative specular guide to the hit distance above, same writer and same reason
+    // for TRANSFER_DST. Same format as mainVelocity, whose convention it shares.
+    m_PTSpecularMotion = m_Graph.CreateResource({
+      .name = "ptSpecularMotion",
+      .format = VK_FORMAT_R16G16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
 
     uint32_t hizMipCount = static_cast<uint32_t>(
       std::floor(std::log2(std::max(renderExtent.width, renderExtent.height)))) + 1;
@@ -405,8 +418,8 @@ namespace YAEngine
     // debug views above sort to the front of the frame because they consume nothing.
     m_PathTracePassIndex = m_Graph.AddPass({
       .name = "PathTrace",
-      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth},
-      .storageOutputs = {m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance},
+      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_MainVelocity},
+      .storageOutputs = {m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance, m_PTSpecularMotion},
       .isCompute = true,
       .shaderStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
       .isEnabled = [this]() { return IsPathTracePassEnabled(); },
@@ -930,7 +943,7 @@ namespace YAEngine
     m_DLSSRayReconstructionPassIndex = m_Graph.AddPass({
       .name = "DLSSRayReconstruction",
       .inputs = {m_PathTraceNoisy, m_MainDepth, m_MainVelocity, m_PTDiffuseAlbedo,
-        m_PTSpecularAlbedo, m_PTNormalRoughness, m_PTHitDistance},
+        m_PTSpecularAlbedo, m_PTNormalRoughness, m_PTHitDistance, m_PTSpecularMotion},
       .storageOutputs = {m_DLSSOutput},
       .isCompute = true,
       .isEnabled = [this]() { return IsRayReconstructionResolve(); },
@@ -1252,7 +1265,7 @@ namespace YAEngine
       .name = "SceneComposePass",
       .inputs = {m_TAAHistory0, m_AOFinal, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor,
         m_SSGIFinal, m_SSGIRadiance, m_DLSSOutput, m_RTDebug, m_PathTraceNoisy, m_PathTraceAccum,
-        m_PTDiffuseAlbedo, m_PTSpecularAlbedo, m_PTNormalRoughness},
+        m_PTDiffuseAlbedo, m_PTSpecularAlbedo, m_PTNormalRoughness, m_PTSpecularMotion},
       .colorOutputs = {m_SceneColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto& historyCurrent = m_Graph.GetResource(GetResolvedColorHandle());
@@ -1262,6 +1275,7 @@ namespace YAEngine
         auto& ptDiffuseAlbedo = m_Graph.GetResource(m_PTDiffuseAlbedo);
         auto& ptSpecularAlbedo = m_Graph.GetResource(m_PTSpecularAlbedo);
         auto& ptNormalRoughness = m_Graph.GetResource(m_PTNormalRoughness);
+        auto& ptSpecularMotion = m_Graph.GetResource(m_PTSpecularMotion);
         auto& aoFinal = m_Graph.GetResource(m_AOFinal);
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
@@ -1301,6 +1315,8 @@ namespace YAEngine
           ptSpecularAlbedo.GetView(), ptSpecularAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(13,
           ptNormalRoughness.GetView(), ptNormalRoughness.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(14,
+          ptSpecularMotion.GetView(), ptSpecularMotion.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
@@ -1363,7 +1379,7 @@ namespace YAEngine
       .name = "SwapchainPass",
       .inputs = {m_TAAHistory0, m_AOFinal, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor,
         m_SSGIFinal, m_SSGIRadiance, m_DLSSOutput, m_RTDebug, m_PathTraceNoisy, m_PathTraceAccum,
-        m_PTDiffuseAlbedo, m_PTSpecularAlbedo, m_PTNormalRoughness},
+        m_PTDiffuseAlbedo, m_PTSpecularAlbedo, m_PTNormalRoughness, m_PTSpecularMotion},
       .colorOutputs = {},
       .externalFramebuffer = true,
       .externalFormat = swapFormat,
@@ -1386,6 +1402,7 @@ namespace YAEngine
         auto& ptDiffuseAlbedo = m_Graph.GetResource(m_PTDiffuseAlbedo);
         auto& ptSpecularAlbedo = m_Graph.GetResource(m_PTSpecularAlbedo);
         auto& ptNormalRoughness = m_Graph.GetResource(m_PTNormalRoughness);
+        auto& ptSpecularMotion = m_Graph.GetResource(m_PTSpecularMotion);
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         auto& pipeline = m_PSOCache.Get(m_QuadPipeline);
@@ -1418,6 +1435,8 @@ namespace YAEngine
           ptSpecularAlbedo.GetView(), ptSpecularAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(13,
           ptNormalRoughness.GetView(), ptNormalRoughness.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(14,
+          ptSpecularMotion.GetView(), ptSpecularMotion.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
@@ -1537,9 +1556,9 @@ namespace YAEngine
 
   void Render::ClearPathTraceOutputs()
   {
-    // None of the three is ever cleared by a pass - the sample index resets the mean by
+    // None of these is ever cleared by a pass - the sample index resets the mean by
     // rewriting it - and the path tracing render path either resolves out of the
-    // accumulation image or hands the noisy one and the hit distance to ray
+    // accumulation image or hands the noisy one and a specular guide to ray
     // reconstruction. A frame that resolves or tags them before the trace has run once (an
     // empty scene, a failed TLAS build) would otherwise present, or denoise against, raw
     // allocation contents; the tonemap pass samples two of them from statically accessed
@@ -1554,7 +1573,7 @@ namespace YAEngine
 
     auto cmd = m_Backend.GetCommandBuffer().BeginSingleTimeCommands();
 
-    for (RGHandle handle : { m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance })
+    for (RGHandle handle : { m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance, m_PTSpecularMotion })
     {
       auto& image = m_Graph.GetResource(handle);
 

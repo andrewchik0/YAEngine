@@ -658,8 +658,9 @@ namespace YAEngine
     // separate resources and two separate tags.
     options.normalRoughnessMode = sl::DLSSDNormalRoughnessMode::ePacked;
     // The companion to kBufferTypeSpecularHitDistance, per section 3.4.9 of the DLSS-RR
-    // Integration Guide, which is why the options move every frame rather than being pushed
-    // lazily the way slDLSSSetOptions is. Section 3.4.9 also settles the convention this
+    // Integration Guide - RR only builds specular motion vectors out of the pair while that
+    // guide is the one tagged - which is why the options move every frame rather than being
+    // pushed lazily the way slDLSSSetOptions is. Section 3.4.9 also settles the convention this
     // used to guess at - "All matrices are Row Major Order and use left multiplication" -
     // which is exactly what ToStreamlineMatrix produces out of a GLM matrix.
     //
@@ -711,6 +712,7 @@ namespace YAEngine
     sl::Resource specularAlbedo = ToStreamlineResource(desc.specularAlbedo);
     sl::Resource normalRoughness = ToStreamlineResource(desc.normalRoughness);
     sl::Resource specularHitDistance = ToStreamlineResource(desc.specularHitDistance);
+    sl::Resource specularMotionVectors = ToStreamlineResource(desc.specularMotionVectors);
 
     sl::SubresourceRange colorInRange = ToStreamlineSubresource(desc.colorIn);
     sl::SubresourceRange colorOutRange = ToStreamlineSubresource(desc.colorOut);
@@ -720,6 +722,7 @@ namespace YAEngine
     sl::SubresourceRange specularAlbedoRange = ToStreamlineSubresource(desc.specularAlbedo);
     sl::SubresourceRange normalRoughnessRange = ToStreamlineSubresource(desc.normalRoughness);
     sl::SubresourceRange specularHitDistanceRange = ToStreamlineSubresource(desc.specularHitDistance);
+    sl::SubresourceRange specularMotionVectorsRange = ToStreamlineSubresource(desc.specularMotionVectors);
 
     colorIn.next = &colorInRange;
     colorOut.next = &colorOutRange;
@@ -729,6 +732,7 @@ namespace YAEngine
     specularAlbedo.next = &specularAlbedoRange;
     normalRoughness.next = &normalRoughnessRange;
     specularHitDistance.next = &specularHitDistanceRange;
+    specularMotionVectors.next = &specularMotionVectorsRange;
 
     // eValidUntilEvaluate for every one of them, exactly as the super resolution path
     // does: the graph owns these images and reuses them later in the frame, but nothing
@@ -744,9 +748,15 @@ namespace YAEngine
     tags.emplace_back(&diffuseAlbedo, sl::kBufferTypeAlbedo, kLifecycle, &renderExtent);
     tags.emplace_back(&specularAlbedo, sl::kBufferTypeSpecularAlbedo, kLifecycle, &renderExtent);
     tags.emplace_back(&normalRoughness, sl::kBufferTypeNormalRoughness, kLifecycle, &renderExtent);
-    // sl_core_types.h marks this one Optional, so a caller with no hit distance to offer
-    // leaves the image empty and the tag simply is not pushed.
-    if (desc.specularHitDistance.image != VK_NULL_HANDLE)
+    // Both specular guides are optional and they are alternatives: section 4.1.9 of the DLSS-RR
+    // guide needs the hit distance only when specular motion vectors are not provided. So only
+    // the one the settings name is pushed, never both, and an empty image drops it too.
+    const RayReconstructionSpecularGuide specularGuide = desc.rrSettings.specularGuide;
+    if (specularGuide == RayReconstructionSpecularGuide::MotionVectors
+      && desc.specularMotionVectors.image != VK_NULL_HANDLE)
+      tags.emplace_back(&specularMotionVectors, sl::kBufferTypeSpecularMotionVectors, kLifecycle, &renderExtent);
+    else if (specularGuide == RayReconstructionSpecularGuide::HitDistance
+      && desc.specularHitDistance.image != VK_NULL_HANDLE)
       tags.emplace_back(&specularHitDistance, sl::kBufferTypeSpecularHitDistance, kLifecycle, &renderExtent);
 
     uint32_t tagCount = static_cast<uint32_t>(tags.size());

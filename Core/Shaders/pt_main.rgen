@@ -24,6 +24,7 @@
 #include "random.glsl"
 #include "light_eval.glsl"
 #include "../Shared/PathTraceData.h"
+#include "specular_motion.glsl"
 
 // Set 1 bindings 3 and up are the pass's own, on a layout forked from the one the two ray
 // tracing debug views share: they hold a single storage image there, and this pass needs the
@@ -51,6 +52,11 @@ layout(set = 1, binding = 9, rgba32f) uniform image2D outAccumulation;
 // Streamline tag names one resource and cannot point at a channel of another. Two bytes per
 // pixel and one store, next to a value this shader has already computed.
 layout(set = 1, binding = 10, r16f) uniform writeonly image2D outHitDistance;
+// The alternative ray reconstruction specular guide to the hit distance above, in MainVelocity's
+// convention - see specular_motion.glsl. Which of the two is tagged is the panel's choice.
+layout(set = 1, binding = 11, rg16f) uniform writeonly image2D outSpecularMotion;
+// Read where the virtual image sits on the surface itself: unlit and emissive texels.
+layout(set = 1, binding = 12) uniform sampler2D u_MainVelocity;
 
 layout(push_constant) uniform PathTracePushBlock
 {
@@ -634,10 +640,18 @@ void main()
   // and an emissive one, none of which reach the probe below.
   float specularHitDistance = 0.0;
 
+  // Every virtual point this pixel can be given lies on the camera ray through it, so its current
+  // unjittered projection is the pixel centre plus the jitter whatever its distance - the same
+  // current NDC backgroundVelocity builds.
+  vec2 pixelNDC = uv * 2.0 - 1.0;
+  vec2 currentNDC = pixelNDC + vec2(u_Frame.jitterX, u_Frame.jitterY);
+  vec2 specularMotion = vec2(0.0);
+
   if (depth <= PT_SKY_DEPTH)
   {
     // The sky is not a surface: there is no vertex to shade and no path to start.
     radiance = texture(u_Skybox, rayDirection).rgb;
+    specularMotion = backgroundVelocity(pixelNDC);
   }
   else
   {
@@ -657,12 +671,15 @@ void main()
       // Unlit is the raster's own escape hatch - the albedo IS the final colour - so there
       // is nothing to integrate and the path stops before it starts.
       radiance = gb0.rgb;
+      // Nothing is reflected, so the image moves with the surface itself.
+      specularMotion = texelFetch(u_MainVelocity, pixel, 0).rg;
     }
     else if (shadingModel == SHADING_EMISSIVE)
     {
       // GBuffer0 holds encoded emission instead of albedo and metallic for this texel, and
       // an emissive texel has given up its PBR response, so it emits and nothing else.
       radiance = decodeEmissive(gb0);
+      specularMotion = texelFetch(u_MainVelocity, pixel, 0).rg;
     }
     else
     {
@@ -698,6 +715,54 @@ void main()
         specularHitDistance = payload.hit == 0u
           ? PT_SPECULAR_MISS_DISTANCE
           : min(payload.hitT, PT_SPECULAR_MISS_DISTANCE);
+
+        // Copied before anything else traces: the payload is shared, and the lookup below
+        // overwrites it. hitT unclamped - the fp16 ceiling belongs to the guide image only.
+        bool probeHit = payload.hit != 0u;
+        float probeHitT = payload.hitT;
+        uint probeInstanceIndex = payload.instanceIndex;
+
+        // The G-buffer does not say which instance P belongs to, so the reflector is found by
+        // tracing the camera ray to it. A hit that lands off the reconstructed depth found
+        // something else, and the reflector is then taken as static.
+        float lookupTolerance = primaryDistance * PT_REFLECTOR_LOOKUP_RELATIVE_TOLERANCE
+          + PT_REFLECTOR_LOOKUP_ABSOLUTE_TOLERANCE;
+
+        payload.hit = 0u;
+        traceRayEXT(u_Tlas, gl_RayFlagsNoneEXT, RT_MASK_OPAQUE,
+          0u, 0u, uint(PT_PRIMARY_MISS_INDEX),
+          u_Frame.cameraPosition, PT_RAY_TMIN, (P - u_Frame.cameraPosition) / primaryDistance,
+          primaryDistance + lookupTolerance,
+          0);
+
+        vec4 reflectorDelta[3] = WORLD_TO_PREV_WORLD_IDENTITY;
+        if (payload.hit != 0u && abs(payload.hitT - primaryDistance) <= lookupTolerance)
+          reflectorDelta = u_Instances[payload.instanceIndex].worldToPrevWorld;
+
+        // N is the normal the probe direction was reflected about.
+        vec3 previousP = applyWorldToPrevWorldPoint(reflectorDelta, P);
+        vec3 previousN = applyWorldToPrevWorldDirection(reflectorDelta, N);
+
+        vec4 previousClip;
+        if (probeHit)
+        {
+          // Based at P, not at the probe origin: that offset runs along N, and mirroring would
+          // carry it off the camera ray - a constant bias even on a frame where nothing moves.
+          vec3 X = P + probeDirection * probeHitT;
+          vec3 previousX = applyWorldToPrevWorldPoint(
+            u_Instances[probeInstanceIndex].worldToPrevWorld, X);
+          vec3 previousVirtual = mirrorPoint(previousX, previousP, previousN);
+          previousClip = u_Frame.prevProj * (u_Frame.prevView * vec4(previousVirtual, 1.0));
+        }
+        else
+        {
+          // The environment sits at infinity and does not move, so only the reflected
+          // direction follows the reflector.
+          vec3 previousVirtualDirection = mirrorDirection(probeDirection, previousN);
+          previousClip = u_Frame.prevProj * (u_Frame.prevView * vec4(previousVirtualDirection, 0.0));
+        }
+
+        specularMotion = specularMotionFromPrevClip(previousClip, currentNDC);
       }
 
       vec3 throughput = vec3(1.0);
@@ -857,6 +922,7 @@ void main()
 
   imageStore(outNoisy, pixel, vec4(radiance, primaryDistance));
   imageStore(outHitDistance, pixel, vec4(specularHitDistance));
+  imageStore(outSpecularMotion, pixel, vec4(specularMotion, 0.0, 0.0));
 
   if (pc.sampleIndex >= 0)
   {

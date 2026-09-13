@@ -1,6 +1,7 @@
 #ifdef __cplusplus
 #pragma once
 #define uint uint32_t
+#define vec4 glm::vec4
 namespace YAEngine {
 #endif
 
@@ -47,10 +48,16 @@ struct RayTracingInstanceRecord
   // is addressed by material slot precisely so this field serves as both.
   uint materialIndex;
   uint flags;
-  uint _pad0;             // keeps the struct at 32 bytes, which is its std430 stride
+  uint _pad0;
+  // Maps a point of this instance from this frame's world space to where it was last frame,
+  // as the top three rows of a row-major affine matrix - VkTransformMatrixKHR's layout. Rows
+  // of vec4 rather than vec3 columns, which std430 would pad to a 16 byte stride anyway.
+  // Offsets 32/48/64 keep the whole record at 80 bytes, its std430 stride.
+  vec4 worldToPrevWorld[3];
 };
 
 #ifdef __cplusplus
 } // namespace YAEngine
+#undef vec4
 #undef uint
 #endif

@@ -602,7 +602,7 @@ namespace YAEngine
     // RTDebug image. Called by both tracing passes, which write identical contents and are
     // mutually exclusive, so one set per frame slot serves both.
     void WriteRayTracingSceneDescriptors(uint32_t frameIndex);
-    // The same scene bindings 0-2 plus the path tracer's own 3-9, on the forked set layout.
+    // The same scene bindings 0-2 plus the path tracer's own 3-12, on the forked set layout.
     void WritePathTraceDescriptors(uint32_t frameIndex);
     // The guide pass's set 1: the G-buffer in, the three ray reconstruction guides out.
     void WritePathTraceGuideDescriptors(uint32_t frameIndex);
@@ -701,6 +701,9 @@ namespace YAEngine
     // specular lobe and zero otherwise. Ray reconstruction builds its specular motion vectors
     // out of it - see section 4.1.9 of NVIDIA's DLSS-RR guide.
     RGHandle m_PTHitDistance {};
+    // RG16F, render resolution: specular motion vectors written by pt_main.rgen in exactly
+    // MainVelocity's convention, since both tags share one sl::Constants::mvecScale.
+    RGHandle m_PTSpecularMotion {};
 
 #ifdef YA_EDITOR
     RGHandle m_SceneColor {};

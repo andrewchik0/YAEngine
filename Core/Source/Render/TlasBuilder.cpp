@@ -7,6 +7,8 @@
 #include "Assets/MeshManager.h"
 #include "Utils/Log.h"
 
+#include <glm/gtc/matrix_inverse.hpp>
+
 namespace YAEngine
 {
   namespace
@@ -32,6 +34,18 @@ namespace YAEngine
           result.matrix[row][column] = world[column][row];
       }
       return result;
+    }
+
+    // RayTracingInstanceRecord::worldToPrevWorld for one object. Identity for a singular
+    // transform rather than the inf or NaN its inverse would put into the motion vectors.
+    void WriteWorldToPrevWorld(const RenderObject& object, glm::vec4 rows[3])
+    {
+      glm::mat4 delta(1.0f);
+      if (std::abs(glm::determinant(glm::mat3(object.worldTransform))) > 0.0f)
+        delta = object.prevWorldTransform * glm::affineInverse(object.worldTransform);
+
+      for (uint32_t row = 0; row < 3; row++)
+        rows[row] = glm::vec4(delta[0][row], delta[1][row], delta[2][row], delta[3][row]);
     }
   }
 
@@ -189,7 +203,7 @@ namespace YAEngine
 
       // Every instance of one object shares its geometry and its material, so the record
       // is built once and only the custom index it is stored at moves.
-      const RayTracingInstanceRecord record {
+      RayTracingInstanceRecord record {
         .vertexAddress = vertexBuffer->GetVertexAddress(),
         .indexAddress = vertexBuffer->GetIndexAddress(),
         .attributeOffset = uint32_t(vertexBuffer->GetAttribOffset()),
@@ -197,6 +211,9 @@ namespace YAEngine
         .flags = recordFlags,
         ._pad0 = 0,
       };
+      // The same for every instance too: prevWorld * offset * inverse(world * offset) cancels
+      // the static instance offset down to prevWorld * inverse(world).
+      WriteWorldToPrevWorld(object, record.worldToPrevWorld);
 
       const VkDeviceAddress bottomLevel = vertexBuffer->GetBottomLevel().GetDeviceAddress();
       const uint32_t mask = object.isTransparent ? RT_MASK_TRANSPARENT : RT_MASK_OPAQUE;

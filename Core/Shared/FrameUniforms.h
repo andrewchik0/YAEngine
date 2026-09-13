@@ -56,6 +56,10 @@
 // surface. Comparing a path traced diagnostic against a rasterized image by eye cannot.
 #define DEBUG_VIEW_HDR_MAGNITUDE    29
 
+// The specular motion vectors pt_main.rgen writes for ray reconstruction, on the Velocity view's
+// scale. Like PT Guides it only exists while the path tracing render path is effective.
+#define DEBUG_VIEW_PT_SPECULAR_MOTION 30
+
 // PathTraceConstants::debugMode, and the order the views above map onto it.
 #define PT_DEBUG_OFF          0
 #define PT_DEBUG_MAX_CONTRIB  1
