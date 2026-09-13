@@ -1,0 +1,47 @@
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_nonuniform_qualifier : require
+
+#define RT_BINDLESS
+#include "raytracing_common.glsl"
+
+hitAttributeEXT vec2 hitBarycentrics;
+
+// The alpha cutout a raster draw resolves into pipeline state. Only reached for instances
+// the TLAS left non-opaque - the alpha-tested ones - and only when the ray was not traced
+// with gl_RayFlagsOpaqueEXT, which forces every candidate opaque and skips this entirely.
+//
+// No payload is declared: an any-hit shader that only accepts or rejects a candidate never
+// touches one, and leaving it out keeps this callable from any trace whatever its payload
+// looks like.
+void main()
+{
+  RayTracingInstanceRecord instance = u_Instances[gl_InstanceCustomIndexEXT];
+
+  // A mesh with no attribute block carries positions alone, so there is no texture
+  // coordinate to cut out with, and an out-of-range material slot cannot be read at all.
+  if (instance.attributeOffset == 0u || instance.materialIndex >= uint(u_Materials.length()))
+    return;
+
+  RayTracingMaterialRecord material = u_Materials[instance.materialIndex];
+  // Without a base color map the alpha is the material's own, which the cutout path never
+  // uses to discard - accepting the candidate is what the raster does there too.
+  if ((material.textureMask & RT_MATERIAL_BASE_COLOR) == 0u)
+    return;
+
+  IndexStream indices = IndexStream(instance.indexAddress);
+  VertexStream vertices = VertexStream(instance.vertexAddress);
+
+  uvec3 triIndices = fetchTriangle(indices, uint(gl_PrimitiveID));
+  vec2 texCoord = interpolateTexCoord(vertices, instance.attributeOffset, triIndices, hitBarycentrics);
+
+  // Mip 0 explicitly: a ray tracing invocation has no derivatives, so an implicit LOD
+  // would be undefined here.
+  float alpha = textureLod(u_BindlessTextures[nonuniformEXT(material.baseColorIndex)],
+    texCoord * material.uvScale, 0.0).a;
+
+  if (alpha < RT_ALPHA_CUTOFF)
+    ignoreIntersectionEXT;
+}

@@ -65,6 +65,9 @@ namespace YAEngine
     m_Registry.Register<SystemScheduler>(&m_Scheduler);
     m_Registry.Register<ComponentRegistry>(&m_ComponentRegistry);
     m_Registry.Register<LayerManager>(&m_LayerManager);
+    m_CaptureSpec = specs.captureSpec;
+    m_Registry.Register<FrameCaptureSpec>(&m_CaptureSpec);
+    m_Registry.Register<FrameCaptureSessionResult>(&m_CaptureSessionResult);
     m_LayerManager.SetRegistry(m_Registry);
 
     auto& terrainSystem = m_Scheduler.AddSystem<TerrainSystem>(m_AssetManager, &m_ThreadPool);

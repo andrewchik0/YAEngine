@@ -82,10 +82,62 @@ namespace YAEngine
         "Ambient Only", "Ambient Diffuse", "Ambient Specular",
         "Reflection Probe Index", "Reflection Probe Fallback", "Volume Coverage",
         "SSGI Validity", "SSGI Screen Part", "SSGI Fallback Weight",
-        "Direct Only"
+        "Direct Only", "Ray Query", "RT Pipeline",
+        "PT Noisy", "PT Reference", "PT Guides",
+        "PT Max Contribution", "PT NEE", "PT Environment", "PT Non-Finite",
+        "HDR Magnitude"
       };
-      if (ImGui::Combo("Debug View", &debugViewIndex, debugViews, IM_ARRAYSIZE(debugViews)))
-        context.render->SetDebugView(debugViewIndex);
+
+      // Spelled out rather than an ImGui::Combo because several entries need device
+      // capabilities or a render path, which only the per-item form can disable.
+      bool rayQueryAvailable = context.render->IsRayQueryAvailable();
+      bool rtPipelineAvailable = context.render->IsRayTracingPipelineAvailable();
+      bool pathTracerAvailable = context.render->IsPathTracerAvailable();
+      bool pathTracingActive = context.render->IsPathTracingActive();
+      if (ImGui::BeginCombo("Debug View", debugViews[debugViewIndex]))
+      {
+        for (int i = 0; i < IM_ARRAYSIZE(debugViews); i++)
+        {
+          bool selectable = true;
+          const char* unavailableReason = nullptr;
+          if (i == DEBUG_VIEW_RAY_QUERY && !rayQueryAvailable)
+          {
+            selectable = false;
+            unavailableReason = "Ray queries are unavailable on this device";
+          }
+          else if (i == DEBUG_VIEW_RT_PIPELINE && !rtPipelineAvailable)
+          {
+            selectable = false;
+            unavailableReason = "The ray tracing pipeline is unavailable on this device.\nIt needs hardware ray tracing and bindless descriptors.";
+          }
+          else if ((i == DEBUG_VIEW_PT_NOISY || i == DEBUG_VIEW_PT_REFERENCE
+            || (i >= DEBUG_VIEW_PT_MAX_CONTRIB && i <= DEBUG_VIEW_PT_NONFINITE))
+            && !pathTracerAvailable)
+          {
+            selectable = false;
+            unavailableReason = "The path tracer is unavailable on this device.\nIt needs hardware ray tracing and bindless descriptors.";
+          }
+          else if (i == DEBUG_VIEW_PT_GUIDES && !pathTracingActive)
+          {
+            selectable = false;
+            unavailableReason = "The guide buffers are only written while the Path Tracing\nrender path is the effective one.";
+          }
+          else if (pathTracingActive && IS_RASTER_ONLY_DEBUG_VIEW(i))
+          {
+            selectable = false;
+            unavailableReason = "Written by a pass the Path Tracing render path switches off:\nthe AO chain, SSR, the deferred lighting diagnostics or the\ntemporal resolve.";
+          }
+
+          ImGui::BeginDisabled(!selectable);
+          if (ImGui::Selectable(debugViews[i], i == debugViewIndex) && selectable)
+            context.render->SetDebugView(i);
+          ImGui::EndDisabled();
+
+          if (unavailableReason != nullptr && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+            ImGui::SetTooltip("%s", unavailableReason);
+        }
+        ImGui::EndCombo();
+      }
     }
 
     if (ImGui::CollapsingHeader(ICON_FA_SLIDERS " Post-Processing", ImGuiTreeNodeFlags_DefaultOpen))
@@ -144,6 +196,102 @@ namespace YAEngine
       ImGui::Checkbox("SSR", &context.render->GetSSREnabled());
       if (context.render->GetSSREnabled())
         ImGui::DragFloat("SSR Intensity", &context.render->GetSSRIntensity(), 0.05f, 0.0f, 20.0f);
+
+      // Which pipeline shades the frame. Above the anti-aliasing combo because it decides
+      // what there is to anti-alias: the path tracer resolves itself and switches the
+      // engine's own resolve off.
+      {
+        RenderPath& path = context.render->GetRenderPath();
+        RenderPath effectivePath = context.render->GetEffectiveRenderPath();
+        bool pathTracerAvailable = context.render->IsPathTracerAvailable();
+
+        if (ImGui::BeginCombo("Render Path", GetRenderPathName(path)))
+        {
+          for (uint32_t i = 0; i < uint32_t(RenderPath::Count); i++)
+          {
+            RenderPath option = RenderPath(i);
+            const char* reason = context.render->GetRenderPathUnavailableReason(option);
+
+            ImGui::BeginDisabled(reason != nullptr);
+            if (ImGui::Selectable(GetRenderPathName(option), option == path) && reason == nullptr)
+              path = option;
+            ImGui::EndDisabled();
+
+            if (reason != nullptr && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+              ImGui::SetTooltip("%s", reason);
+          }
+          ImGui::EndCombo();
+        }
+
+        if (effectivePath != path)
+          ImGui::TextDisabled("Falling back to %s", GetRenderPathName(effectivePath));
+
+        // Ray reconstruction is what turns the tracer's single sample into a frame, so its
+        // status belongs next to the combo that selects the path, exactly the way the DLSS
+        // status sits under the anti-aliasing one.
+        if (!context.render->IsRayReconstructionAvailable())
+        {
+          const std::string& rrReason = context.render->GetRayReconstructionUnavailableReason();
+          ImGui::TextDisabled("Ray Reconstruction is unavailable: %s",
+            rrReason.empty() ? "not supported on this device" : rrReason.c_str());
+        }
+
+        // Developer only, and deliberately not serialized: it resolves the path tracer out
+        // of its own running mean instead of the denoiser, which is the only way to look at
+        // the raw sample and at the converged reference while the render path owns the
+        // frame. Shown whatever the path is currently set to, because on a device without
+        // ray reconstruction ticking it is what makes the Path Tracing entry selectable at
+        // all - it only disappears where there is no tracer to resolve either way.
+        if (pathTracerAvailable)
+        {
+          bool devResolve = context.render->IsPathTraceDevResolveEnabled();
+          if (ImGui::Checkbox("PT Developer Resolve (no denoiser)", &devResolve))
+            context.render->SetPathTraceDevResolve(devResolve);
+          if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Resolves the path tracer out of its accumulated mean instead of\n"
+              "DLSS Ray Reconstruction: one noisy sample while anything moves,\n"
+              "converging to the reference while nothing does. Traces 1:1 and is\n"
+              "not saved with the scene.");
+        }
+
+        // The tracer's own settings, next to the combo that turns it on - and still
+        // reachable in raster mode while one of the path traced debug views is up, which
+        // is the other thing they drive.
+        if (pathTracerAvailable
+          && (effectivePath == RenderPath::PathTracing || context.render->IsPathTraceView()))
+        {
+          ImGui::SliderInt("PT Bounces", &context.render->GetPathTraceMaxBounces(),
+            PT_MIN_BOUNCES, PT_MAX_BOUNCES);
+          if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Path vertices after the G-buffer one. Every bounce costs a full\n"
+              "trace plus a shadow ray, and the image needs proportionally more\n"
+              "samples to converge.");
+
+          // AlwaysClamp: without it Ctrl+Click text entry ignores the range, and a value typed
+          // past the ceiling is exactly what the scene serializer would silently pull back.
+          ImGui::DragFloat("PT Firefly Clamp", &context.render->GetPathTraceFireflyClamp(),
+            0.1f, PT_MIN_FIREFLY_CLAMP, PT_MAX_FIREFLY_CLAMP, "%.1f",
+            ImGuiSliderFlags_AlwaysClamp);
+          if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("Ceiling on the radiance one bounce may add. 0 switches it off,\n"
+              "which is the unbiased setting - and the one to compare against\n"
+              "when a converged image looks too dark.");
+
+          // The running mean is what the render path presents, and what the reference
+          // view displays; the noisy view alone never touches it.
+          if (effectivePath == RenderPath::PathTracing
+            || context.render->GetDebugView() == DEBUG_VIEW_PT_REFERENCE)
+          {
+            ImGui::Text("Accumulated samples: %d", context.render->GetPathTraceSampleCount() + 1);
+            if (ImGui::Button(ICON_FA_ROTATE " Reset Accumulation"))
+              context.render->ResetPathTraceAccumulation();
+            if (ImGui::IsItemHovered())
+              ImGui::SetTooltip("The mean also restarts on its own whenever the camera moves,\n"
+                "the scene or the lights change, or the render resolution does.");
+          }
+        }
+      }
+
       {
         AntialiasingMode& mode = context.render->GetAntialiasingMode();
         bool dlssAvailable = context.render->IsDLSSAvailable();
@@ -173,6 +321,22 @@ namespace YAEngine
 
         AntialiasingMode effective = context.render->GetEffectiveAntialiasingMode();
 
+        // Under the path tracing render path the effective mode is not the selected one:
+        // ray reconstruction resolves the frame and only exists inside the DLSS family, so
+        // a non-DLSS selection is promoted to DLAA for the duration and put back untouched
+        // the moment the path goes away. With the developer resolve the mode drives nothing
+        // but the camera jitter, which is what gives the accumulated mean its edges.
+        if (context.render->IsPathTracingActive())
+        {
+          if (context.render->IsPathTraceDevResolveEnabled())
+            ImGui::TextDisabled("Developer resolve: the mode only drives camera jitter.");
+          else if (effective != mode)
+            ImGui::TextDisabled("Path Tracing resolves through Ray Reconstruction, running as %s.",
+              GetAntialiasingModeName(effective));
+          else
+            ImGui::TextDisabled("Path Tracing resolves through Ray Reconstruction.");
+        }
+
         // Only the upscale modes make the two differ; showing it always would just be
         // the viewport size printed twice.
         VkExtent2D renderExtent = context.render->GetRenderExtent();
@@ -181,8 +345,35 @@ namespace YAEngine
           ImGui::Text("Render %ux%u -> output %ux%u",
             renderExtent.width, renderExtent.height, outputExtent.width, outputExtent.height);
 
-        if (UsesTAAPass(effective))
+        if (UsesTAAPass(effective) && !context.render->IsPathTracingActive())
           ImGui::DragFloat("TAA Clamp Sigma", &context.render->GetTAAClampSigma(), 0.01f, 0.0f, 8.0f);
+
+        // Only reachable while ray reconstruction is the resolve that produced the image on
+        // screen. Not serialized: section 3.13 of the DLSS-RR Integration Guide recommends
+        // shipping the default and offering the named presets for experimentation only.
+        if (context.render->IsPathTracingActive()
+          && !context.render->IsPathTraceDevResolveEnabled()
+          && ImGui::CollapsingHeader("Ray Reconstruction"))
+        {
+          RayReconstructionSettings& rr = context.render->GetRayReconstructionSettings();
+
+          if (ImGui::BeginCombo("DLSSDPreset", GetRayReconstructionPresetName(rr.preset)))
+          {
+            for (uint32_t i = 0; i < uint32_t(RayReconstructionPreset::Count); i++)
+            {
+              RayReconstructionPreset option = RayReconstructionPreset(i);
+              if (ImGui::Selectable(GetRayReconstructionPresetName(option), option == rr.preset))
+                rr.preset = option;
+            }
+            ImGui::EndCombo();
+          }
+          if (ImGui::IsItemHovered())
+            ImGui::SetTooltip("eDefault is what NVIDIA recommends shipping - it resolves to\n"
+              "whatever the installed nvngx_dlssd.dll considers current. The named\n"
+              "presets are for experimentation and pin an older network.");
+
+          ImGui::TextDisabled("Changing the preset restarts the RR history.");
+        }
       }
 
       ImGui::Checkbox("Bloom", &context.render->GetBloomEnabled());
@@ -292,6 +483,25 @@ namespace YAEngine
 
       if (ImGui::Button(ICON_FA_ROTATE " Recompile Shaders"))
         context.render->GetShaderHotReload().RecompileAll();
+
+      // Secondary to the --capture command line, which is what an unattended agent uses.
+      // Deliberately without settings of its own: FrameCapture introduces no scene state.
+      if (ImGui::Button(ICON_FA_CAMERA " Capture Frame"))
+      {
+        static int captureIndex = 0;
+        char directory[128];
+        std::snprintf(directory, sizeof(directory), "Captures/%03d_manual", captureIndex++);
+        context.render->RequestCapture(FrameCaptureRequest {
+          .directory = directory,
+          .targets = { "final", "resolved" },
+          .shotName = "manual",
+          .requestedBy = "editor button",
+          .scenePath = context.scene ? context.scene->GetScenePath() : std::string()
+        });
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Dumps the current frame into Captures/NNN_manual next to the\n"
+          "executable, in the same layout a --capture run produces.");
     }
 
     ImGui::End();

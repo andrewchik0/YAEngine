@@ -6,6 +6,7 @@
 #include <sl.h>
 #include <sl_consts.h>
 #include <sl_dlss.h>
+#include <sl_dlss_d.h>
 #include <sl_helpers.h>
 #include <sl_helpers_vk.h>
 #endif
@@ -25,6 +26,7 @@ namespace YAEngine
       switch (feature)
       {
         case StreamlineFeature::DLSS: return sl::kFeatureDLSS;
+        case StreamlineFeature::RayReconstruction: return sl::kFeatureDLSS_RR;
       }
 
       return sl::kFeatureDLSS;
@@ -35,6 +37,7 @@ namespace YAEngine
       switch (feature)
       {
         case StreamlineFeature::DLSS: return "DLSS";
+        case StreamlineFeature::RayReconstruction: return "DLSS Ray Reconstruction";
       }
 
       return "unknown";
@@ -52,6 +55,31 @@ namespace YAEngine
       }
 
       return sl::DLSSMode::eOff;
+    }
+
+    // The engine enum is dense and the SDK one is not - presets A, B and C were removed - so
+    // this is a real mapping and not a cast.
+    sl::DLSSDPreset ToStreamlinePreset(RayReconstructionPreset preset)
+    {
+      switch (preset)
+      {
+        case RayReconstructionPreset::Default: return sl::DLSSDPreset::eDefault;
+        case RayReconstructionPreset::D: return sl::DLSSDPreset::ePresetD;
+        case RayReconstructionPreset::E: return sl::DLSSDPreset::ePresetE;
+        case RayReconstructionPreset::F: return sl::DLSSDPreset::ePresetF;
+        case RayReconstructionPreset::G: return sl::DLSSDPreset::ePresetG;
+        case RayReconstructionPreset::H: return sl::DLSSDPreset::ePresetH;
+        case RayReconstructionPreset::I: return sl::DLSSDPreset::ePresetI;
+        case RayReconstructionPreset::J: return sl::DLSSDPreset::ePresetJ;
+        case RayReconstructionPreset::K: return sl::DLSSDPreset::ePresetK;
+        case RayReconstructionPreset::L: return sl::DLSSDPreset::ePresetL;
+        case RayReconstructionPreset::M: return sl::DLSSDPreset::ePresetM;
+        case RayReconstructionPreset::N: return sl::DLSSDPreset::ePresetN;
+        case RayReconstructionPreset::O: return sl::DLSSDPreset::ePresetO;
+        case RayReconstructionPreset::Count: break;
+      }
+
+      return sl::DLSSDPreset::eDefault;
     }
 
     // The engine drives a single scene view, so every tag, constant and evaluate call
@@ -95,6 +123,44 @@ namespace YAEngine
       range.baseArrayLayer = 0;
       range.layerCount = VK_REMAINING_ARRAY_LAYERS;
       return range;
+    }
+
+    // The per-frame constants both evaluates push. Identical for the two features - they
+    // describe the camera and the frame, not the algorithm - so the conventions below are
+    // derived once and neither resolve can drift from the other.
+    sl::Constants BuildStreamlineConstants(const DLSSEvaluateDesc& desc)
+    {
+      glm::mat4 invView = glm::inverse(desc.view);
+      glm::mat4 invProj = glm::inverse(desc.proj);
+      glm::mat4 clipToPrevClip = desc.prevProj * desc.prevView * invView * invProj;
+
+      sl::Constants constants {};
+      constants.cameraViewToClip = ToStreamlineMatrix(desc.proj);
+      constants.clipToCameraView = ToStreamlineMatrix(invProj);
+      constants.clipToLensClip = ToStreamlineMatrix(glm::mat4(1.0f));
+      constants.clipToPrevClip = ToStreamlineMatrix(clipToPrevClip);
+      constants.prevClipToClip = ToStreamlineMatrix(glm::inverse(clipToPrevClip));
+      constants.jitterOffset = { desc.jitterPixels.x, desc.jitterPixels.y };
+      constants.mvecScale = { desc.mvecScale.x, desc.mvecScale.y };
+      constants.cameraPinholeOffset = { 0.0f, 0.0f };
+      constants.cameraPos = { desc.cameraPosition.x, desc.cameraPosition.y, desc.cameraPosition.z };
+      constants.cameraUp = { desc.cameraUp.x, desc.cameraUp.y, desc.cameraUp.z };
+      constants.cameraRight = { desc.cameraRight.x, desc.cameraRight.y, desc.cameraRight.z };
+      constants.cameraFwd = { desc.cameraForward.x, desc.cameraForward.y, desc.cameraForward.z };
+      constants.cameraNear = desc.nearPlane;
+      constants.cameraFar = desc.farPlane;
+      constants.cameraFOV = desc.fov;
+      constants.cameraAspectRatio = desc.aspectRatio;
+      // Reversed-Z with an infinite far plane: the sky sits at 0.
+      constants.depthInverted = sl::Boolean::eTrue;
+      constants.cameraMotionIncluded = sl::Boolean::eTrue;
+      constants.motionVectors3D = sl::Boolean::eFalse;
+      constants.reset = desc.reset ? sl::Boolean::eTrue : sl::Boolean::eFalse;
+      constants.orthographicProjection = sl::Boolean::eFalse;
+      constants.motionVectorsDilated = sl::Boolean::eFalse;
+      // computeVelocity adds the jitter back before it stores the vector.
+      constants.motionVectorsJittered = sl::Boolean::eFalse;
+      return constants;
     }
 
     void OnStreamlineLogMessage(sl::LogType type, const char* message)
@@ -194,6 +260,13 @@ namespace YAEngine
     privateDataFeature.privateData = VK_TRUE;
     requirements.MergeVulkan13Features(privateDataFeature);
 
+    // Streamline is handed exactly one graphics and one compute queue by slSetVulkanInfo
+    // and shares them across every loaded plugin, so what the device has to reserve is the
+    // largest single request, not their sum. The registry accumulates, which is right for
+    // independent subsystems and wrong here - hence the max first, one request after.
+    uint32_t extraGraphicsQueues = 0;
+    uint32_t extraComputeQueues = 0;
+
     for (const FeatureState& state : m_Features)
     {
       // An unsupported feature must not drag NVIDIA extensions into the device we create.
@@ -226,8 +299,8 @@ namespace YAEngine
       requirements.MergeVulkan13Features(
         sl::getVkPhysicalDeviceVulkan13Features(featureRequirements.vkNumFeatures13, featureRequirements.vkFeatures13));
 
-      requirements.RequestExtraGraphicsQueues(featureRequirements.vkNumGraphicsQueuesRequired);
-      requirements.RequestExtraComputeQueues(featureRequirements.vkNumComputeQueuesRequired);
+      extraGraphicsQueues = std::max(extraGraphicsQueues, featureRequirements.vkNumGraphicsQueuesRequired);
+      extraComputeQueues = std::max(extraComputeQueues, featureRequirements.vkNumComputeQueuesRequired);
 
       YA_LOG_INFO("Render", "Streamline feature %s wants %u instance extension(s), %u device extension(s), %u graphics and %u compute queue(s)",
         GetFeatureName(state.feature),
@@ -236,6 +309,9 @@ namespace YAEngine
         featureRequirements.vkNumGraphicsQueuesRequired,
         featureRequirements.vkNumComputeQueuesRequired);
     }
+
+    requirements.RequestExtraGraphicsQueues(extraGraphicsQueues);
+    requirements.RequestExtraComputeQueues(extraComputeQueues);
 #else
     (void)requirements;
 #endif
@@ -284,6 +360,21 @@ namespace YAEngine
       if (featureResult == sl::Result::eOk)
       {
         YA_LOG_INFO("Render", "Streamline feature %s is available on this adapter", GetFeatureName(state.feature));
+
+        // The NGX half is the model itself - nvngx_dlss.dll or nvngx_dlssd.dll - and it is
+        // the only number that says which network actually runs. It is NOT the SDK version
+        // the init line above prints: the model DLL ships next to the executable and can be
+        // replaced independently of the Streamline drop, and the preset letters are indices
+        // into whatever model is loaded. Logged so that question is answered by the log
+        // rather than by inspecting files on disk.
+        sl::FeatureVersion version {};
+        if (slGetFeatureVersion(ToStreamlineFeature(state.feature), version) == sl::Result::eOk)
+        {
+          YA_LOG_INFO("Render", "Streamline feature %s runs plugin %u.%u.%u over NGX model %u.%u.%u",
+            GetFeatureName(state.feature),
+            version.versionSL.major, version.versionSL.minor, version.versionSL.build,
+            version.versionNGX.major, version.versionNGX.minor, version.versionNGX.build);
+        }
       }
       else
       {
@@ -319,6 +410,9 @@ namespace YAEngine
     m_DLSSOptionsWidth = 0;
     m_DLSSOptionsHeight = 0;
     b_DLSSEvaluateLogged = false;
+    m_RROptionsWidth = 0;
+    m_RROptionsHeight = 0;
+    b_RREvaluateLogged = false;
   }
 
   bool StreamlineIntegration::IsFeatureSupported(StreamlineFeature feature) const
@@ -344,6 +438,49 @@ namespace YAEngine
     if (result != sl::Result::eOk)
     {
       YA_LOG_WARN("Render", "DLSS optimal settings query failed: %s", sl::getResultAsStr(result));
+      return false;
+    }
+
+    settings = {
+      .renderWidth = optimalSettings.optimalRenderWidth,
+      .renderHeight = optimalSettings.optimalRenderHeight,
+      .renderWidthMin = optimalSettings.renderWidthMin,
+      .renderHeightMin = optimalSettings.renderHeightMin,
+      .renderWidthMax = optimalSettings.renderWidthMax,
+      .renderHeightMax = optimalSettings.renderHeightMax
+    };
+
+    return true;
+#else
+    (void)quality;
+    (void)outputWidth;
+    (void)outputHeight;
+    (void)settings;
+    return false;
+#endif
+  }
+
+  bool StreamlineIntegration::GetRayReconstructionSettings(DLSSQuality quality, uint32_t outputWidth,
+                                                           uint32_t outputHeight, DLSSSettings& settings) const
+  {
+#ifdef YA_DLSS
+    if (!IsRayReconstructionAvailable())
+      return false;
+
+    // Deliberately NOT the super resolution query: ray reconstruction runs its own network
+    // and sizes its input itself, so the same quality mode can want a different render
+    // extent here than slDLSSGetOptimalSettings reported for the same output size.
+    sl::DLSSDOptions options {};
+    options.mode = ToStreamlineMode(quality);
+    options.outputWidth = outputWidth;
+    options.outputHeight = outputHeight;
+
+    sl::DLSSDOptimalSettings optimalSettings {};
+    sl::Result result = slDLSSDGetOptimalSettings(options, optimalSettings);
+    if (result != sl::Result::eOk)
+    {
+      YA_LOG_WARN("Render", "Ray reconstruction optimal settings query failed: %s",
+        sl::getResultAsStr(result));
       return false;
     }
 
@@ -453,36 +590,7 @@ namespace YAEngine
       return false;
     }
 
-    glm::mat4 invView = glm::inverse(desc.view);
-    glm::mat4 invProj = glm::inverse(desc.proj);
-    glm::mat4 clipToPrevClip = desc.prevProj * desc.prevView * invView * invProj;
-
-    sl::Constants constants {};
-    constants.cameraViewToClip = ToStreamlineMatrix(desc.proj);
-    constants.clipToCameraView = ToStreamlineMatrix(invProj);
-    constants.clipToLensClip = ToStreamlineMatrix(glm::mat4(1.0f));
-    constants.clipToPrevClip = ToStreamlineMatrix(clipToPrevClip);
-    constants.prevClipToClip = ToStreamlineMatrix(glm::inverse(clipToPrevClip));
-    constants.jitterOffset = { desc.jitterPixels.x, desc.jitterPixels.y };
-    constants.mvecScale = { desc.mvecScale.x, desc.mvecScale.y };
-    constants.cameraPinholeOffset = { 0.0f, 0.0f };
-    constants.cameraPos = { desc.cameraPosition.x, desc.cameraPosition.y, desc.cameraPosition.z };
-    constants.cameraUp = { desc.cameraUp.x, desc.cameraUp.y, desc.cameraUp.z };
-    constants.cameraRight = { desc.cameraRight.x, desc.cameraRight.y, desc.cameraRight.z };
-    constants.cameraFwd = { desc.cameraForward.x, desc.cameraForward.y, desc.cameraForward.z };
-    constants.cameraNear = desc.nearPlane;
-    constants.cameraFar = desc.farPlane;
-    constants.cameraFOV = desc.fov;
-    constants.cameraAspectRatio = desc.aspectRatio;
-    // Reversed-Z with an infinite far plane: the sky sits at 0.
-    constants.depthInverted = sl::Boolean::eTrue;
-    constants.cameraMotionIncluded = sl::Boolean::eTrue;
-    constants.motionVectors3D = sl::Boolean::eFalse;
-    constants.reset = desc.reset ? sl::Boolean::eTrue : sl::Boolean::eFalse;
-    constants.orthographicProjection = sl::Boolean::eFalse;
-    constants.motionVectorsDilated = sl::Boolean::eFalse;
-    // computeVelocity adds the jitter back before it stores the vector.
-    constants.motionVectorsJittered = sl::Boolean::eFalse;
+    sl::Constants constants = BuildStreamlineConstants(desc);
 
     sl::Result constantsResult = slSetConstants(constants, frame, viewport);
     if (constantsResult != sl::Result::eOk)
@@ -517,6 +625,176 @@ namespace YAEngine
 #endif
   }
 
+  bool StreamlineIntegration::EvaluateRayReconstruction(const DLSSEvaluateDesc& desc)
+  {
+#ifdef YA_DLSS
+    if (!IsRayReconstructionAvailable() || desc.cmd == VK_NULL_HANDLE || desc.frameToken == nullptr)
+      return false;
+
+    // The three demodulation guides are not optional: without them the denoiser has no
+    // surface to separate the radiance from and there is nothing to fall back to.
+    if (desc.diffuseAlbedo.image == VK_NULL_HANDLE || desc.specularAlbedo.image == VK_NULL_HANDLE
+      || desc.normalRoughness.image == VK_NULL_HANDLE)
+    {
+      YA_LOG_WARN("Render", "Ray reconstruction evaluate skipped: a guide buffer is missing");
+      return false;
+    }
+
+    sl::FrameToken& frame = *static_cast<sl::FrameToken*>(desc.frameToken);
+    sl::ViewportHandle viewport(kStreamlineViewport);
+
+    sl::DLSSDOptions options {};
+    options.mode = ToStreamlineMode(desc.quality);
+    options.outputWidth = desc.colorOut.width;
+    options.outputHeight = desc.colorOut.height;
+    // Mandatory, not a choice: ProgrammingGuideDLSS_RR.md 5.0 says RR only supports HDR
+    // input. The same section is why exposure is handled below by two scalars rather than
+    // by useAutoExposure the way super resolution does it - RR ignores that option outright
+    // and documents no exposure buffer to tag.
+    options.colorBuffersHDR = sl::Boolean::eTrue;
+    // sl_dlss_d.h: ePacked is "App needs to write Roughness to w channel of Normal
+    // resource", which is exactly what pt_guides.comp writes into ptNormalRoughness -
+    // one RGBA16F, world normal in xyz and roughness in w. eUnpacked would demand two
+    // separate resources and two separate tags.
+    options.normalRoughnessMode = sl::DLSSDNormalRoughnessMode::ePacked;
+    // The companion to kBufferTypeSpecularHitDistance, per section 3.4.9 of the DLSS-RR
+    // Integration Guide, which is why the options move every frame rather than being pushed
+    // lazily the way slDLSSSetOptions is. Section 3.4.9 also settles the convention this
+    // used to guess at - "All matrices are Row Major Order and use left multiplication" -
+    // which is exactly what ToStreamlineMatrix produces out of a GLM matrix.
+    //
+    // Only worldToCameraView actually reaches the network. The plugin forwards it as
+    // pInWorldToViewMatrix, but takes pInViewToClipMatrix from sl::Constants::cameraViewToClip
+    // instead of from the field below, so the view to clip transform the guide asks for is
+    // the one BuildStreamlineConstants already pushes. cameraViewToWorld is filled in
+    // regardless: it is part of the documented struct, and a correct value costs one inverse.
+    options.worldToCameraView = ToStreamlineMatrix(desc.view);
+    options.cameraViewToWorld = ToStreamlineMatrix(glm::inverse(desc.view));
+
+    // One selection driving every quality mode, since only the one matching options.mode is
+    // ever consulted. Section 3.13 recommends shipping the default.
+    sl::DLSSDPreset preset = ToStreamlinePreset(desc.rrSettings.preset);
+    options.dlaaPreset = preset;
+    options.qualityPreset = preset;
+    options.balancedPreset = preset;
+    options.performancePreset = preset;
+    options.ultraPerformancePreset = preset;
+    options.ultraQualityPreset = preset;
+
+    sl::Result optionsResult = slDLSSDSetOptions(viewport, options);
+    if (optionsResult != sl::Result::eOk)
+    {
+      YA_LOG_WARN("Render", "Ray reconstruction options could not be set: %s",
+        sl::getResultAsStr(optionsResult));
+      return false;
+    }
+
+    // A zero width means nothing has been pushed yet - a real output is never 0 wide - so
+    // this is true on the first evaluate of a run and on every mode or extent change after.
+    const bool optionsChanged = m_RROptionsWidth == 0 || desc.quality != m_RROptionsQuality
+      || desc.colorOut.width != m_RROptionsWidth || desc.colorOut.height != m_RROptionsHeight;
+
+    m_RROptionsQuality = desc.quality;
+    m_RROptionsWidth = desc.colorOut.width;
+    m_RROptionsHeight = desc.colorOut.height;
+
+    sl::Extent renderExtent { 0, 0, desc.colorIn.width, desc.colorIn.height };
+    sl::Extent outputExtent { 0, 0, desc.colorOut.width, desc.colorOut.height };
+
+    // Named locals rather than a container: every tag below holds a POINTER to its
+    // resource, so the objects have to sit still until slSetTagForFrame has read them.
+    sl::Resource colorIn = ToStreamlineResource(desc.colorIn);
+    sl::Resource colorOut = ToStreamlineResource(desc.colorOut);
+    sl::Resource depth = ToStreamlineResource(desc.depth);
+    sl::Resource motionVectors = ToStreamlineResource(desc.motionVectors);
+    sl::Resource diffuseAlbedo = ToStreamlineResource(desc.diffuseAlbedo);
+    sl::Resource specularAlbedo = ToStreamlineResource(desc.specularAlbedo);
+    sl::Resource normalRoughness = ToStreamlineResource(desc.normalRoughness);
+    sl::Resource specularHitDistance = ToStreamlineResource(desc.specularHitDistance);
+
+    sl::SubresourceRange colorInRange = ToStreamlineSubresource(desc.colorIn);
+    sl::SubresourceRange colorOutRange = ToStreamlineSubresource(desc.colorOut);
+    sl::SubresourceRange depthRange = ToStreamlineSubresource(desc.depth);
+    sl::SubresourceRange motionVectorsRange = ToStreamlineSubresource(desc.motionVectors);
+    sl::SubresourceRange diffuseAlbedoRange = ToStreamlineSubresource(desc.diffuseAlbedo);
+    sl::SubresourceRange specularAlbedoRange = ToStreamlineSubresource(desc.specularAlbedo);
+    sl::SubresourceRange normalRoughnessRange = ToStreamlineSubresource(desc.normalRoughness);
+    sl::SubresourceRange specularHitDistanceRange = ToStreamlineSubresource(desc.specularHitDistance);
+
+    colorIn.next = &colorInRange;
+    colorOut.next = &colorOutRange;
+    depth.next = &depthRange;
+    motionVectors.next = &motionVectorsRange;
+    diffuseAlbedo.next = &diffuseAlbedoRange;
+    specularAlbedo.next = &specularAlbedoRange;
+    normalRoughness.next = &normalRoughnessRange;
+    specularHitDistance.next = &specularHitDistanceRange;
+
+    // eValidUntilEvaluate for every one of them, exactly as the super resolution path
+    // does: the graph owns these images and reuses them later in the frame, but nothing
+    // touches them between the tag and the evaluate below.
+    constexpr sl::ResourceLifecycle kLifecycle = sl::ResourceLifecycle::eValidUntilEvaluate;
+
+    std::vector<sl::ResourceTag> tags;
+    tags.reserve(8);
+    tags.emplace_back(&colorIn, sl::kBufferTypeScalingInputColor, kLifecycle, &renderExtent);
+    tags.emplace_back(&colorOut, sl::kBufferTypeScalingOutputColor, kLifecycle, &outputExtent);
+    tags.emplace_back(&depth, sl::kBufferTypeDepth, kLifecycle, &renderExtent);
+    tags.emplace_back(&motionVectors, sl::kBufferTypeMotionVectors, kLifecycle, &renderExtent);
+    tags.emplace_back(&diffuseAlbedo, sl::kBufferTypeAlbedo, kLifecycle, &renderExtent);
+    tags.emplace_back(&specularAlbedo, sl::kBufferTypeSpecularAlbedo, kLifecycle, &renderExtent);
+    tags.emplace_back(&normalRoughness, sl::kBufferTypeNormalRoughness, kLifecycle, &renderExtent);
+    // sl_core_types.h marks this one Optional, so a caller with no hit distance to offer
+    // leaves the image empty and the tag simply is not pushed.
+    if (desc.specularHitDistance.image != VK_NULL_HANDLE)
+      tags.emplace_back(&specularHitDistance, sl::kBufferTypeSpecularHitDistance, kLifecycle, &renderExtent);
+
+    uint32_t tagCount = static_cast<uint32_t>(tags.size());
+    sl::Result tagResult = slSetTagForFrame(frame, viewport, tags.data(), tagCount, desc.cmd);
+    if (tagResult != sl::Result::eOk)
+    {
+      YA_LOG_WARN("Render", "Ray reconstruction resources could not be tagged: %s",
+        sl::getResultAsStr(tagResult));
+      return false;
+    }
+
+    sl::Constants constants = BuildStreamlineConstants(desc);
+
+    sl::Result constantsResult = slSetConstants(constants, frame, viewport);
+    if (constantsResult != sl::Result::eOk)
+    {
+      YA_LOG_WARN("Render", "Ray reconstruction constants could not be set: %s",
+        sl::getResultAsStr(constantsResult));
+      return false;
+    }
+
+    const sl::BaseStructure* inputs[] = { &viewport };
+    sl::Result evaluateResult = slEvaluateFeature(sl::kFeatureDLSS_RR, frame, inputs,
+      static_cast<uint32_t>(std::size(inputs)), desc.cmd);
+    if (evaluateResult != sl::Result::eOk)
+    {
+      YA_LOG_WARN("Render", "Ray reconstruction evaluate failed: %s",
+        sl::getResultAsStr(evaluateResult));
+      return false;
+    }
+
+    if (optionsChanged || !b_RREvaluateLogged)
+    {
+      b_RREvaluateLogged = true;
+      YA_LOG_INFO("Render", "Ray reconstruction evaluate running: %ux%u -> %ux%u, %u tag(s)",
+        desc.colorIn.width, desc.colorIn.height, desc.colorOut.width, desc.colorOut.height,
+        tagCount);
+    }
+
+    // Same caveat as the super resolution evaluate: Streamline leaves its own pipeline and
+    // descriptor sets bound and every graph pass rebinds both before it records anything.
+    return true;
+#else
+    (void)desc;
+    return false;
+#endif
+  }
+
   void StreamlineIntegration::ReleaseDLSSResources()
   {
 #ifdef YA_DLSS
@@ -531,6 +809,24 @@ namespace YAEngine
     m_DLSSOptionsWidth = 0;
     m_DLSSOptionsHeight = 0;
     b_DLSSEvaluateLogged = false;
+#endif
+  }
+
+  void StreamlineIntegration::ReleaseRayReconstructionResources()
+  {
+#ifdef YA_DLSS
+    if (!IsRayReconstructionAvailable())
+      return;
+
+    sl::Result result = slFreeResources(sl::kFeatureDLSS_RR, sl::ViewportHandle(kStreamlineViewport));
+    // Nothing was allocated yet on the first extent change of a run, which is not an error.
+    if (result != sl::Result::eOk && result != sl::Result::eErrorInvalidParameter)
+      YA_LOG_WARN("Render", "Ray reconstruction resources could not be released: %s",
+        sl::getResultAsStr(result));
+
+    m_RROptionsWidth = 0;
+    m_RROptionsHeight = 0;
+    b_RREvaluateLogged = false;
 #endif
   }
 

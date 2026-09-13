@@ -133,6 +133,12 @@ namespace YAEngine
     if (droppedFeatures > 0)
       YA_LOG_WARN("Vulkan", "%u requested optional Vulkan feature(s) are unsupported and stay disabled", droppedFeatures);
 
+    uint32_t droppedStructFeatures = requirements.ResolveDeviceFeatureStructs(physicalDevice.Get());
+    if (droppedStructFeatures > 0)
+      YA_LOG_WARN("Vulkan", "%u requested optional extension feature(s) are unsupported and stay disabled", droppedStructFeatures);
+
+    b_BufferDeviceAddressSupported = requirements.GetVulkan12Features().bufferDeviceAddress == VK_TRUE;
+
     VkPhysicalDeviceVulkan11Features features11 = requirements.GetVulkan11Features();
     VkPhysicalDeviceVulkan12Features features12 = requirements.GetVulkan12Features();
     VkPhysicalDeviceVulkan13Features features13 = requirements.GetVulkan13Features();
@@ -142,7 +148,8 @@ namespace YAEngine
     features13.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES;
     features11.pNext = &features12;
     features12.pNext = &features13;
-    features13.pNext = nullptr;
+    // The extension feature structs are owned by the requirements, which outlive the call.
+    features13.pNext = requirements.BuildDeviceFeatureStructChain();
 
     VkPhysicalDeviceFeatures2 features2 { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2, .pNext = &features11 };
     features2.features = deviceFeatures;

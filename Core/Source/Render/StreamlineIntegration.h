@@ -9,7 +9,10 @@ namespace YAEngine
   // enum, its sl::Feature mapping and the list passed to Init.
   enum class StreamlineFeature : uint32_t
   {
-    DLSS
+    DLSS,
+    // DLSS Ray Reconstruction (sl::kFeatureDLSS_RR). A separate plugin and a separate
+    // availability answer: a device can have super resolution and not have this one.
+    RayReconstruction
   };
 
   enum class DLSSQuality : uint32_t
@@ -29,6 +32,65 @@ namespace YAEngine
     uint32_t renderHeightMin = 0;
     uint32_t renderWidthMax = 0;
     uint32_t renderHeightMax = 0;
+  };
+
+  // Render presets sl_dlss_d.h defines, verbatim. The numbering is NOT contiguous - A, B and
+  // C were removed from the SDK - so the enum is a dense UI list and ToStreamlinePreset maps
+  // it onto the real values.
+  enum class RayReconstructionPreset : uint32_t
+  {
+    Default,  // whatever an OTA decides
+    D,        // default model (transformer)
+    E,        // latest transformer model
+    F, G, H, I, J, K, L,
+    M, N, O,  // the header marks these three "not recommended to use"
+    Count
+  };
+
+  inline const char* GetRayReconstructionPresetName(RayReconstructionPreset preset)
+  {
+    switch (preset)
+    {
+      case RayReconstructionPreset::Default: return "eDefault";
+      case RayReconstructionPreset::D: return "ePresetD (default transformer)";
+      case RayReconstructionPreset::E: return "ePresetE (latest transformer)";
+      case RayReconstructionPreset::F: return "ePresetF";
+      case RayReconstructionPreset::G: return "ePresetG";
+      case RayReconstructionPreset::H: return "ePresetH";
+      case RayReconstructionPreset::I: return "ePresetI";
+      case RayReconstructionPreset::J: return "ePresetJ";
+      case RayReconstructionPreset::K: return "ePresetK";
+      case RayReconstructionPreset::L: return "ePresetL";
+      case RayReconstructionPreset::M: return "ePresetM (not recommended)";
+      case RayReconstructionPreset::N: return "ePresetN (not recommended)";
+      case RayReconstructionPreset::O: return "ePresetO (not recommended)";
+      case RayReconstructionPreset::Count: break;
+    }
+
+    return "Unknown";
+  }
+
+  // What the ray reconstruction panel section drives. Not serialized: section 3.13 of the
+  // DLSS-RR Integration Guide recommends shipping the default and offering the named presets
+  // for experimentation only, so this is a session-lifetime choice.
+  //
+  // The exposure, camera transpose and hit distance levers that used to sit here were removed
+  // once the documentation answered what they were guessing at. Section 3.7 states that
+  // exposure, auto-exposure and sharpness "are not supported by DLSS Ray Reconstruction",
+  // which is why the two exposure sliders measured no effect at all; the transpose was
+  // testing a convention section 3.4.9 states outright ("All matrices are Row Major Order and
+  // use left multiplication"); and the hit distance tag now carries what section 3.4.9 asks
+  // for, so switching it off only removes information.
+  struct RayReconstructionSettings
+  {
+    // Default rather than a named preset. The preset letters are indices into whatever model
+    // the loaded nvngx_dlssd.dll carries, so a letter that named the newest model in one drop
+    // names an older one in the next: E was the latest transformer in 310.7.0 and measurably
+    // less boiling there, but 310.7.129 (DLSS 4.5) put its second-generation model behind
+    // Default, leaving an explicit E pinned to the superseded one. Default always resolves to
+    // whatever the installed model considers current, which is also what section 3.13
+    // recommends shipping.
+    RayReconstructionPreset preset = RayReconstructionPreset::Default;
   };
 
   // Opaque sl::FrameToken*, only valid while Streamline is initialized.
@@ -52,6 +114,10 @@ namespace YAEngine
 
   // Everything one slEvaluateFeature call needs. Matrices are the engine's own
   // column-vector GLM matrices and must NOT carry the camera jitter.
+  //
+  // Both resolves share it: super resolution reads everything down to the flags, and ray
+  // reconstruction reads the same plus the four guide images below, which stay empty for
+  // the super resolution call.
   struct DLSSEvaluateDesc
   {
     VkCommandBuffer cmd = VK_NULL_HANDLE;
@@ -62,6 +128,14 @@ namespace YAEngine
     DLSSImage colorOut;       // output-res storage image
     DLSSImage depth;          // render-res, depth-only view
     DLSSImage motionVectors;  // render-res
+
+    // Ray reconstruction only. All render-res; EvaluateRayReconstruction tags whichever
+    // of them carries a live VkImage and treats an empty one as "not provided", which is
+    // legal for the optional hit distance and nothing else.
+    DLSSImage diffuseAlbedo;        // demodulation guide
+    DLSSImage specularAlbedo;       // demodulation guide
+    DLSSImage normalRoughness;      // world normal xyz + roughness w, one image
+    DLSSImage specularHitDistance;  // optional
 
     glm::mat4 view { 1.0f };
     glm::mat4 proj { 1.0f };
@@ -86,6 +160,9 @@ namespace YAEngine
     float aspectRatio = 1.0f;
     // Drops the accumulated history for one frame.
     bool reset = false;
+
+    // Read only by EvaluateRayReconstruction.
+    RayReconstructionSettings rrSettings;
   };
 
   // Bootstraps Streamline alongside the engine's own Vulkan setup (manual hooking: the
@@ -111,21 +188,36 @@ namespace YAEngine
     bool IsInitialized() const { return b_Initialized; }
     bool IsFeatureSupported(StreamlineFeature feature) const;
     bool IsDLSSAvailable() const { return IsFeatureSupported(StreamlineFeature::DLSS); }
+    bool IsRayReconstructionAvailable() const
+    {
+      return IsFeatureSupported(StreamlineFeature::RayReconstruction);
+    }
 
     // Why a feature is unavailable, for the UI. Empty while it is available.
     const std::string& GetUnavailableReason(StreamlineFeature feature) const;
 
     // Render resolution DLSS wants for the given output size, false when unavailable.
     bool GetDLSSSettings(DLSSQuality quality, uint32_t outputWidth, uint32_t outputHeight, DLSSSettings& settings) const;
+    // The same question for ray reconstruction, which answers it through its own plugin
+    // (slDLSSDGetOptimalSettings) and may well answer it differently for the same mode.
+    bool GetRayReconstructionSettings(DLSSQuality quality, uint32_t outputWidth, uint32_t outputHeight,
+                                      DLSSSettings& settings) const;
     // Per-frame handle every sl* evaluate call needs, nullptr when unavailable.
     StreamlineFrameToken GetFrameToken(uint32_t frameIndex);
 
     // Tags the four buffers, pushes the per-frame constants and runs the upscale into
     // desc.colorOut on desc.cmd. Must be called outside a VkRenderPass instance.
     bool EvaluateDLSS(const DLSSEvaluateDesc& desc);
+    // The ray reconstruction half: the same four buffers plus the guides, and the same
+    // per-frame constants, denoising and upscaling the noisy sample in one step. Must be
+    // called outside a VkRenderPass instance too.
+    bool EvaluateRayReconstruction(const DLSSEvaluateDesc& desc);
     // Releases the DLSS instance so the next evaluate rebuilds it. Needed when the
     // extents change; the caller owns waiting for the GPU first.
     void ReleaseDLSSResources();
+    // The same for the ray reconstruction instance, which is built for its own pair of
+    // extents and is not the one above.
+    void ReleaseRayReconstructionResources();
 
   private:
 
@@ -149,5 +241,14 @@ namespace YAEngine
     uint32_t m_DLSSOptionsWidth = 0;
     uint32_t m_DLSSOptionsHeight = 0;
     bool b_DLSSEvaluateLogged = false;
+
+    // The same for ray reconstruction. Only the LOGGING is driven off these: unlike
+    // DLSSOptions, DLSSDOptions carries the view matrices, which move every frame, so
+    // slDLSSDSetOptions cannot be skipped on an unchanged mode - see
+    // EvaluateRayReconstruction.
+    DLSSQuality m_RROptionsQuality = DLSSQuality::DLAA;
+    uint32_t m_RROptionsWidth = 0;
+    uint32_t m_RROptionsHeight = 0;
+    bool b_RREvaluateLogged = false;
   };
 }

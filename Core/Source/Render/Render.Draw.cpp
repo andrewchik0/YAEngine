@@ -348,7 +348,7 @@ namespace YAEngine
 
   void Render::ResolveAntialiasingMode()
   {
-    AntialiasingMode previous = m_EffectiveAntialiasingMode;
+    m_PreviousEffectiveAntialiasingMode = m_EffectiveAntialiasingMode;
     m_EffectiveAntialiasingMode = m_AntialiasingMode;
 
     bool usable = m_Backend.GetStreamline().IsDLSSAvailable()
@@ -368,8 +368,83 @@ namespace YAEngine
       }
     }
 
-    // Both resolves carry accumulated history that is meaningless in the other mode.
-    if (m_EffectiveAntialiasingMode != previous)
+    // The history reset that used to live here now runs at the end of ResolveRenderPath,
+    // which is where the effective mode is finally settled - the path resolve below can
+    // still promote it.
+  }
+
+  void Render::ResolveRenderPath()
+  {
+    m_PreviousEffectiveRenderPath = m_EffectiveRenderPath;
+    m_EffectiveRenderPath = m_RenderPath;
+
+    // Everything the path needs that is not per-frame: the device, a pipeline the tracer
+    // actually built into, the master ray tracing toggle, and - since the resolve became
+    // ray reconstruction's job - the RR plugin itself. The per-frame half, a TLAS and a
+    // material table for THIS frame, cannot be tested here because the build has not been
+    // recorded yet; IsPathTracePassEnabled is what tests it.
+    //
+    // The DLSS-family half of the condition is not tested: it is ENFORCED, a few lines
+    // below, by promoting the effective mode to DLAA. A user flipping the render path
+    // combo would otherwise be silently bounced back to raster for having TAA selected,
+    // which is the more surprising of the two behaviours by a wide margin.
+    const bool rayReconstructionReady = b_PathTraceDevResolve || IsRayReconstructionAvailable();
+    const bool usable = m_Backend.GetContext().raytracingSupported
+      && IsPathTracerAvailable()
+      && b_RayTracingEnabled
+      && rayReconstructionReady;
+
+    if (m_EffectiveRenderPath == RenderPath::PathTracing && !usable)
+    {
+      // The selection stays as the user left it, exactly as for the anti-aliasing mode: a
+      // capable device, or the ray tracing toggle coming back on, should bring the path
+      // back without them having to pick it again.
+      m_EffectiveRenderPath = RenderPath::Raster;
+
+      if (!b_PathTracingFallbackWarned)
+      {
+        b_PathTracingFallbackWarned = true;
+
+        const char* missing = "the path tracing pipeline";
+        if (!m_Backend.GetContext().raytracingSupported)
+          missing = "hardware ray tracing";
+        else if (IsPathTracerAvailable() && !b_RayTracingEnabled)
+          missing = "the ray tracing master toggle";
+        else if (IsPathTracerAvailable())
+          missing = "DLSS Ray Reconstruction";
+
+        YA_LOG_WARN("Render", "Path Tracing is selected but %s is unavailable, falling back to Raster",
+          missing);
+      }
+    }
+
+    // Ray reconstruction IS the path's resolve and it only exists inside the DLSS family,
+    // so a path traced frame runs in a DLSS mode whatever the user picked for the raster
+    // one. DLAA is the 1:1 member and the safe promotion: it changes no resolution, it is
+    // never queried for optimal settings and therefore can never end up rejected, and the
+    // user's own selection is left completely untouched - flipping the path back restores
+    // it. GetJitterParameters and every isEnabled read the effective mode, so the jitter
+    // sweep, the phase count and the pass gating all follow from this one assignment.
+    if (m_EffectiveRenderPath == RenderPath::PathTracing && !b_PathTraceDevResolve
+      && (!IsDLSSMode(m_EffectiveAntialiasingMode)
+        || m_RRModeRejected[size_t(m_EffectiveAntialiasingMode)]))
+    {
+      m_EffectiveAntialiasingMode = AntialiasingMode::DLAA;
+    }
+
+    if (m_EffectiveRenderPath != m_PreviousEffectiveRenderPath)
+    {
+      // Neither resolve produced what the other one's history holds, and the accumulated
+      // image describes a frame the other path shaded.
+      b_ResetTAAPending = true;
+      b_ResetDLSSPending = true;
+      b_PathTraceResetPending = true;
+    }
+
+    // Both resolves carry accumulated history that is meaningless in the other mode. Tested
+    // here rather than in ResolveAntialiasingMode because the promotion above is the last
+    // thing that can move the effective mode.
+    if (m_EffectiveAntialiasingMode != m_PreviousEffectiveAntialiasingMode)
     {
       b_ResetTAAPending = true;
       b_ResetDLSSPending = true;
@@ -378,6 +453,39 @@ namespace YAEngine
 
   VkExtent2D Render::ComputeRenderExtent(AntialiasingMode mode, VkExtent2D outputExtent)
   {
+    if (m_EffectiveRenderPath == RenderPath::PathTracing)
+    {
+      // With no denoiser there is no upscaler either, so the developer resolve traces at
+      // exactly the resolution it presents.
+      if (b_PathTraceDevResolve)
+        return outputExtent;
+
+      // DLAA is defined as 1:1 here too, and it is what ResolveRenderPath promotes to.
+      if (!IsDLSSMode(mode) || mode == AntialiasingMode::DLAA)
+        return outputExtent;
+
+      // Ray reconstruction runs its own network and sizes its input itself, so this is
+      // NOT the super resolution query - the same mode can want a different render extent
+      // on the two sides, and UpdateResolutionForMode keys on the path precisely so that
+      // switching between them re-asks.
+      DLSSSettings settings {};
+      bool queried = m_Backend.GetStreamline().GetRayReconstructionSettings(ToDLSSQuality(mode),
+        outputExtent.width, outputExtent.height, settings);
+
+      if (queried && settings.renderWidth > 0 && settings.renderHeight > 0)
+        return { settings.renderWidth, settings.renderHeight };
+
+      // Remembered in the RR memo alone: the mode is still perfectly usable in raster, and
+      // the next ResolveRenderPath demotes the traced frame to DLAA rather than to TAA,
+      // which is not a mode ray reconstruction can resolve at all.
+      m_RRModeRejected[size_t(mode)] = true;
+      m_EffectiveAntialiasingMode = AntialiasingMode::DLAA;
+      YA_LOG_WARN("Render", "Ray reconstruction reports no render resolution for %s at %ux%u, falling back to DLAA",
+        GetAntialiasingModeName(mode), outputExtent.width, outputExtent.height);
+
+      return outputExtent;
+    }
+
     // DLAA is defined as 1:1, so there is nothing to ask the driver about.
     if (!IsDLSSMode(mode) || mode == AntialiasingMode::DLAA)
       return outputExtent;
@@ -405,8 +513,13 @@ namespace YAEngine
       return false;
 
     // Nothing the render extent depends on moved, so the driver is not asked again -
-    // an editor viewport that is merely being redrawn must not thrash the graph.
+    // an editor viewport that is merely being redrawn must not thrash the graph. The path
+    // is part of the key because the same mode is answered by ray reconstruction's own
+    // optimal settings there and by super resolution's here, and the two can differ; the
+    // developer resolve is part of it because it forces 1:1 whatever the mode says.
     if (m_EffectiveAntialiasingMode == m_ResolutionMode
+      && m_EffectiveRenderPath == m_ResolutionPath
+      && b_PathTraceDevResolve == b_ResolutionDevResolve
       && outputExtent.width == m_ResolutionOutputExtent.width
       && outputExtent.height == m_ResolutionOutputExtent.height)
       return false;
@@ -414,6 +527,8 @@ namespace YAEngine
     VkExtent2D renderExtent = ComputeRenderExtent(m_EffectiveAntialiasingMode, outputExtent);
 
     m_ResolutionMode = m_EffectiveAntialiasingMode;
+    m_ResolutionPath = m_EffectiveRenderPath;
+    b_ResolutionDevResolve = b_PathTraceDevResolve;
     m_ResolutionOutputExtent = outputExtent;
 
     VkExtent2D currentRender = m_Graph.GetExtent();
@@ -422,7 +537,8 @@ namespace YAEngine
       && outputExtent.width == currentOutput.width && outputExtent.height == currentOutput.height)
       return false;
 
-    YA_LOG_INFO("Render", "%s: render %ux%u, output %ux%u",
+    YA_LOG_INFO("Render", "%s / %s: render %ux%u, output %ux%u",
+      GetRenderPathName(m_EffectiveRenderPath),
       GetAntialiasingModeName(m_EffectiveAntialiasingMode),
       renderExtent.width, renderExtent.height, outputExtent.width, outputExtent.height);
 
@@ -430,45 +546,43 @@ namespace YAEngine
     return true;
   }
 
-  void Render::RunDLSSEvaluate(VkCommandBuffer cmd, FrameContext& frame)
+  DLSSImage Render::DescribeStreamlineImage(RGHandle handle, VkImageLayout layout)
   {
-    StreamlineFrameToken token = m_Backend.GetStreamline().GetFrameToken(
-      static_cast<uint32_t>(m_GlobalFrameIndex));
-    if (token == nullptr)
-      return;
+    auto& image = m_Graph.GetResource(handle);
+    const RGResourceDesc& desc = m_Graph.GetResourceDesc(handle);
+    VkExtent2D extent = desc.resolution == RGResolution::Output
+      ? m_Graph.GetOutputExtent() : m_Graph.GetExtent();
 
-    VkExtent2D renderExtent = m_Graph.GetExtent();
-
-    auto describe = [this](RGHandle handle, VkImageLayout layout) {
-      auto& image = m_Graph.GetResource(handle);
-      const RGResourceDesc& desc = m_Graph.GetResourceDesc(handle);
-      VkExtent2D extent = desc.resolution == RGResolution::Output
-        ? m_Graph.GetOutputExtent() : m_Graph.GetExtent();
-
-      return DLSSImage {
-        .image = image.GetImage(),
-        .view = image.GetView(),
-        .layout = layout,
-        .format = desc.format,
-        .aspect = desc.aspect,
-        .width = extent.width,
-        .height = extent.height
-      };
+    return DLSSImage {
+      .image = image.GetImage(),
+      .view = image.GetView(),
+      .layout = layout,
+      .format = desc.format,
+      .aspect = desc.aspect,
+      .width = extent.width,
+      .height = extent.height
     };
+  }
+
+  DLSSEvaluateDesc Render::MakeStreamlineEvaluateDesc(VkCommandBuffer cmd, FrameContext& frame,
+    StreamlineFrameToken token)
+  {
+    VkExtent2D renderExtent = m_Graph.GetExtent();
 
     const glm::mat4& view = m_FrameUniformBuffer.uniforms.view;
     glm::mat4 world = glm::inverse(view);
 
+    // colorIn and the guides are left empty on purpose: they are the only fields the two
+    // resolves disagree about, and each caller fills in its own.
     DLSSEvaluateDesc desc {
       .cmd = cmd,
       .frameToken = token,
       .quality = ToDLSSQuality(m_EffectiveAntialiasingMode),
-      // The graph put the three inputs in SHADER_READ_ONLY and the output in GENERAL
-      // right before this callback; Streamline transitions from there and back.
-      .colorIn = describe(m_SSRColor, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
-      .colorOut = describe(m_DLSSOutput, VK_IMAGE_LAYOUT_GENERAL),
-      .depth = describe(m_MainDepth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
-      .motionVectors = describe(m_MainVelocity, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+      // The graph put every declared input in SHADER_READ_ONLY and the output in GENERAL
+      // right before the callback; Streamline transitions from there and back.
+      .colorOut = DescribeStreamlineImage(m_DLSSOutput, VK_IMAGE_LAYOUT_GENERAL),
+      .depth = DescribeStreamlineImage(m_MainDepth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
+      .motionVectors = DescribeStreamlineImage(m_MainVelocity, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL),
       .view = view,
       // SetUpCamera keeps the jitter out of the stored matrices, which is exactly what
       // Streamline wants, but m_FrameUniformBuffer.proj carries it.
@@ -499,7 +613,56 @@ namespace YAEngine
       .reset = b_ResetDLSSPending
     };
 
+    return desc;
+  }
+
+  void Render::RunDLSSEvaluate(VkCommandBuffer cmd, FrameContext& frame)
+  {
+    StreamlineFrameToken token = m_Backend.GetStreamline().GetFrameToken(
+      static_cast<uint32_t>(m_GlobalFrameIndex));
+    if (token == nullptr)
+      return;
+
+    DLSSEvaluateDesc desc = MakeStreamlineEvaluateDesc(cmd, frame, token);
+    // The rasterized, jittered, still-render-resolution frame, transparency included.
+    desc.colorIn = DescribeStreamlineImage(m_SSRColor, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
     if (m_Backend.GetStreamline().EvaluateDLSS(desc))
+      b_ResetDLSSPending = false;
+  }
+
+  void Render::RunRayReconstructionEvaluate(VkCommandBuffer cmd, FrameContext& frame)
+  {
+    StreamlineFrameToken token = m_Backend.GetStreamline().GetFrameToken(
+      static_cast<uint32_t>(m_GlobalFrameIndex));
+    if (token == nullptr)
+      return;
+
+    // A preset change swaps the network, so what the accumulated history describes changes
+    // with it and the denoiser has to start over - otherwise the first frames after the flip
+    // are a blend of two models. Detected before the desc is built, because that is where the
+    // reset flag is read.
+    if (m_RRSettings.preset != m_RRAppliedSettings.preset)
+      b_ResetDLSSPending = true;
+
+    m_RRAppliedSettings = m_RRSettings;
+
+    DLSSEvaluateDesc desc = MakeStreamlineEvaluateDesc(cmd, frame, token);
+    desc.rrSettings = m_RRSettings;
+    // One traced sample per pixel, undenoised - the whole point of the feature. Its alpha
+    // carries the primary hit distance, which is tagged separately below because a
+    // Streamline tag names a resource and not a channel.
+    desc.colorIn = DescribeStreamlineImage(m_PathTraceNoisy, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    desc.diffuseAlbedo = DescribeStreamlineImage(m_PTDiffuseAlbedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    desc.specularAlbedo = DescribeStreamlineImage(m_PTSpecularAlbedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    desc.normalRoughness = DescribeStreamlineImage(m_PTNormalRoughness, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    // The world-space length of the first bounce ray, measured from the primary surface, on
+    // the frames that bounce took the specular lobe - which is what section 3.4.9 of the
+    // DLSS-RR Integration Guide asks for. Streamline turns it into the specular motion
+    // vectors together with the world to view matrix and sl::Constants::cameraViewToClip.
+    desc.specularHitDistance = DescribeStreamlineImage(m_PTHitDistance, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    if (m_Backend.GetStreamline().EvaluateRayReconstruction(desc))
       b_ResetDLSSPending = false;
   }
 
@@ -534,7 +697,8 @@ namespace YAEngine
     if (IsTemporalAA(m_EffectiveAntialiasingMode) && !IS_INDIRECT_DEBUG_VIEW(m_CurrentTexture))
     {
       float upscaleRatio = float(outputExtent.width) / float(std::max(1u, renderExtent.width));
-      JitterParameters jitterParams = GetJitterParameters(m_EffectiveAntialiasingMode, upscaleRatio);
+      JitterParameters jitterParams = GetJitterParameters(m_EffectiveAntialiasingMode, upscaleRatio,
+        IsRayReconstructionResolve());
       glm::vec2 jitter = GetTAAJitter(m_GlobalFrameIndex, jitterParams.phaseCount);
 
       // A Halton sample spans one NDC unit per pixel of extent, which is two pixels wide,
@@ -954,9 +1118,15 @@ namespace YAEngine
     // deliberately ignored for them and the dedicated bake slot is used instead.
     uint32_t shadowSlot = GetShadowSlot(frameIndex, isBake);
 
-    bool hasDirectionalShadow = b_ShadowsEnabled && frame.snapshot.directionalShadow.castShadow;
-    bool hasSpotShadows = b_ShadowsEnabled && !frame.snapshot.spotShadowRequests.empty();
-    bool hasPointShadows = b_ShadowsEnabled && !frame.snapshot.pointShadowRequests.empty();
+    // The path tracer traces a shadow ray per light sample, so the atlas is dead weight
+    // while it owns the frame: this takes the exact branch b_ShadowsEnabled = false takes,
+    // invalidation of the cached atlas content included. Bakes are the exception - they
+    // render through the raster offscreen path and still need the atlas.
+    bool shadowsWanted = b_ShadowsEnabled && (isBake || !IsPathTracingActive());
+
+    bool hasDirectionalShadow = shadowsWanted && frame.snapshot.directionalShadow.castShadow;
+    bool hasSpotShadows = shadowsWanted && !frame.snapshot.spotShadowRequests.empty();
+    bool hasPointShadows = shadowsWanted && !frame.snapshot.pointShadowRequests.empty();
 
     if (!hasDirectionalShadow && !hasSpotShadows && !hasPointShadows)
     {

@@ -90,6 +90,11 @@ namespace YAEngine
     return !glfwWindowShouldClose(m_WindowHandle);
   }
 
+  void Window::Close()
+  {
+    glfwSetWindowShouldClose(m_WindowHandle, GLFW_TRUE);
+  }
+
   const std::vector<WindowEvent>& Window::PollEvents()
   {
     m_WindowEventStack.clear();

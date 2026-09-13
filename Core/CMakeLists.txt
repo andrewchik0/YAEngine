@@ -73,6 +73,11 @@ add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   gbuffer.frag gbuffer_alphatest.frag.spv -DALPHA_TEST)
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   gtao.frag gtao_ssgi.frag.spv -DSSGI)
+# The bindless half of the ray query debug view. A separate module because the base one has
+# to stay loadable on a device without descriptor indexing, where a runtime-sized sampler
+# array is not a legal declaration at all.
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  rt_debug.comp rt_debug_bindless.comp.spv -DRT_BINDLESS)
 target_compile_definitions(Core PRIVATE
   WORKING_DIR="${CMAKE_CURRENT_SOURCE_DIR}"
 )

@@ -7,7 +7,7 @@
 
 namespace YAEngine
 {
-  void VulkanDescriptorSet::Init(const RenderContext& ctx, const SetDescription& setDescription)
+  void VulkanDescriptorSet::CreateLayout(const RenderContext& ctx, const SetDescription& setDescription)
   {
     m_Device = ctx.device;
 
@@ -15,39 +15,67 @@ namespace YAEngine
     {
       m_DescriptorSetLayout = ctx.layoutCache->GetOrCreate(ctx.device, setDescription.bindings);
       b_OwnsLayout = false;
+      return;
     }
-    else
+
+    b_OwnsLayout = true;
+
+    std::vector<VkDescriptorSetLayoutBinding> vkBindings;
+    std::vector<VkDescriptorBindingFlags> bindingFlags;
+    vkBindings.reserve(setDescription.bindings.size());
+    bindingFlags.reserve(setDescription.bindings.size());
+
+    VkDescriptorBindingFlags anyFlags = 0;
+    for (const BindingDescription& b : setDescription.bindings)
     {
-      b_OwnsLayout = true;
+      VkDescriptorSetLayoutBinding binding{};
+      binding.binding = b.binding;
+      binding.descriptorType = b.type;
+      binding.descriptorCount = b.count;
+      binding.stageFlags = b.stages;
+      binding.pImmutableSamplers = nullptr;
 
-      std::vector<VkDescriptorSetLayoutBinding> vkBindings;
-      vkBindings.reserve(setDescription.bindings.size());
-
-      for (const BindingDescription& b : setDescription.bindings)
-      {
-        VkDescriptorSetLayoutBinding binding{};
-        binding.binding = b.binding;
-        binding.descriptorType = b.type;
-        binding.descriptorCount = 1;
-        binding.stageFlags = b.stages;
-        binding.pImmutableSamplers = nullptr;
-
-        vkBindings.push_back(binding);
-      }
-
-      VkDescriptorSetLayoutCreateInfo info{};
-      info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-      info.bindingCount = static_cast<uint32_t>(vkBindings.size());
-      info.pBindings = vkBindings.data();
-
-      if (vkCreateDescriptorSetLayout(m_Device, &info, nullptr, &m_DescriptorSetLayout) != VK_SUCCESS)
-      {
-        YA_LOG_ERROR("Render", "Failed to create descriptor set layout");
-        throw std::runtime_error("failed to create descriptor set layout!");
-      }
+      vkBindings.push_back(binding);
+      bindingFlags.push_back(b.flags);
+      anyFlags |= b.flags;
     }
 
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo{};
+    flagsInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    flagsInfo.bindingCount = static_cast<uint32_t>(bindingFlags.size());
+    flagsInfo.pBindingFlags = bindingFlags.data();
+
+    VkDescriptorSetLayoutCreateInfo info{};
+    info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+    info.bindingCount = static_cast<uint32_t>(vkBindings.size());
+    info.pBindings = vkBindings.data();
+    if (anyFlags != 0)
+    {
+      info.pNext = &flagsInfo;
+      // Required of the layout as soon as one of its bindings is update-after-bind, and it
+      // is what ties the layout to a pool created with the matching flag.
+      if ((anyFlags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0)
+        info.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+    }
+
+    if (vkCreateDescriptorSetLayout(m_Device, &info, nullptr, &m_DescriptorSetLayout) != VK_SUCCESS)
+    {
+      YA_LOG_ERROR("Render", "Failed to create descriptor set layout");
+      throw std::runtime_error("failed to create descriptor set layout!");
+    }
+  }
+
+  void VulkanDescriptorSet::Init(const RenderContext& ctx, const SetDescription& setDescription)
+  {
+    CreateLayout(ctx, setDescription);
     Init(ctx, m_DescriptorSetLayout);
+  }
+
+  void VulkanDescriptorSet::Init(const RenderContext& ctx, const SetDescription& setDescription,
+    VulkanDescriptorPool& pool, uint32_t variableDescriptorCount)
+  {
+    CreateLayout(ctx, setDescription);
+    m_DescriptorSet = pool.Allocate(m_DescriptorSetLayout, variableDescriptorCount);
   }
 
   void VulkanDescriptorSet::Init(const RenderContext& ctx, VkDescriptorSetLayout descriptorSetLayout)
@@ -117,7 +145,8 @@ namespace YAEngine
     uint32_t binding,
     VkImageView imageView,
     VkSampler sampler,
-    VkImageLayout layout)
+    VkImageLayout layout,
+    uint32_t arrayElement)
   {
     auto& imageInfo = m_ImageInfos[m_ImageInfoCount++];
     imageInfo = {};
@@ -130,6 +159,7 @@ namespace YAEngine
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     write.dstSet = m_Set;
     write.dstBinding = binding;
+    write.dstArrayElement = arrayElement;
     write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     write.descriptorCount = 1;
     write.pImageInfo = &imageInfo;
@@ -158,6 +188,30 @@ namespace YAEngine
     return *this;
   }
 
+  DescriptorWriter& DescriptorWriter::WriteAccelerationStructure(
+    uint32_t binding,
+    VkAccelerationStructureKHR structure)
+  {
+    auto& handle = m_AccelHandles[m_AccelInfoCount];
+    handle = structure;
+
+    auto& accelInfo = m_AccelInfos[m_AccelInfoCount++];
+    accelInfo = {};
+    accelInfo.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET_ACCELERATION_STRUCTURE_KHR;
+    accelInfo.accelerationStructureCount = 1;
+    accelInfo.pAccelerationStructures = &handle;
+
+    auto& write = m_Writes[m_WriteCount++];
+    write = {};
+    write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+    write.pNext = &accelInfo;
+    write.dstSet = m_Set;
+    write.dstBinding = binding;
+    write.descriptorType = VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR;
+    write.descriptorCount = 1;
+    return *this;
+  }
+
   void DescriptorWriter::Flush()
   {
     if (m_WriteCount > 0)
@@ -166,6 +220,7 @@ namespace YAEngine
       m_WriteCount = 0;
       m_BufferInfoCount = 0;
       m_ImageInfoCount = 0;
+      m_AccelInfoCount = 0;
     }
   }
 
@@ -218,7 +273,8 @@ namespace YAEngine
     uint32_t binding,
     VkImageView imageView,
     VkSampler sampler,
-    VkImageLayout layout)
+    VkImageLayout layout,
+    uint32_t arrayElement)
   {
     VkDescriptorImageInfo imageInfo{};
     imageInfo.imageView = imageView;
@@ -229,6 +285,7 @@ namespace YAEngine
     write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
     write.dstSet = m_DescriptorSet;
     write.dstBinding = binding;
+    write.dstArrayElement = arrayElement;
     write.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
     write.descriptorCount = 1;
     write.pImageInfo = &imageInfo;

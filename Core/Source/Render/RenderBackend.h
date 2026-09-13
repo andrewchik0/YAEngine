@@ -1,5 +1,6 @@
 #pragma once
 
+#include "BindlessTextureRegistry.h"
 #include "DescriptorLayoutCache.h"
 #include "GeometryArena.h"
 #include "RenderContext.h"
@@ -36,11 +37,15 @@ namespace YAEngine
     StreamlineIntegration& GetStreamline() { return m_Streamline; }
     const StreamlineIntegration& GetStreamline() const { return m_Streamline; }
 
+    // Only for reporting: the device name, driver and API version a frame capture records.
+    VkPhysicalDevice GetPhysicalDevice() { return m_PhysicalDevice.Get(); }
+
     VulkanSwapChain& GetSwapChain() { return m_SwapChain; }
     VulkanCommandBuffer& GetCommandBuffer() { return m_CommandBuffer; }
     VulkanDescriptorPool& GetDescriptorPool() { return m_DescriptorPool; }
     DescriptorLayoutCache& GetLayoutCache() { return m_LayoutCache; }
     GeometryArena& GetGeometryArena() { return m_GeometryArena; }
+    BindlessTextureRegistry& GetBindlessTextures() { return m_BindlessTextures; }
 
     VkCommandBuffer GetCurrentCommandBuffer() { return m_CommandBuffer.GetCurrentBuffer(); }
     uint32_t GetCurrentFrameIndex() const { return m_CurrentFrameIndex; }
@@ -62,6 +67,7 @@ namespace YAEngine
     VulkanImGui m_ImGUI {};
     DescriptorLayoutCache m_LayoutCache;
     GeometryArena m_GeometryArena;
+    BindlessTextureRegistry m_BindlessTextures;
 
     RenderContext m_Context {};
     VkPipelineCache m_PipelineCache {};

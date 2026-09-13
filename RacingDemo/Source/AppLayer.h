@@ -23,8 +23,8 @@
 #endif
 
 // #define TEST
-#define BISTRO_RACING
-// #define BISTRO_INTERIOR
+// #define BISTRO_RACING
+#define BISTRO_INTERIOR
 
 class AppLayer : public YAEngine::Layer
 {

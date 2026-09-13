@@ -1,6 +1,7 @@
 #include "PipelineCache.h"
 
 #include "DebugMarker.h"
+#include "RenderContext.h"
 #include "Utils/Log.h"
 
 namespace YAEngine
@@ -92,6 +93,56 @@ namespace YAEngine
     return hash;
   }
 
+  bool RayTracingPipelineKey::operator==(const RayTracingPipelineKey& other) const
+  {
+    if (pushConstantSize != other.pushConstantSize) return false;
+    if (shaderFiles != other.shaderFiles) return false;
+    if (sets.size() != other.sets.size()) return false;
+    for (size_t i = 0; i < sets.size(); i++)
+    {
+      if (sets[i] != other.sets[i]) return false;
+    }
+    return true;
+  }
+
+  size_t RayTracingPipelineKeyHash::operator()(const RayTracingPipelineKey& key) const
+  {
+    size_t hash = 0;
+    auto combine = [&](size_t v)
+    {
+      hash ^= v + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    };
+
+    for (const auto& file : key.shaderFiles)
+      combine(std::hash<std::string>{}(file));
+    combine(std::hash<uint32_t>{}(key.pushConstantSize));
+    for (auto layout : key.sets)
+      combine(std::hash<uintptr_t>{}(reinterpret_cast<uintptr_t>(layout)));
+
+    return hash;
+  }
+
+  RayTracingPipelineKey PipelineCache::MakeRayTracingKey(const RaytracingPipelineCreateInfo& info)
+  {
+    RayTracingPipelineKey key = {
+      .pushConstantSize = info.pushConstantSize,
+      .sets = info.sets,
+    };
+
+    key.shaderFiles.push_back(info.raygenShaderFile);
+    for (const auto& missShaderFile : info.missShaderFiles)
+      key.shaderFiles.push_back(missShaderFile);
+    for (const auto& hitGroup : info.hitGroups)
+    {
+      key.shaderFiles.push_back(hitGroup.closestHitShaderFile);
+      // Pushed even when empty, so a group that gained or lost its any-hit shader is a
+      // different key rather than the same one with a shorter list.
+      key.shaderFiles.push_back(hitGroup.anyHitShaderFile);
+    }
+
+    return key;
+  }
+
   VulkanPipeline& PipelineCache::GetOrCreate(
     VkDevice device,
     VkRenderPass renderPass,
@@ -157,6 +208,27 @@ namespace YAEngine
     return pipeline;
   }
 
+  VulkanRaytracingPipeline& PipelineCache::GetOrCreateRayTracing(
+    const RenderContext& ctx,
+    const RayTracingPipelineKey& key,
+    const RaytracingPipelineCreateInfo& info,
+    VkPipelineCache vkCache)
+  {
+    auto [it, inserted] = m_RayTracingCache.try_emplace(key);
+    if (!inserted)
+      return it->second;
+
+    auto& pipeline = it->second;
+    pipeline.Init(ctx, info, vkCache);
+    YA_DEBUG_NAME(ctx.device, VK_OBJECT_TYPE_PIPELINE,
+      pipeline.Get(), info.raygenShaderFile.c_str());
+    YA_LOG_VERBOSE("Render", "PSO Cache: created ray tracing pipeline (%s, %u miss, %u hit group(s))",
+      info.raygenShaderFile.c_str(),
+      static_cast<uint32_t>(info.missShaderFiles.size()),
+      static_cast<uint32_t>(info.hitGroups.size()));
+    return pipeline;
+  }
+
   PipelineHandle PipelineCache::Register(
     VkDevice device,
     VkRenderPass renderPass,
@@ -201,6 +273,40 @@ namespace YAEngine
     return handle;
   }
 
+  PipelineHandle PipelineCache::RegisterRayTracing(
+    const RenderContext& ctx,
+    const RaytracingPipelineCreateInfo& info,
+    VkPipelineCache vkCache)
+  {
+    RayTracingPipelineKey key = MakeRayTracingKey(info);
+    auto& pipeline = GetOrCreateRayTracing(ctx, key, info, vkCache);
+    uint32_t index = static_cast<uint32_t>(m_RayTracingPipelines.size());
+    m_RayTracingPipelines.push_back(&pipeline);
+    PipelineHandle handle { index };
+
+#ifdef YA_EDITOR
+    m_RayTracingEntries.push_back({ &pipeline, &ctx, info, vkCache });
+
+    // Deduplicated on the way in: the same closest hit shader can serve several groups of
+    // one pipeline, and recreating that pipeline twice for one reload would destroy a
+    // pipeline the second pass then rebuilds from a handle nothing else holds.
+    for (const auto& shaderFile : key.shaderFiles)
+    {
+      if (shaderFile.empty())
+        continue;
+
+      auto& handles = m_ShaderToRayTracing[shaderFile];
+      if (std::find_if(handles.begin(), handles.end(),
+        [index](PipelineHandle existing) { return existing.index == index; }) == handles.end())
+      {
+        handles.push_back(handle);
+      }
+    }
+#endif
+
+    return handle;
+  }
+
   VulkanPipeline& PipelineCache::Get(PipelineHandle handle)
   {
     return *m_GraphicsPipelines[handle.index];
@@ -209,6 +315,11 @@ namespace YAEngine
   VulkanComputePipeline& PipelineCache::GetCompute(PipelineHandle handle)
   {
     return *m_ComputePipelines[handle.index];
+  }
+
+  VulkanRaytracingPipeline& PipelineCache::GetRayTracing(PipelineHandle handle)
+  {
+    return *m_RayTracingPipelines[handle.index];
   }
 
   void PipelineCache::Destroy()
@@ -221,14 +332,23 @@ namespace YAEngine
       pipeline.Destroy();
     m_ComputeCache.clear();
 
+    // Releases the shader binding table with the pipeline, which is why this has to run
+    // before the backend tears the allocator down.
+    for (auto& [key, pipeline] : m_RayTracingCache)
+      pipeline.Destroy();
+    m_RayTracingCache.clear();
+
     m_GraphicsPipelines.clear();
     m_ComputePipelines.clear();
+    m_RayTracingPipelines.clear();
 
 #ifdef YA_EDITOR
     m_GraphicsEntries.clear();
     m_ComputeEntries.clear();
+    m_RayTracingEntries.clear();
     m_ShaderToGraphics.clear();
     m_ShaderToCompute.clear();
+    m_ShaderToRayTracing.clear();
 #endif
   }
 
@@ -257,6 +377,21 @@ namespace YAEngine
         auto& entry = m_ComputeEntries[handle.index];
         entry.pipeline->Destroy();
         entry.pipeline->Init(device, entry.shaderFile, entry.sets, entry.pushConstantSize, entry.vkCache);
+        ++count;
+      }
+    }
+
+    // Init rebuilds the shader binding table along with the pipeline, which is the whole
+    // reason the entry keeps a context: group handles belong to one pipeline object and
+    // mean nothing for its replacement.
+    auto rtIt = m_ShaderToRayTracing.find(shaderFile);
+    if (rtIt != m_ShaderToRayTracing.end())
+    {
+      for (auto handle : rtIt->second)
+      {
+        auto& entry = m_RayTracingEntries[handle.index];
+        entry.pipeline->Destroy();
+        entry.pipeline->Init(*entry.ctx, entry.info, entry.vkCache);
         ++count;
       }
     }

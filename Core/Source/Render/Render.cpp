@@ -52,6 +52,12 @@ namespace YAEngine
         VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
       m_Backend.GetCommandBuffer().EndSingleTimeCommands(cmd);
       m_NoneCubeMap.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+      // The path tracer rebuilds its descriptor set every frame and so cannot rely on the
+      // one-off write the IBL sets get when a skybox is loaded. It reads the display
+      // cubemap through these instead, which start on the same placeholder.
+      m_SkyboxView = m_NoneCubeMap.GetView();
+      m_SkyboxSampler = m_NoneCubeMap.GetSampler();
     }
 
     m_DefaultMaterial.Init(ctx, m_NoneTexture);
@@ -68,6 +74,8 @@ namespace YAEngine
     InitGTAOStaticResources();
 
     m_ShadowManager.Init(ctx);
+    m_TlasBuilder.Init(ctx);
+    m_MaterialTable.Init(ctx);
     m_ProbeAtlas.Init(ctx);
     m_ProbeBuffer.Init(ctx);
     m_VolumeStorage.Init(ctx);
@@ -77,12 +85,14 @@ namespace YAEngine
     VkExtent2D initialExtent { uint32_t(width), uint32_t(height) };
     m_ResolutionOutputExtent = initialExtent;
     m_ResolutionMode = m_EffectiveAntialiasingMode;
+    m_ResolutionPath = m_EffectiveRenderPath;
 
     SetupRenderGraph(initialExtent, initialExtent);
     CreateTAAFramebuffers();
     m_Backend.GetSwapChain().CreateFrameBuffers(
       m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
     ClearHistoryBuffers();
+    ClearPathTraceOutputs();
     InitPipelines();
     CreateHiZResources();
     CreateGTAOResources();
@@ -103,8 +113,6 @@ namespace YAEngine
 #endif
 
     m_CubicResources.Init(ctx);
-
-    InitFrameCapture();
 
     vkDeviceWaitIdle(ctx.device);
   }
@@ -146,6 +154,8 @@ namespace YAEngine
 #endif
 
     m_ShadowManager.Destroy(ctx);
+    m_TlasBuilder.Destroy(ctx);
+    m_MaterialTable.Destroy(ctx);
     m_ProbeAtlas.Destroy(ctx);
     m_ProbeBuffer.Destroy(ctx);
     m_VolumeStorage.Destroy(ctx);
@@ -187,6 +197,12 @@ namespace YAEngine
     for (auto& set : m_DeferredLightingLightDescriptorSets)
       set.Destroy();
     for (auto& set : m_LightCullInputDescriptorSets)
+      set.Destroy();
+    for (auto& set : m_RTDebugDescriptorSets)
+      set.Destroy();
+    for (auto& set : m_PathTraceDescriptorSets)
+      set.Destroy();
+    for (auto& set : m_PathTraceGuideDescriptorSets)
       set.Destroy();
     for (auto& set : m_HistogramPassDescriptorSets)
       set.Destroy();
@@ -235,8 +251,11 @@ namespace YAEngine
       std::floor(std::log2(std::max(renderExtent.width, renderExtent.height)))) + 1;
     m_Graph.SetResourceMipLevels(m_HiZResource, hizMipCount);
 
-    // A DLSS instance is built for one pair of extents and has to be rebuilt for the new one.
+    // A DLSS instance is built for one pair of extents and has to be rebuilt for the new
+    // one. Ray reconstruction keeps an instance of its own under a second feature id, so
+    // both are released here or the one that was not would keep serving the old extents.
     m_Backend.GetStreamline().ReleaseDLSSResources();
+    m_Backend.GetStreamline().ReleaseRayReconstructionResources();
     b_ResetDLSSPending = true;
 
     DestroyBloomResources();
@@ -249,6 +268,13 @@ namespace YAEngine
 
     // Recreates managed resources and non-external framebuffers
     m_Graph.Resize(renderExtent, outputExtent);
+
+    // The ray query target is one of them, and nothing clears it.
+    b_RTDebugValid = false;
+    // The path tracer's two images went with it, the accumulated one included: the samples
+    // it held describe a different resolution, so the mean starts over.
+    b_PathTraceOutputValid = false;
+    b_PathTraceResetPending = true;
 
 #ifdef YA_EDITOR
     CreateSceneImGuiDescriptor();
@@ -282,6 +308,7 @@ namespace YAEngine
     CreateTAAFramebuffers();
 
     ClearHistoryBuffers();
+    ClearPathTraceOutputs();
   }
 
   void Render::Resize()
@@ -300,14 +327,72 @@ namespace YAEngine
     ResizeGraph(ComputeRenderExtent(m_EffectiveAntialiasingMode, outputExtent), outputExtent);
 
     m_ResolutionMode = m_EffectiveAntialiasingMode;
+    m_ResolutionPath = m_EffectiveRenderPath;
+    b_ResolutionDevResolve = b_PathTraceDevResolve;
     m_ResolutionOutputExtent = outputExtent;
 #endif
   }
 
+  void Render::UpdatePathTraceAccumulation(const FrameContext& frame)
+  {
+    // In raster mode the reference view is the only consumer of the running mean, so
+    // nothing accumulates while it is not on the screen - and it starts from sample zero
+    // when it comes back. A noisy-view frame writing into the buffer would poison the mean
+    // anyway: its push constant carries -1 and the shader leaves the image alone. The path
+    // tracing render path always accumulates: the mean is the image it presents.
+    if (!IsPathTraceAccumulating())
+    {
+      m_PathTraceSampleIndex = 0;
+      return;
+    }
+
+    // A frame the pass will not run on contributes no sample, so the index has to stay put
+    // or the next one that does run would be blended in at the wrong weight. The cached
+    // state is left alone too, so a camera that moved during the gap is still detected.
+    if (!IsPathTracePassEnabled())
+      return;
+
+    // Everything the samples already in the buffer depend on. The projection compared is the
+    // UNJITTERED one on purpose: the per-frame jitter is what gives the reference its
+    // anti-aliasing, and treating it as camera motion would reset the mean every frame and
+    // the image would never converge at all.
+    const bool cameraMoved =
+      m_FrameUniformBuffer.uniforms.view != m_PathTraceCachedView
+      || m_UnjitteredProj != m_PathTraceCachedProj;
+
+    // The same three digests the shadow atlas cache keys on, which is exactly the right set:
+    // they cover which casters exist, where they are and what every light is doing, and the
+    // acceleration structure is rebuilt from the same snapshot.
+    const bool sceneChanged =
+      frame.snapshot.casterIdentityDigest != m_PathTraceCachedIdentityDigest
+      || frame.snapshot.casterTransformDigest != m_PathTraceCachedTransformDigest
+      || frame.snapshot.lightDigest != m_PathTraceCachedLightDigest;
+
+    if (b_PathTraceResetPending || cameraMoved || sceneChanged)
+    {
+      // Zero is the reset: the shader rewrites the image at that index rather than blending
+      // into it, so nothing has to be cleared and no extra pass exists to clear it.
+      m_PathTraceSampleIndex = 0;
+      b_PathTraceResetPending = false;
+    }
+    else
+    {
+      m_PathTraceSampleIndex++;
+    }
+
+    m_PathTraceCachedView = m_FrameUniformBuffer.uniforms.view;
+    m_PathTraceCachedProj = m_UnjitteredProj;
+    m_PathTraceCachedIdentityDigest = frame.snapshot.casterIdentityDigest;
+    m_PathTraceCachedTransformDigest = frame.snapshot.casterTransformDigest;
+    m_PathTraceCachedLightDigest = frame.snapshot.lightDigest;
+  }
+
   void Render::Draw(FrameContext& frame)
   {
-    // Runs first: the resolution the rest of the frame is set up for depends on it.
+    // Runs first: the resolution the rest of the frame is set up for depends on both, and
+    // the path resolve reads the mode one - see ResolveRenderPath.
     ResolveAntialiasingMode();
+    ResolveRenderPath();
 
 #ifdef YA_EDITOR
     // Handle deferred viewport resize BEFORE acquiring the frame -
@@ -409,6 +494,33 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.gamma = m_Gamma;
     m_FrameUniformBuffer.uniforms.exposure = m_Exposure;
     m_FrameUniformBuffer.uniforms.currentTexture = m_CurrentTexture;
+    // Both ray tracing views display an image only their own tracing pass ever writes, and
+    // that pass runs later in this very frame. Until one has run once - no ray tracing on
+    // this device, ray tracing switched off, a scene with nothing traceable, or a resize
+    // that just reallocated the image - the view falls back to the final image instead of
+    // showing whatever the allocation happened to hold.
+    if ((m_CurrentTexture == DEBUG_VIEW_RAY_QUERY || m_CurrentTexture == DEBUG_VIEW_RT_PIPELINE)
+      && !b_RTDebugValid)
+    {
+      m_FrameUniformBuffer.uniforms.currentTexture = 0;
+    }
+    // Same rule for the path tracer's two images, which are equally uncleared.
+    if (IsPathTraceView() && !b_PathTraceOutputValid)
+    {
+      m_FrameUniformBuffer.uniforms.currentTexture = 0;
+    }
+    // The path tracing render path switches off the AO chain, the screen space effects,
+    // the deferred lighting pass and the temporal resolve, so every view fed by one of
+    // them would display a buffer nothing wrote this frame. The guide view is the mirror
+    // case: its pass only exists while that path is effective.
+    if (IsPathTracingActive() && IS_RASTER_ONLY_DEBUG_VIEW(m_CurrentTexture))
+    {
+      m_FrameUniformBuffer.uniforms.currentTexture = 0;
+    }
+    if (m_CurrentTexture == DEBUG_VIEW_PT_GUIDES && !IsPathTracingActive())
+    {
+      m_FrameUniformBuffer.uniforms.currentTexture = 0;
+    }
     // screenWidth/Height is the resolution the scene is rasterized and shaded at;
     // outputWidth/Height is what reaches the screen. They only differ while a DLSS
     // upscale mode is active.
@@ -460,8 +572,9 @@ namespace YAEngine
     // that overwrites it runs much later in the graph.
     m_Graph.SetPassInput(m_SSGIRadiancePrefilterPassIndex, 0, GetPreviousResolvedColorHandle());
 
-    // Nothing reads the histories while DLSS resolves, so the ping-pong stays untouched.
-    if (!IsDLSSMode(m_EffectiveAntialiasingMode))
+    // Nothing reads the histories while DLSS resolves, and nothing writes them while the
+    // path tracer owns the frame, so the ping-pong stays untouched in both.
+    if (!IsDLSSMode(m_EffectiveAntialiasingMode) && !IsPathTracingActive())
     {
       m_Graph.SetPassInput(m_TAAPassIndex, 1, historyRead);
       m_Graph.SetPassColorOutput(m_TAAPassIndex, 0, historyWrite);
@@ -501,6 +614,8 @@ namespace YAEngine
         set.WriteCombinedImageSampler(3,
           cubeMap.GetView(), cubeMap.GetSampler());
       }
+      m_SkyboxView = cubeMap.GetView();
+      m_SkyboxSampler = cubeMap.GetSampler();
       m_BoundSkybox = skybox;
     }
 
@@ -635,7 +750,44 @@ namespace YAEngine
       RenderShadowMaps(frame, cmd, currentFrame);
     }
 
+    // Between the shadow pass, which has ended its render pass instance, and the graph,
+    // which begins the next one: an acceleration structure build may not be recorded
+    // inside a render pass, and this is the only gap in the frame that is outside one.
+    // It also has to precede the graph because the compute passes that trace the
+    // structure live inside it. The instance list comes from the snapshot rather than
+    // from the collected draw commands, so it does not wait on them.
+    if (b_RayTracingEnabled && m_Backend.GetContext().raytracingSupported)
+    {
+      YA_PROFILE_CPU("BuildTlas");
+#ifdef YA_EDITOR
+      GpuZoneScope tlasZone(&m_GpuProfiler, cmd, "TLAS");
+#endif
+      // Before the build on purpose: the build's host-write barrier is a global
+      // VkMemoryBarrier, so it orders these records against the same compute read it
+      // already orders its own instance array and records against, and no second barrier
+      // is needed. Same frame, same MaterialManager state, so a material index a TLAS
+      // record carries always names a record written here.
+      m_MaterialTable.Update(m_Backend.GetContext(), currentFrame,
+        frame.assets.Materials(), frame.assets.Textures());
+
+      m_TlasBuilder.Build(m_Backend.GetContext(), cmd, currentFrame, frame.snapshot,
+        frame.assets.Meshes(), frame.assets.Materials());
+    }
+
+    // Decides what the path tracing pass pushes as its sample index, so it has to precede
+    // the graph. It reads the same snapshot digests the shadow cache does, which are
+    // already final by now.
+    UpdatePathTraceAccumulation(frame);
+
     m_Graph.Execute(cmd, &frame);
+
+    // Particles are drawn by the forward transparent pass, which the path tracing render
+    // path switches off - transparency as a whole is stage 6's problem. Dropping this
+    // frame's submissions here is what keeps them from being carried into the next one:
+    // DrawTransparent is the only other place that empties the staging buffers, and it
+    // did not run.
+    m_ParticleStage.clear();
+    m_PendingParticleBatches.clear();
 
     YA_PROFILE_CPU_END(record);
 
@@ -648,6 +800,7 @@ namespace YAEngine
       Resize();
     }
 
+    if (b_CaptureRequested)
     {
       YA_PROFILE_CPU("Capture");
       CaptureFrame();

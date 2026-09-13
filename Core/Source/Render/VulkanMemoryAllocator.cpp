@@ -8,13 +8,17 @@
 
 namespace YAEngine
 {
-  void VulkanMemoryAllocator::Init(VkInstance instance, VkDevice device, VkPhysicalDevice physicalDevice)
+  void VulkanMemoryAllocator::Init(VkInstance instance, VkDevice device, VkPhysicalDevice physicalDevice,
+                                   bool bufferDeviceAddress)
   {
     VmaAllocatorCreateInfo allocatorInfo{};
     allocatorInfo.physicalDevice = physicalDevice;
     allocatorInfo.device = device;
     allocatorInfo.instance = instance;
     allocatorInfo.vulkanApiVersion = VK_API_VERSION_1_3;
+
+    if (bufferDeviceAddress)
+      allocatorInfo.flags |= VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
 
     VkResult result = vmaCreateAllocator(&allocatorInfo, &m_Allocator);
     if (result != VK_SUCCESS)

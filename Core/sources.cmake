@@ -16,16 +16,25 @@ set(SOURCE_FILES
   Source/Render/Render.SSGI.cpp
   Source/Render/Render.Bloom.cpp
   Source/Render/Render.Capture.cpp
+  Source/Render/FrameCaptureLayer.cpp
+  Source/Render/FrameCaptureLayer.h
   Source/Render/VulkanInstance.cpp
   Source/Render/VulkanInstance.h
   Source/Render/VulkanDebugExtension.cpp
   Source/Render/VulkanDebugExtension.h
   Source/Render/AntialiasingMode.h
+  Source/Render/RenderPath.h
   Source/Render/RenderSpecs.h
   Source/Render/VulkanPhysicalDevice.cpp
   Source/Render/VulkanPhysicalDevice.h
   Source/Render/VulkanRequirements.cpp
   Source/Render/VulkanRequirements.h
+  Source/Render/RayTracingRequirements.cpp
+  Source/Render/RayTracingRequirements.h
+  Source/Render/RayTracingDispatch.cpp
+  Source/Render/RayTracingDispatch.h
+  Source/Render/VulkanAccelerationStructure.cpp
+  Source/Render/VulkanAccelerationStructure.h
   Source/Render/VulkanDevice.cpp
   Source/Render/VulkanDevice.h
   Source/Render/VulkanSurface.cpp
@@ -106,6 +115,8 @@ set(SOURCE_FILES
   Source/Utils/ProfilerStorage.cpp
   Source/Utils/KeyCodes.h
   Source/Utils/ServiceRegistry.h
+  Source/Utils/FrameCaptureSpec.cpp
+  Source/Utils/FrameCaptureSpec.h
   Source/LayerManager.h
   Source/Input/InputSystem.cpp
   Source/Input/InputSystem.h
@@ -151,6 +162,8 @@ set(SOURCE_FILES
   Source/Render/RenderGraph.h
   Source/Render/VulkanComputePipeline.cpp
   Source/Render/VulkanComputePipeline.h
+  Source/Render/VulkanRaytracingPipeline.cpp
+  Source/Render/VulkanRaytracingPipeline.h
   Source/Render/PipelineCache.cpp
   Source/Render/PipelineCache.h
   Source/Render/ShadowAtlas.cpp
@@ -158,6 +171,12 @@ set(SOURCE_FILES
   Source/Render/ShadowInvalidation.h
   Source/Render/ShadowManager.cpp
   Source/Render/ShadowManager.h
+  Source/Render/TlasBuilder.cpp
+  Source/Render/TlasBuilder.h
+  Source/Render/RayTracingMaterialTable.cpp
+  Source/Render/RayTracingMaterialTable.h
+  Source/Render/BindlessTextureRegistry.cpp
+  Source/Render/BindlessTextureRegistry.h
   Source/Utils/Topology.h
   Source/Utils/Topology.cpp
   Source/Utils/ThreadPool.h

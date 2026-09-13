@@ -86,6 +86,47 @@ namespace YAEngine
       m_EnabledExtensions.push_back(request.name);
       YA_LOG_INFO("Vulkan", "Enabling optional device extension %s", request.name.c_str());
     }
+
+    DropExtensionsWithMissingDependencies(requirements);
+  }
+
+  void VulkanPhysicalDevice::DropExtensionsWithMissingDependencies(VulkanRequirements& requirements)
+  {
+    auto isEnabled = [&](const std::string& name)
+    {
+      if (std::find(m_EnabledExtensions.begin(), m_EnabledExtensions.end(), name) != m_EnabledExtensions.end())
+        return true;
+
+      return requirements.IsDeviceExtensionEnabled(name.c_str());
+    };
+
+    // VUID-VkDeviceCreateInfo-ppEnabledExtensionNames-01387 wants an extension listed
+    // together with everything it depends on, so a missing dependency has to take its
+    // dependents with it - transitively, hence the fixpoint.
+    bool changed = true;
+    while (changed)
+    {
+      changed = false;
+
+      for (auto& request : requirements.GetDeviceExtensions())
+      {
+        if (!request.enabled)
+          continue;
+
+        for (const auto& dependency : request.dependencies)
+        {
+          if (isEnabled(dependency))
+            continue;
+
+          request.enabled = false;
+          std::erase(m_EnabledExtensions, request.name);
+          changed = true;
+          YA_LOG_WARN("Vulkan", "Optional device extension %s needs %s which is unavailable, skipping it",
+            request.name.c_str(), dependency.c_str());
+          break;
+        }
+      }
+    }
   }
 
   bool VulkanPhysicalDevice::IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface) {

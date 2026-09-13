@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Pch.h"
+#include "Utils/FrameCaptureSpec.h"
 #include "Utils/ServiceRegistry.h"
 #include "Window.h"
 #include "Layer.h"
@@ -27,6 +28,9 @@ namespace YAEngine
     bool validationLayers = false;
     bool debugUtils = false;
     bool enableDLSS = true;
+    // Disarmed unless argv (or the retired YA_CAPTURE_DIR) asked for a capture. Registered
+    // in the service registry so FrameCaptureLayer can read it in OnAttach.
+    FrameCaptureSpec captureSpec;
   };
 
   class Engine
@@ -76,6 +80,8 @@ namespace YAEngine
     MainThreadDispatcher& GetDispatcher() { return m_Dispatcher; }
     ComponentRegistry& GetComponentRegistry() { return m_ComponentRegistry; }
     CameraTrackPlayer& GetCameraTrackPlayer() { return m_CameraTrackPlayer; }
+    // What main returns: zero unless a capture session reported partial or failed shots.
+    int GetExitCode() const { return m_CaptureSessionResult.exitCode; }
 
     void SetReelPlaybackMode(bool enabled)
     {
@@ -105,6 +111,9 @@ namespace YAEngine
 
     SceneSnapshot m_Snapshot;
     LightBuffer m_LightData {};
+
+    FrameCaptureSpec m_CaptureSpec;
+    FrameCaptureSessionResult m_CaptureSessionResult;
 
     static constexpr double FIXED_DT = 1.0 / 144.0;
     static constexpr int MAX_FIXED_STEPS = 5;

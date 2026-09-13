@@ -1,6 +1,7 @@
 #pragma once
 
 #include "AntialiasingMode.h"
+#include "RenderPath.h"
 #include "FrameContext.h"
 #include "FrameUniformBuffer.h"
 #include "RenderBackend.h"
@@ -15,12 +16,16 @@
 #include "LightStorageBuffer.h"
 #include "TileLightBuffer.h"
 #include "ShadowManager.h"
+#include "RayTracingMaterialTable.h"
+#include "TlasBuilder.h"
 #include "ReflectionProbeAtlas.h"
 #include "ReflectionProbeStorageBuffer.h"
 #include "IrradianceVolumeStorage.h"
 #include "GTAOConstants.h"
+#include "PathTraceData.h"
 #include "Assets/Handle.h"
 #include "ParticleInstance.h"
+#include "Utils/FrameCaptureSpec.h"
 
 #ifdef YA_EDITOR
 #include <entt/fwd.hpp>
@@ -68,6 +73,9 @@ namespace YAEngine
     static constexpr uint32_t MAX_PARTICLES_PER_FRAME = 8192;
     // Slot in m_BloomHistorySrcSets that reads the DLSS output instead of a TAA history.
     static constexpr uint32_t BLOOM_SRC_DLSS = 2;
+    // And the one that reads the path tracer's accumulation image, which is what the
+    // path tracing render path resolves into.
+    static constexpr uint32_t BLOOM_SRC_PATHTRACE = 3;
     static constexpr uint32_t MAX_PARTICLE_BATCHES_PER_FRAME = 16;
     static constexpr int32_t DEBUG_VIEW_WIREFRAME = 7;
     static constexpr int MIN_PROBE_BOUNCES = 1;
@@ -91,6 +99,10 @@ namespace YAEngine
         set.WriteCombinedImageSampler(2, m_NoneTexture.GetView(), m_NoneTexture.GetSampler());
         set.WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
       }
+      // The path tracer's set is rewritten every frame, so it takes the fallback the same
+      // way the IBL sets just did rather than through a descriptor write of its own.
+      m_SkyboxView = m_NoneCubeMap.GetView();
+      m_SkyboxSampler = m_NoneCubeMap.GetSampler();
       // Unlike the probe buffer, the volume atlas is not rebuilt from the per-frame
       // snapshot, so a teardown has to clear it explicitly - otherwise the next scene
       // is lit, and baked, by the previous one's volumes.
@@ -145,11 +157,68 @@ namespace YAEngine
     // selection needs hardware that is not there - see GetEffectiveAntialiasingMode.
     AntialiasingMode& GetAntialiasingMode() { return m_AntialiasingMode; }
     AntialiasingMode GetEffectiveAntialiasingMode() const { return m_EffectiveAntialiasingMode; }
+    // Which pipeline shades the frame, selected and resolved, on exactly the same rule as
+    // the anti-aliasing mode above: the selection is what the scene stores and the user
+    // sees, the effective value is what this frame can really run.
+    RenderPath& GetRenderPath() { return m_RenderPath; }
+    RenderPath GetEffectiveRenderPath() const { return m_EffectiveRenderPath; }
+    bool IsPathTracingActive() const { return m_EffectiveRenderPath == RenderPath::PathTracing; }
+    // Why a path cannot run on this device right now, or nullptr when it can. Drives the
+    // disabled entry and its tooltip in the editor combo.
+    const char* GetRenderPathUnavailableReason(RenderPath path) const
+    {
+      if (path != RenderPath::PathTracing)
+        return nullptr;
+      if (!IsRayTracingAvailable())
+        return "Hardware ray tracing is unavailable on this device.";
+      if (!IsPathTracerAvailable())
+        return "The path tracing pipeline could not be built.\n"
+          "It needs hardware ray tracing and bindless descriptors.";
+      if (!b_RayTracingEnabled)
+        return "Ray tracing is switched off by the master toggle.";
+      // Ray reconstruction is the path's resolve: one sample per pixel is what the tracer
+      // produces, and without a denoiser there is nothing to display. The developer
+      // override below is the deliberate way past this, not a second supported mode.
+      if (!b_PathTraceDevResolve && !IsRayReconstructionAvailable())
+        return "DLSS Ray Reconstruction is unavailable, and it is what turns the tracer's\n"
+          "one sample per pixel into a frame. Tick the developer resolve to path trace\n"
+          "without a denoiser.";
+
+      return nullptr;
+    }
     bool IsDLSSAvailable() const { return m_Backend.GetStreamline().IsDLSSAvailable(); }
     const std::string& GetDLSSUnavailableReason() const
     {
       return m_Backend.GetStreamline().GetUnavailableReason(StreamlineFeature::DLSS);
     }
+    bool IsRayReconstructionAvailable() const
+    {
+      return m_Backend.GetStreamline().IsRayReconstructionAvailable();
+    }
+    const std::string& GetRayReconstructionUnavailableReason() const
+    {
+      return m_Backend.GetStreamline().GetUnavailableReason(StreamlineFeature::RayReconstruction);
+    }
+    // Developer escape hatch: path trace with NO denoiser, resolving out of the running
+    // mean instead. It is what makes the raw sample and the converged reference reachable
+    // while the render path owns the frame, and it is the only way into the path at all on
+    // a device without ray reconstruction. Deliberately NOT serialized - a scene must never
+    // come back missing its denoiser.
+    bool IsPathTraceDevResolveEnabled() const { return b_PathTraceDevResolve; }
+    void SetPathTraceDevResolve(bool enabled)
+    {
+      if (b_PathTraceDevResolve == enabled)
+        return;
+
+      b_PathTraceDevResolve = enabled;
+      // The two resolves hold unrelated histories, and the extent the tracer runs at moves
+      // with the override, so whichever one takes over starts from nothing.
+      b_ResetDLSSPending = true;
+      b_PathTraceResetPending = true;
+    }
+    // Bound straight to the panel widget; RunRayReconstructionEvaluate notices when the
+    // preset moved and restarts the denoiser's history.
+    RayReconstructionSettings& GetRayReconstructionSettings() { return m_RRSettings; }
     // What the scene is rasterized at, and what reaches the screen. Equal outside the
     // DLSS upscale modes.
     VkExtent2D GetRenderExtent() const { return m_Graph.GetExtent(); }
@@ -178,6 +247,62 @@ namespace YAEngine
     int& GetVolumeBounceCount() { return m_VolumeBounceCount; }
     bool& GetIrradianceVolumesEnabled() { return b_IrradianceVolumesEnabled; }
     float& GetIrradianceNormalBias() { return m_IrradianceNormalBias; }
+    // Master switch for everything ray traced, the per-frame TLAS build included. Has no
+    // effect on a device that granted no ray tracing, and is deliberately not serialized:
+    // it is a development toggle, not a scene setting.
+    bool& GetRayTracingEnabled() { return b_RayTracingEnabled; }
+    bool IsRayTracingAvailable() const { return m_Backend.GetContext().raytracingSupported; }
+    // Tracing from a compute shader, which is what the Ray Query debug view needs.
+    bool IsRayQueryAvailable() const { return m_Backend.GetContext().rayQuerySupported; }
+    // The RT Pipeline debug view needs more than the device flag: the entry points, the
+    // bindless table and a pipeline that actually built. A valid handle means all three.
+    bool IsRayTracingPipelineAvailable() const { return static_cast<bool>(m_RTPipelineDebugPipeline); }
+    // The path tracer needs exactly what the RT Pipeline view needs, so a valid handle is
+    // the whole test here too.
+    bool IsPathTracerAvailable() const { return static_cast<bool>(m_PathTracePipeline); }
+    // True while any view served by the path tracing pass is selected - the two radiance
+    // views and the three energy diagnostics, all of which come out of the one dispatch.
+    bool IsPathTraceView() const
+    {
+      return m_CurrentTexture == DEBUG_VIEW_PT_NOISY
+        || m_CurrentTexture == DEBUG_VIEW_PT_REFERENCE
+        || IsPathTraceDebugView();
+    }
+    // The energy diagnostics - which bounce contributed most and how much, the next event
+    // estimation and environment totals - plus the non-finite locator. They replace the
+    // radiance in the noisy image, so nothing may accumulate while one is on. The range has
+    // to stay contiguous: GetPathTraceDebugMode maps it onto PT_DEBUG_* by offset.
+    bool IsPathTraceDebugView() const
+    {
+      return m_CurrentTexture >= DEBUG_VIEW_PT_MAX_CONTRIB
+        && m_CurrentTexture <= DEBUG_VIEW_PT_NONFINITE;
+    }
+    int GetPathTraceDebugMode() const
+    {
+      if (!IsPathTraceDebugView())
+        return PT_DEBUG_OFF;
+
+      return PT_DEBUG_MAX_CONTRIB + (m_CurrentTexture - DEBUG_VIEW_PT_MAX_CONTRIB);
+    }
+    // Serialized in the scene settings node since the path tracer became a render path the
+    // user selects: they change what the frame looks like, not just what a diagnostic does.
+    int& GetPathTraceMaxBounces() { return m_PathTraceMaxBounces; }
+    float& GetPathTraceFireflyClamp() { return m_PathTraceFireflyClamp; }
+    // How many samples the PT Reference image has averaged since its last reset. Zero means
+    // the next frame rewrites it.
+    int GetPathTraceSampleCount() const { return m_PathTraceSampleIndex; }
+    void ResetPathTraceAccumulation() { b_PathTraceResetPending = true; }
+
+    // FrameCapture. Draw services a request at the end of the frame it is already
+    // recording, which is the only point where "the frame that just finished" is
+    // unambiguous - the TAA and global frame indices have not advanced yet.
+    void RequestCapture(const FrameCaptureRequest& request);
+    // True once per serviced request; the result is dropped after it is taken.
+    bool ConsumeCaptureResult(FrameCaptureResult& outResult);
+    void WriteCaptureSession(const FrameCaptureSessionInfo& info);
+    // One log line per capturable target, for --capture-list-targets.
+    void LogCaptureTargets();
+    uint64_t GetGlobalFrameIndex() const { return m_GlobalFrameIndex; }
 
     // Rebuilds the volume atlas from freshly loaded assets and rewrites the IBL
     // descriptors. outSlots receives the atlas slot of every input volume.
@@ -235,13 +360,40 @@ namespace YAEngine
     // Resolved once per frame from the selection and what the hardware can actually do.
     AntialiasingMode m_EffectiveAntialiasingMode = AntialiasingMode::TAA;
     bool b_DLSSFallbackWarned = false;
-    // Mode and output size the current render extent was queried for. A mismatch is
-    // what triggers the render-resolution half of the graph to be rebuilt.
+    RenderPath m_RenderPath = RenderPath::Raster;
+    // Resolved once per frame the same way, by ResolveRenderPath.
+    RenderPath m_EffectiveRenderPath = RenderPath::Raster;
+    bool b_PathTracingFallbackWarned = false;
+    // What the two resolves settled on LAST frame, captured before this frame's pair of
+    // resolves overwrites them. The history reset flags are raised once, at the end of
+    // ResolveRenderPath, because that is the only point where both are final: the path
+    // resolve can still promote the mode, and comparing inside ResolveAntialiasingMode
+    // would then see a change on every single frame the promotion happens.
+    AntialiasingMode m_PreviousEffectiveAntialiasingMode = AntialiasingMode::TAA;
+    RenderPath m_PreviousEffectiveRenderPath = RenderPath::Raster;
+    // Resolves the path tracer out of its running mean instead of ray reconstruction. A
+    // development toggle, never serialized - see SetPathTraceDevResolve.
+    bool b_PathTraceDevResolve = false;
+    // m_RRAppliedSettings is last frame's copy, so a preset change is spotted whatever
+    // mutated it.
+    RayReconstructionSettings m_RRSettings;
+    RayReconstructionSettings m_RRAppliedSettings;
+    // Mode, path, developer resolve and output size the current render extent was queried
+    // for. A mismatch is what triggers the render-resolution half of the graph to be
+    // rebuilt. The path is part of the key because it answers the question through ray
+    // reconstruction's own optimal settings rather than super resolution's, and the
+    // override because it forces the two extents equal - see ComputeRenderExtent.
     AntialiasingMode m_ResolutionMode = AntialiasingMode::TAA;
+    RenderPath m_ResolutionPath = RenderPath::Raster;
+    bool b_ResolutionDevResolve = false;
     VkExtent2D m_ResolutionOutputExtent {};
     // Modes whose optimal settings the driver refused, so the query is not repeated
     // every frame. Indexed by AntialiasingMode.
     std::array<bool, size_t(AntialiasingMode::Count)> m_DLSSModeRejected {};
+    // The same memo for ray reconstruction, which answers through its own plugin and can
+    // refuse a mode super resolution accepts. Kept apart so a refusal on one side never
+    // takes the mode away from the other.
+    std::array<bool, size_t(AntialiasingMode::Count)> m_RRModeRejected {};
     // Width of the variance clipping box in sigmas. Low values collapse the box on locally
     // uniform neighbourhoods and throw away converged history on sub-pixel geometry.
     float m_TAAClampSigma = 0.979f;
@@ -302,6 +454,35 @@ namespace YAEngine
     // it is looked up in a volume. First-line mitigation against light leaking
     // through walls thinner than the node spacing.
     float m_IrradianceNormalBias = 0.25f;
+    // On by default, and gated on ctx.raytracingSupported at every use, so a device that
+    // has the hardware traces without anything having to switch it on.
+    bool b_RayTracingEnabled = true;
+    // False until one of the two ray tracing debug passes has filled m_RTDebug at least
+    // once since the last graph resize. The image is never cleared, so the view has to fall
+    // back to the final image until then rather than display whatever the allocation
+    // happened to hold.
+    bool b_RTDebugValid = false;
+    // The same rule for the path tracer's two images, which are equally uncleared.
+    bool b_PathTraceOutputValid = false;
+    // Bounce budget of one path, counting the G-buffer vertex as bounce zero. Three is where
+    // an interior stops changing visibly per extra bounce.
+    int m_PathTraceMaxBounces = 3;
+    // Ceiling on what one bounce may add to the pixel, 0 = off. The only bias in the tracer,
+    // and the reason a converged image is a reference rather than a ground truth.
+    float m_PathTraceFireflyClamp = 10.0f;
+    // Index of the sample the next PT frame contributes to the running mean. Zero rewrites
+    // the accumulation image, which is how a reset is expressed - nothing clears it.
+    int m_PathTraceSampleIndex = 0;
+    bool b_PathTraceResetPending = true;
+    // Everything the accumulated image depends on, as of the last accumulated frame. Any
+    // mismatch means the samples already in the buffer describe a different image and the
+    // mean has to start over. The projection compared here is the UNJITTERED one: the
+    // jitter is what gives the reference its anti-aliasing, so it must not reset anything.
+    glm::mat4 m_PathTraceCachedView = glm::mat4(1.0f);
+    glm::mat4 m_PathTraceCachedProj = glm::mat4(1.0f);
+    uint64_t m_PathTraceCachedIdentityDigest = 0;
+    uint64_t m_PathTraceCachedTransformDigest = 0;
+    uint64_t m_PathTraceCachedLightDigest = 0;
     float m_LastFrameTime = 0.0f;
     float m_DeltaTime = 0.0f;
 
@@ -320,6 +501,11 @@ namespace YAEngine
     void SetUpCamera(FrameContext& frame);
     // Turns the selected mode into the one this frame can really run.
     void ResolveAntialiasingMode();
+    // The same for the render path, and the last word on the effective anti-aliasing mode:
+    // it can promote it to DLAA, because ray reconstruction is what resolves a traced frame
+    // and it only exists inside the DLSS family. Runs after ResolveAntialiasingMode, and
+    // raises the history reset flags for both.
+    void ResolveRenderPath();
     void InitPipelines();
 
     // Per-frame-in-flight model SSBOs and indirect command buffers for the batched
@@ -342,19 +528,52 @@ namespace YAEngine
     // the render-resolution half of the graph. Returns true when anything moved.
     bool UpdateResolutionForMode(VkExtent2D outputExtent);
     void RunDLSSEvaluate(VkCommandBuffer cmd, FrameContext& frame);
+    // The path tracer's resolve: the noisy sample plus the four guides through ray
+    // reconstruction, into the same DLSSOutput super resolution writes.
+    void RunRayReconstructionEvaluate(VkCommandBuffer cmd, FrameContext& frame);
+    // Everything both evaluates describe identically - the camera, the frame, the depth and
+    // velocity tags and the reset flag - so the two conventions-heavy halves are written
+    // once. Each caller then names its own scaling input and, for ray reconstruction, its
+    // guides.
+    DLSSEvaluateDesc MakeStreamlineEvaluateDesc(VkCommandBuffer cmd, FrameContext& frame,
+      StreamlineFrameToken token);
+    // One graph resource in the shape Streamline needs, since it cannot query a VkImage.
+    // layout must be the layout the graph really left the image in.
+    DLSSImage DescribeStreamlineImage(RGHandle handle, VkImageLayout layout);
+    // True while ray reconstruction is what turns this frame into an image. ResolveRenderPath
+    // already refuses the path outright when RR is unavailable, so the override is the only
+    // thing left to test here.
+    bool IsRayReconstructionResolve() const
+    {
+      return IsPathTracingActive() && !b_PathTraceDevResolve;
+    }
     // The image this frame's anti-aliasing resolved into: the DLSS output, or the TAA
     // history slot the resolve just filled.
+    //
+    // The path tracer takes the DLSS output too, because ray reconstruction writes exactly
+    // where super resolution would - denoise, upscale and anti-alias are one evaluate. The
+    // developer resolve is the exception: with no denoiser the accumulation image is what
+    // the frame comes out of, its running mean being the single noisy sample at index 0
+    // whenever anything moves and the converged reference whenever nothing does.
     RGHandle GetResolvedColorHandle() const
     {
+      if (m_EffectiveRenderPath == RenderPath::PathTracing)
+        return IsRayReconstructionResolve() ? m_DLSSOutput : m_PathTraceAccum;
+
       if (IsDLSSMode(m_EffectiveAntialiasingMode))
         return m_DLSSOutput;
 
       return m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
     }
-    // The previous frame's resolved image. DLSS keeps a single output image, which still
-    // holds the previous frame everywhere the evaluate has not run yet.
+    // The previous frame's resolved image. Both DLSS resolves keep a single output image,
+    // which still holds the previous frame everywhere the evaluate has not run yet; so does
+    // the path tracer's accumulation image, which the trace has not touched that early
+    // either. One image covers both roles in every case but the TAA ping-pong.
     RGHandle GetPreviousResolvedColorHandle() const
     {
+      if (m_EffectiveRenderPath == RenderPath::PathTracing)
+        return IsRayReconstructionResolve() ? m_DLSSOutput : m_PathTraceAccum;
+
       if (IsDLSSMode(m_EffectiveAntialiasingMode))
         return m_DLSSOutput;
 
@@ -362,6 +581,12 @@ namespace YAEngine
     }
     void CreateTAAFramebuffers();
     void ClearHistoryBuffers();
+    // Blacks out the path tracer's three images. They are never cleared by a pass - the
+    // sample index resets the mean by rewriting it - so a frame that resolves them, or
+    // hands them to ray reconstruction, without the trace having run would otherwise work
+    // off whatever the allocation held. Runs wherever they are (re)allocated, next to
+    // ClearHistoryBuffers.
+    void ClearPathTraceOutputs();
     void CreateHiZResources();
     void DestroyHiZResources();
     void InitGTAOStaticResources();
@@ -373,8 +598,43 @@ namespace YAEngine
     void CreateBloomResources();
     void DestroyBloomResources();
 
-    // Debug frame capture, armed via the YA_CAPTURE_DIR environment variable
-    void InitFrameCapture();
+    // Points set 1 at this frame's TLAS, instance records, material records and the shared
+    // RTDebug image. Called by both tracing passes, which write identical contents and are
+    // mutually exclusive, so one set per frame slot serves both.
+    void WriteRayTracingSceneDescriptors(uint32_t frameIndex);
+    // The same scene bindings 0-2 plus the path tracer's own 3-9, on the forked set layout.
+    void WritePathTraceDescriptors(uint32_t frameIndex);
+    // The guide pass's set 1: the G-buffer in, the three ray reconstruction guides out.
+    void WritePathTraceGuideDescriptors(uint32_t frameIndex);
+    // Decides whether this frame extends the reference image or starts it over, and advances
+    // the sample index. Runs before the graph, because the pass reads the result as a push
+    // constant.
+    void UpdatePathTraceAccumulation(const FrameContext& frame);
+    // The exact condition the path tracing pass runs under. Shared with the accumulation
+    // counter, which may not advance on a frame that traced nothing: the mean would then
+    // weight a later sample as if the missing ones were in the buffer. Only meaningful once
+    // the TLAS build for this frame has been recorded, which precedes the graph.
+    bool IsPathTracePassEnabled() const
+    {
+      return (IsPathTracingActive() || IsPathTraceView())
+        && IsPathTracerAvailable()
+        && b_RayTracingEnabled
+        && m_TlasBuilder.IsValid(m_Backend.GetCurrentFrameIndex())
+        && m_MaterialTable.IsValid(m_Backend.GetCurrentFrameIndex());
+    }
+    // Whether this frame extends the running mean. The render path always does - the mean
+    // IS the image it presents - and in raster mode only the reference view does, which is
+    // the one that displays it.
+    bool IsPathTraceAccumulating() const
+    {
+      // A diagnostic frame contributes no radiance sample, so it must not advance the mean
+      // either - the pass stores the diagnostic instead of the radiance.
+      if (IsPathTraceDebugView())
+        return false;
+
+      return IsPathTracingActive() || m_CurrentTexture == DEBUG_VIEW_PT_REFERENCE;
+    }
+
     void CaptureFrame();
 
     RenderBackend m_Backend;
@@ -384,11 +644,10 @@ namespace YAEngine
     GpuProfiler m_GpuProfiler;
 #endif
 
-    std::string m_CaptureDir;
-    int m_CaptureWarmup = 90;
-    int m_CaptureFramesLeft = 16;
-    int m_CaptureIndex = 0;
-    bool b_CaptureManifestOpen = false;
+    FrameCaptureRequest m_CaptureRequest;
+    FrameCaptureResult m_CaptureResult;
+    bool b_CaptureRequested = false;
+    bool b_CaptureResultReady = false;
 
     // Render graph resource handles - G-buffer
     RGHandle m_GBuffer0 {};       // R8G8B8A8_UNORM: albedo.rgb + metallic
@@ -418,6 +677,30 @@ namespace YAEngine
     // read by everything the TAA history would otherwise feed. Persists across frames so
     // the SSGI prefilter can reproject the previous frame's stabilized image.
     RGHandle m_DLSSOutput {};
+    // RGBA16F, render resolution: one traced primary ray per pixel, already shaded into a
+    // display color. Written only while one of the two ray tracing debug views is on the
+    // screen, by whichever of them it is - they share the image and never both run.
+    RGHandle m_RTDebug {};
+    // The path tracer's outputs, both at render resolution. Noisy is RGBA16F and holds this
+    // frame's single sample - radiance in rgb, primary hit distance in alpha, which is what
+    // stage 5 hands ray reconstruction. Accumulation is RGBA32F because a running mean over
+    // thousands of samples stops moving in fp16 long before it has converged; it persists
+    // across frames and is never cleared, the sample index resets it instead.
+    RGHandle m_PathTraceNoisy {};
+    RGHandle m_PathTraceAccum {};
+    // Guide buffers for ray reconstruction, all at render resolution and written from the
+    // G-buffer by pt_guides.comp while the path tracing render path is effective. The two
+    // albedos are what the denoiser demodulates the radiance by, so 8 bits each is the
+    // format it wants; normal and roughness share one RGBA16F in the PACKED layout
+    // sl_dlss_d.h documents - world normal in xyz, roughness in w.
+    RGHandle m_PTDiffuseAlbedo {};
+    RGHandle m_PTSpecularAlbedo {};
+    RGHandle m_PTNormalRoughness {};
+    // R16F, render resolution: the world-space length of the first bounce ray measured from
+    // the primary surface, written by pt_main.rgen on the frames that bounce sampled the
+    // specular lobe and zero otherwise. Ray reconstruction builds its specular motion vectors
+    // out of it - see section 4.1.9 of NVIDIA's DLSS-RR guide.
+    RGHandle m_PTHitDistance {};
 
 #ifdef YA_EDITOR
     RGHandle m_SceneColor {};
@@ -494,6 +777,10 @@ namespace YAEngine
     uint32_t m_SSGIRadiancePrefilterPassIndex {};
     uint32_t m_GTAOPassIndex {};
     uint32_t m_HiZPassIndex {};
+    uint32_t m_RTDebugPassIndex {};
+    uint32_t m_RTPipelineDebugPassIndex {};
+    uint32_t m_PathTracePassIndex {};
+    uint32_t m_PathTraceGuidesPassIndex {};
     uint32_t m_GTAODenoisePassIndex {};
     uint32_t m_LightCullPassIndex {};
     uint32_t m_DeferredLightingPassIndex {};
@@ -501,6 +788,7 @@ namespace YAEngine
     uint32_t m_BloomPassIndex {};
     uint32_t m_TAAPassIndex {};
     uint32_t m_DLSSEvaluatePassIndex {};
+    uint32_t m_DLSSRayReconstructionPassIndex {};
     uint32_t m_ForwardTransparentPassIndex {};
     uint32_t m_HistogramPassIndex {};
     uint32_t m_ExposureAdaptPassIndex {};
@@ -525,11 +813,22 @@ namespace YAEngine
     glm::mat4 m_UnjitteredProj = glm::mat4(1.0f);
 
     CubeMapHandle m_BoundSkybox {};
+    // The display cubemap the IBL sets bind at set 3 binding 3, kept here as well because
+    // the path tracer's set is rebuilt from scratch every frame and cannot rely on a write
+    // that only happens when the skybox changes.
+    VkImageView m_SkyboxView {};
+    VkSampler m_SkyboxSampler {};
 
     FrameUniformBuffer m_FrameUniformBuffer {};
     LightStorageBuffer m_LightBuffer;
     TileLightBuffer m_TileLightBuffer;
     ShadowManager m_ShadowManager;
+    TlasBuilder m_TlasBuilder;
+    // Alongside the TLAS rather than inside it: both are per frame in flight and both are
+    // refilled from the same frame's asset state, but the material table is indexed by
+    // material slot and is independent of the instance list - a later pass that traces
+    // without rebuilding the structure still wants it.
+    RayTracingMaterialTable m_MaterialTable;
     ReflectionProbeAtlas m_ProbeAtlas;
     ReflectionProbeStorageBuffer m_ProbeBuffer;
     IrradianceVolumeStorage m_VolumeStorage;
@@ -542,6 +841,19 @@ namespace YAEngine
     std::vector<VulkanDescriptorSet> m_GTAOPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_GTAODenoiseDescriptorSets;
     std::vector<VulkanDescriptorSet> m_LightCullInputDescriptorSets;
+    // Set 1 of every ray tracing pass, one per frame in flight. Shared by the Ray Query and
+    // RT Pipeline views: the bindings and their contents are identical and the two passes
+    // are mutually exclusive, so a second copy would only be a second thing to keep in
+    // step. Empty on a device without ray tracing, where neither pass exists.
+    std::vector<VulkanDescriptorSet> m_RTDebugDescriptorSets;
+    // Set 1 of the path tracing pass, one per frame in flight. A fork of the layout above:
+    // bindings 0-2 are the same scene, and from 3 up it carries the G-buffer, the sky, the
+    // lights and the two outputs instead of one storage image. Empty wherever the path
+    // tracer could not be built.
+    std::vector<VulkanDescriptorSet> m_PathTraceDescriptorSets;
+    // Set 1 of the guide pass. Plain compute over the G-buffer, so it needs none of the
+    // scene bindings above and exists on every device, ray tracing or not.
+    std::vector<VulkanDescriptorSet> m_PathTraceGuideDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingLightDescriptorSets;
     std::vector<VulkanDescriptorSet> m_IBLDescriptorSets;
@@ -569,6 +881,16 @@ namespace YAEngine
     PipelineHandle m_SSGIRadiancePrefilterPipeline {};
     PipelineHandle m_GTAODenoisePipeline {};
     PipelineHandle m_HiZPipeline {};
+    PipelineHandle m_RTDebugPipeline {};
+    // Invalid on a device that cannot build it, which is what gates the RT Pipeline view.
+    PipelineHandle m_RTPipelineDebugPipeline {};
+    // The path tracer proper: pt_main.rgen over the same hit group, with a second miss
+    // shader for shadow rays. Invalid where the device cannot build it, which gates both
+    // path traced views.
+    PipelineHandle m_PathTracePipeline {};
+    // The guide buffer pass. A plain compute shader over the G-buffer, so unlike the tracer
+    // it builds everywhere and needs no availability test.
+    PipelineHandle m_PathTraceGuidesPipeline {};
     PipelineHandle m_LightCullPipeline {};
     PipelineHandle m_DeferredLightingPipeline {};
     PipelineHandle m_BloomDownsamplePipeline {};

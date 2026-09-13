@@ -49,8 +49,17 @@ namespace YAEngine
     return mode == AntialiasingMode::TAA;
   }
 
+  // Ray reconstruction asks for more jitter positions than super resolution does, and states
+  // a floor rather than a formula: section 3.6 of the DLSS-RR Integration Guide says there is
+  // "no reason to limit the number of samples" and that "many more jitter positions (at
+  // least 32)" are highly recommended. The super resolution sizing below would hand DLAA
+  // eight, since the path tracer always resolves at a scaling ratio of one.
+  inline constexpr uint32_t RAY_RECONSTRUCTION_MIN_JITTER_PHASES = 32;
+
   // upscaleRatio is output extent / render extent along one axis, 1 for DLAA.
-  inline JitterParameters GetJitterParameters(AntialiasingMode mode, float upscaleRatio = 1.0f)
+  // rayReconstruction raises the phase floor - the sweep itself is unchanged.
+  inline JitterParameters GetJitterParameters(AntialiasingMode mode, float upscaleRatio = 1.0f,
+    bool rayReconstruction = false)
   {
     // The engine TAA pass was tuned against a halved sweep over 1024 Halton phases.
     if (!IsDLSSMode(mode))
@@ -59,6 +68,9 @@ namespace YAEngine
     // DLSS is trained on the full +-0.5 px sweep, and NVIDIA sizes the sequence as
     // 8 base phases scaled by the area ratio between output and render resolution.
     float phases = std::ceil(8.0f * upscaleRatio * upscaleRatio);
+    if (rayReconstruction)
+      phases = std::max(phases, float(RAY_RECONSTRUCTION_MIN_JITTER_PHASES));
+
     return {
       .amplitude = 0.5f,
       .phaseCount = static_cast<uint32_t>(std::max(1.0f, phases))

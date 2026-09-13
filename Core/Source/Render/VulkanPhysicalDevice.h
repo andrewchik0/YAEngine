@@ -53,6 +53,7 @@ namespace YAEngine
     bool IsDeviceSuitable(VkPhysicalDevice device, VkSurfaceKHR surface);
     bool CheckDeviceExtensionSupport(VkPhysicalDevice device);
     void ResolveExtensions(VulkanRequirements& requirements);
+    void DropExtensionsWithMissingDependencies(VulkanRequirements& requirements);
 
     VkPhysicalDevice m_PhysicalDevice {};
     std::vector<std::string> m_EnabledExtensions;

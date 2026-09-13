@@ -12,6 +12,8 @@ namespace YAEngine
       if (bindings[i].binding != other.bindings[i].binding) return false;
       if (bindings[i].type != other.bindings[i].type) return false;
       if (bindings[i].stages != other.bindings[i].stages) return false;
+      if (bindings[i].count != other.bindings[i].count) return false;
+      if (bindings[i].flags != other.bindings[i].flags) return false;
     }
     return true;
   }
@@ -24,6 +26,8 @@ namespace YAEngine
       hash ^= std::hash<uint32_t>{}(b.binding) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
       hash ^= std::hash<uint32_t>{}(static_cast<uint32_t>(b.type)) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
       hash ^= std::hash<uint32_t>{}(static_cast<uint32_t>(b.stages)) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+      hash ^= std::hash<uint32_t>{}(b.count) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+      hash ^= std::hash<uint32_t>{}(static_cast<uint32_t>(b.flags)) + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     }
     return hash;
   }
@@ -42,23 +46,44 @@ namespace YAEngine
       return it->second;
 
     std::vector<VkDescriptorSetLayoutBinding> vkBindings;
+    std::vector<VkDescriptorBindingFlags> bindingFlags;
     vkBindings.reserve(key.bindings.size());
+    bindingFlags.reserve(key.bindings.size());
 
+    VkDescriptorBindingFlags anyFlags = 0;
     for (const BindingDescription& b : key.bindings)
     {
       VkDescriptorSetLayoutBinding binding{};
       binding.binding = b.binding;
       binding.descriptorType = b.type;
-      binding.descriptorCount = 1;
+      binding.descriptorCount = b.count;
       binding.stageFlags = b.stages;
       binding.pImmutableSamplers = nullptr;
       vkBindings.push_back(binding);
+      bindingFlags.push_back(b.flags);
+      anyFlags |= b.flags;
     }
+
+    // The two arrays are index-parallel, which is why the flags are gathered in the same
+    // pass the bindings are: pBindingFlags[i] belongs to pBindings[i], not to a binding
+    // number, and the sort above has already reordered both.
+    VkDescriptorSetLayoutBindingFlagsCreateInfo flagsInfo{};
+    flagsInfo.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO;
+    flagsInfo.bindingCount = static_cast<uint32_t>(bindingFlags.size());
+    flagsInfo.pBindingFlags = bindingFlags.data();
 
     VkDescriptorSetLayoutCreateInfo info{};
     info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
     info.bindingCount = static_cast<uint32_t>(vkBindings.size());
     info.pBindings = vkBindings.data();
+    if (anyFlags != 0)
+    {
+      info.pNext = &flagsInfo;
+      // Required of the layout as soon as one of its bindings is update-after-bind, and it
+      // is what ties the layout to a pool created with the matching flag.
+      if ((anyFlags & VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT) != 0)
+        info.flags |= VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT;
+    }
 
     VkDescriptorSetLayout layout;
     if (vkCreateDescriptorSetLayout(device, &info, nullptr, &layout) != VK_SUCCESS)

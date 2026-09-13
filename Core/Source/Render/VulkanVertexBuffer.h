@@ -2,6 +2,7 @@
 
 #include "Pch.h"
 #include "GeometryArena.h"
+#include "VulkanAccelerationStructure.h"
 #include "VulkanBuffer.h"
 #include "Utils/MeshSimplifier.h"
 #include "Utils/PositionQuantizer.h"
@@ -81,7 +82,25 @@ namespace YAEngine
     // below it. Never fails, so no call site has to test for a missing level.
     MeshLodRange GetLodRange(uint32_t lodLevel) const;
 
+    // Empty on a device without ray tracing, and for a mesh with no triangles.
+    const VulkanAccelerationStructure& GetBottomLevel() const { return m_BottomLevel; }
+    bool HasBottomLevel() const { return m_BottomLevel.IsValid(); }
+
+    // Addresses of the interleaved streams the structure above was built over, cached at
+    // build time. A hit resolves geometry through these, once per instance per frame, so
+    // asking the device for them again every frame would repeat work the build already
+    // did. Zero unless HasBottomLevel().
+    VkDeviceAddress GetVertexAddress() const { return m_VertexAddress; }
+    VkDeviceAddress GetIndexAddress() const { return m_IndexAddress; }
+
+    // Byte offset of the {tex, normal, tangent} block inside the vertex stream. Zero
+    // means the stream was not split and carries positions alone.
+    VkDeviceSize GetAttribOffset() const { return m_AttribOffset; }
+
   private:
+
+    // Builds the bottom level structure over the interleaved stream created above.
+    void CreateBottomLevel(const RenderContext& ctx, size_t vertexCount, VkDeviceSize positionStride);
 
     void CreateWeldedPositions(const RenderContext& ctx,
       const std::vector<glm::vec3>& positions, const std::vector<uint32_t>& indices,
@@ -99,6 +118,15 @@ namespace YAEngine
     VulkanBuffer m_IndicesBuffer;
     size_t m_IndicesCount {};
     VkDeviceSize m_AttribOffset {};
+
+    // Ray tracing geometry for this mesh, built over the interleaved stream above and
+    // never over the welded arena one: a hit shader fetches attributes with exactly the
+    // indices this is built from, and the arena welds positions into a different indexing.
+    // Owned here rather than in a cache keyed by mesh handle so the structure and the
+    // buffers it describes share one lifetime, which removes invalidation entirely.
+    VulkanAccelerationStructure m_BottomLevel;
+    VkDeviceAddress m_VertexAddress = 0;
+    VkDeviceAddress m_IndexAddress = 0;
 
     // Position-only stream with duplicate positions removed. Depth prepass and
     // shadow passes fetch this instead of the interleaved stream, which carries

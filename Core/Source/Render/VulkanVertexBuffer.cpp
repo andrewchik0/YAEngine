@@ -11,6 +11,18 @@ namespace YAEngine
   {
     VkDeviceSize totalSize = vertexCount * vertexSize;
 
+    // The interleaved stream is what the bottom level structure is built over and what a
+    // hit shader will fetch attributes from, so both buffers need an address, a place in
+    // a build input and, for that future fetch, a storage binding. Nothing changes on a
+    // device without ray tracing.
+    VkBufferUsageFlags rayTracingUsage = 0;
+    if (ctx.raytracingSupported)
+    {
+      rayTracingUsage = VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT
+        | VK_BUFFER_USAGE_ACCELERATION_STRUCTURE_BUILD_INPUT_READ_ONLY_BIT_KHR
+        | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    }
+
     // Reorganize Vertex data from AoS to SoA: [positions] [attribs]
     if (vertexSize == sizeof(Vertex))
     {
@@ -30,17 +42,25 @@ namespace YAEngine
         dstAttrib[i] = { src[i].tex, src[i].normal, src[i].tangent };
       }
 
-      m_VerticesBuffer = VulkanBuffer::CreateStaged(ctx, soaData.data(), totalSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+      m_VerticesBuffer = VulkanBuffer::CreateStaged(ctx, soaData.data(), totalSize,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | rayTracingUsage);
     }
     else
     {
       m_AttribOffset = 0;
-      m_VerticesBuffer = VulkanBuffer::CreateStaged(ctx, inputData, totalSize, VK_BUFFER_USAGE_VERTEX_BUFFER_BIT);
+      m_VerticesBuffer = VulkanBuffer::CreateStaged(ctx, inputData, totalSize,
+        VK_BUFFER_USAGE_VERTEX_BUFFER_BIT | rayTracingUsage);
     }
 
     m_IndicesCount = indices.size();
     VkDeviceSize indicesSize = indices.size() * sizeof(uint32_t);
-    m_IndicesBuffer = VulkanBuffer::CreateStaged(ctx, indices.data(), indicesSize, VK_BUFFER_USAGE_INDEX_BUFFER_BIT);
+    m_IndicesBuffer = VulkanBuffer::CreateStaged(ctx, indices.data(), indicesSize,
+      VK_BUFFER_USAGE_INDEX_BUFFER_BIT | rayTracingUsage);
+
+    // The SoA split leaves positions alone at the front; every other format the engine
+    // feeds here keeps position as the leading member of its own stride.
+    CreateBottomLevel(ctx, vertexCount,
+      m_AttribOffset > 0 ? VkDeviceSize(sizeof(glm::vec3)) : VkDeviceSize(vertexSize));
 
     // Position is the leading member of every vertex format the engine feeds here.
     if (vertexSize >= sizeof(glm::vec3))
@@ -67,6 +87,38 @@ namespace YAEngine
         CreateWeldedPositions(ctx, welded.positions, welded.indices, &lods, quantized);
       }
     }
+  }
+
+  void VulkanVertexBuffer::CreateBottomLevel(const RenderContext& ctx, size_t vertexCount,
+    VkDeviceSize positionStride)
+  {
+    // Below one triangle the build sizes query reports nothing to allocate, and a zero
+    // sized buffer is not a legal one.
+    if (!ctx.raytracingSupported || vertexCount == 0 || m_IndicesCount < 3)
+      return;
+
+    // Every staged upload above already blocked on its own fence, so the geometry is
+    // resident before the build is recorded. Mesh creation only ever runs on the main
+    // thread - asset loading parallelizes the CPU half and hands the GPU half back - and
+    // the single-time path is not thread safe, sharing one fence across all callers.
+    AccelerationStructureGeometry geometry {
+      .vertexAddress = m_VerticesBuffer.GetDeviceAddress(ctx),
+      .vertexStride = positionStride,
+      .maxVertex = static_cast<uint32_t>(vertexCount - 1),
+      .indexAddress = m_IndicesBuffer.GetDeviceAddress(ctx),
+      .indexCount = static_cast<uint32_t>(m_IndicesCount),
+    };
+
+    if (!m_BottomLevel.BuildBottomLevel(ctx, geometry))
+      return;
+
+    // Kept alongside the structure so a TLAS record can name the geometry it describes
+    // without a device call per instance per frame.
+    m_VertexAddress = geometry.vertexAddress;
+    m_IndexAddress = geometry.indexAddress;
+
+    YA_LOG_VERBOSE("Vulkan", "Built a bottom level acceleration structure: %zu triangles, %llu bytes",
+      m_IndicesCount / 3, static_cast<unsigned long long>(m_BottomLevel.GetSize()));
   }
 
   void VulkanVertexBuffer::CreateWeldedPositions(const RenderContext& ctx,
@@ -159,6 +211,12 @@ namespace YAEngine
 
   void VulkanVertexBuffer::Destroy(const RenderContext& ctx)
   {
+    // Ahead of the buffers it was built from, and it releases its own storage buffer only
+    // after the structure handle. A no-op when nothing was built.
+    m_BottomLevel.Destroy(ctx);
+    m_VertexAddress = 0;
+    m_IndexAddress = 0;
+
     m_VerticesBuffer.Destroy(ctx);
     m_IndicesBuffer.Destroy(ctx);
 

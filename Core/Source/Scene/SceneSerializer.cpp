@@ -173,6 +173,12 @@ namespace YAEngine
     settings["ssgiThickness"] = render.GetSSGIThickness();
     settings["ssgiIntensity"] = render.GetSSGIIntensity();
     settings["antialiasing"] = static_cast<uint32_t>(render.GetAntialiasingMode());
+    settings["renderPath"] = static_cast<uint32_t>(render.GetRenderPath());
+    settings["ptBounces"] = render.GetPathTraceMaxBounces();
+    // Clamped on the way out as well as on the way in, so what the file says is what the
+    // next load will actually apply.
+    settings["ptFireflyClamp"] = std::clamp(render.GetPathTraceFireflyClamp(),
+      PT_MIN_FIREFLY_CLAMP, PT_MAX_FIREFLY_CLAMP);
     settings["taaClampSigma"] = render.GetTAAClampSigma();
     settings["shadows"] = render.GetShadowsEnabled();
     settings["shadowLod"] = render.GetShadowLodEnabled();
@@ -297,6 +303,24 @@ namespace YAEngine
       // Scenes written before the antialiasing enum only knew TAA on or off.
       render.GetAntialiasingMode() = settings["taa"].as<bool>()
         ? AntialiasingMode::TAA : AntialiasingMode::None;
+    }
+    if (settings["renderPath"])
+    {
+      uint32_t path = settings["renderPath"].as<uint32_t>();
+      if (path < static_cast<uint32_t>(RenderPath::Count))
+        render.GetRenderPath() = static_cast<RenderPath>(path);
+    }
+    if (settings["ptBounces"])
+    {
+      render.GetPathTraceMaxBounces() = std::clamp(settings["ptBounces"].as<int>(),
+        PT_MIN_BOUNCES, PT_MAX_BOUNCES);
+    }
+    if (settings["ptFireflyClamp"])
+    {
+      // Clamped to the range the panel offers; a negative ceiling would clamp every
+      // bounce contribution to it and black the image out.
+      render.GetPathTraceFireflyClamp() = std::clamp(
+        settings["ptFireflyClamp"].as<float>(), PT_MIN_FIREFLY_CLAMP, PT_MAX_FIREFLY_CLAMP);
     }
     if (settings["taaClampSigma"]) render.GetTAAClampSigma() = settings["taaClampSigma"].as<float>();
     if (settings["shadows"]) render.GetShadowsEnabled() = settings["shadows"].as<bool>();

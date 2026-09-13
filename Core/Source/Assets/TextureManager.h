@@ -13,6 +13,9 @@ namespace YAEngine
   private:
     VulkanTexture m_VulkanTexture;
     bool m_HasAlpha = false;
+    // Slot in the global bindless table, or 0 - the white fallback - on a device without
+    // one. A shader only ever learns of it through a material record.
+    uint32_t m_BindlessIndex = 0;
 
     friend class TextureManager;
   };
@@ -48,6 +51,14 @@ namespace YAEngine
       return Get(handle).m_VulkanTexture;
     }
 
+    // Index into the bindless texture table. A stale handle resolves to the fallback slot
+    // rather than to nothing, so a caller building a GPU record never has to branch.
+    uint32_t GetBindlessIndex(TextureHandle handle)
+    {
+      const Texture* texture = TryGet(handle);
+      return texture != nullptr ? texture->m_BindlessIndex : 0;
+    }
+
     struct PathInfo
     {
       std::string path;
@@ -65,6 +76,11 @@ namespace YAEngine
     }
 
   private:
+
+    // Claims and writes the texture's slot in the global bindless table. Returns the
+    // fallback slot when the device has no table.
+    uint32_t RegisterBindless(const VulkanTexture& texture);
+
     const RenderContext* m_Ctx = nullptr;
 
     struct CacheKey

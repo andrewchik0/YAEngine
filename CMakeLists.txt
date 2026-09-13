@@ -16,6 +16,8 @@ set(STREAMLINE_RUNTIME_DLLS
   "${STREAMLINE_DIR}/bin/x64/sl.common.dll"
   "${STREAMLINE_DIR}/bin/x64/sl.dlss.dll"
   "${STREAMLINE_DIR}/bin/x64/nvngx_dlss.dll"
+  "${STREAMLINE_DIR}/bin/x64/sl.dlss_d.dll"
+  "${STREAMLINE_DIR}/bin/x64/nvngx_dlssd.dll"
 )
 
 find_program(GLSLC_EXECUTABLE

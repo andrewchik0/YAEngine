@@ -55,6 +55,13 @@ namespace YAEngine
     bool clearDepth = true;
     bool depthOnly = false;
     bool isCompute = false;
+    // Which pipeline stage a compute-kind pass actually runs its shaders in. The barrier
+    // table names VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT for every storage image transition,
+    // which is wrong for a vkCmdTraceRaysKHR pass - it reads and writes from
+    // VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR - so the graph substitutes this mask for
+    // the compute bit on whichever side of a transition belongs to the pass. Only consulted
+    // while isCompute is set.
+    VkPipelineStageFlags shaderStage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
     bool externalFramebuffer = false;
     VkFormat externalFormat = VK_FORMAT_UNDEFINED;
     VkImageLayout finalColorLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
@@ -109,6 +116,16 @@ namespace YAEngine
     const RGResourceDesc& GetResourceDesc(RGHandle handle) const;
     void SetResourceMipLevels(RGHandle handle, uint32_t mipLevels);
 
+    // Linear scan over the resource list, so a target added to SetupRenderGraph becomes
+    // addressable by name for free. Deliberately not cached: a map would be one more thing
+    // to keep in sync across resizes, and the only caller runs once per frame capture.
+    RGHandle FindResource(std::string_view name) const;
+    // Enumeration for frame capture's target discovery: handles 0..count-1 are valid and
+    // GetResourceDesc answers for each of them.
+    uint32_t GetResourceCount() const { return static_cast<uint32_t>(m_Resources.size()); }
+    // False for an imported image, which the graph neither allocates nor resizes.
+    bool IsResourceManaged(RGHandle handle) const { return m_Resources[handle].managed; }
+
   private:
 
     struct Resource
@@ -149,6 +166,11 @@ namespace YAEngine
     std::vector<CompiledPass> m_Passes;
     std::vector<uint32_t> m_ExecutionOrder;
     std::vector<VkImageLayout> m_CurrentLayouts;
+    // The shader stage the pass that last wrote each resource as a storage image ran in.
+    // Index-parallel to m_CurrentLayouts, and the source side of the substitution described
+    // on RGPassInfo::shaderStage - a later reader has to wait on the stage that actually
+    // produced the image, not on the compute stage the barrier table assumes.
+    std::vector<VkPipelineStageFlags> m_ResourceWriteStages;
 
     bool m_Compiled = false;
 

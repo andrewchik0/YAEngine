@@ -15,6 +15,17 @@ layout(set = 1, binding = 5) uniform sampler2D preResolveTexture;
 // reprojected radiance whose alpha is the reprojection validity.
 layout(set = 1, binding = 6) uniform sampler2D ssgiTexture;
 layout(set = 1, binding = 7) uniform sampler2D ssgiRadianceTexture;
+// Ray query diagnostic, already display-ready when rt_debug.comp writes it.
+layout(set = 1, binding = 8) uniform sampler2D rayQueryTexture;
+// The path tracer's two outputs: this frame's single sample, and the running mean it keeps
+// while nothing moves. Both are HDR scene radiance, unlike the diagnostic above.
+layout(set = 1, binding = 9) uniform sampler2D pathTraceNoisyTexture;
+layout(set = 1, binding = 10) uniform sampler2D pathTraceAccumTexture;
+// Ray reconstruction guides, written by pt_guides.comp while the path tracing render path
+// is effective. Only the combined PT Guides view reads them.
+layout(set = 1, binding = 11) uniform sampler2D ptDiffuseAlbedoTexture;
+layout(set = 1, binding = 12) uniform sampler2D ptSpecularAlbedoTexture;
+layout(set = 1, binding = 13) uniform sampler2D ptNormalRoughnessTexture;
 
 layout(std430, set = 2, binding = 0) readonly buffer ExposureSSBO
 {
@@ -97,6 +108,81 @@ void main()
     return;
   case DEBUG_VIEW_SSGI_FALLBACK: // white = all volume fallback, black = all screen
     outColor = vec4(debugFallbackHeat(texture(ssgiTexture, uv).a), 1.0);
+    return;
+  case DEBUG_VIEW_RAY_QUERY:   // one inline ray query per pixel through the scene TLAS
+  case DEBUG_VIEW_RT_PIPELINE: // the same image traced through the shader binding table
+    // One image, written by whichever of the two tracing passes is enabled - they are
+    // mutually exclusive. Synthetic display-space color, and Render only lets either view
+    // through once that pass has actually filled it - no tone mapping, no gamma.
+    outColor = vec4(texture(rayQueryTexture, uv).rgb, 1.0);
+    return;
+  case DEBUG_VIEW_PT_NOISY:     // one path traced sample per pixel, this frame's
+  case DEBUG_VIEW_PT_REFERENCE: // the running mean of every sample since the last reset
+    {
+      // Scene radiance in the same linear units the deferred pass produces, so it goes
+      // through the same operator the final image does - exposure, tone map, gamma. Bloom
+      // is left out: it is composited from the raster chain and would be this image plus a
+      // glow of a different one. Auto-exposure still meters the rasterized frame, which is
+      // what makes the two comparable at a glance rather than each finding its own key.
+      vec3 color = u_Frame.currentTexture == DEBUG_VIEW_PT_NOISY
+        ? texture(pathTraceNoisyTexture, uv).rgb
+        : texture(pathTraceAccumTexture, uv).rgb;
+      color = color * (autoExposure * u_Frame.exposure);
+      color = applyTonemap(color);
+      outColor = vec4(pow(color, vec3(1.0 / u_Frame.gamma)), 1.0);
+    }
+    return;
+  case DEBUG_VIEW_PT_MAX_CONTRIB:
+  case DEBUG_VIEW_PT_NEE:
+  case DEBUG_VIEW_PT_ENVIRONMENT:
+    // The tracer stored a base-10 logarithm rather than radiance, so it is raised back before
+    // the shared ramp takes it - and no exposure and no tone map, which would compress exactly
+    // the range these views exist to show.
+    outColor = vec4(debugLogMagnitude(pow(10.0, texture(pathTraceNoisyTexture, uv).r), uv), 1.0);
+    return;
+  case DEBUG_VIEW_PT_NONFINITE:
+    {
+      // The tracer stored a PT_NF_* code in R and the bounce in G as raw integers - the
+      // numbers are meant to be read out of the captured image, and the screen only has to
+      // say where a hit is and roughly which code it was. Black is a path that stayed
+      // finite, which is every pixel of a healthy frame.
+      float code = texture(pathTraceNoisyTexture, uv).r;
+      outColor = vec4(code <= 0.0
+        ? vec3(0.0)
+        : debugCategoryHue(code / float(PT_NF_COUNT)), 1.0);
+    }
+    return;
+  case DEBUG_VIEW_HDR_MAGNITUDE:
+    // The resolved image the tone map is about to consume, on the same scale. `frame` is
+    // whichever buffer the active render path resolved into, so this reads the rasterized and
+    // the path traced frame identically and the two can be compared number for number.
+    {
+      vec3 hdr = texture(frame, uv).rgb;
+      outColor = vec4(debugLogMagnitude(max(hdr.r, max(hdr.g, hdr.b)), uv), 1.0);
+    }
+    return;
+  case DEBUG_VIEW_PT_GUIDES:
+    {
+      // All three guide buffers at once, one per quadrant of the same frame: the two
+      // demodulation albedos on top, the world normal and the roughness underneath.
+      // Render only lets this view through while the path tracing render path is
+      // effective, which is the only time the pass that fills them runs.
+      vec2 tileUV = fract(uv * 2.0);
+      bool right = uv.x >= 0.5;
+      bool bottom = uv.y >= 0.5;
+
+      vec3 value;
+      if (!bottom && !right)
+        value = pow(texture(ptDiffuseAlbedoTexture, tileUV).rgb, vec3(1.0 / u_Frame.gamma));
+      else if (!bottom)
+        value = pow(texture(ptSpecularAlbedoTexture, tileUV).rgb, vec3(1.0 / u_Frame.gamma));
+      else if (!right)
+        value = texture(ptNormalRoughnessTexture, tileUV).rgb * 0.5 + 0.5;
+      else
+        value = vec3(texture(ptNormalRoughnessTexture, tileUV).a);
+
+      outColor = vec4(value, 1.0);
+    }
     return;
   case DEBUG_VIEW_AMBIENT_ONLY:     // raw linear ambient term, no direct light
   case DEBUG_VIEW_AMBIENT_DIFFUSE:  // diffuse half of it - irradiance volumes

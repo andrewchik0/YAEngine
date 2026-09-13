@@ -1,6 +1,7 @@
 #include "TextureManager.h"
 
 #include "DdsFile.h"
+#include "Render/BindlessTextureRegistry.h"
 #include "Render/RenderContext.h"
 #include "Utils/Log.h"
 #include "Utils/MipGenerator.h"
@@ -80,6 +81,8 @@ namespace YAEngine
       texture->m_VulkanTexture.Load(*m_Ctx, data, width, height, 4, format, true, alpha);
       stbi_image_free(data);
 
+      texture->m_BindlessIndex = RegisterBindless(texture->m_VulkanTexture);
+
       auto handle = Store(std::move(texture));
       m_Cache[key] = handle;
       return handle;
@@ -146,6 +149,8 @@ namespace YAEngine
       return {};
     }
 
+    texture->m_BindlessIndex = RegisterBindless(texture->m_VulkanTexture);
+
     auto handle = Store(std::move(texture));
 
     if (!cachePath.empty())
@@ -204,9 +209,21 @@ namespace YAEngine
     return result;
   }
 
+  uint32_t TextureManager::RegisterBindless(const VulkanTexture& texture)
+  {
+    if (m_Ctx->bindlessTextures == nullptr)
+      return BindlessTextureRegistry::FALLBACK_INDEX;
+
+    return m_Ctx->bindlessTextures->Register(texture.GetView(), texture.GetSampler());
+  }
+
   void TextureManager::Destroy(TextureHandle handle)
   {
-    Get(handle).m_VulkanTexture.Destroy(*m_Ctx);
+    Texture& texture = Get(handle);
+    if (m_Ctx->bindlessTextures != nullptr)
+      m_Ctx->bindlessTextures->Release(texture.m_BindlessIndex);
+
+    texture.m_VulkanTexture.Destroy(*m_Ctx);
     Remove(handle);
 
     std::erase_if(m_Cache, [&](const auto& pair) {
@@ -219,6 +236,11 @@ namespace YAEngine
     ForEach([this](Texture& texture) {
       texture.m_VulkanTexture.Destroy(*m_Ctx);
     });
+    // Every slot at once rather than one Release per texture: a scene teardown empties the
+    // manager, so the table is empty afterwards whatever it held.
+    if (m_Ctx != nullptr && m_Ctx->bindlessTextures != nullptr)
+      m_Ctx->bindlessTextures->ReleaseAll();
+
     Clear();
     m_Cache.clear();
   }

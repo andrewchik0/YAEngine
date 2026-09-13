@@ -22,7 +22,8 @@ std::vector<fs::path> CollectShaders(const fs::path& root)
     const auto& p = entry.path();
     auto ext = p.extension().string();
 
-    if (ext == ".vert" || ext == ".frag" || ext == ".comp" || ext == ".geom" || ext == ".tesc" || ext == ".tese")
+    if (ext == ".vert" || ext == ".frag" || ext == ".comp" || ext == ".geom" || ext == ".tesc" || ext == ".tese"
+        || ext == ".rgen" || ext == ".rchit" || ext == ".rmiss" || ext == ".rahit" || ext == ".rint" || ext == ".rcall")
       result.push_back(p);
   }
 
@@ -281,14 +282,38 @@ static void RemoveTempShader(const fs::path& tempPath)
   std::remove(tempPath.string().c_str());
 }
 
-static constexpr const char* GLSL_VERSION = "450";
+// 460: glslang only registers GL_EXT_ray_query / GL_EXT_ray_tracing builtin types at >= 460
+static constexpr const char* GLSL_VERSION = "460";
+
+// Locate a real #version directive: it must open a line, with only spaces/tabs before it.
+// A plain substring search would also match "#version" mentioned inside a comment, and stripping
+// on that hit discards every #extension line above it. A "#version" opening a line inside a
+// /* */ block comment is still misread - pathological, deliberately out of scope.
+static size_t FindVersionDirective(const std::string& body)
+{
+  size_t pos = body.find("#version");
+
+  while (pos != std::string::npos)
+  {
+    size_t lineStart = pos;
+    while (lineStart > 0 && (body[lineStart - 1] == ' ' || body[lineStart - 1] == '\t'))
+      --lineStart;
+
+    if (lineStart == 0 || body[lineStart - 1] == '\n')
+      return pos;
+
+    pos = body.find("#version", pos + 1);
+  }
+
+  return std::string::npos;
+}
 
 static std::string PrepareSource(const std::string& source, const std::vector<std::string>& defines = {})
 {
   std::string body = source;
 
   // Strip existing #version if present (transition: works with or without it)
-  size_t versionPos = body.find("#version");
+  size_t versionPos = FindVersionDirective(body);
   if (versionPos != std::string::npos)
   {
     size_t lineEnd = body.find('\n', versionPos);
@@ -313,6 +338,8 @@ static int RunGlslc(const fs::path& glslc,
 {
   std::vector<std::wstring> args = {
     glslc.wstring(),
+    // SPIR-V 1.6: ray tracing stages require >= 1.4, engine requires Vulkan 1.3 devices
+    L"--target-env=vulkan1.3",
   };
 
   if (optimize)

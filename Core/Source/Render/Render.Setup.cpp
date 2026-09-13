@@ -11,6 +11,89 @@
 
 namespace YAEngine
 {
+  void Render::WriteRayTracingSceneDescriptors(uint32_t frameIndex)
+  {
+    // Rewritten at this frame's own slot every frame rather than once at setup. The slot's
+    // fence was waited on in BeginFrame, so nothing is still reading the set, and this
+    // absorbs the structure and the record buffer being replaced outright whenever the
+    // instance capacity grows.
+    auto& rtDebug = m_Graph.GetResource(m_RTDebug);
+
+    m_RTDebugDescriptorSets[frameIndex].Writer()
+      .WriteAccelerationStructure(0, m_TlasBuilder.Get(frameIndex))
+      .WriteStorageBuffer(1, m_TlasBuilder.GetRecordBuffer(frameIndex),
+        m_TlasBuilder.GetRecordBufferSize(frameIndex))
+      .WriteStorageBuffer(2, m_MaterialTable.GetBuffer(frameIndex),
+        m_MaterialTable.GetBufferSize(frameIndex))
+      .WriteStorageImage(3, rtDebug.GetView())
+      .Flush();
+  }
+
+  void Render::WritePathTraceDescriptors(uint32_t frameIndex)
+  {
+    // Rewritten every frame at this frame's own slot, exactly like the debug views' set:
+    // bindings 0-2 name buffers the TLAS builder may have replaced outright when capacity
+    // grew, and the rest are graph resources a resize reallocates.
+    auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
+    auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
+    auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+    auto& noisy = m_Graph.GetResource(m_PathTraceNoisy);
+    auto& accumulation = m_Graph.GetResource(m_PathTraceAccum);
+    auto& hitDistance = m_Graph.GetResource(m_PTHitDistance);
+
+    m_PathTraceDescriptorSets[frameIndex].Writer()
+      .WriteAccelerationStructure(0, m_TlasBuilder.Get(frameIndex))
+      .WriteStorageBuffer(1, m_TlasBuilder.GetRecordBuffer(frameIndex),
+        m_TlasBuilder.GetRecordBufferSize(frameIndex))
+      .WriteStorageBuffer(2, m_MaterialTable.GetBuffer(frameIndex),
+        m_MaterialTable.GetBufferSize(frameIndex))
+      .WriteCombinedImageSampler(3, gbuffer0.GetView(), gbuffer0.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteCombinedImageSampler(4, gbuffer1.GetView(), gbuffer1.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteCombinedImageSampler(5, mainDepth.GetView(), mainDepth.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      // The very cubemap the IBL sets bind at set 3 binding 3, so the sky behind a traced
+      // pixel and behind a rasterized one is one texture.
+      .WriteCombinedImageSampler(6, m_SkyboxView, m_SkyboxSampler)
+      .WriteStorageBuffer(7, m_LightBuffer.GetBuffer(frameIndex), sizeof(LightBuffer))
+      .WriteStorageImage(8, noisy.GetView())
+      .WriteStorageImage(9, accumulation.GetView())
+      .WriteStorageImage(10, hitDistance.GetView())
+      .Flush();
+  }
+
+  void Render::WritePathTraceGuideDescriptors(uint32_t frameIndex)
+  {
+    // Every binding names a graph resource a resize reallocates, so the set is rewritten at
+    // this frame's own slot rather than once at setup - the same rule the tracer's set
+    // above follows, for the same reason.
+    auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
+    auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
+    auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+    auto& diffuseAlbedo = m_Graph.GetResource(m_PTDiffuseAlbedo);
+    auto& specularAlbedo = m_Graph.GetResource(m_PTSpecularAlbedo);
+    auto& normalRoughness = m_Graph.GetResource(m_PTNormalRoughness);
+
+    m_PathTraceGuideDescriptorSets[frameIndex].Writer()
+      .WriteCombinedImageSampler(0, gbuffer0.GetView(), gbuffer0.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteCombinedImageSampler(1, gbuffer1.GetView(), gbuffer1.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteCombinedImageSampler(2, mainDepth.GetView(), mainDepth.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteStorageImage(3, diffuseAlbedo.GetView())
+      .WriteStorageImage(4, specularAlbedo.GetView())
+      .WriteStorageImage(5, normalRoughness.GetView())
+      // Read straight off the Render-owned resources rather than through a cached view the
+      // way the skybox is: CubicTextureResources::Init loads the LUT unconditionally and it
+      // is never replaced, so by the time any frame writes this set it is always the same
+      // live texture. The IBL set binds the very same image at set 3 binding 2.
+      .WriteCombinedImageSampler(6,
+        m_CubicResources.brdfLut.GetView(), m_CubicResources.brdfLut.GetSampler())
+      .Flush();
+  }
+
   void Render::SetupRenderGraph(VkExtent2D renderExtent, VkExtent2D outputExtent)
   {
     auto& ctx = m_Backend.GetContext();
@@ -114,6 +197,82 @@ namespace YAEngine
       .resolution = RGResolution::Output
     });
 
+    // Visualization of one inline ray query per pixel. Allocated like every other graph
+    // resource, on a device that can never fill it too: the tonemap pass samples it from a
+    // statically accessed binding, which has to hold a live view whatever the hardware is.
+    m_RTDebug = m_Graph.CreateResource({
+      .name = "rtDebug",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT
+    });
+
+    // One path traced sample per pixel: radiance in rgb, primary hit distance in alpha for
+    // stage 5's ray reconstruction. Allocated on every device for the same reason rtDebug
+    // is - the tonemap pass samples it from a statically accessed binding.
+    // Point filtered, both of them. R32G32B32A32_SFLOAT is not a format Vulkan requires to
+    // support linear filtering, so the accumulation image may not ask for it - and the two
+    // views have to be resampled identically or they would stop being comparable in the
+    // DLSS modes, where the render extent is below the output one and the tonemap pass
+    // samples these at output resolution.
+    // TRANSFER_DST on both: neither is ever cleared by a pass, so ClearPathTraceOutputs
+    // blacks them out wherever they are allocated - a frame that resolves the accumulation
+    // image without the trace having run would otherwise present raw allocation contents.
+    m_PathTraceNoisy = m_Graph.CreateResource({
+      .name = "pathTraceNoisy",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    // The reference image, a running mean over every sample since the last reset. RGBA32F
+    // rather than fp16: a mean over thousands of samples stops moving in half precision long
+    // before the image has converged, because 1/(n+1) of a new sample falls below the
+    // spacing of what is already there. It persists across frames and is never cleared - the
+    // sample index in the push constant is what resets it.
+    //
+    // The path tracing render path resolves into this image, so bloom, the histogram and
+    // the tone map all sample it. Point filtering is what makes that safe on every device:
+    // R32G32B32A32_SFLOAT is required to be SAMPLED, never to be filtered linearly, and the
+    // path forces render extent == output extent so every consumer but the bloom downsample
+    // reads it texel for texel anyway.
+    m_PathTraceAccum = m_Graph.CreateResource({
+      .name = "pathTraceAccum",
+      .format = VK_FORMAT_R32G32B32A32_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+
+    // Ray reconstruction guides, written from the G-buffer while the path tracing render
+    // path is effective. Allocated on every device for the same reason rtDebug is: the
+    // tonemap pass samples all three from statically accessed bindings.
+    m_PTDiffuseAlbedo = m_Graph.CreateResource({
+      .name = "ptDiffuseAlbedo",
+      .format = VK_FORMAT_R8G8B8A8_UNORM,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTSpecularAlbedo = m_Graph.CreateResource({
+      .name = "ptSpecularAlbedo",
+      .format = VK_FORMAT_R8G8B8A8_UNORM,
+      .filter = VK_FILTER_NEAREST
+    });
+    // World-space normal in rgb, roughness in a - the PACKED layout sl_dlss_d.h names
+    // ("App needs to write Roughness to w channel of Normal resource"), which is what
+    // EvaluateRayReconstruction selects with DLSSDNormalRoughnessMode::ePacked.
+    m_PTNormalRoughness = m_Graph.CreateResource({
+      .name = "ptNormalRoughness",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .filter = VK_FILTER_NEAREST
+    });
+    // Primary hit distance, the fourth guide - and the only one the G-buffer cannot supply,
+    // because it is a property of the ray rather than of the surface it landed on. Written
+    // by pt_main.rgen next to the value it already puts in the noisy alpha, since a
+    // Streamline tag names one whole resource and cannot point at a channel of another.
+    // TRANSFER_DST for the same reason the two images above have it: no pass ever clears it.
+    m_PTHitDistance = m_Graph.CreateResource({
+      .name = "ptHitDistance",
+      .format = VK_FORMAT_R16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+
     uint32_t hizMipCount = static_cast<uint32_t>(
       std::floor(std::log2(std::max(renderExtent.width, renderExtent.height)))) + 1;
     m_HiZResource = m_Graph.CreateResource({
@@ -148,6 +307,208 @@ namespace YAEngine
       }
     });
 
+    // 2b. Ray query debug view (compute). The TLAS is built before the graph and its build
+    // barrier already targets the compute stage, so this could sit anywhere; it is declared
+    // here because it consumes nothing the graph produces and so sorts to the front of the
+    // frame alongside the other compute passes.
+    //
+    // isEnabled is re-evaluated every frame, and everything it tests is known by the time
+    // Execute runs: the TLAS build precedes the graph, so IsValid already describes this
+    // frame. False drops the pass whole - no descriptor writes, no dispatch, no barrier -
+    // which is what makes the view cost nothing while it is off.
+    m_RTDebugPassIndex = m_Graph.AddPass({
+      .name = "RayQueryDebug",
+      .storageOutputs = {m_RTDebug},
+      .isCompute = true,
+      .isEnabled = [this]() {
+        return m_CurrentTexture == DEBUG_VIEW_RAY_QUERY
+          && m_Backend.GetContext().rayQuerySupported
+          && b_RayTracingEnabled
+          && m_TlasBuilder.IsValid(m_Backend.GetCurrentFrameIndex())
+          && m_MaterialTable.IsValid(m_Backend.GetCurrentFrameIndex());
+      },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        WriteRayTracingSceneDescriptors(currentFrame);
+
+        auto& pipeline = m_PSOCache.GetCompute(m_RTDebugPipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_RTDebugDescriptorSets[currentFrame].Get()}, 1);
+
+        // Bound once here rather than kept resident: the table is global and never
+        // rebuilt, so this costs one vkCmdBindDescriptorSets and the pass owes nothing
+        // to whatever bound set 2 before it.
+        auto* bindless = m_Backend.GetContext().bindlessTextures;
+        if (bindless != nullptr && bindless->IsValid())
+          pipeline.BindDescriptorSets(ctx.cmd, {bindless->GetSet()},
+            BindlessTextureRegistry::BINDLESS_TEXTURE_SET);
+
+        uint32_t w = m_Graph.GetExtent().width;
+        uint32_t h = m_Graph.GetExtent().height;
+        pipeline.Dispatch(ctx.cmd, (w + 7) / 8, (h + 7) / 8, 1);
+
+        b_RTDebugValid = true;
+      }
+    });
+
+    // 2c. The same visualization traced through the ray tracing pipeline instead: rgen,
+    // one hit group and one miss shader off a shader binding table. It writes the same
+    // image as the pass above and is mutually exclusive with it - each tests its own view
+    // id, and only one of the two can be selected - so the two never race for RTDebug.
+    //
+    // shaderStage is what makes the graph's barriers correct here: the storage image
+    // transition it needs is a ray tracing stage one, not a compute one, and the pass that
+    // samples RTDebug afterwards has to wait on the same stage.
+    m_RTPipelineDebugPassIndex = m_Graph.AddPass({
+      .name = "RTPipelineDebug",
+      .storageOutputs = {m_RTDebug},
+      .isCompute = true,
+      .shaderStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+      .isEnabled = [this]() {
+        return m_CurrentTexture == DEBUG_VIEW_RT_PIPELINE
+          && IsRayTracingPipelineAvailable()
+          && b_RayTracingEnabled
+          && m_TlasBuilder.IsValid(m_Backend.GetCurrentFrameIndex())
+          && m_MaterialTable.IsValid(m_Backend.GetCurrentFrameIndex());
+      },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        WriteRayTracingSceneDescriptors(currentFrame);
+
+        auto& pipeline = m_PSOCache.GetRayTracing(m_RTPipelineDebugPipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_RTDebugDescriptorSets[currentFrame].Get()}, 1);
+
+        // The pipeline is only ever registered on a device with a live bindless table, so
+        // this set is not optional the way it is for the ray query pass above.
+        pipeline.BindDescriptorSets(ctx.cmd, {m_Backend.GetContext().bindlessTextures->GetSet()},
+          BindlessTextureRegistry::BINDLESS_TEXTURE_SET);
+
+        // One invocation per pixel exactly, not a rounded-up tile count: a trace launch is
+        // sized in rays, so there is nothing for a workgroup to overshoot.
+        pipeline.TraceRays(ctx.cmd, m_Graph.GetExtent().width, m_Graph.GetExtent().height);
+
+        b_RTDebugValid = true;
+      }
+    });
+
+    // 2d. The path tracer. One sample per pixel per frame, feeding the two path traced debug
+    // views: PT Noisy shows the sample, PT Reference the running mean the same dispatch
+    // keeps. One pass serves both - which of the two images the tonemap pass then displays
+    // is the only difference, and whether the mean is updated at all rides on a push
+    // constant rather than on a second pipeline.
+    //
+    // Its first path vertex is read out of the G-buffer instead of traced, which is why the
+    // pass declares those as inputs: that ORDERS it after the G-buffer pass, where the
+    // debug views above sort to the front of the frame because they consume nothing.
+    m_PathTracePassIndex = m_Graph.AddPass({
+      .name = "PathTrace",
+      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth},
+      .storageOutputs = {m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance},
+      .isCompute = true,
+      .shaderStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+      .isEnabled = [this]() { return IsPathTracePassEnabled(); },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        WritePathTraceDescriptors(currentFrame);
+
+        // Two things the graph's own barriers do not cover, both for the same reason - the
+        // shared barrier table in ImageBarrier.h is written in terms of the fragment and
+        // compute stages, and only the compute bit is substituted for shaderStage:
+        //
+        // - A sampled input is made visible to VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT, and
+        //   this pass reads the G-buffer and depth from the ray tracing stage.
+        // - The accumulation image is read-modify-written, and it is the PREVIOUS frame's
+        //   trace that wrote what this one loads. The transition chain the graph emits
+        //   around it establishes write-then-read but names SHADER_WRITE as its
+        //   destination, not the read this pass also performs.
+        //
+        // One global barrier rather than a change to the table, which every raster pass
+        // shares - and whose ray tracing stage bit would not even be legal on a device
+        // without the extension.
+        VkMemoryBarrier traceInputBarrier {};
+        traceInputBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        traceInputBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        traceInputBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        vkCmdPipelineBarrier(ctx.cmd,
+          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT
+            | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+          0, 1, &traceInputBarrier, 0, nullptr, 0, nullptr);
+
+        auto& pipeline = m_PSOCache.GetRayTracing(m_PathTracePipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_PathTraceDescriptorSets[currentFrame].Get()}, 1);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_Backend.GetContext().bindlessTextures->GetSet()},
+          BindlessTextureRegistry::BINDLESS_TEXTURE_SET);
+
+        PathTraceConstants pc {};
+        pc.maxBounces = m_PathTraceMaxBounces;
+        // -1 is how the shader is told to leave the accumulation image alone rather than
+        // overwrite it with a one-sample mean, which is what the noisy view alone wants.
+        // The render path always accumulates - the mean is the image it presents.
+        pc.sampleIndex = IsPathTraceAccumulating() ? m_PathTraceSampleIndex : -1;
+        pc.fireflyClamp = m_PathTraceFireflyClamp;
+        pc.debugMode = GetPathTraceDebugMode();
+        pipeline.PushConstants(ctx.cmd, &pc);
+
+        // One invocation per pixel exactly, not a rounded-up tile count: a trace launch is
+        // sized in rays, so there is nothing for a workgroup to overshoot.
+        pipeline.TraceRays(ctx.cmd, m_Graph.GetExtent().width, m_Graph.GetExtent().height);
+
+        b_PathTraceOutputValid = true;
+      }
+    });
+
+    // 2e. Ray reconstruction guides. A plain compute pass over the G-buffer rather than an
+    // epilogue in pt_main.rgen, for two reasons: the raygen shader returns early on sky,
+    // unlit and emissive texels, so folding the stores in would mean restructuring its
+    // control flow for a consumer that does not exist yet, and its already forked set 1
+    // would grow three more storage images. What that costs is one full-screen G-buffer
+    // read plus three stores, and only on frames the path tracing render path owns - the
+    // isEnabled below is what keeps it at exactly zero everywhere else.
+    m_PathTraceGuidesPassIndex = m_Graph.AddPass({
+      .name = "PathTraceGuides",
+      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth},
+      .storageOutputs = {m_PTDiffuseAlbedo, m_PTSpecularAlbedo, m_PTNormalRoughness},
+      .isCompute = true,
+      .isEnabled = [this]() { return IsPathTracingActive(); },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        WritePathTraceGuideDescriptors(currentFrame);
+
+        // The same gap the path tracing pass covers by hand, for the same reason: the
+        // shared barrier table makes a sampled input visible to the FRAGMENT stage, and
+        // this pass reads the G-buffer and depth from a compute shader. A pass whose input
+        // is already in SHADER_READ_ONLY emits no barrier at all, so the dependency on the
+        // G-buffer write has to be stated here rather than relied on.
+        VkMemoryBarrier gbufferBarrier {};
+        gbufferBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        gbufferBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
+          | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+        gbufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(ctx.cmd,
+          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
+            | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          0, 1, &gbufferBarrier, 0, nullptr, 0, nullptr);
+
+        auto& pipeline = m_PSOCache.GetCompute(m_PathTraceGuidesPipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_PathTraceGuideDescriptorSets[currentFrame].Get()}, 1);
+
+        uint32_t w = m_Graph.GetExtent().width;
+        uint32_t h = m_Graph.GetExtent().height;
+        pipeline.Dispatch(ctx.cmd, (w + 7) / 8, (h + 7) / 8, 1);
+      }
+    });
+
     // 3. GTAO depth prefilter - the only pass that reads the reversed-Z depth buffer. It
     // writes positive linear view depth plus four reduced mips, so the sampling passes below
     // never have to know the projection convention.
@@ -156,6 +517,10 @@ namespace YAEngine
       .inputs = {m_MainDepth},
       .storageOutputs = {m_GTAODepth},
       .isCompute = true,
+      // Nothing downstream of the AO chain runs while the path tracer owns the frame:
+      // the tracer integrates occlusion for real and the deferred pass that consumes
+      // AOFinal is off.
+      .isEnabled = [this]() { return !IsPathTracingActive(); },
       .altName = "SSGIDepthPrefilter",
       .useAltName = [this]() { return b_SSGIEnabled && b_AOEnabled; },
       .execute = [this](const RGExecuteContext& ctx) {
@@ -189,6 +554,9 @@ namespace YAEngine
       .inputs = {m_TAAHistory1, m_MainVelocity, m_MainDepth},
       .storageOutputs = {m_SSGIRadiance},
       .isCompute = true,
+      // Its source is the previous frame's resolved image, which the path tracer's own
+      // accumulation supersedes, and its consumer is the GTAO pass, which is off.
+      .isEnabled = [this]() { return !IsPathTracingActive(); },
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_AOEnabled || !b_SSGIEnabled) return;
 
@@ -231,6 +599,7 @@ namespace YAEngine
       .name = "GTAOPass",
       .inputs = {m_GTAODepth, m_GBuffer1, m_SSGIRadiance},
       .colorOutputs = {m_GTAOWorkingAO, m_GTAOEdges, m_SSGIWorking, m_SSGIBentWorking},
+      .isEnabled = [this]() { return !IsPathTracingActive(); },
       .altName = "SSGIPass",
       .useAltName = [this]() { return b_SSGIEnabled && b_AOEnabled; },
       .execute = [this](const RGExecuteContext& ctx) {
@@ -266,6 +635,7 @@ namespace YAEngine
       .name = "GTAODenoise",
       .inputs = {m_GTAOWorkingAO, m_GTAOEdges, m_SSGIWorking, m_SSGIBentWorking},
       .colorOutputs = {m_AOFinal, m_SSGIFinal, m_SSGIBentFinal},
+      .isEnabled = [this]() { return !IsPathTracingActive(); },
       .altName = "SSGIDenoise",
       .useAltName = [this]() { return b_SSGIEnabled && b_AOEnabled; },
       .execute = [this](const RGExecuteContext& ctx) {
@@ -297,6 +667,10 @@ namespace YAEngine
       .name = "LightCull",
       .inputs = {m_MainDepth},
       .isCompute = true,
+      // The tile list only ever feeds the deferred and forward transparent passes, and
+      // both are off while the path tracer owns the frame - it picks its light per path
+      // vertex out of the full LightBuffer instead.
+      .isEnabled = [this]() { return !IsPathTracingActive(); },
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
@@ -335,6 +709,10 @@ namespace YAEngine
       .name = "DeferredLighting",
       .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_AOFinal, m_SSGIFinal, m_SSGIBentFinal},
       .colorOutputs = {m_LitColor},
+      // The pass the path tracer replaces. LitColor - and SSRColor after it - therefore
+      // hold the last raster frame while that path is effective; nothing reads either,
+      // because every consumer is disabled alongside this one.
+      .isEnabled = [this]() { return !IsPathTracingActive(); },
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
 
@@ -373,6 +751,8 @@ namespace YAEngine
       .inputs = {m_MainDepth},
       .storageOutputs = {m_HiZResource},
       .isCompute = true,
+      // Built for the SSR march alone, which the path tracer's bounce rays replace.
+      .isEnabled = [this]() { return !IsPathTracingActive(); },
       .execute = [this](const RGExecuteContext& ctx) {
         uint32_t mipCount = m_Graph.GetResourceDesc(m_HiZResource).mipLevels;
         uint32_t w = m_Graph.GetExtent().width;
@@ -429,6 +809,9 @@ namespace YAEngine
       .name = "SSRPass",
       .inputs = {m_LitColor, m_MainDepth, m_GBuffer1, m_GBuffer0, m_HiZResource},
       .colorOutputs = {m_SSRColor},
+      // Traced reflections are what the path tracer's specular lobe produces, so the
+      // screen space approximation has nothing to add and no consumer left.
+      .isEnabled = [this]() { return !IsPathTracingActive(); },
       .execute = [this](const RGExecuteContext& ctx) {
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
 
@@ -469,6 +852,11 @@ namespace YAEngine
       .depthOutput = m_MainDepth,
       .clearColor = false,
       .clearDepth = false,
+      // Transparent geometry is simply absent from a path traced frame in v1: it draws
+      // into SSRColor, which nothing resolves any more, and the TLAS carries it under mask
+      // 0x02 which the tracer never traces against. Stage 6 is what composites it - either
+      // by tracing that mask or by drawing this pass over the resolved image.
+      .isEnabled = [this]() { return !IsPathTracingActive(); },
       .execute = [this](const RGExecuteContext& ctx) {
         auto* frame = static_cast<FrameContext*>(ctx.userData);
         DrawTransparent(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame);
@@ -482,8 +870,12 @@ namespace YAEngine
       .externalFramebuffer = true,
       // None also runs the pass: taa.frag falls back to a passthrough copy when the
       // taaEnabled uniform is 0, which keeps the resolved image written for downstream
-      // consumers. Only the DLSS evaluate replaces the pass outright.
-      .isEnabled = [this]() { return !IsDLSSMode(m_EffectiveAntialiasingMode); },
+      // consumers. Only the DLSS evaluate replaces the pass outright - and the path
+      // tracer, whose accumulation image IS the resolve and whose input this pass would
+      // read out of a stale SSRColor.
+      .isEnabled = [this]() {
+        return !IsDLSSMode(m_EffectiveAntialiasingMode) && !IsPathTracingActive();
+      },
       .execute = [this](const RGExecuteContext& ctx) {
         auto& ssrColor = m_Graph.GetResource(m_SSRColor);
         auto historyReadHandle = m_TAAIndex == 0 ? m_TAAHistory1 : m_TAAHistory0;
@@ -516,10 +908,35 @@ namespace YAEngine
       .inputs = {m_SSRColor, m_MainDepth, m_MainVelocity},
       .storageOutputs = {m_DLSSOutput},
       .isCompute = true,
-      .isEnabled = [this]() { return IsDLSSMode(m_EffectiveAntialiasingMode); },
+      // Super resolution upscales a rasterized frame, and there is none while the path
+      // tracer owns it - the ray reconstruction pass below is the resolve that belongs to
+      // a traced one, and the two are mutually exclusive by construction.
+      .isEnabled = [this]() {
+        return IsDLSSMode(m_EffectiveAntialiasingMode) && !IsPathTracingActive();
+      },
       .execute = [this](const RGExecuteContext& ctx) {
         auto* frame = static_cast<FrameContext*>(ctx.userData);
         RunDLSSEvaluate(ctx.cmd, *frame);
+      }
+    });
+
+    // 11c. The path tracer's own resolve: denoise, upscale and anti-alias in one evaluate.
+    // It sits in the same graph slot as the super resolution pass above and writes the same
+    // image, so everything downstream keeps reading DLSSOutput and never learns which of
+    // the two filled it. A separate pass rather than a branch inside that one because the
+    // tagged inputs are different: the noisy sample and the four guides instead of the
+    // rasterized SSRColor, and declaring those in the raster pass would only make the graph
+    // order and barrier frames that never touch them.
+    m_DLSSRayReconstructionPassIndex = m_Graph.AddPass({
+      .name = "DLSSRayReconstruction",
+      .inputs = {m_PathTraceNoisy, m_MainDepth, m_MainVelocity, m_PTDiffuseAlbedo,
+        m_PTSpecularAlbedo, m_PTNormalRoughness, m_PTHitDistance},
+      .storageOutputs = {m_DLSSOutput},
+      .isCompute = true,
+      .isEnabled = [this]() { return IsRayReconstructionResolve(); },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
+        RunRayReconstructionEvaluate(ctx.cmd, *frame);
       }
     });
 
@@ -529,18 +946,29 @@ namespace YAEngine
       // jittered lit frame, so unfiltered flicker never reaches TAA. Both histories are
       // declared as inputs: History0's static writer orders this pass after the resolve,
       // History1 covers the ping-pong buffer actually sampled on alternate frames so it
-      // still gets a barrier. The DLSS output orders it after the evaluate.
-      .inputs = {m_TAAHistory0, m_TAAHistory1, m_DLSSOutput},
+      // still gets a barrier. The DLSS output orders it after the evaluate, and the path
+      // tracer's accumulation image after the trace.
+      .inputs = {m_TAAHistory0, m_TAAHistory1, m_DLSSOutput, m_PathTraceAccum},
       .isCompute = true,
       .resolution = RGResolution::Output,
       .execute = [this](const RGExecuteContext& ctx) {
         if (!b_BloomEnabled) return;
 
-        // Previous frame's resolved image: index 1 holds History1, index 0 holds History0.
-        // DLSS has already written this frame's image by now, so index 2 has no latency.
-        uint32_t bloomSrcSet = IsDLSSMode(m_EffectiveAntialiasingMode)
-          ? BLOOM_SRC_DLSS
-          : (m_TAAIndex == 0 ? 1 : 0);
+        // Keyed on the handle the resolve actually landed in rather than on the mode, so
+        // the path tracer picks index 2 or index 3 by the same rule that decides what the
+        // tone map reads - there is no second place where the two could disagree.
+        // GetPreviousResolvedColorHandle is the right question: in TAA modes bloom sources
+        // the PREVIOUS frame's history so unfiltered flicker never reaches the resolve,
+        // while DLSS keeps one output image that this frame's evaluate has already
+        // written, and so does the path tracer's accumulation image.
+        RGHandle bloomSrc = GetPreviousResolvedColorHandle();
+        uint32_t bloomSrcSet = 0;
+        if (bloomSrc == m_DLSSOutput)
+          bloomSrcSet = BLOOM_SRC_DLSS;
+        else if (bloomSrc == m_PathTraceAccum)
+          bloomSrcSet = BLOOM_SRC_PATHTRACE;
+        else
+          bloomSrcSet = bloomSrc == m_TAAHistory1 ? 1 : 0;
 
         uint32_t baseW = m_Graph.GetOutputExtent().width;
         uint32_t baseH = m_Graph.GetOutputExtent().height;
@@ -643,9 +1071,11 @@ namespace YAEngine
 
     m_HistogramPassIndex = m_Graph.AddPass({
       .name = "HistogramBuild",
-      // Slot 0 is retargeted every frame to whichever image the resolve wrote; the
-      // DLSS output is also named statically so this pass is ordered after the evaluate.
-      .inputs = {m_TAAHistory0, m_DLSSOutput},
+      // Slot 0 is retargeted every frame to whichever image the resolve wrote; the DLSS
+      // output and the path tracer's accumulation image are also named statically so this
+      // pass is ordered after the evaluate and after the trace respectively. A retargeted
+      // slot moves the barrier, not the topological edge, which is compiled once.
+      .inputs = {m_TAAHistory0, m_DLSSOutput, m_PathTraceAccum},
       .isCompute = true,
       .resolution = RGResolution::Output,
       .execute = [this](const RGExecuteContext& ctx) {
@@ -821,10 +1251,17 @@ namespace YAEngine
     m_SceneComposePassIndex = m_Graph.AddPass({
       .name = "SceneComposePass",
       .inputs = {m_TAAHistory0, m_AOFinal, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor,
-        m_SSGIFinal, m_SSGIRadiance, m_DLSSOutput},
+        m_SSGIFinal, m_SSGIRadiance, m_DLSSOutput, m_RTDebug, m_PathTraceNoisy, m_PathTraceAccum,
+        m_PTDiffuseAlbedo, m_PTSpecularAlbedo, m_PTNormalRoughness},
       .colorOutputs = {m_SceneColor},
       .execute = [this](const RGExecuteContext& ctx) {
         auto& historyCurrent = m_Graph.GetResource(GetResolvedColorHandle());
+        auto& rtDebug = m_Graph.GetResource(m_RTDebug);
+        auto& ptNoisy = m_Graph.GetResource(m_PathTraceNoisy);
+        auto& ptAccum = m_Graph.GetResource(m_PathTraceAccum);
+        auto& ptDiffuseAlbedo = m_Graph.GetResource(m_PTDiffuseAlbedo);
+        auto& ptSpecularAlbedo = m_Graph.GetResource(m_PTSpecularAlbedo);
+        auto& ptNormalRoughness = m_Graph.GetResource(m_PTNormalRoughness);
         auto& aoFinal = m_Graph.GetResource(m_AOFinal);
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
@@ -852,6 +1289,18 @@ namespace YAEngine
           ssgiFinal.GetView(), ssgiFinal.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(7,
           ssgiRadiance.GetView(), ssgiRadiance.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(8,
+          rtDebug.GetView(), rtDebug.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(9,
+          ptNoisy.GetView(), ptNoisy.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(10,
+          ptAccum.GetView(), ptAccum.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(11,
+          ptDiffuseAlbedo.GetView(), ptDiffuseAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(12,
+          ptSpecularAlbedo.GetView(), ptSpecularAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(13,
+          ptNormalRoughness.GetView(), ptNormalRoughness.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
@@ -913,7 +1362,8 @@ namespace YAEngine
     m_SwapchainPassIndex = m_Graph.AddPass({
       .name = "SwapchainPass",
       .inputs = {m_TAAHistory0, m_AOFinal, m_GBuffer0, m_GBuffer1, m_MainVelocity, m_SSRColor,
-        m_SSGIFinal, m_SSGIRadiance, m_DLSSOutput},
+        m_SSGIFinal, m_SSGIRadiance, m_DLSSOutput, m_RTDebug, m_PathTraceNoisy, m_PathTraceAccum,
+        m_PTDiffuseAlbedo, m_PTSpecularAlbedo, m_PTNormalRoughness},
       .colorOutputs = {},
       .externalFramebuffer = true,
       .externalFormat = swapFormat,
@@ -930,6 +1380,12 @@ namespace YAEngine
         auto& preResolve = m_Graph.GetResource(m_SSRColor);
         auto& ssgiFinal = m_Graph.GetResource(m_SSGIFinal);
         auto& ssgiRadiance = m_Graph.GetResource(m_SSGIRadiance);
+        auto& rtDebug = m_Graph.GetResource(m_RTDebug);
+        auto& ptNoisy = m_Graph.GetResource(m_PathTraceNoisy);
+        auto& ptAccum = m_Graph.GetResource(m_PathTraceAccum);
+        auto& ptDiffuseAlbedo = m_Graph.GetResource(m_PTDiffuseAlbedo);
+        auto& ptSpecularAlbedo = m_Graph.GetResource(m_PTSpecularAlbedo);
+        auto& ptNormalRoughness = m_Graph.GetResource(m_PTNormalRoughness);
 
         auto currentFrame = m_Backend.GetCurrentFrameIndex();
         auto& pipeline = m_PSOCache.Get(m_QuadPipeline);
@@ -950,6 +1406,18 @@ namespace YAEngine
           ssgiFinal.GetView(), ssgiFinal.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(7,
           ssgiRadiance.GetView(), ssgiRadiance.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(8,
+          rtDebug.GetView(), rtDebug.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(9,
+          ptNoisy.GetView(), ptNoisy.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(10,
+          ptAccum.GetView(), ptAccum.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(11,
+          ptDiffuseAlbedo.GetView(), ptDiffuseAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(12,
+          ptSpecularAlbedo.GetView(), ptSpecularAlbedo.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SwapChainDescriptorSets[currentFrame].WriteCombinedImageSampler(13,
+          ptNormalRoughness.GetView(), ptNormalRoughness.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SwapChainDescriptorSets[currentFrame].Get()}, 1);
         pipeline.BindDescriptorSets(ctx.cmd, {m_ExposureReadDescriptorSets[currentFrame].Get()}, 2);
@@ -1059,6 +1527,43 @@ namespace YAEngine
       // transition to SHADER_READ_ONLY for first frame's use
       TransitionImageLayout(cmd, image.GetImage(),
         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+      image.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+      m_Graph.SetResourceLayout(handle, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    }
+
+    m_Backend.GetCommandBuffer().EndSingleTimeCommands(cmd);
+  }
+
+  void Render::ClearPathTraceOutputs()
+  {
+    // None of the three is ever cleared by a pass - the sample index resets the mean by
+    // rewriting it - and the path tracing render path either resolves out of the
+    // accumulation image or hands the noisy one and the hit distance to ray
+    // reconstruction. A frame that resolves or tags them before the trace has run once (an
+    // empty scene, a failed TLAS build) would otherwise present, or denoise against, raw
+    // allocation contents; the tonemap pass samples two of them from statically accessed
+    // bindings on every device besides.
+    const VkClearColorValue black = {{ 0.0f, 0.0f, 0.0f, 0.0f }};
+    VkImageSubresourceRange range {};
+    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    range.baseMipLevel = 0;
+    range.levelCount = 1;
+    range.baseArrayLayer = 0;
+    range.layerCount = 1;
+
+    auto cmd = m_Backend.GetCommandBuffer().BeginSingleTimeCommands();
+
+    for (RGHandle handle : { m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance })
+    {
+      auto& image = m_Graph.GetResource(handle);
+
+      TransitionImageLayout(cmd, image.GetImage(),
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+      vkCmdClearColorImage(cmd, image.GetImage(),
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
+      TransitionImageLayout(cmd, image.GetImage(),
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
       image.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
       m_Graph.SetResourceLayout(handle, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);

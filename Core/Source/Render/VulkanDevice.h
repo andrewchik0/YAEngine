@@ -47,6 +47,13 @@ namespace YAEngine
       return b_Unorm16VertexSupported;
     }
 
+    // Resolved after the optional feature bits were masked, so it is the state the device
+    // was actually created with. VMA has to be told the same thing.
+    bool IsBufferDeviceAddressSupported() const
+    {
+      return b_BufferDeviceAddressSupported;
+    }
+
     VulkanQueueLocation GetGraphicsQueueLocation() const
     {
       return m_GraphicsQueue;
@@ -69,6 +76,7 @@ namespace YAEngine
     bool b_MultiDrawIndirectSupported = false;
     bool b_DrawIndirectFirstInstanceSupported = false;
     bool b_Unorm16VertexSupported = false;
+    bool b_BufferDeviceAddressSupported = false;
 
     VulkanQueueLocation m_GraphicsQueue {};
     std::vector<VulkanQueueLocation> m_ExtraGraphicsQueues;

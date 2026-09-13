@@ -21,6 +21,8 @@ namespace YAEngine
     void Destroy();
 
     bool IsOpen() const;
+    // Ends the main loop at the next iteration, through the normal shutdown path.
+    void Close();
 
     const std::vector<WindowEvent>& PollEvents();
 

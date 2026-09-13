@@ -43,6 +43,12 @@ namespace YAEngine
       return m_Size;
     }
 
+    // Only valid for a buffer created with VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT, and
+    // only on a device that granted bufferDeviceAddress. Vulkan offers no way to ask a
+    // buffer what usage it carries, so the caller holds that guarantee - asking for any
+    // other buffer is a validation error, not an address of zero.
+    VkDeviceAddress GetDeviceAddress(const RenderContext& ctx) const;
+
     void Update(uint32_t offset, const void* data, uint32_t size)
     {
       std::memcpy(static_cast<uint8_t*>(m_MappedData) + offset, data, size);

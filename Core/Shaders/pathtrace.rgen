@@ -1,0 +1,56 @@
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_nonuniform_qualifier : require
+
+// Not a permutation, unlike rt_debug.comp: the RT Pipeline debug view is only registered at
+// all on a device that granted descriptor indexing, so there is no second permutation for
+// this module to be. Defined before the include, which is what declares set 2.
+// RT_DEBUG_VIEW claims set 1 binding 3 as the output image - the path tracer forks the
+// layout from that binding up, so only the two debug views declare it.
+#define RT_BINDLESS
+#define RT_DEBUG_VIEW
+#include "raytracing_common.glsl"
+
+// Location 0, matching the traceRayEXT payload argument below and the rayPayloadInEXT
+// declarations in pathtrace.rchit and pathtrace.rmiss.
+layout(location = 0) rayPayloadEXT RayTracingPayload payload;
+
+void main()
+{
+  ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
+  // The launch is sized in whole 8x8 tiles by nothing here - vkCmdTraceRaysKHR takes the
+  // exact extent - but the guard costs nothing and keeps this identical to the compute view
+  // it is compared against.
+  if (pixel.x >= u_Frame.screenWidth || pixel.y >= u_Frame.screenHeight)
+    return;
+
+  vec3 rayOrigin;
+  vec3 rayDirection;
+  primaryRay(pixel, rayOrigin, rayDirection);
+
+  payload.hit = 0u;
+
+  // gl_RayFlagsOpaqueEXT, the same flag rt_debug.comp's ray query uses, so the two views
+  // resolve the same surface for every pixel: it forces every candidate opaque and the
+  // any-hit cutout in pathtrace.rahit never runs. Dropping the flag is what switches the
+  // cutout on, and it is the path tracer's job to do that - it would change this image and
+  // break the pixel comparison the SBT stack is validated with.
+  traceRayEXT(u_Tlas, gl_RayFlagsOpaqueEXT, RT_MASK_OPAQUE,
+    0u, // sbtRecordOffset: one hit group, and every instance names it
+    0u, // sbtRecordStride: no per-geometry records to step over
+    0u, // missIndex: the only miss shader
+    rayOrigin, RT_DEBUG_TMIN, rayDirection, RT_DEBUG_TMAX,
+    0); // payload location
+
+  vec3 color = RT_DEBUG_MISS_COLOR;
+
+  if (payload.hit != 0u)
+  {
+    color = shadeDebugHit(payload.instanceIndex, payload.primitiveIndex,
+      payload.objectToWorld, payload.barycentrics, rayDirection);
+  }
+
+  imageStore(outRayQuery, pixel, vec4(color, 1.0));
+}

@@ -176,6 +176,8 @@ namespace YAEngine
     m_ViewportWidth = outputExtent.width;
     m_ViewportHeight = outputExtent.height;
     m_ResolutionMode = m_EffectiveAntialiasingMode;
+    m_ResolutionPath = m_EffectiveRenderPath;
+    b_ResolutionDevResolve = b_PathTraceDevResolve;
     m_ResolutionOutputExtent = outputExtent;
   }
 

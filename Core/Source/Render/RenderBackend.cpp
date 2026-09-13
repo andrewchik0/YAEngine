@@ -1,6 +1,7 @@
 #include "RenderBackend.h"
 
 #include "DebugMarker.h"
+#include "RayTracingRequirements.h"
 #include "Utils/Log.h"
 
 namespace YAEngine
@@ -13,13 +14,18 @@ namespace YAEngine
     // first Vulkan call, then it dictates what the instance and the device must carry.
     if (specs.enableDLSS)
     {
-      m_Streamline.Init({ StreamlineFeature::DLSS });
+      // Both plugins are asked for at once: they are probed and reported independently, so
+      // a device that has super resolution and not ray reconstruction still gets the first,
+      // and an unsupported one contributes no extensions to the device we are about to make.
+      m_Streamline.Init({ StreamlineFeature::DLSS, StreamlineFeature::RayReconstruction });
       m_Streamline.ApplyRequirements(m_Requirements);
     }
     else
     {
       YA_LOG_INFO("Render", "DLSS disabled by launch option, Streamline not initialized");
     }
+
+    RegisterRayTracingRequirements(m_Requirements);
 
     m_VulkanInstance.Init(specs, m_Requirements);
     DebugMarker::Init(m_VulkanInstance.Get(), specs.debugUtils);
@@ -53,14 +59,18 @@ namespace YAEngine
         graphicsForSL.family, graphicsForSL.index, computeForSL.family, computeForSL.index);
     }
 
-    m_Allocator.Init(m_VulkanInstance.Get(), m_Device.Get(), m_PhysicalDevice.Get());
+    m_Allocator.Init(m_VulkanInstance.Get(), m_Device.Get(), m_PhysicalDevice.Get(),
+      m_Device.IsBufferDeviceAddressSupported());
     m_SwapChain.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), window, m_Allocator.Get());
 
     m_CommandBuffer.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), m_MaxFramesInFlight);
     m_Sync.Init(m_Device.Get(), m_PhysicalDevice.Get(), m_Surface.Get(), m_MaxFramesInFlight, m_SwapChain.GetImageCount());
     m_CommandBuffer.SetGraphicsQueue(m_Sync.GetQueue());
 
-    m_DescriptorPool.Init(m_Device.Get());
+    // The extension requests were resolved against the physical device above, so this
+    // already knows whether acceleration structure descriptors are a legal type here.
+    m_DescriptorPool.Init(m_Device.Get(),
+      m_Requirements.IsDeviceExtensionEnabled(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME));
 
     std::vector<char> cacheData;
     {
@@ -97,6 +107,7 @@ namespace YAEngine
     m_Context.pipelineCache = m_PipelineCache;
     m_Context.layoutCache = &m_LayoutCache;
     m_Context.geometryArena = &m_GeometryArena;
+    m_Context.bindlessTextures = &m_BindlessTextures;
     m_Context.depthClampSupported = m_Device.IsDepthClampSupported();
     m_Context.multiDrawIndirectSupported = m_Device.IsMultiDrawIndirectSupported();
     m_Context.drawIndirectFirstInstanceSupported = m_Device.IsDrawIndirectFirstInstanceSupported();
@@ -136,7 +147,47 @@ namespace YAEngine
     if (!m_Context.unorm16VertexSupported)
       YA_LOG_WARN("Render", "Quantized shadow positions are unavailable on this device, the exact position stream is forced");
 
+    ResolveRayTracingCapabilities(m_PhysicalDevice.Get(), m_Requirements, m_Context);
+
+    if (m_Context.raytracingSupported && !m_Context.rayTracing.Load(m_Context.device))
+    {
+      // An enabled extension whose entry points the device will not hand back leaves
+      // nothing callable, so the capability is withdrawn rather than crashed into.
+      YA_LOG_WARN("Vulkan", "Ray tracing entry points could not be loaded, ray tracing is disabled");
+      m_Context.raytracingSupported = false;
+      m_Context.rayQuerySupported = false;
+    }
+
+    // Separate from the acceleration structure group on purpose: a device could grant the
+    // structures without the pipeline extension, and everything built on the structures
+    // alone - the TLAS, the ray query views - has to keep working there.
+    if (m_Context.raytracingSupported && !m_Context.rayTracing.LoadPipeline(m_Context.device))
+    {
+      YA_LOG_WARN("Vulkan",
+        "Ray tracing pipeline entry points could not be loaded, only ray query tracing is available");
+    }
+
+    if (m_Context.raytracingSupported)
+    {
+      YA_LOG_INFO("Vulkan",
+        "Ray tracing entry points loaded, every mesh builds a bottom level acceleration structure (scratch alignment %u bytes)",
+        m_Context.accelerationStructureProperties.minAccelerationStructureScratchOffsetAlignment);
+    }
+
+    if (m_Context.rayTracing.IsPipelineLoaded())
+    {
+      YA_LOG_INFO("Vulkan",
+        "Ray tracing pipelines available: handle size %u, handle alignment %u, base alignment %u, max recursion %u",
+        m_Context.rayTracingPipelineProperties.shaderGroupHandleSize,
+        m_Context.rayTracingPipelineProperties.shaderGroupHandleAlignment,
+        m_Context.rayTracingPipelineProperties.shaderGroupBaseAlignment,
+        m_Context.rayTracingPipelineProperties.maxRayRecursionDepth);
+    }
+
     m_GeometryArena.Init(m_Context);
+    // After the capability resolve above, which is what decides whether the table exists at
+    // all, and before Render::Init builds the first pipeline layout that names its set.
+    m_BindlessTextures.Init(m_Context);
   }
 
   void RenderBackend::Destroy()
@@ -166,6 +217,9 @@ namespace YAEngine
 
     m_Sync.Destroy();
     m_ImGUI.Destroy();
+    // Before the layout cache and the allocator: the table holds an image of its own, and
+    // its layout is one the cache owns.
+    m_BindlessTextures.Destroy(m_Context);
     m_GeometryArena.Destroy(m_Context);
     m_CommandBuffer.Destroy();
     m_LayoutCache.Destroy(m_Device.Get());

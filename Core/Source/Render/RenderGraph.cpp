@@ -109,6 +109,7 @@ namespace YAEngine
     m_ExecutionOrder = TopologicalSort();
 
     m_CurrentLayouts.resize(m_Resources.size(), VK_IMAGE_LAYOUT_UNDEFINED);
+    m_ResourceWriteStages.resize(m_Resources.size(), VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
     m_Compiled = true;
   }
 
@@ -569,6 +570,20 @@ namespace YAEngine
       auto& image = ResolveResource(handle);
       auto info = LookupBarrierInfo(layout, targetLayout);
 
+      // The barrier table is written entirely in terms of the compute stage for storage
+      // images. Substituting that bit is what lets a pass whose shaders run somewhere else
+      // - a trace rays pass - wait, and be waited on, in the stage it really uses.
+      if ((info.srcStage & VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT) != 0)
+      {
+        info.srcStage = (info.srcStage & ~VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+          | m_ResourceWriteStages[handle];
+      }
+      if ((info.dstStage & VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT) != 0)
+      {
+        info.dstStage = (info.dstStage & ~VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+          | pass.info.shaderStage;
+      }
+
       if (barrierCount >= MAX_BARRIERS)
       {
         YA_LOG_ERROR("Render", "InsertBarriers: exceeded MAX_BARRIERS (%u)", MAX_BARRIERS);
@@ -687,6 +702,10 @@ namespace YAEngine
         for (auto handle : pass.info.storageOutputs)
         {
           m_CurrentLayouts[handle] = VK_IMAGE_LAYOUT_GENERAL;
+          // Recorded unconditionally, not inside InsertBarriers: a pass whose output is
+          // already in GENERAL emits no barrier at all, and the next reader would then
+          // still wait on whichever stage wrote it last time.
+          m_ResourceWriteStages[handle] = pass.info.shaderStage;
           ResolveResource(handle).SetLayout(VK_IMAGE_LAYOUT_GENERAL);
         }
         DebugMarker::EndLabel(cmd);
@@ -855,6 +874,17 @@ namespace YAEngine
     m_Resources[handle].desc.mipLevels = mipLevels;
   }
 
+  RGHandle RenderGraph::FindResource(std::string_view name) const
+  {
+    for (size_t i = 0; i < m_Resources.size(); i++)
+    {
+      if (m_Resources[i].desc.name == name)
+        return static_cast<RGHandle>(i);
+    }
+
+    return RG_INVALID_HANDLE;
+  }
+
   VulkanImage& RenderGraph::ResolveResource(RGHandle handle)
   {
     auto& res = m_Resources[handle];
@@ -892,5 +922,7 @@ namespace YAEngine
     BuildFramebuffers();
 
     std::fill(m_CurrentLayouts.begin(), m_CurrentLayouts.end(), VK_IMAGE_LAYOUT_UNDEFINED);
+    std::fill(m_ResourceWriteStages.begin(), m_ResourceWriteStages.end(),
+      VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT);
   }
 }

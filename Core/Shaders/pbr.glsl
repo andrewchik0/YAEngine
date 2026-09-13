@@ -16,13 +16,52 @@ vec2 hammersley(uint i, uint N)
   return vec2(float(i) / float(N), radicalInverseVdC(i));
 }
 
+// The denominator is written as (1 - xi) + a^2 * xi, not the textbook 1 + (a^2 - 1) * xi.
+// The two are algebraically the same expression, so a converged image does not move - but the
+// textbook one subtracts nearly equal numbers and all that survives the cancellation is
+// a^2 * xi. At the small alphas the path tracer reaches just above its delta lobe threshold
+// that remainder drops below half an ulp of 1.0, the quotient rounds to exactly 1, and the old
+// sinTheta = sqrt(1 - cosTheta * cosTheta) took the square root of exactly zero - which is NaN
+// wherever the driver lowers sqrt to x * inversesqrt(x). Reading cos^2 and sin^2 off the same
+// denominator instead makes cos^2 <= 1 and sin^2 >= 0 true by construction, and for xi < 1 the
+// denominator is a sum of two non-negative terms that are never both zero.
 vec3 importanceSampleGGX(vec2 Xi, vec3 N, float roughness)
 {
   float a = roughness * roughness;
+  float a2Xi = a * a * Xi.y;
+  float den = (1.0 - Xi.y) + a2Xi;
 
   float phi = 2.0 * PI * Xi.x;
-  float cosTheta = sqrt((1.0 - Xi.y) / (1.0 + (a * a - 1.0) * Xi.y));
-  float sinTheta = sqrt(1.0 - cosTheta * cosTheta);
+  float cos2Theta = (1.0 - Xi.y) / den;
+  float sin2Theta = a2Xi / den;
+
+  // Xi.y == 0 puts sin^2 at exactly zero - 2^-24 of the samples, and the first sample of every
+  // Hammersley sequence - and sqrt is no more trustworthy on a zero here than it was above.
+  float cosTheta = cos2Theta > 0.0 ? sqrt(cos2Theta) : 0.0;
+  float sinTheta = sin2Theta > 0.0 ? sqrt(sin2Theta) : 0.0;
+
+  vec3 H;
+  H.x = cos(phi) * sinTheta;
+  H.y = sin(phi) * sinTheta;
+  H.z = cosTheta;
+
+  vec3 up = abs(N.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+  vec3 tangent = normalize(cross(up, N));
+  vec3 bitangent = cross(N, tangent);
+
+  vec3 sampleVec = tangent * H.x + bitangent * H.y + N * H.z;
+  return normalize(sampleVec);
+}
+
+// Cosine-weighted hemisphere sample around N, in the same tangent frame
+// importanceSampleGGX builds so the two lobes of a path tracer cannot end up in different
+// bases. The pdf is NdotL / PI, which is exactly what the Lambert term albedo / PI * NdotL
+// cancels against - a caller sampling this way multiplies by the albedo and nothing else.
+vec3 sampleCosineHemisphere(vec2 Xi, vec3 N)
+{
+  float phi = 2.0 * PI * Xi.x;
+  float cosTheta = sqrt(1.0 - Xi.y);
+  float sinTheta = sqrt(Xi.y);
 
   vec3 H;
   H.x = cos(phi) * sinTheta;

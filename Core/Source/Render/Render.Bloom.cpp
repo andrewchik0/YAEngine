@@ -117,11 +117,14 @@ namespace YAEngine
     }
 
     // One pre-written set per source the chain can start from: the two TAA history
-    // buffers and the DLSS output. Rewriting a single set every frame races with the
-    // previous frame still reading it - the sets are not per frame-in-flight.
-    const RGHandle historyHandles[3] = { m_TAAHistory0, m_TAAHistory1, m_DLSSOutput };
-    m_BloomHistorySrcSets.resize(3);
-    for (uint32_t i = 0; i < 3; i++)
+    // buffers, the DLSS output and the path tracer's accumulation image. Rewriting a
+    // single set every frame races with the previous frame still reading it - the sets
+    // are not per frame-in-flight. Index order must match BLOOM_SRC_*.
+    const RGHandle historyHandles[4] = {
+      m_TAAHistory0, m_TAAHistory1, m_DLSSOutput, m_PathTraceAccum
+    };
+    m_BloomHistorySrcSets.resize(4);
+    for (uint32_t i = 0; i < 4; i++)
     {
       m_BloomHistorySrcSets[i].Init(ctx, m_BloomDownsampleDescriptorSets[0].GetLayout());
 

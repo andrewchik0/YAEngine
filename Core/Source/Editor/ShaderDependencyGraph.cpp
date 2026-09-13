@@ -11,7 +11,9 @@ namespace YAEngine
   bool ShaderDependencyGraph::IsCompilable(const std::string& filename) const
   {
     auto ext = std::filesystem::path(filename).extension().string();
-    return ext == ".vert" || ext == ".frag" || ext == ".comp" || ext == ".geom";
+    return ext == ".vert" || ext == ".frag" || ext == ".comp" || ext == ".geom"
+        || ext == ".rgen" || ext == ".rchit" || ext == ".rmiss" || ext == ".rahit"
+        || ext == ".rint" || ext == ".rcall";
   }
 
   void ShaderDependencyGraph::ScanFile(const std::filesystem::path& filePath, const std::filesystem::path& baseDir)
@@ -76,6 +78,8 @@ namespace YAEngine
 
         auto ext = entry.path().extension().string();
         if (ext == ".vert" || ext == ".frag" || ext == ".comp" || ext == ".geom"
+            || ext == ".rgen" || ext == ".rchit" || ext == ".rmiss" || ext == ".rahit"
+            || ext == ".rint" || ext == ".rcall"
             || ext == ".glsl" || ext == ".h")
         {
           ScanFile(entry.path(), dir);

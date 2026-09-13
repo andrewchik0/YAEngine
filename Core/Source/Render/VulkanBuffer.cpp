@@ -151,6 +151,18 @@ namespace YAEngine
     return result;
   }
 
+  VkDeviceAddress VulkanBuffer::GetDeviceAddress(const RenderContext& ctx) const
+  {
+    VkBufferDeviceAddressInfo info {
+      .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+      .buffer = m_Buffer,
+    };
+
+    // Core since Vulkan 1.2 and exported by the loader, unlike every KHR ray tracing
+    // entry point the addresses it returns end up feeding.
+    return vkGetBufferDeviceAddress(ctx.device, &info);
+  }
+
   void VulkanBuffer::Destroy(const RenderContext& ctx)
   {
     if (m_Allocation)

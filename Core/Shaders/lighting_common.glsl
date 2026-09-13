@@ -6,8 +6,9 @@
 #include "pbr.glsl"
 #include "debug_ramps.glsl"
 
-// Lights (set 2)
-#include "../Shared/LightData.h"
+// Lights (set 2). light_eval.glsl carries LightData.h and the falloff/cone math, which the
+// path tracer's ray generation shader reuses from a different set entirely.
+#include "light_eval.glsl"
 layout(std430, set = 2, binding = 0) readonly buffer LightBufferSSBO
 {
   LightBuffer u_Lights;
@@ -501,9 +502,9 @@ vec3 computeDirectLightingSplit(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 v
 
   // Directional light (not tile-culled)
   {
-    vec3 L = normalize(-u_Lights.directional.directionIntensity.xyz);
-    float intensity = u_Lights.directional.directionIntensity.w;
-    vec3 radiance = u_Lights.directional.colorPad.rgb * intensity;
+    vec3 L;
+    vec3 radiance = evaluateDirectionalLight(u_Lights.directional.directionIntensity,
+      u_Lights.directional.colorPad.rgb, L);
 
     float shadowFactor = calculateCSMShadow(worldPos, -viewPos.z, normal);
     radiance *= shadowFactor;
@@ -524,16 +525,12 @@ vec3 computeDirectLightingSplit(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 v
   {
     int i = int(u_Tiles[tileIndex].indices[t]);
     vec3 lightPos = u_Lights.pointLights[i].positionRadius.xyz;
-    float lightRadius = u_Lights.pointLights[i].positionRadius.w;
 
-    vec3 L = lightPos - worldPos;
-    float dist = length(L);
-    if (dist > lightRadius) continue;
-    L /= dist;
-
-    float att = 1.0 - (dist * dist) / (lightRadius * lightRadius);
-    att = att * att;
-    vec3 radiance = u_Lights.pointLights[i].colorIntensity.rgb * u_Lights.pointLights[i].colorIntensity.w * att;
+    vec3 L;
+    float dist;
+    vec3 radiance;
+    if (!evaluatePointLight(u_Lights.pointLights[i].positionRadius,
+      u_Lights.pointLights[i].colorIntensity, worldPos, L, dist, radiance)) continue;
 
     int pointShadowIdx = floatBitsToInt(u_Lights.pointLights[i].shadowPad.x);
     if (pointShadowIdx >= 0)
@@ -549,22 +546,13 @@ vec3 computeDirectLightingSplit(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 v
   {
     int i = int(u_Tiles[tileIndex].indices[tilePtCount + t]);
     vec3 lightPos = u_Lights.spotLights[i].positionRadius.xyz;
-    float lightRadius = u_Lights.spotLights[i].positionRadius.w;
 
-    vec3 L = lightPos - worldPos;
-    float dist = length(L);
-    if (dist > lightRadius) continue;
-    L /= dist;
-
-    vec3 lightDir = u_Lights.spotLights[i].directionInnerCone.xyz;
-    float innerCos = u_Lights.spotLights[i].directionInnerCone.w;
-    float outerCos = u_Lights.spotLights[i].colorOuterCone.w;
-    float theta = dot(L, -lightDir);
-    float spotFactor = clamp((theta - outerCos) / (innerCos - outerCos), 0.0, 1.0);
-
-    float att = 1.0 - (dist * dist) / (lightRadius * lightRadius);
-    att = att * att;
-    vec3 radiance = u_Lights.spotLights[i].colorOuterCone.rgb * u_Lights.spotLights[i].intensityShadow.x * att * spotFactor;
+    vec3 L;
+    float dist;
+    vec3 radiance;
+    if (!evaluateSpotLight(u_Lights.spotLights[i].positionRadius,
+      u_Lights.spotLights[i].directionInnerCone, u_Lights.spotLights[i].colorOuterCone,
+      u_Lights.spotLights[i].intensityShadow.x, worldPos, L, dist, radiance)) continue;
 
     int spotShadowIdx = floatBitsToInt(u_Lights.spotLights[i].intensityShadow.y);
     if (spotShadowIdx >= 0)
