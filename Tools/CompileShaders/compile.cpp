@@ -6,6 +6,10 @@
 #include <string>
 #include <vector>
 #include <algorithm>
+#include <atomic>
+#include <mutex>
+#include <thread>
+#define NOMINMAX
 #include <windows.h>
 
 namespace fs = std::filesystem;
@@ -142,7 +146,7 @@ enum class ParseState
   SKIPPING
 };
 
-bool ParseShaderFromFile(const fs::path& filePath, std::set<std::string>& includedFiles, std::string& out)
+bool ParseShaderFromFile(const fs::path& filePath, std::set<std::string>& includedFiles, std::string& out, std::ostream& err)
 {
   fs::path canonicalPath;
   try
@@ -157,7 +161,7 @@ bool ParseShaderFromFile(const fs::path& filePath, std::set<std::string>& includ
   auto lines = ReadLines(canonicalPath);
   if (lines.empty() && !fs::exists(canonicalPath))
   {
-    std::cerr << "Failed to read shader file: " << canonicalPath.string() << std::endl;
+    err << "Failed to read shader file: " << canonicalPath.string() << std::endl;
     return false;
   }
 
@@ -213,8 +217,8 @@ bool ParseShaderFromFile(const fs::path& filePath, std::set<std::string>& includ
         size_t closeQuote = args.find('"', 1);
         if (closeQuote == std::string::npos || closeQuote == 1)
         {
-          std::cerr << "Malformed #include directive in "
-                    << canonicalPath.string() << ":" << (i + 1) << std::endl;
+          err << "Malformed #include directive in "
+              << canonicalPath.string() << ":" << (i + 1) << std::endl;
           return false;
         }
 
@@ -222,8 +226,8 @@ bool ParseShaderFromFile(const fs::path& filePath, std::set<std::string>& includ
 
         if (includeName.empty())
         {
-          std::cerr << "Empty filename in #include directive in "
-                    << canonicalPath.string() << ":" << (i + 1) << std::endl;
+          err << "Empty filename in #include directive in "
+              << canonicalPath.string() << ":" << (i + 1) << std::endl;
           return false;
         }
 
@@ -244,10 +248,10 @@ bool ParseShaderFromFile(const fs::path& filePath, std::set<std::string>& includ
           includedFiles.insert(includeKey);
 
           std::string includeOut;
-          if (!ParseShaderFromFile(includePath, includedFiles, includeOut))
+          if (!ParseShaderFromFile(includePath, includedFiles, includeOut, err))
           {
-            std::cerr << "  included from " << canonicalPath.string()
-                      << ":" << (i + 1) << std::endl;
+            err << "  included from " << canonicalPath.string()
+                << ":" << (i + 1) << std::endl;
             return false;
           }
           out += includeOut;
@@ -330,11 +334,16 @@ static std::string PrepareSource(const std::string& source, const std::vector<st
   return result;
 }
 
+// Handle inheritance is process-wide: a glslc launched by another thread between CreatePipe and
+// closing our write end would inherit that end, and ReadFile would then also wait for it to exit.
+static std::mutex s_ProcessLaunchMutex;
+
 static int RunGlslc(const fs::path& glslc,
                     const fs::path& input,
                     const fs::path& output,
                     const std::string& stage,
-                    bool optimize)
+                    bool optimize,
+                    std::ostream& err)
 {
   std::vector<std::wstring> args = {
     glslc.wstring(),
@@ -373,9 +382,11 @@ static int RunGlslc(const fs::path& glslc,
   HANDLE hReadPipe = nullptr;
   HANDLE hWritePipe = nullptr;
 
+  std::unique_lock launchLock(s_ProcessLaunchMutex);
+
   if (!CreatePipe(&hReadPipe, &hWritePipe, &sa, 0))
   {
-    std::cerr << "Failed to create pipe for glslc stderr" << std::endl;
+    err << "Failed to create pipe for glslc stderr" << std::endl;
     return 1;
   }
 
@@ -399,7 +410,7 @@ static int RunGlslc(const fs::path& glslc,
       nullptr, nullptr,
       &si, &pi))
   {
-    std::cerr << "Failed to launch glslc" << std::endl;
+    err << "Failed to launch glslc" << std::endl;
     CloseHandle(hReadPipe);
     CloseHandle(hWritePipe);
     return 1;
@@ -407,6 +418,7 @@ static int RunGlslc(const fs::path& glslc,
 
   // Close write end in parent so ReadFile can detect EOF
   CloseHandle(hWritePipe);
+  launchLock.unlock();
 
   // Read stderr output
   std::string stderrOutput;
@@ -431,10 +443,45 @@ static int RunGlslc(const fs::path& glslc,
 
   if (exitCode != 0 && !stderrOutput.empty())
   {
-    std::cerr << stderrOutput;
+    err << stderrOutput;
   }
 
   return static_cast<int>(exitCode);
+}
+
+static bool CompileDirectoryShader(const fs::path& glslc,
+                                   const fs::path& shader,
+                                   const fs::path& outputDir,
+                                   bool optimize,
+                                   std::ostream& err)
+{
+  std::set<std::string> includedFiles;
+  std::string text;
+
+  if (!ParseShaderFromFile(shader, includedFiles, text, err))
+  {
+    err << "Failed to preprocess shader: " << shader.string() << std::endl;
+    return false;
+  }
+
+  text = PrepareSource(text);
+
+  auto tempPath = WriteTempShader(text, shader);
+
+  fs::path output = outputDir / (shader.filename().string() + ".spv");
+
+  std::string stage = shader.extension().string().substr(1);
+
+  int exitCode = RunGlslc(glslc, tempPath, output, stage, optimize, err);
+  RemoveTempShader(tempPath);
+
+  if (exitCode != 0)
+  {
+    err << "glslc failed for " << shader.string() << " (exit code " << exitCode << ")" << std::endl;
+    return false;
+  }
+
+  return true;
 }
 
 int main(int argc, char** argv)
@@ -484,7 +531,7 @@ int main(int argc, char** argv)
     std::set<std::string> includedFiles;
     std::string text;
 
-    if (!ParseShaderFromFile(inputFile, includedFiles, text))
+    if (!ParseShaderFromFile(inputFile, includedFiles, text, std::cerr))
     {
       std::cerr << "Failed to preprocess shader: " << inputFile.string() << std::endl;
       return 1;
@@ -511,7 +558,7 @@ int main(int argc, char** argv)
     }
     std::wcout << std::endl;
 
-    int exitCode = RunGlslc(glslc, tempPath, outputPath, stage, optimize);
+    int exitCode = RunGlslc(glslc, tempPath, outputPath, stage, optimize, std::cerr);
     RemoveTempShader(tempPath);
 
     if (exitCode != 0)
@@ -532,39 +579,42 @@ int main(int argc, char** argv)
 
   auto shaders = CollectShaders(sourceDir);
 
-  bool anyFailed = false;
+  fs::create_directories(outputPath);
 
-  for (auto& shader : shaders)
+  std::atomic<size_t> nextShader = 0;
+  std::atomic<bool> anyFailed = false;
+  std::mutex consoleMutex;
+
+  auto compileWorker = [&]
   {
-    std::set<std::string> includedFiles;
-    std::string text;
-
-    if (!ParseShaderFromFile(shader, includedFiles, text))
+    for (size_t index = nextShader++; index < shaders.size(); index = nextShader++)
     {
-      std::cerr << "Failed to preprocess shader: " << shader.string() << std::endl;
-      anyFailed = true;
-      continue;
+      const fs::path& shader = shaders[index];
+
+      {
+        std::scoped_lock lock(consoleMutex);
+        std::wcout << L"Compiling " << shader.filename().wstring() << std::endl;
+      }
+
+      // Buffered so diagnostics of shaders failing at the same time don't interleave
+      std::ostringstream errors;
+
+      if (!CompileDirectoryShader(glslc, shader, outputPath, optimize, errors))
+      {
+        anyFailed = true;
+        std::scoped_lock lock(consoleMutex);
+        std::cerr << errors.str();
+      }
     }
+  };
 
-    text = PrepareSource(text);
+  size_t threadCount = std::min<size_t>(std::max(std::thread::hardware_concurrency(), 1u), shaders.size());
 
-    auto tempPath = WriteTempShader(text, shader);
-
-    fs::path output = outputPath / (shader.filename().string() + ".spv");
-    fs::create_directories(output.parent_path());
-
-    std::string stage = shader.extension().string().substr(1);
-
-    std::wcout << L"Compiling " << shader.filename().wstring() << std::endl;
-
-    int exitCode = RunGlslc(glslc, tempPath, output, stage, optimize);
-    RemoveTempShader(tempPath);
-
-    if (exitCode != 0)
-    {
-      std::cerr << "glslc failed for " << shader.string() << " (exit code " << exitCode << ")" << std::endl;
-      anyFailed = true;
-    }
+  {
+    std::vector<std::jthread> workers;
+    workers.reserve(threadCount);
+    for (size_t i = 0; i < threadCount; ++i)
+      workers.emplace_back(compileWorker);
   }
 
   return anyFailed ? 1 : 0;
