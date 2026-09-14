@@ -106,6 +106,20 @@ namespace YAEngine
 
   struct HiddenTag {};
 
+  // Absence of BakeOverrideComponent means Auto. An explicit Include or Exclude covers the
+  // whole subtree; the nearest one up the hierarchy wins - see Scene/BakeExclusion.h.
+  enum class BakeOverride : uint8_t
+  {
+    Auto,
+    Include,
+    Exclude
+  };
+
+  struct BakeOverrideComponent
+  {
+    BakeOverride mode = BakeOverride::Auto;
+  };
+
 
   struct MaterialComponent
   {
@@ -217,12 +231,17 @@ namespace YAEngine
   struct IrradianceVolumeComponent
   {
     glm::vec3 halfExtents { 5.0f };
-    // Node spacing in meters, always one of IRRADIANCE_SPACINGS (Utils/IrradianceGrid.h); the box snaps to the world lattice, not vice versa. Kept as a float for scene format stability - snapped on load, editor only offers valid values.
-    float spacing = 1.0f;
-    // Cube face resolution for capturing a node; an L1 fit averages the whole hemisphere so 16-32 is plenty and bake time scales with its square. Must match BakeLimits::VOLUME_DEFAULT_CAPTURE_RESOLUTION, clamped on load.
-    uint32_t captureResolution = 32;
-    // How much of the sphere a node may see from inside before the bake rejects it as buried; per-volume since a dense interior needs a different value than an open landscape. Must match BakeLimits::VOLUME_DEFAULT_BACKFACE_THRESHOLD, clamped on load.
+    // Brick node spacing range in meters: fine next to geometry, coarse in open air. Always values of IRRADIANCE_SPACINGS (Utils/IrradianceGrid.h) with min <= max; the box snaps to the world lattice, not vice versa. Floats for scene format stability - snapped on load, editor only offers valid values.
+    float minSpacing = 0.5f;
+    float maxSpacing = 4.0f;
+    // Fraction of a node's probe rays that may hit the inside of single-sided geometry before the bake rejects it as buried; per-volume since a dense interior needs a different value than an open landscape. Must match BakeLimits::VOLUME_DEFAULT_BACKFACE_THRESHOLD, clamped on load.
     float backfaceRatioThreshold = 0.25f;
+    // Buried nodes within their local spacing of a back face are moved past it and integrated again instead of being dilated from their neighbours. Read by the bake only.
+    bool virtualOffset = true;
+    // Extra clearance in meters, beyond the minimum probe clearance, at which a virtual offset node is placed in front of its nearest back face. Must match BakeLimits::VOLUME_DEFAULT_VIRTUAL_OFFSET_BIAS, clamped on load.
+    float virtualOffsetBias = 0.05f;
+    // Width in meters over which the volume hands its box faces over to the volume enclosing it or to the sky. Stored in the baked file, so a change applies on rebake. Must match BakeLimits::VOLUME_DEFAULT_EDGE_FADE, clamped on load.
+    float edgeFade = 1.0f;
     bool baked = false;       // runtime only, reset on load
     uint32_t atlasSlot = 0;   // runtime only, index in the volume atlas
     std::string bakedVolumePath;

@@ -1,0 +1,219 @@
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_nonuniform_qualifier : require
+
+// Bake-time probes. RayTracedProbeBaker dispatches this over a chunk of points once per pass, and
+// every point traces a spherical Fibonacci set of directions from its exact position - a probe
+// floats in space, so there is no surface normal to offset along - recording what the rays hit.
+// In integrate mode it also gathers the radiance each ray brings back and projects it onto L1 SH.
+// Everything past the first hit is pt_path.glsl, so a baked probe converges on what the path
+// tracer sees from the same point.
+//
+// Always bindless, for the reason pt_main.rgen gives.
+#define RT_BINDLESS
+#include "raytracing_common.glsl"
+#include "light_eval.glsl"
+#include "../Shared/PathTraceData.h"
+#include "../Shared/ProbeBakeData.h"
+
+// Bindings 0-2 are the scene, declared in raytracing_common.glsl; from 3 up the bake's own.
+// The display cubemap the path tracer samples on a miss.
+layout(set = 1, binding = 3) uniform samplerCube u_Skybox;
+
+// A copy of the bake snapshot's lights, never one of the frame loop's light buffer slots.
+layout(std430, set = 1, binding = 4) readonly buffer ProbeBakeLightSSBO
+{
+  LightBuffer u_Lights;
+};
+
+layout(std430, set = 1, binding = 5) readonly buffer ProbeBakePointSSBO
+{
+  ProbeBakePoint u_Points[];
+};
+
+// Written afresh by every pass, see ProbeBakeRecord.
+layout(std430, set = 1, binding = 6) writeonly buffer ProbeBakeRecordSSBO
+{
+  ProbeBakeRecord u_Records[];
+};
+
+layout(push_constant) uniform ProbeBakePushBlock
+{
+  ProbeBakeConstants pc;
+};
+
+layout(location = 0) rayPayloadEXT RayTracingPayload payload;
+layout(location = 1) rayPayloadEXT ShadowRayPayload shadowPayload;
+
+#include "pt_path.glsl"
+
+// The L1 basis SphericalHarmonics.cpp finalizes with. SHL1Accumulator::Finalize turns these sums
+// into coefficients, so both sides have to use the same constants.
+const float SH_Y0 = 0.2820947918;
+const float SH_Y1 = 0.4886025119;
+
+// Split one seed into the pass's rotation stream and the path streams of its samples. Any two
+// distinct values do: the seed is hashed again with each.
+const uint ROTATION_STREAM_SALT = 0x9E3779B9u;
+const uint PATH_STREAM_SALT = 0x7F4A7C15u;
+
+// The seed key and the pass hashed into each other, the way initRandomSeed hashes a pixel and a
+// frame. Nothing about the order, the chunk or the block a point was dispatched in enters, which
+// is what keeps a bake independent of how the scheduler split it.
+uint pointPassSeed(ivec3 seedKey, uint passIndex)
+{
+  return pcgHash(uint(seedKey.x) ^ pcgHash(uint(seedKey.y) ^ pcgHash(uint(seedKey.z) ^ pcgHash(passIndex))));
+}
+
+// Uniformly distributed over all rotations: three uniforms make a unit quaternion uniform on the
+// 3-sphere (Shoemake, "Uniform Random Rotations", Graphics Gems III).
+mat3 randomRotation(inout uint state)
+{
+  float u = randomFloat(state);
+  float theta1 = 2.0 * PI * randomFloat(state);
+  float theta2 = 2.0 * PI * randomFloat(state);
+
+  float r1 = sqrt(1.0 - u);
+  float r2 = sqrt(u);
+  float x = r1 * sin(theta1);
+  float y = r1 * cos(theta1);
+  float z = r2 * sin(theta2);
+  float w = r2 * cos(theta2);
+
+  return mat3(
+    1.0 - 2.0 * (y * y + z * z), 2.0 * (x * y + w * z), 2.0 * (x * z - w * y),
+    2.0 * (x * y - w * z), 1.0 - 2.0 * (x * x + z * z), 2.0 * (y * z + w * x),
+    2.0 * (x * z + w * y), 2.0 * (y * z - w * x), 1.0 - 2.0 * (x * x + y * y));
+}
+
+// Point i of a count point spherical Fibonacci set: equal area steps in z, golden angle steps in
+// azimuth. The set stratifies the sphere within a pass. The random rotation is what makes each of
+// its directions uniformly distributed on its own - which is what lets every sample carry the
+// same weight - and what keeps the passes from repeating each other's directions.
+vec3 sphericalFibonacci(uint i, uint count)
+{
+  const float GOLDEN_RATIO_CONJUGATE = 0.6180339887;
+
+  float z = 1.0 - (2.0 * float(i) + 1.0) / float(count);
+  float radius = sqrt(max(1.0 - z * z, 0.0));
+  float phi = 2.0 * PI * fract(float(i) * GOLDEN_RATIO_CONJUGATE);
+  return vec3(radius * cos(phi), radius * sin(phi), z);
+}
+
+// Zero in a record is "nothing recorded yet", see ProbeBakeRecord.
+bool isNearer(float distance, float recorded)
+{
+  return recorded == 0.0 || distance < recorded;
+}
+
+void main()
+{
+  uint pointIndex = pc.firstPoint + gl_LaunchIDEXT.x;
+  ProbeBakePoint point = u_Points[pointIndex];
+  ProbeBakeRecord record = ProbeBakeRecord(vec4(0.0), vec4(0.0), vec4(0.0), 0.0, 0u, 0u, 0.0,
+    vec3(0.0), 0.0, 0u, 0u, 0u, 0u);
+
+  uint seed = pointPassSeed(point.seedKey, pc.passIndex);
+  uint rotationState = pcgHash(seed ^ ROTATION_STREAM_SALT);
+
+  mat3 rotation = randomRotation(rotationState);
+  bool integrate = pc.mode == PROBE_BAKE_MODE_INTEGRATE;
+  PathSettings pathSettings = PathSettings(pc.maxBounces, pc.fireflyClamp, false);
+
+  for (uint sampleIndex = 0u; sampleIndex < pc.samplesPerPass; sampleIndex++)
+  {
+    vec3 direction = rotation * sphericalFibonacci(sampleIndex, pc.samplesPerPass);
+
+    // No opaque flag, so the alpha cutout in pathtrace.rahit lets a probe see through foliage
+    // exactly as a path does.
+    payload.hit = 0u;
+    traceRayEXT(u_Tlas, gl_RayFlagsNoneEXT, RT_MASK_OPAQUE,
+      0u, // sbtRecordOffset: one hit group, and every instance names it
+      0u, // sbtRecordStride: no per-geometry records to step over
+      uint(PT_PRIMARY_MISS_INDEX),
+      point.position, PT_RAY_TMIN, direction, PT_RAY_TMAX,
+      0); // payload location
+
+    record.rayCount++;
+    vec3 radiance = vec3(0.0);
+
+    // A probe ray is the first bounce of the receiver that reads the probe, so what it brings back
+    // directly - the sky here, an emitter below - is clamped the way tracePath clamps the addend of
+    // every bounce. That only bounds variance and does not reproduce the path tracer's clamp: the
+    // path tracer clamps throughput * L after the receiver's BRDF weight, the bake clamps incoming
+    // L at a throughput of one, so where the clamp bites probes come out darker - about 2x in
+    // clamped directions at albedo 0.5. A bake matches the path tracer only with the clamp at 0 or
+    // where no contribution reaches the ceiling.
+    if (payload.hit == 0u)
+    {
+      if (integrate)
+        radiance = clampContribution(texture(u_Skybox, direction).rgb, pc.fireflyClamp);
+    }
+    else
+    {
+      float hitT = payload.hitT;
+      if (isNearer(hitT, record.nearestHitDistance))
+        record.nearestHitDistance = hitT;
+      // Every hit lies beyond PT_RAY_TMIN, so a close distance of zero counts none.
+      if (hitT < point.closeHitDistance)
+        record.closeHitCount++;
+
+      // Looking at the inside of geometry: light gathered there would leak through the wall, so
+      // the sample gathers nothing and is counted for the caller's classification instead. A
+      // double sided instance is meant to be seen from both sides and is shaded as usual.
+      bool doubleSided = (u_Instances[payload.instanceIndex].flags & RT_INSTANCE_DOUBLE_SIDED) != 0u;
+      if (payload.frontFacing == 0u && !doubleSided)
+      {
+        record.backfaceCount++;
+        if (isNearer(hitT, record.nearestBackfaceDistance))
+        {
+          record.nearestBackfaceDistance = hitT;
+          record.nearestBackfaceDirection = direction;
+        }
+      }
+      else if (integrate)
+      {
+        // Resolved before tracePath runs: the path traces through the same payload.
+        RayHitGeometry hit = resolveHitGeometry(payload.instanceIndex, payload.primitiveIndex,
+          payload.objectToWorld, payload.barycentrics, direction);
+        PathSurface surface = resolveHitMaterial(hit, payload.barycentrics);
+
+        // tracePath starts from a PBR response and leaves an emitting first vertex to its caller.
+        if (surface.emissiveTexel)
+        {
+          radiance = clampContribution(surface.emissive, pc.fireflyClamp);
+        }
+        else
+        {
+          // Reseeded per sample, so no stream runs past one path: a single stream walked through
+          // a whole pass would share long runs of pcgHash's orbit with other points and passes.
+          uint pathState = pcgHash(seed ^ pcgHash(sampleIndex ^ PATH_STREAM_SALT));
+          PathDebug pathDebug = PathDebug(0.0, -1.0, vec3(0.0), vec3(0.0));
+          tracePath(hit.position, hit.normal, -direction, surface.albedo, surface.metallic,
+            surface.roughness, vec3(1.0), pathSettings, PT_FIRST_VERTEX_COIN, pathState,
+            radiance, pathDebug);
+        }
+      }
+    }
+
+    if (integrate)
+    {
+      // Zeroed but still counted: dropping the sample from the weight sum as well would bias the
+      // estimate upward wherever paths go bad.
+      if (any(isnan(radiance)) || any(isinf(radiance)))
+        radiance = vec3(0.0);
+
+      // The raw sums of SHL1Accumulator::coefficients at a solid angle of one per sample, see
+      // ProbeBakeRecord::weightSum.
+      vec4 basis = vec4(SH_Y0, SH_Y1 * direction);
+      record.shR += radiance.r * basis;
+      record.shG += radiance.g * basis;
+      record.shB += radiance.b * basis;
+      record.weightSum += 1.0;
+    }
+  }
+
+  u_Records[pointIndex] = record;
+}

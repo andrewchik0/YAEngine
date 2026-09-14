@@ -21,6 +21,7 @@
 #include "ReflectionProbeAtlas.h"
 #include "ReflectionProbeStorageBuffer.h"
 #include "IrradianceVolumeStorage.h"
+#include "BakeLimits.h"
 #include "GTAOConstants.h"
 #include "PathTraceData.h"
 #include "Assets/Handle.h"
@@ -34,7 +35,8 @@
 #include "Editor/ShaderHotReload.h"
 #include "OffscreenRenderer.h"
 #include "ReflectionProbeBaker.h"
-#include "IrradianceVolumeBaker.h"
+#include "RayTracedProbeBaker.h"
+#include "Utils/IrradianceBrickLayout.h"
 #endif
 
 namespace YAEngine
@@ -79,6 +81,98 @@ namespace YAEngine
     // Set instead of the pixels when the frame could not be copied
     std::string error;
   };
+
+  struct IrradianceVolumeBakeAllResult
+  {
+    struct Volume
+    {
+      entt::entity entity {};
+      // Baked and saved by this call. A volume that failed keeps its earlier file, which the
+      // reload at the end still loads and marks baked.
+      bool rebaked = false;
+    };
+
+    // False when no volume was attempted: the scene has no volumes, the ray traced baker is
+    // unavailable, or the bake scene could not be built. The log names which.
+    bool bakeSceneBuilt = false;
+    // Every volume of the scene, filled once the bake scene is built.
+    std::vector<Volume> volumes;
+  };
+
+  struct IrradianceVolumeBakeCounts
+  {
+    uint32_t uniqueNodes = 0;
+    // Unique nodes that are not stitched; stitched ones are interpolated instead.
+    uint32_t integratedNodes = 0;
+    // Classified at their own position, so virtual offset nodes accepted afterwards still count here.
+    uint32_t buriedNodes = 0;
+    // Not buried but nearer to geometry than BakeLimits::VOLUME_MIN_PROBE_CLEARANCE_FRACTION allows.
+    uint32_t tooCloseNodes = 0;
+    // Neither buried nor too close, but with at least BakeLimits::VOLUME_MAX_ENCLOSED_FRACTION of its
+    // rays hitting geometry within BakeLimits::VOLUME_ENCLOSURE_DISTANCE_FRACTION of its spacing.
+    uint32_t enclosedNodes = 0;
+    // Buried nodes whose nearest back face lies within their spacing, when the volume's virtual
+    // offset is on. Accepted ones passed all three tests from their offset position and end valid;
+    // rejected ones, those whose offset would exceed their spacing included, are dilated.
+    uint32_t virtualOffsetCandidates = 0;
+    uint32_t virtualOffsetAccepted = 0;
+    uint32_t virtualOffsetRejected = 0;
+    // The extra integration of the offset positions.
+    double virtualOffsetSeconds = 0.0;
+  };
+
+  // Everything a placement preview depends on besides the scene geometry, compared exactly: a
+  // preview whose fingerprint no longer matches its volume is stale.
+  struct IrradianceVolumePlacementFingerprint
+  {
+    glm::vec3 center { 0.0f };
+    glm::quat rotation { 1.0f, 0.0f, 0.0f, 0.0f };
+    glm::vec3 halfExtents { 0.0f };
+    float minSpacing = 0.0f;
+    float maxSpacing = 0.0f;
+    float backfaceRatioThreshold = 0.0f;
+
+    bool operator==(const IrradianceVolumePlacementFingerprint&) const = default;
+  };
+
+  struct IrradianceVolumePlacementPreview
+  {
+    IrradianceVolumePlacementFingerprint fingerprint;
+    // Empty when the layout built. Otherwise why there is none: the preview could not run (no ray
+    // traced baker, no bake scene) or the layout failed. Only the fingerprint, the query counters
+    // and the timings are then set.
+    std::string error;
+    // What the Details panel, the brick gizmo and the bridge read. The layout itself is dropped
+    // after validation: at the limits it takes hundreds of megabytes per volume.
+    uint32_t minSpacingIndex = 0;
+    uint32_t maxSpacingIndex = 0;
+    std::vector<IrradianceBrick> bricks;
+    std::array<IrradianceBrickLevelStats, IRRADIANCE_SPACINGS.size()> levelStats {};
+    uint32_t indirectionCells = 0;
+    uint32_t queryBatches = 0;
+    uint32_t queryPoints = 0;
+    // Validation runs only on a layout that built.
+    bool validationPassed = false;
+    std::string validationFailure;
+    double totalSeconds = 0.0;
+    // BuildIrradianceBrickLayout, its geometry queries included.
+    double layoutSeconds = 0.0;
+    double querySeconds = 0.0;
+  };
+
+  // Cost of a brick layout, sized with the brick format as planned, before it exists.
+  struct IrradianceVolumePlacementEstimate
+  {
+    uint32_t bricks = 0;
+    uint32_t uniqueNodes = 0;
+    uint32_t stitchedNodes = 0;
+    // Unique nodes that get integrated; stitched ones are interpolated instead.
+    uint32_t bakedNodes = 0;
+    uint32_t indirectionCells = 0;
+    uint64_t runtimeBytes = 0;
+    uint64_t diskBytes = 0;
+    uint64_t primarySamples = 0;
+  };
 #endif
 
   class Render
@@ -98,8 +192,11 @@ namespace YAEngine
     static constexpr int32_t DEBUG_VIEW_WIREFRAME = 7;
     static constexpr int MIN_PROBE_BOUNCES = 1;
     static constexpr int MAX_PROBE_BOUNCES = 4;
-    static constexpr int MIN_VOLUME_BOUNCES = 1;
-    static constexpr int MAX_VOLUME_BOUNCES = 4;
+    // The volume bake traces pt_path.glsl's estimator, so it takes the path tracer's ranges.
+    static constexpr int MIN_VOLUME_BOUNCES = PT_MIN_BOUNCES;
+    static constexpr int MAX_VOLUME_BOUNCES = PT_MAX_BOUNCES;
+    static constexpr int MIN_VOLUME_SAMPLES = int(BakeLimits::VOLUME_MIN_SAMPLES_PER_PROBE);
+    static constexpr int MAX_VOLUME_SAMPLES = int(BakeLimits::RT_PROBE_MAX_SAMPLES_PER_PROBE);
 
     void Init(GLFWwindow* window, const RenderSpecs &specs);
     void Destroy();
@@ -263,6 +360,8 @@ namespace YAEngine
     float& GetFogStartDistance() { return m_FogStartDistance; }
     int& GetProbeBounceCount() { return m_ProbeBounceCount; }
     int& GetVolumeBounceCount() { return m_VolumeBounceCount; }
+    int& GetVolumeSampleCount() { return m_VolumeSampleCount; }
+    float& GetVolumeFireflyClamp() { return m_VolumeFireflyClamp; }
     bool& GetIrradianceVolumesEnabled() { return b_IrradianceVolumesEnabled; }
     float& GetIrradianceNormalBias() { return m_IrradianceNormalBias; }
     // Master switch for everything ray traced, the per-frame TLAS build included. Has no
@@ -437,7 +536,7 @@ namespace YAEngine
     // error has to stay under before the shadow visibly leaves its caster.
     int m_ShadowCascadeLods[CSM_CASCADE_COUNT] = { 0, 1, 1, 2 };
     // False at startup and after any invalidation that bypasses the digests
-    // (probe/volume bakes, a shadows-off stretch).
+    // (reflection probe bakes, a shadows-off stretch).
     bool b_ShadowAtlasContentValid = false;
     // Reason to charge the next redraw with when the digests cannot carry it.
     ShadowInvalidation m_ShadowCachePendingReason = ShadowInvalidation::None;
@@ -468,10 +567,13 @@ namespace YAEngine
     // Number of probe bake passes in a bake-all run. Every pass after the first
     // lets probes pick up the light their neighbours captured in the previous one.
     int m_ProbeBounceCount = 1;
-    // Same idea for irradiance volumes. Two by default: bake time grows linearly
-    // with the pass count and is the binding constraint here, while a third bounce
-    // adds only a few percent of energy at typical albedo.
-    int m_VolumeBounceCount = 2;
+    // Path bounces, samples per probe and firefly clamp (0 = off) of the ray traced
+    // irradiance volume bake. The clamp defaults to 10, not 100: small, very bright emitters
+    // near a node (string light bulbs) otherwise bake a colored blob, and against the path
+    // traced reference 10 errs no more than 100, while 2 already biases dark.
+    int m_VolumeBounceCount = 3;
+    int m_VolumeSampleCount = int(BakeLimits::VOLUME_DEFAULT_SAMPLES_PER_PROBE);
+    float m_VolumeFireflyClamp = 10.0f;
     bool b_IrradianceVolumesEnabled = true;
     // The volume UBO is not rebuilt from the per-frame snapshot, so it is uploaded
     // only when it actually changed - once per frame in flight after each change.
@@ -520,11 +622,8 @@ namespace YAEngine
 
     // probeCenter != nullptr fits the CSM cascades around that point instead of the
     // camera frustum, so one atlas render covers all six faces of a probe bake.
-    // probeRadius > 0 widens that fit to a box of capture points - an irradiance
-    // volume renders the atlas once for the whole box, never once per node.
     void RenderShadowMaps(FrameContext& frame, VkCommandBuffer cmd,
-      uint32_t frameIndex, const glm::vec3* probeCenter = nullptr,
-      float probeRadius = 0.0f);
+      uint32_t frameIndex, const glm::vec3* probeCenter = nullptr);
     void SetUpCamera(FrameContext& frame);
     // Turns the selected mode into the one this frame can really run.
     void ResolveAntialiasingMode();
@@ -540,7 +639,7 @@ namespace YAEngine
     void CreateShadowIndirectResources();
     void DestroyShadowIndirectResources();
 
-    // Set 3 bindings 5-9. Re-run after every volume atlas rebuild - the image
+    // Set 3 bindings 5-10. Re-run after every volume atlas rebuild - the image
     // views change and stale ones would dangle.
     void WriteIrradianceVolumeDescriptors();
 
@@ -818,6 +917,9 @@ namespace YAEngine
     bool b_IrradianceVolumesVisible = true;
     bool b_VolumeNodesVisible = false;
     bool b_VolumeInvalidNodesVisible = false;
+    bool b_VolumeBricksVisible = true;
+    // Wire boxes the editor's baked node overlay queued this frame; reset with the gizmo renderer.
+    uint32_t m_VolumeNodeGizmosDrawn = 0;
     VolumeNodeColorMode m_VolumeNodeColorMode = VolumeNodeColorMode::Irradiance;
     bool b_CollidersVisible = false;
     bool b_CameraFrustumsVisible = true;
@@ -864,15 +966,6 @@ namespace YAEngine
     void RecordSwapchainReadback(VkCommandBuffer cmd, uint32_t imageIndex);
     void LatchSwapchainReadback();
     void DestroySwapchainReadback();
-
-    // Backface mask pipelines for the irradiance volume node classification. Their
-    // render pass belongs to BackfaceRatioSampler, which is built lazily when a bake
-    // first needs it, so they cannot be registered from InitPipelines like the rest.
-    // [0] non-instanced, [1] instanced.
-    PipelineHandle m_BackfaceMaskPipelines[2] {};
-    void InitBackfaceMaskPipelines(VkRenderPass renderPass);
-    void DrawMeshesBackfaceMask(VkCommandBuffer cmd, FrameContext& frame,
-      VkDescriptorSet frameUBO);
 #endif
 
     // Pass indices
@@ -1090,7 +1183,6 @@ namespace YAEngine
     std::vector<DrawCommand> m_DepthDrawCommands;
 #ifdef YA_EDITOR
     std::vector<DrawCommand> m_PickDrawCommands;
-    std::vector<DrawCommand> m_BackfaceDrawCommands;
 #endif
     std::vector<DrawCommand> m_ShadowDrawCommands;
     std::vector<DrawCommand> m_TransparentDrawCommands;
@@ -1164,8 +1256,8 @@ namespace YAEngine
       glm::vec3 max;
     };
     std::vector<ShadowBounds> m_ShadowBounds;
-    // maxFramesInFlight + 1 slots: the extra one belongs to the probe and irradiance
-    // volume bakers, which render the atlas outside the frame loop.
+    // maxFramesInFlight + 1 slots: the extra one belongs to the reflection probe
+    // baker, which renders the atlas outside the frame loop.
     std::vector<VulkanBuffer> m_ShadowModelBuffers;
     std::vector<VulkanDescriptorSet> m_ShadowModelDescriptorSets;
     std::vector<VulkanBuffer> m_ShadowIndirectBuffers;
@@ -1233,6 +1325,10 @@ namespace YAEngine
     bool& GetIrradianceVolumesVisible() { return b_IrradianceVolumesVisible; }
     bool& GetVolumeNodesVisible() { return b_VolumeNodesVisible; }
     bool& GetVolumeInvalidNodesVisible() { return b_VolumeInvalidNodesVisible; }
+    bool& GetVolumeBricksVisible() { return b_VolumeBricksVisible; }
+    // Set by the node overlay once it has queued its gizmos; the brick preview budget yields to it.
+    uint32_t GetVolumeNodeGizmosDrawn() const { return m_VolumeNodeGizmosDrawn; }
+    void SetVolumeNodeGizmosDrawn(uint32_t count) { m_VolumeNodeGizmosDrawn = count; }
     VolumeNodeColorMode& GetVolumeNodeColorMode() { return m_VolumeNodeColorMode; }
     bool& GetCollidersVisible() { return b_CollidersVisible; }
     bool& GetCameraFrustumsVisible() { return b_CameraFrustumsVisible; }
@@ -1267,12 +1363,49 @@ namespace YAEngine
     void BakeProbe(entt::entity entity, class Scene& scene, class AssetManager& assets,
       bool writeToDisk = true);
     void BakeAllProbes(class Scene& scene, class AssetManager& assets);
-    // writeToDisk == false skips the .yaiv write, for intermediate bounce passes.
-    // outData receives the freshly baked volume when it is not null; the caller then
-    // owns refreshing the atlas, which lets a bounce loop avoid a disk round-trip.
-    bool BakeIrradianceVolume(entt::entity entity, class Scene& scene, class AssetManager& assets,
-      bool writeToDisk = true, IrradianceVolumeFileData* outData = nullptr);
-    void BakeAllIrradianceVolumes(class Scene& scene, class AssetManager& assets);
+    // Ray traced, into a bake scene built for this call. Saves the .yaiv, then reloads every
+    // volume; on failure nothing is reloaded.
+    bool BakeIrradianceVolume(entt::entity entity, class Scene& scene, class AssetManager& assets);
+    // Builds one bake scene for every volume, bakes them all to disk, then reloads them.
+    IrradianceVolumeBakeAllResult BakeAllIrradianceVolumes(class Scene& scene, class AssetManager& assets);
+    // Irradiance volumes bake only by ray tracing, so false disables every volume bake.
+    bool IsRayTracedBakeAvailable() const { return m_RayTracedProbeBaker.IsAvailable(); }
+    // Fills the TLAS and material table bake slots from a bake snapshot on a single-time
+    // command buffer. Nothing that reads either bake slot may still be in flight. Returns
+    // whether both slots hold a traceable scene afterwards.
+    bool BuildRayTracingBakeScene(const SceneSnapshot& snapshot, class AssetManager& assets);
+
+    // Brick wireframes drawn for the selected volume's preview at most. GizmoRenderer shares
+    // 32768 wire instances per frame between every depth tested gizmo, and the baked node
+    // overlay can already take 20000 of them, so the cap drops by the node boxes that overlay
+    // draws, down to MAX_DRAWN_PREVIEW_BRICKS_WITH_NODES.
+    static constexpr uint32_t MAX_DRAWN_PREVIEW_BRICKS = 10000;
+    static constexpr uint32_t MAX_DRAWN_PREVIEW_BRICKS_WITH_NODES = 4000;
+    // Every how many bricks of each spacing level the wireframes draw, in preview order. The
+    // cap is shared out per level, a level needing less than its share passing the rest on, so
+    // the few fine bricks that show refinement survive a coarse majority. A level draws
+    // ceil(levelStats[level].bricks / stride) bricks. drawnNodeGizmos is GetVolumeNodeGizmosDrawn.
+    static std::array<uint32_t, IRRADIANCE_SPACINGS.size()> GetPreviewBrickDrawStrides(
+      const IrradianceVolumePlacementPreview& preview, uint32_t drawnNodeGizmos);
+    // Lays out the sparse bricks the volume would bake with, by ray traced geometry queries into
+    // a bake scene built for this call, validates the layout and keeps its summary for the entity,
+    // a failed layout included. nullptr, with an error logged, when the entity has no volume, the
+    // ray traced baker is unavailable or the bake scene could not be built; the last two replace
+    // the entity's kept preview with one carrying the error.
+    const IrradianceVolumePlacementPreview* PreviewIrradianceVolumePlacement(entt::entity entity,
+      class Scene& scene, class AssetManager& assets);
+    const IrradianceVolumePlacementPreview* FindIrradianceVolumePlacementPreview(entt::entity entity) const;
+    void ClearIrradianceVolumePlacementPreviews() { m_VolumePlacementPreviews.clear(); }
+    // Drops the previews of entities that were destroyed or lost their volume.
+    void PruneIrradianceVolumePlacementPreviews(class Scene& scene);
+    static IrradianceVolumePlacementFingerprint ComputeIrradianceVolumePlacementFingerprint(class Scene& scene,
+      entt::entity entity);
+    static IrradianceVolumePlacementEstimate EstimateIrradianceVolumePlacement(const IrradianceVolumePlacementPreview& preview,
+      uint32_t samplesPerProbe);
+    // By spacing index, coarse to fine: blue, cyan, green, yellow, red.
+    static glm::vec4 GetPlacementBrickColor(uint32_t spacingIndex);
+    // See IrradianceVolumeStorage::GetGeneration.
+    uint32_t GetIrradianceVolumeGeneration() const { return m_VolumeStorage.GetGeneration(); }
 #endif
 
     ReflectionProbeAtlas& GetProbeAtlas() { return m_ProbeAtlas; }
@@ -1281,10 +1414,24 @@ namespace YAEngine
 #ifdef YA_EDITOR
     ShaderHotReload m_ShaderHotReload;
     ReflectionProbeBaker m_ProbeBaker;
-    IrradianceVolumeBaker m_VolumeBaker;
+    RayTracedProbeBaker m_RayTracedProbeBaker;
+    // Per volume entity; cleared on scene change, pruned of destroyed entities.
+    std::unordered_map<entt::entity, IrradianceVolumePlacementPreview> m_VolumePlacementPreviews;
+
+    // The brick layout of a volume placement, by geometry queries into the bake scene
+    // BuildRayTracingBakeScene last built. The one path both the placement preview and the bake
+    // lay bricks out by, so the preview shows what the bake gets. Not validated.
+    IrradianceBrickLayout BuildIrradianceVolumeBrickLayout(const IrradianceVolumePlacementFingerprint& placement,
+      double& outQuerySeconds);
+
+    // One volume against the bake scene BuildRayTracingBakeScene last built, with the lights
+    // of the BuildBakeSceneSnapshot call that scene came from: layout, integration, dilation,
+    // stitching. Saves the .yaiv and logs the per-volume result.
+    bool BakeIrradianceVolumeInBakeScene(entt::entity entity, class Scene& scene,
+      class AssetManager& assets, const LightBuffer& lights, IrradianceVolumeBakeCounts& outCounts);
 #endif
 
     friend class OffscreenRenderer;
-    friend class BackfaceRatioSampler;
+    friend class RayTracedProbeBaker;
   };
 }

@@ -6,6 +6,7 @@
 #include "Assets/AssetManager.h"
 #include "Render/BakeLimits.h"
 #include "Utils/IrradianceGrid.h"
+#include "Utils/Log.h"
 
 namespace YAEngine
 {
@@ -417,9 +418,12 @@ namespace YAEngine
         auto& iv = reg.get<IrradianceVolumeComponent>(e);
         YAML::Node n;
         n["halfExtents"] = SerializeVec3(iv.halfExtents);
-        n["spacing"] = iv.spacing;
-        n["captureResolution"] = iv.captureResolution;
+        n["minSpacing"] = iv.minSpacing;
+        n["maxSpacing"] = iv.maxSpacing;
         n["backfaceRatioThreshold"] = iv.backfaceRatioThreshold;
+        n["virtualOffset"] = iv.virtualOffset;
+        n["virtualOffsetBias"] = iv.virtualOffsetBias;
+        n["edgeFade"] = iv.edgeFade;
         if (!iv.bakedVolumePath.empty())
           n["bakedVolume"] = iv.bakedVolumePath;
         return n;
@@ -428,18 +432,37 @@ namespace YAEngine
         IrradianceVolumeComponent iv;
         if (n["halfExtents"]) iv.halfExtents = DeserializeVec3(n["halfExtents"]);
         // Snapped on read so a scene written before the world lattice, or edited by hand, still lands on a lattice the other volumes share.
-        if (n["spacing"]) iv.spacing = SnapIrradianceSpacing(n["spacing"].as<float>());
-        // Clamped like the probe resolution above, so a hand-edited scene cannot put a value in the component that the UI combo silently misreports.
-        if (n["captureResolution"])
+        // A scene written before adaptive bricks has one uniform "spacing"; as both bounds it keeps baking the same lattice.
+        if (n["spacing"])
         {
-          iv.captureResolution = std::clamp(n["captureResolution"].as<uint32_t>(),
-            BakeLimits::VOLUME_MIN_CAPTURE_RESOLUTION, BakeLimits::VOLUME_MAX_CAPTURE_RESOLUTION);
+          float spacing = SnapIrradianceSpacing(n["spacing"].as<float>());
+          iv.minSpacing = spacing;
+          iv.maxSpacing = spacing;
+        }
+        if (n["minSpacing"]) iv.minSpacing = SnapIrradianceSpacing(n["minSpacing"].as<float>());
+        if (n["maxSpacing"]) iv.maxSpacing = SnapIrradianceSpacing(n["maxSpacing"].as<float>());
+        if (iv.minSpacing > iv.maxSpacing)
+        {
+          YA_LOG_WARN("Scene", "Irradiance volume min spacing %g m exceeds max spacing %g m, max raised to %g m",
+            double(iv.minSpacing), double(iv.maxSpacing), double(iv.minSpacing));
+          iv.maxSpacing = iv.minSpacing;
         }
         // Absent in scenes written before node classification existed; those keep the component default rather than silently baking with the test switched off.
         if (n["backfaceRatioThreshold"])
         {
           iv.backfaceRatioThreshold = std::clamp(n["backfaceRatioThreshold"].as<float>(),
             BakeLimits::VOLUME_MIN_BACKFACE_THRESHOLD, BakeLimits::VOLUME_MAX_BACKFACE_THRESHOLD);
+        }
+        if (n["virtualOffset"]) iv.virtualOffset = n["virtualOffset"].as<bool>();
+        if (n["virtualOffsetBias"])
+        {
+          iv.virtualOffsetBias = std::clamp(n["virtualOffsetBias"].as<float>(),
+            BakeLimits::VOLUME_MIN_VIRTUAL_OFFSET_BIAS, BakeLimits::VOLUME_MAX_VIRTUAL_OFFSET_BIAS);
+        }
+        if (n["edgeFade"])
+        {
+          iv.edgeFade = std::clamp(n["edgeFade"].as<float>(),
+            BakeLimits::VOLUME_MIN_EDGE_FADE, BakeLimits::VOLUME_MAX_EDGE_FADE);
         }
         if (n["bakedVolume"]) iv.bakedVolumePath = n["bakedVolume"].as<std::string>();
         iv.baked = false;
@@ -830,6 +853,35 @@ namespace YAEngine
       [](entt::registry& reg, entt::entity e, const YAML::Node&) {
         if (!reg.all_of<HiddenTag>(e))
           reg.emplace<HiddenTag>(e);
+      }
+    );
+
+    // A scalar, and only for an explicit override: Auto is the absence of the component, so
+    // a null node here is what keeps it out of the scene file.
+    registry.Register<BakeOverrideComponent>("bakeOverride",
+      [](const entt::registry& reg, entt::entity e) -> YAML::Node {
+        auto& c = reg.get<BakeOverrideComponent>(e);
+        YAML::Node n;
+        if (c.mode == BakeOverride::Include)
+          n = "include";
+        else if (c.mode == BakeOverride::Exclude)
+          n = "exclude";
+        return n;
+      },
+      [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
+        std::string value = n.IsScalar() ? n.as<std::string>() : std::string();
+        if (value == "include" || value == "exclude")
+        {
+          reg.emplace_or_replace<BakeOverrideComponent>(e, BakeOverrideComponent {
+            .mode = value == "include" ? BakeOverride::Include : BakeOverride::Exclude,
+          });
+          return;
+        }
+
+        if (value != "auto")
+          YA_LOG_WARN("Scene", "Unknown bakeOverride value '%s', loaded as auto", value.c_str());
+        if (reg.all_of<BakeOverrideComponent>(e))
+          reg.remove<BakeOverrideComponent>(e);
       }
     );
   }

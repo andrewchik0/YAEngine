@@ -119,6 +119,7 @@ set(SOURCE_FILES
   Source/Utils/ServiceRegistry.h
   Source/Utils/FrameCaptureSpec.cpp
   Source/Utils/FrameCaptureSpec.h
+  Source/Utils/FormatText.h
   Source/Utils/CameraOrientation.h
   Source/LayerManager.h
   Source/Input/InputSystem.cpp
@@ -198,6 +199,10 @@ set(SOURCE_FILES
   Source/Utils/SphericalHarmonics.cpp
   Source/Utils/IrradianceGrid.h
   Source/Utils/IrradianceGrid.cpp
+  Source/Utils/IrradianceBrickLayout.h
+  Source/Utils/IrradianceBrickLayout.cpp
+  Source/Utils/IrradianceBrickBake.h
+  Source/Utils/IrradianceBrickBake.cpp
   Source/Utils/SplinePath3D.h
   Source/Utils/RoadMeshGenerator.h
   Source/Utils/RoadMeshGenerator.cpp
@@ -237,11 +242,11 @@ if(YA_EDITOR)
     Source/Render/GpuProfiler.cpp
     Source/Render/OffscreenRenderer.h
     Source/Render/OffscreenRenderer.cpp
-    Source/Render/BackfaceRatioSampler.h
-    Source/Render/BackfaceRatioSampler.cpp
     Source/Render/ReflectionProbeBaker.cpp
-    Source/Render/IrradianceVolumeBaker.h
-    Source/Render/IrradianceVolumeBaker.cpp
+    Source/Render/RayTracedProbeBaker.h
+    Source/Render/RayTracedProbeBaker.cpp
+    Source/Scene/BakeExclusion.h
+    Source/Scene/BakeExclusion.cpp
     Source/Editor/EditorLayer.cpp
     Source/Editor/EditorLayer.Actions.cpp
     Source/Editor/EditorLayer.h

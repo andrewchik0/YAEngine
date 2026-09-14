@@ -200,6 +200,10 @@ namespace YAEngine
     settings["fogStartDistance"] = render.GetFogStartDistance();
     settings["probeBounces"] = render.GetProbeBounceCount();
     settings["volumeBounces"] = render.GetVolumeBounceCount();
+    settings["volumeSamples"] = std::clamp(render.GetVolumeSampleCount(),
+      Render::MIN_VOLUME_SAMPLES, Render::MAX_VOLUME_SAMPLES);
+    settings["volumeFireflyClamp"] = std::clamp(render.GetVolumeFireflyClamp(),
+      PT_MIN_FIREFLY_CLAMP, PT_MAX_FIREFLY_CLAMP);
     settings["irradianceVolumes"] = render.GetIrradianceVolumesEnabled();
     settings["irradianceNormalBias"] = render.GetIrradianceNormalBias();
     return settings;
@@ -367,6 +371,16 @@ namespace YAEngine
       render.GetVolumeBounceCount() = std::clamp(settings["volumeBounces"].as<int>(),
         Render::MIN_VOLUME_BOUNCES, Render::MAX_VOLUME_BOUNCES);
     }
+    if (settings["volumeSamples"])
+    {
+      render.GetVolumeSampleCount() = std::clamp(settings["volumeSamples"].as<int>(),
+        Render::MIN_VOLUME_SAMPLES, Render::MAX_VOLUME_SAMPLES);
+    }
+    if (settings["volumeFireflyClamp"])
+    {
+      render.GetVolumeFireflyClamp() = std::clamp(settings["volumeFireflyClamp"].as<float>(),
+        PT_MIN_FIREFLY_CLAMP, PT_MAX_FIREFLY_CLAMP);
+    }
     if (settings["irradianceVolumes"])
       render.GetIrradianceVolumesEnabled() = settings["irradianceVolumes"].as<bool>();
     if (settings["irradianceNormalBias"])
@@ -417,6 +431,38 @@ namespace YAEngine
     }
   }
 
+  // Atlas half of LoadIrradianceVolumes. entities and volumes are parallel.
+  static void ApplyIrradianceVolumes(Scene& scene, Render& render,
+    const std::vector<entt::entity>& entities,
+    const std::vector<IrradianceVolumeFileData>& volumes)
+  {
+    // Always called, even with nothing to upload - a previous scene may have left
+    // volumes in the atlas and they have to go away with it.
+    std::vector<uint32_t> slots;
+    render.UploadIrradianceVolumes(volumes, slots);
+
+    for (size_t i = 0; i < entities.size(); i++)
+    {
+      auto& volume = scene.GetComponent<IrradianceVolumeComponent>(entities[i]);
+      if (slots[i] == IrradianceVolumeStorage::INVALID_SLOT)
+      {
+        // Cleared, not just skipped: Upload reassigns every slot, so a leftover
+        // baked + atlasSlot would now point at somebody else's texels.
+        volume.baked = false;
+        volume.atlasSlot = 0;
+        YA_LOG_WARN("Scene", "Irradiance volume '%s' was not uploaded (see the warning above) and is inactive",
+          scene.GetName(entities[i]).c_str());
+        continue;
+      }
+
+      volume.atlasSlot = slots[i];
+      volume.baked = true;
+
+      YA_LOG_INFO("Scene", "Loaded irradiance volume '%s' -> slot %u",
+        scene.GetName(entities[i]).c_str(), slots[i]);
+    }
+  }
+
   // Shared: load irradiance volumes (Pass 5)
   void SceneSerializer::LoadIrradianceVolumes(Scene& scene, AssetManager& assets, Render& render)
   {
@@ -460,47 +506,6 @@ namespace YAEngine
     }
 
     ApplyIrradianceVolumes(scene, render, entities, volumes);
-  }
-
-  void SceneSerializer::ApplyIrradianceVolumes(Scene& scene, Render& render,
-    const std::vector<entt::entity>& entities,
-    const std::vector<IrradianceVolumeFileData>& volumes)
-  {
-    // Public, so the precondition is checked rather than assumed: the loop below
-    // walks entities and indexes slots, which Upload sizes from volumes.
-    if (entities.size() != volumes.size())
-    {
-      YA_LOG_ERROR("Scene", "ApplyIrradianceVolumes got %zu entities for %zu volumes",
-        entities.size(), volumes.size());
-      return;
-    }
-
-    // Always called, even with nothing to upload - a previous scene may have left
-    // volumes in the atlas and they have to go away with it.
-    std::vector<uint32_t> slots;
-    render.UploadIrradianceVolumes(volumes, slots);
-
-    for (size_t i = 0; i < entities.size(); i++)
-    {
-      auto& volume = scene.GetComponent<IrradianceVolumeComponent>(entities[i]);
-      if (slots[i] == IrradianceVolumeStorage::INVALID_SLOT)
-      {
-        // Cleared, not just skipped: Upload reassigns every slot, so a leftover
-        // baked + atlasSlot would now point at somebody else's texels and the
-        // next bake would drop the wrong volume from its capture.
-        volume.baked = false;
-        volume.atlasSlot = 0;
-        YA_LOG_WARN("Scene", "Irradiance volume '%s' did not fit into the atlas and is inactive",
-          scene.GetName(entities[i]).c_str());
-        continue;
-      }
-
-      volume.atlasSlot = slots[i];
-      volume.baked = true;
-
-      YA_LOG_INFO("Scene", "Loaded irradiance volume '%s' -> slot %u",
-        scene.GetName(entities[i]).c_str(), slots[i]);
-    }
   }
 
   // Shared: create entity and apply transform + components

@@ -27,6 +27,9 @@ namespace YAEngine
   // Everything is per frame in flight. The GPU can still be tracing frame N-1's structure
   // while frame N is recorded, so the structure, the instance array its build reads and
   // the record buffer a shader reads all belong to a frame slot, never to the builder.
+  // Editor builds keep one more slot past the frames in flight for bakes, which build and
+  // trace on single-time command buffers outside the frame loop and must not touch a slot
+  // the loop may still own - the shadow model buffers keep a bake slot for the same reason.
   class TlasBuilder
   {
   public:
@@ -37,8 +40,8 @@ namespace YAEngine
     // Fills the frame slot's instance and record buffers from the snapshot and records
     // the build into cmd. Two constraints on where it may be called:
     //  - outside any render pass instance, which a build may not be recorded inside;
-    //  - only after this slot's frame fence has been waited on, because the buffers it
-    //    overwrites, and may replace outright, are the ones frame N-1 read.
+    //  - only once nothing that read this slot is still in flight - for a frame slot, after
+    //    its frame fence - because the buffers it overwrites may be replaced outright.
     void Build(const RenderContext& ctx, VkCommandBuffer cmd, uint32_t frameIndex,
       const SceneSnapshot& snapshot, MeshManager& meshes, MaterialManager& materials);
 
@@ -59,6 +62,11 @@ namespace YAEngine
     // True when the last Build replaced this slot's record buffer, which growth does.
     // A descriptor pointing at the old handle has to be rewritten before it is used.
     bool RecordBufferChanged(uint32_t frameIndex) const;
+
+#ifdef YA_EDITOR
+    // Past every frame index, so the frame loop never builds into it.
+    uint32_t GetBakeSlot() const { return m_BakeSlot; }
+#endif
 
   private:
 
@@ -106,6 +114,10 @@ namespace YAEngine
       MeshManager& meshes, MaterialManager& materials);
 
     std::vector<FrameSlot> m_Slots;
+#ifdef YA_EDITOR
+    uint32_t m_BakeSlot = 0;
+#endif
+    // One-time diagnostics of the frame slots only; a bake build logs its own summary.
     bool b_CapacityWarned = false;
     bool b_FirstBuildLogged = false;
   };

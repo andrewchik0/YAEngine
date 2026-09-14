@@ -43,6 +43,7 @@ namespace YAEngine
     void EnsureBasePath(const std::string& scenePath);
     void SyncEditorCameraState();
     void DebugDrawIrradianceVolumeNodes();
+    void DebugDrawIrradianceVolumeBricks();
     void DebugDrawSceneCameras();
     void DebugDrawCameraTrack();
 
@@ -85,7 +86,12 @@ namespace YAEngine
     // Parsed .yaiv of the selected volume, so the node gizmos never re-read the
     // file per frame
     std::string m_VolumeNodeCachePath;
+    // Render::GetIrradianceVolumeGeneration when the cache was filled
+    uint32_t m_VolumeNodeCacheGeneration = 0;
     IrradianceVolumeFileData m_VolumeNodeCache;
+    // Per node of the cached volume: xyz world position, w gizmo half size. Found from the bricks
+    // once when the cache is filled.
+    std::vector<glm::vec4> m_VolumeNodeGizmos;
     bool b_VolumeNodeCacheValid = false;
     // Brightest L0 channel over all valid nodes of the cached volume. Scanned
     // once when the cache is filled - the node draw runs every frame.

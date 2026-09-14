@@ -20,6 +20,11 @@ void main()
   payload.instanceIndex = uint(gl_InstanceCustomIndexEXT);
   payload.primitiveIndex = uint(gl_PrimitiveID);
   payload.hit = 1u;
+  // Taken as is: without the flip facing flag, which no instance sets, ray tracing calls the
+  // side whose object space vertices run counterclockwise (right-handed) seen from the ray
+  // origin front facing - the side COUNTER_CLOCKWISE rasterization keeps under the engine's
+  // Y-flipped projection.
+  payload.frontFacing = gl_HitKindEXT == gl_HitKindFrontFacingTriangleEXT ? 1u : 0u;
   payload.hitT = gl_HitTEXT;
   payload.objectToWorld = gl_ObjectToWorldEXT;
 }

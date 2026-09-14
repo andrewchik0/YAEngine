@@ -7,9 +7,13 @@
 #include "Scene/Components.h"
 #include "Assets/MeshManager.h"
 #include "Assets/MaterialManager.h"
+#include "Utils/IrradianceGrid.h"
 #include "Utils/SplinePath3D.h"
 #include "Utils/Log.h"
 #include "TerrainMaterialUniforms.h"
+#ifdef YA_EDITOR
+#include "Scene/BakeExclusion.h"
+#endif
 
 namespace YAEngine
 {
@@ -64,13 +68,20 @@ namespace YAEngine
     }
   };
 
-  inline void BuildSceneSnapshot(SceneSnapshot& snapshot, LightBuffer& lights, Scene& scene, MeshManager& meshManager, MaterialManager& materialManager)
+  // excludedEntities is set only by BuildBakeSceneSnapshot. The per-frame call leaves it
+  // null, so it never resolves the bake rule and pays one pointer test per object.
+  inline void BuildSceneSnapshot(SceneSnapshot& snapshot, LightBuffer& lights, Scene& scene, MeshManager& meshManager, MaterialManager& materialManager,
+    const std::unordered_set<entt::entity>* excludedEntities = nullptr)
   {
     snapshot.objects.clear();
     snapshot.spotShadowRequests.clear();
     snapshot.pointShadowRequests.clear();
     snapshot.shadowMoverBounds.clear();
     snapshot.shadowMoverUnbounded = false;
+#ifdef YA_EDITOR
+    snapshot.bakeExcludedObjectCount = 0;
+    snapshot.bakeExcludedLightCount = 0;
+#endif
     snapshot.skybox = scene.GetSkybox();
 
     // Extract camera
@@ -104,6 +115,7 @@ namespace YAEngine
     view.each([&](entt::entity entity, MeshComponent& mesh, WorldTransform& wt, MaterialComponent& material)
     {
       if (reg.all_of<HiddenTag>(entity)) return;
+      if (excludedEntities != nullptr && excludedEntities->contains(entity)) return;
 
       // Auto-add LocalBounds from mesh data if missing
       if (!reg.all_of<LocalBounds>(entity) && meshManager.Has(mesh.asset))
@@ -321,13 +333,10 @@ namespace YAEngine
       auto& volume = volumeView.get<IrradianceVolumeComponent>(entity);
       auto& wt = volumeView.get<WorldTransform>(entity);
 
-      glm::vec3 center = glm::vec3(wt.world[3]);
-      glm::quat rotation = ExtractIrradianceBoxRotation(wt.world);
-
       snapshot.irradianceVolumes.push_back(IrradianceVolumeInstance {
-        .center = center,
-        .rotation = rotation,
-        .grid = ComputeIrradianceGridLayout(center, rotation, volume.halfExtents, volume.spacing),
+        .center = glm::vec3(wt.world[3]),
+        .rotation = ExtractIrradianceBoxRotation(wt.world),
+        .halfExtents = volume.halfExtents,
       });
     }
 #endif
@@ -340,6 +349,9 @@ namespace YAEngine
     auto lightView = scene.GetView<LightComponent, WorldTransform>();
     for (auto entity : lightView)
     {
+      if (excludedEntities != nullptr && excludedEntities->contains(entity))
+        continue;
+
       auto& light = lightView.get<LightComponent>(entity);
       auto& wt = lightView.get<WorldTransform>(entity);
 
@@ -433,4 +445,43 @@ namespace YAEngine
     }
     snapshot.lightDigest = lightDigest.value;
   }
+
+#ifdef YA_EDITOR
+  // What a bake renders or traces: the regular snapshot minus the render objects and lights
+  // of entities the bake rule excludes. Probes and volumes are kept - the rule changes what
+  // a probe captures, never which probes bake.
+  inline void BuildBakeSceneSnapshot(SceneSnapshot& snapshot, LightBuffer& lights, Scene& scene,
+    MeshManager& meshManager, MaterialManager& materialManager)
+  {
+    auto& reg = scene.GetRegistry();
+    BakeExclusionResolver resolver(reg);
+    std::unordered_set<entt::entity> excluded;
+    uint32_t excludedObjects = 0;
+    uint32_t excludedLights = 0;
+
+    // Resolved up front, while no view is being iterated: BuildSceneSnapshot emplaces
+    // components as it goes. Hidden objects never reach the snapshot, so they are not
+    // counted as excluded.
+    for (auto entity : reg.view<MeshComponent, WorldTransform, MaterialComponent>())
+    {
+      if (reg.all_of<HiddenTag>(entity) || !resolver.IsExcluded(entity))
+        continue;
+      excluded.insert(entity);
+      excludedObjects++;
+    }
+
+    for (auto entity : reg.view<LightComponent, WorldTransform>())
+    {
+      if (!resolver.IsExcluded(entity))
+        continue;
+      excluded.insert(entity);
+      excludedLights++;
+    }
+
+    BuildSceneSnapshot(snapshot, lights, scene, meshManager, materialManager, &excluded);
+
+    snapshot.bakeExcludedObjectCount = excludedObjects;
+    snapshot.bakeExcludedLightCount = excludedLights;
+  }
+#endif
 }

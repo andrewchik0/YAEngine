@@ -2,11 +2,13 @@
 // the mesh streams an instance record points at, and the debug shading the Ray Query and
 // RT Pipeline views must agree on down to the last bit - they exist to be compared.
 //
-// No version or extension directives here on purpose. The shader compiler pastes an
-// include into its consumer and strips any leading version directive it finds, which would
-// silently discard everything ahead of it. That search is a plain substring scan over the
-// expanded text, so prose may not spell either directive out either - naming one in a
-// comment truncates the file exactly as a real one would.
+// No version or extension directives here on purpose. Tools/CompileShaders pastes an include
+// into its consumer, then prepends its own version line after cutting the expanded text at the
+// first version directive that opens a line - with everything ahead of that line, so a real one
+// here would silently drop the consumer's extension directives and every declaration before the
+// include. A mention after a line comment marker opens no line and is harmless, but one opening
+// a line inside a block comment is still misread, so prose keeps not spelling the directive
+// out. Extension directives are not scanned for at all: enabling them is the consumer's job.
 // Every consumer enables GL_EXT_buffer_reference, GL_EXT_buffer_reference2,
 // GL_EXT_shader_explicit_arithmetic_types_int64 and either GL_EXT_ray_query or
 // GL_EXT_ray_tracing itself, plus GL_EXT_nonuniform_qualifier when it defines RT_BINDLESS.
@@ -138,6 +140,11 @@ struct RayTracingPayload
   // Zero when the miss shader ran. Set by the closest hit shader and by nothing else, so
   // the ray generation shader has to clear it before every trace.
   uint hit;
+  // Nonzero when the committed hit is on the side the raster pipeline treats as its front
+  // face; meaningful only while hit is set. Facing is judged on object space winding, so a
+  // mirrored instance keeps its authored front where the raster, judging after the
+  // transform, sees the other side.
+  uint frontFacing;
   // Parametric distance along the ray to the committed hit, gl_HitTEXT verbatim. Carried
   // separately from the barycentric position because a probe ray that only needs to know how
   // far it got should not have to fetch a triangle to find out.

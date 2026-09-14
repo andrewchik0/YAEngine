@@ -31,15 +31,11 @@ namespace YAEngine
     // Cascades fitted to concentric spheres around a point instead of a camera
     // frustum. A reflection probe looks in all six directions, so one omnidirectional
     // fit serves every cube face and the atlas is rendered once per probe.
-    // volumeRadius inflates every cascade sphere by that amount so a whole BOX of
-    // capture points shares one fit - an irradiance volume renders the atlas once
-    // for all its nodes instead of once per node. Zero reproduces the point fit.
     void ComputeCascadesAroundPoint(
       const glm::vec3& center,
       float nearPlane,
       float shadowDistance,
-      const glm::vec3& lightDirection,
-      float volumeRadius = 0.0f);
+      const glm::vec3& lightDirection);
 
     // Reason of a refit performed by the LAST ComputeCascades call (the camera
     // path), None when every cascade reused its frozen fit. The cache skip
@@ -138,7 +134,7 @@ namespace YAEngine
     // The fit a cascade stays on while the required sphere still fits inside it.
     // viewProj is reused VERBATIM on those frames so the matrix is bit-identical
     // between refits - what the tile cache keys on. Only ComputeCascades touches
-    // this: the probe/volume bake path (ComputeCascadesAroundPoint) bypasses
+    // this: the probe bake path (ComputeCascadesAroundPoint) bypasses
     // hysteresis entirely and the next camera frame rewrites m_ShadowData from
     // here, so bakes self-heal.
     struct FrozenCascadeFit

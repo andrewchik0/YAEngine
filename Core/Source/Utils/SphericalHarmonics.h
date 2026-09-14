@@ -36,19 +36,10 @@ namespace YAEngine
     SHL1RGB coefficients {};
     float totalSolidAngle = 0.0f;
 
-    void AddSample(const glm::vec3& color, const glm::vec3& direction, float solidAngle);
-
-    // Normalizes by the accumulated solid angle (exactly 4*pi for a full cube),
-    // then applies the cosine convolution.
+    // Normalizes by the accumulated solid angle to a full sphere, then applies the
+    // cosine convolution.
     SHL1RGB Finalize() const;
   };
-
-  // Face order matches ReflectionProbeBaker's Vulkan cube layer order (0=+X, 1=-X, 2=+Y,
-  // 3=-Y, 4=+Z, 5=-Z); texel (x, y) has y growing downwards, like GPU readback rows.
-  glm::vec3 CubeFaceTexelDirection(uint32_t face, uint32_t x, uint32_t y, uint32_t faceSize);
-
-  // Differential solid angle of one cube face texel. Independent of the face.
-  float CubeFaceTexelSolidAngle(uint32_t x, uint32_t y, uint32_t faceSize);
 
   // Irradiance for a surface normal, clamped to zero: an L1 fit can dip negative
   // on strongly directional environments and negative light is never wanted.

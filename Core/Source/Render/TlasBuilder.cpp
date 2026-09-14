@@ -51,10 +51,16 @@ namespace YAEngine
 
   void TlasBuilder::Init(const RenderContext& ctx)
   {
+    uint32_t slotCount = ctx.maxFramesInFlight;
+#ifdef YA_EDITOR
+    m_BakeSlot = ctx.maxFramesInFlight;
+    slotCount++;
+#endif
+
     if (!ctx.raytracingSupported)
       return;
 
-    m_Slots.resize(ctx.maxFramesInFlight);
+    m_Slots.resize(slotCount);
     for (FrameSlot& slot : m_Slots)
       EnsureCapacity(ctx, slot, INITIAL_INSTANCE_CAPACITY);
   }
@@ -99,9 +105,10 @@ namespace YAEngine
 
     if (target > capacity)
     {
-      // Both buffers were last read by this slot's own frame, whose fence the caller has
-      // already waited on, so the old allocations can go now instead of onto a deferred
-      // destroy queue.
+      // Nothing in flight still reads either buffer - a frame slot's fence has been waited
+      // on, and the bake slot is only used on single-time command buffers, which wait for
+      // completion - so the old allocations can go now instead of onto a deferred destroy
+      // queue. Descriptors naming them are rewritten before their next use.
       slot.instances.Destroy(ctx);
       slot.records.Destroy(ctx);
 
@@ -123,14 +130,6 @@ namespace YAEngine
 
     if (!slot.addressUsable)
       return 0;
-
-    if (required > capacity && !b_CapacityWarned)
-    {
-      b_CapacityWarned = true;
-      YA_LOG_WARN("Render",
-        "TLAS instance capacity capped at %u while %llu was requested, the excess instances are dropped",
-        capacity, (unsigned long long)required);
-    }
 
     return capacity;
   }
@@ -169,6 +168,20 @@ namespace YAEngine
     uint32_t capacity = EnsureCapacity(ctx, slot, required);
     if (capacity == 0)
       return;
+
+#ifdef YA_EDITOR
+    const bool frameSlot = frameIndex != m_BakeSlot;
+#else
+    const bool frameSlot = true;
+#endif
+
+    if (required > capacity && frameSlot && !b_CapacityWarned)
+    {
+      b_CapacityWarned = true;
+      YA_LOG_WARN("Render",
+        "TLAS instance capacity capped at %u while %llu was requested, the excess instances are dropped",
+        capacity, (unsigned long long)required);
+    }
 
     auto* instances = static_cast<VkAccelerationStructureInstanceKHR*>(slot.instances.GetMapped());
     auto* records = static_cast<RayTracingInstanceRecord*>(slot.records.GetMapped());
@@ -303,7 +316,7 @@ namespace YAEngine
 
     slot.built = true;
 
-    if (!b_FirstBuildLogged)
+    if (frameSlot && !b_FirstBuildLogged)
     {
       b_FirstBuildLogged = true;
       YA_LOG_INFO("Render",

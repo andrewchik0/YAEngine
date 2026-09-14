@@ -3,7 +3,6 @@
 #include "Pch.h"
 #include "Assets/Handle.h"
 #include "ReflectionProbeData.h"
-#include "Utils/IrradianceGrid.h"
 
 namespace YAEngine
 {
@@ -74,13 +73,12 @@ namespace YAEngine
     std::vector<glm::vec2> roadPolyline;
   };
 
-  // One irradiance volume as the renderer sees it. Carries the full box
-  // description because the same data fills the volume UBO.
+  // The influence box of one irradiance volume, for its bounds gizmo.
   struct IrradianceVolumeInstance
   {
     glm::vec3 center { 0.0f };
     glm::quat rotation { 1.0f, 0.0f, 0.0f, 0.0f };
-    IrradianceGridLayout grid;
+    glm::vec3 halfExtents { 0.0f };
   };
 
   // Union of a moved shadow caster's previous and current world AABB - the
@@ -105,6 +103,9 @@ namespace YAEngine
     // Only the volume bounds gizmo reads this - the shader gets its volume data
     // from IrradianceVolumeStorage, which is filled at upload time.
     std::vector<IrradianceVolumeInstance> irradianceVolumes;
+    // What BuildBakeSceneSnapshot left out, zero for every other snapshot.
+    uint32_t bakeExcludedObjectCount = 0;
+    uint32_t bakeExcludedLightCount = 0;
 #endif
     TerrainRenderData terrainData {};
 

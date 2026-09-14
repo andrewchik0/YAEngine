@@ -204,6 +204,7 @@ void main()
   case DEBUG_VIEW_PROBE_INDEX:      // one color per dominant probe, black = no local probe
   case DEBUG_VIEW_PROBE_FALLBACK:   // heat ramp of the skybox fallback share
   case DEBUG_VIEW_VOLUME_COVERAGE:  // one color per irradiance volume, black = skybox
+  case DEBUG_VIEW_VOLUME_LEVEL:     // one color per brick spacing level, black = skybox
     // These are synthetic display-space colors, not linear light - no gamma encoding.
     outColor = vec4(texture(frame, uv).rgb, 1.0);
     return;

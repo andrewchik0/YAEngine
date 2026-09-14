@@ -60,6 +60,11 @@
 // scale. Like PT Guides it only exists while the path tracing render path is effective.
 #define DEBUG_VIEW_PT_SPECULAR_MOTION 30
 
+// The spacing level of the brick the innermost contributing irradiance volume was sampled in,
+// finest red to coarsest blue as the placement brick gizmo, black = skybox. Written by deferred
+// lighting like Volume Coverage.
+#define DEBUG_VIEW_VOLUME_LEVEL     31
+
 // PathTraceConstants::debugMode, and the order the views above map onto it.
 #define PT_DEBUG_OFF          0
 #define PT_DEBUG_MAX_CONTRIB  1
@@ -132,7 +137,8 @@
   || (view) == DEBUG_VIEW_PROBE_INDEX \
   || (view) == DEBUG_VIEW_PROBE_FALLBACK \
   || (view) == DEBUG_VIEW_VOLUME_COVERAGE \
-  || (view) == DEBUG_VIEW_DIRECT_ONLY)
+  || (view) == DEBUG_VIEW_DIRECT_ONLY \
+  || (view) == DEBUG_VIEW_VOLUME_LEVEL)
 
 // Views whose source is written by a pass the path tracing render path switches off: the
 // AO chain, the screen space effects, the temporal resolve and every deferred lighting
@@ -143,7 +149,8 @@
      (view) == DEBUG_VIEW_AO \
   || (view) == DEBUG_VIEW_SSR \
   || (view) == DEBUG_VIEW_TAA_DELTA \
-  || ((view) >= DEBUG_VIEW_AMBIENT_ONLY && (view) <= DEBUG_VIEW_DIRECT_ONLY))
+  || ((view) >= DEBUG_VIEW_AMBIENT_ONLY && (view) <= DEBUG_VIEW_DIRECT_ONLY) \
+  || (view) == DEBUG_VIEW_VOLUME_LEVEL)
 
 #ifdef __cplusplus
 #pragma once

@@ -103,7 +103,7 @@ namespace YAEngine
 
 #ifdef YA_EDITOR
     m_ProbeBaker.Init(*this, BakeLimits::PROBE_DEFAULT_CAPTURE_RESOLUTION);
-    m_VolumeBaker.Init(*this, BakeLimits::VOLUME_DEFAULT_CAPTURE_RESOLUTION);
+    m_RayTracedProbeBaker.Init(*this);
     CreateSceneImGuiDescriptor();
     CreatePickResources();
     m_ViewportWidth = width;
@@ -145,7 +145,7 @@ namespace YAEngine
     m_GpuProfiler.Destroy(ctx);
     m_ShaderHotReload.Destroy();
     m_ProbeBaker.Destroy();
-    m_VolumeBaker.Destroy();
+    m_RayTracedProbeBaker.Destroy();
     DestroySceneImGuiDescriptor();
     DestroyPickResources();
     DestroySwapchainReadback();
@@ -647,6 +647,7 @@ namespace YAEngine
 
 #ifdef YA_EDITOR
     m_GizmoRenderer.Clear();
+    m_VolumeNodeGizmosDrawn = 0;
     if (b_GizmosEnabled)
     {
       for (int i = 0; i < frame.lights.pointLightCount; i++)
@@ -724,7 +725,7 @@ namespace YAEngine
       {
         for (const auto& volume : frame.snapshot.irradianceVolumes)
         {
-          m_GizmoRenderer.DrawWireBoxDepthTested(volume.center, volume.grid.halfExtents,
+          m_GizmoRenderer.DrawWireBoxDepthTested(volume.center, volume.halfExtents,
             volume.rotation, glm::vec4(1.0f, 0.55f, 0.15f, 0.55f));
         }
       }
@@ -884,7 +885,7 @@ namespace YAEngine
 
     SceneSnapshot snapshot;
     LightBuffer lights {};
-    BuildSceneSnapshot(snapshot, lights, scene, assets.Meshes(), assets.Materials());
+    BuildBakeSceneSnapshot(snapshot, lights, scene, assets.Meshes(), assets.Materials());
 
     FrameContext frame {
       .snapshot = snapshot,
@@ -921,7 +922,7 @@ namespace YAEngine
     // bake. Frame 0 is the slot OffscreenRenderer binds.
     {
       IrradianceVolumeBuffer noVolumes {};
-      noVolumes.atlasInvSize = m_VolumeStorage.GetBufferData().atlasInvSize;
+      noVolumes.poolInvSize = m_VolumeStorage.GetBufferData().poolInvSize;
       noVolumes.volumeCount = 0;
       m_VolumeStorage.SetUp(0, noVolumes);
     }
@@ -955,7 +956,7 @@ namespace YAEngine
 
   void Render::BakeAllProbes(Scene& scene, AssetManager& assets)
   {
-    // Snapshot the entity list first - BuildSceneSnapshot inside BakeProbe can add
+    // Snapshot the entity list first - BuildBakeSceneSnapshot inside BakeProbe can add
     // components and invalidate a live view
     std::vector<entt::entity> probes;
     {

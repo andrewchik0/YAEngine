@@ -364,8 +364,7 @@ namespace YAEngine
     const glm::vec3& center,
     float nearPlane,
     float shadowDistance,
-    const glm::vec3& lightDirection,
-    float volumeRadius)
+    const glm::vec3& lightDirection)
   {
     if (shadowDistance <= nearPlane)
     {
@@ -385,9 +384,7 @@ namespace YAEngine
       // reaches sqrt(3) times its view depth at the frustum corners. Inflating the
       // sphere by that factor keeps every texel a cascade can be selected for inside
       // the map it was fitted to.
-      // Capture points spread over a box reach volumeRadius further out than the
-      // center does, so the sphere grows by that much and one atlas serves them all.
-      float radius = m_CascadeSplits[i + 1] * OMNI_CASCADE_SLACK + volumeRadius;
+      float radius = m_CascadeSplits[i + 1] * OMNI_CASCADE_SLACK;
 
       float texelWorldSize = FitCascadeToSphere(i, center, radius, lightDir);
 

@@ -83,7 +83,7 @@ namespace YAEngine
         "Direct Only", "Ray Query", "RT Pipeline",
         "PT Noisy", "PT Reference", "PT Guides",
         "PT Max Contribution", "PT NEE", "PT Environment", "PT Non-Finite",
-        "HDR Magnitude", "PT Specular Motion"
+        "HDR Magnitude", "PT Specular Motion", "Volume Level"
       };
 
       // Spelled out rather than an ImGui::Combo because several entries need device
@@ -442,10 +442,29 @@ namespace YAEngine
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Bake passes over every probe. Each extra pass lets probes\npick up the light their neighbours captured previously.");
 
+      // AlwaysClamp on the three volume bake settings: Ctrl+Click text entry otherwise ignores
+      // the range the scene serializer clamps to.
       ImGui::SliderInt("Volume Bounces", &context.render->GetVolumeBounceCount(),
-        Render::MIN_VOLUME_BOUNCES, Render::MAX_VOLUME_BOUNCES);
+        Render::MIN_VOLUME_BOUNCES, Render::MAX_VOLUME_BOUNCES, "%d", ImGuiSliderFlags_AlwaysClamp);
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Bake passes over every irradiance volume in Bake All Volumes.\nEach extra pass lets a volume pick up the light its neighbours\ncaptured previously. Bake time grows linearly with the count.");
+        ImGui::SetTooltip("Path bounces per sample of the ray traced irradiance volume bake,\n"
+          "as PT Bounces is for the path tracer. Every bounce adds a trace and\n"
+          "a shadow ray to each sample.");
+
+      ImGui::SliderInt("Volume Samples", &context.render->GetVolumeSampleCount(),
+        Render::MIN_VOLUME_SAMPLES, Render::MAX_VOLUME_SAMPLES, "%d",
+        ImGuiSliderFlags_Logarithmic | ImGuiSliderFlags_AlwaysClamp);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Paths traced per irradiance volume node. Noise falls with the\n"
+          "square root of the count, bake time grows linearly with it.");
+
+      ImGui::DragFloat("Volume Firefly Clamp", &context.render->GetVolumeFireflyClamp(),
+        0.1f, PT_MIN_FIREFLY_CLAMP, PT_MAX_FIREFLY_CLAMP, "%.1f", ImGuiSliderFlags_AlwaysClamp);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Ceiling on the radiance one bounce may add in the volume bake.\n"
+          "The default 10 keeps small, very bright emitters near a node from baking a\n"
+          "colored blob without darkening the result; 2 already biases dark.\n"
+          "0 switches it off, which is the unbiased setting.");
 
       ImGui::Separator();
       ImGui::Checkbox("Irradiance Volumes Enabled", &context.render->GetIrradianceVolumesEnabled());
@@ -454,15 +473,25 @@ namespace YAEngine
       ImGui::DragFloat("Irradiance Normal Bias", &context.render->GetIrradianceNormalBias(),
         0.01f, 0.0f, 1.0f, "%.2f m");
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Pushes the diffuse sample point along the surface normal.\nRaise it when light leaks through thin walls, lower it when\ncorners lose contact shadowing. Around half the node spacing.");
+        ImGui::SetTooltip("Pushes the diffuse sample point along the surface normal.\nRaise it when light leaks through thin walls, lower it when\ncorners lose contact shadowing. Around half the brick spacing\nof the volume where the leak shows.");
 
       if (ImGui::Button(ICON_FA_CIRCLE_PLAY " Bake All Reflection Probes"))
         context.render->BakeAllProbes(*context.scene, *context.assetManager);
 
+      const bool volumeBakeAvailable = context.render->IsRayTracedBakeAvailable();
+      ImGui::BeginDisabled(!volumeBakeAvailable);
       if (ImGui::Button(ICON_FA_CIRCLE_PLAY " Bake All Volumes"))
         context.render->BakeAllIrradianceVolumes(*context.scene, *context.assetManager);
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Bakes every irradiance volume in the scene. Check the node count\non each volume first - bake time scales with it.");
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      {
+        if (volumeBakeAvailable)
+          ImGui::SetTooltip("Bakes every irradiance volume in the scene by ray tracing. Preview Placement\n"
+            "on each volume shows its node count first - bake time scales with nodes x Volume Samples.");
+        else
+          ImGui::SetTooltip("Irradiance volumes bake by ray tracing, and the ray traced baker is\n"
+            "unavailable: no hardware ray tracing pipeline or no bindless texture table.");
+      }
 
       if (ImGui::Button(ICON_FA_ROTATE " Recompile Shaders"))
         context.render->GetShaderHotReload().RecompileAll();

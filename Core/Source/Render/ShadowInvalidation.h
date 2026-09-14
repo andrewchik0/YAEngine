@@ -14,7 +14,7 @@ namespace YAEngine
     CasterMoved,          // a caster's transform changed inside a fitted tile
     CasterAddedOrRemoved, // a caster entered or left the tile's frustum
     LightParamsChanged,   // a light's cone / radius / bias parameters changed
-    ProbeBake,            // a probe or irradiance volume bake rewrote the atlas
+    ProbeBake,            // a reflection probe bake rewrote the atlas
     Resize,               // atlas or tile layout changed
     GeometryStreamedIn,   // streamed-in geometry appeared inside an already fitted tile
     SettingsChanged,      // a shadow render setting changed (shadows on/off, cascade LOD)

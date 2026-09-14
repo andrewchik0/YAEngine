@@ -1,5 +1,6 @@
 #include "Utils/FrameCaptureSpec.h"
 
+#include "Utils/FormatText.h"
 #include "Utils/Log.h"
 
 #include "FrameUniforms.h"
@@ -49,9 +50,10 @@ namespace YAEngine
       { "pt-nonfinite",         "PT Non-Finite" },
       { "hdr-magnitude",        "HDR Magnitude" },
       { "pt-specular-motion",   "PT Specular Motion" },
+      { "volume-level",         "Volume Level" },
     };
 
-    static_assert(std::size(DEBUG_VIEWS) == DEBUG_VIEW_PT_SPECULAR_MOTION + 1,
+    static_assert(std::size(DEBUG_VIEWS) == DEBUG_VIEW_VOLUME_LEVEL + 1,
       "Debug view table is out of sync with the DEBUG_VIEW_* ids in FrameUniforms.h");
 
     struct NamedMode
@@ -161,14 +163,7 @@ namespace YAEngine
     {
       va_list args;
       va_start(args, format);
-      va_list sizing;
-      va_copy(sizing, args);
-      int length = std::vsnprintf(nullptr, 0, format, sizing);
-      va_end(sizing);
-
-      outError.assign(length > 0 ? static_cast<size_t>(length) : 0, '\0');
-      if (length > 0)
-        std::vsnprintf(outError.data(), outError.size() + 1, format, args);
+      FormatText(outError, format, args);
       va_end(args);
       return false;
     }

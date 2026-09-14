@@ -8,6 +8,7 @@
 #include "Scene/ModelOverrides.h"
 #include "Scene/SceneSerializer.h"
 #include "Scene/YamlUtils.h"
+#include "Utils/IrradianceGrid.h"
 #include "Utils/Log.h"
 #include "Utils/ServiceRegistry.h"
 
@@ -91,6 +92,42 @@ namespace YAEngine
         merged[key] = existing ? MergeYaml(existing, it->second) : YAML::Clone(it->second);
       }
       return merged;
+    }
+
+    // The deserializer settles min > max by raising max, and lets minSpacing and maxSpacing override
+    // a legacy spacing. A patch merged over the current values would then keep the bound it did not
+    // name and undo the one it did, so the unnamed bound gives way here, as in the Details panel.
+    void ResolveIrradianceVolumeSpacingPatch(const YAML::Node& patch, YAML::Node& merged)
+    {
+      const bool namesMin = static_cast<bool>(patch["minSpacing"]);
+      const bool namesMax = static_cast<bool>(patch["maxSpacing"]);
+
+      if (patch["spacing"])
+      {
+        if (!namesMin)
+          merged.remove("minSpacing");
+        if (!namesMax)
+          merged.remove("maxSpacing");
+        return;
+      }
+
+      if (namesMin == namesMax)
+        return;
+
+      // Values that do not parse are left for the deserializer to reject.
+      float minSpacing = 0.0f;
+      float maxSpacing = 0.0f;
+      if (!YAML::convert<float>::decode(merged["minSpacing"], minSpacing)
+        || !YAML::convert<float>::decode(merged["maxSpacing"], maxSpacing))
+        return;
+
+      if (SnapIrradianceSpacing(minSpacing) <= SnapIrradianceSpacing(maxSpacing))
+        return;
+
+      if (namesMax)
+        merged["minSpacing"] = maxSpacing;
+      else
+        merged["maxSpacing"] = minSpacing;
     }
 
     std::string ListComponentNames(const ComponentRegistry& components)
@@ -529,7 +566,9 @@ namespace YAEngine
       return;
     }
 
-    const YAML::Node merged = MergeYaml(before, patch);
+    YAML::Node merged = MergeYaml(before, patch);
+    if (component == "irradianceVolume")
+      ResolveIrradianceVolumeSpacingPatch(patch, merged);
     const std::string beforeText = EmitYaml(before);
 
     // A round trip is not free: it rebuilds terrain, regenerates scatter, allocates a material

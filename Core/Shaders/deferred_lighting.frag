@@ -26,7 +26,8 @@ void main()
     // the Ambient views leave the sky visible so the image stays recognisable.
     if (u_Frame.currentTexture == DEBUG_VIEW_PROBE_INDEX
       || u_Frame.currentTexture == DEBUG_VIEW_PROBE_FALLBACK
-      || u_Frame.currentTexture == DEBUG_VIEW_VOLUME_COVERAGE)
+      || u_Frame.currentTexture == DEBUG_VIEW_VOLUME_COVERAGE
+      || u_Frame.currentTexture == DEBUG_VIEW_VOLUME_LEVEL)
     {
       outColor = vec4(0.0, 0.0, 0.0, 1.0);
       return;
@@ -161,6 +162,11 @@ void main()
   {
     // Black means no volume covered the pixel and diffuse came from the skybox
     outColor = vec4(probeDebugColor(g_VolumeDebugIndex), 1.0);
+    return;
+  }
+  if (u_Frame.currentTexture == DEBUG_VIEW_VOLUME_LEVEL)
+  {
+    outColor = vec4(volumeLevelDebugColor(g_VolumeDebugLevel), 1.0);
     return;
   }
 

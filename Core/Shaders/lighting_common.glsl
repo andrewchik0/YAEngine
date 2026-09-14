@@ -35,8 +35,8 @@ layout(std430, set = 3, binding = 4) readonly buffer ReflectionProbeSSBO
   ReflectionProbeBuffer u_Probes;
 };
 
-// Irradiance volumes (set 3, bindings 5-9). One 3D texture per color channel,
-// each texel holding (L0, L1x, L1y, L1z) of that channel.
+// Irradiance volumes (set 3, bindings 5-10). The brick pool is one 3D texture per color
+// channel, each texel holding (L0, L1x, L1y, L1z) of that channel.
 layout(set = 3, binding = 5) uniform sampler3D irradianceVolumeR;
 layout(set = 3, binding = 6) uniform sampler3D irradianceVolumeG;
 layout(set = 3, binding = 7) uniform sampler3D irradianceVolumeB;
@@ -49,6 +49,9 @@ layout(std140, set = 3, binding = 9) uniform IrradianceVolumeUBO
 {
   IrradianceVolumeBuffer u_Volumes;
 };
+
+// Cell -> brick pool slot, read with texelFetch only
+layout(set = 3, binding = 10) uniform usampler3D irradianceVolumeIndirection;
 
 const float MAX_REFLECTION_LOD = 8.0; // log2(256) for probe prefilter
 
@@ -208,10 +211,24 @@ float g_ProbeDebugRemaining;
 // Index of the irradiance volume that covered the pixel, -1 when none did and
 // the diffuse term came from the skybox. Filled by computeDiffuseIBL.
 int g_VolumeDebugIndex;
+// Spacing index of the brick that volume was sampled in, -1 alongside the index above.
+int g_VolumeDebugLevel = -1;
 
 bool isIndirectDebugView(int view)
 {
   return IS_INDIRECT_DEBUG_VIEW(view);
+}
+
+// The brick gizmo's colors, so the view reads like it. Black is reserved for "the skybox
+// supplied the pixel".
+vec3 volumeLevelDebugColor(int spacingIndex)
+{
+  if (spacingIndex < 0) return vec3(0.0);
+  if (spacingIndex == 0) return vec4(IRRADIANCE_LEVEL_COLOR_0).rgb;
+  if (spacingIndex == 1) return vec4(IRRADIANCE_LEVEL_COLOR_1).rgb;
+  if (spacingIndex == 2) return vec4(IRRADIANCE_LEVEL_COLOR_2).rgb;
+  if (spacingIndex == 3) return vec4(IRRADIANCE_LEVEL_COLOR_3).rgb;
+  return vec4(IRRADIANCE_LEVEL_COLOR_4).rgb;
 }
 
 // Distinct colors for the first 8 atlas slots, wrapping around beyond that.
@@ -262,6 +279,7 @@ vec3 sampleSkyboxIrradiance(vec3 normal)
 vec3 computeDiffuseIBL(vec3 worldPos, vec3 normal)
 {
   g_VolumeDebugIndex = -1;
+  g_VolumeDebugLevel = -1;
 
   int volumeCount = min(u_Volumes.volumeCount, MAX_IRRADIANCE_VOLUMES);
   if (volumeCount == 0)
@@ -288,24 +306,45 @@ vec3 computeDiffuseIBL(vec3 worldPos, vec3 normal)
     if (toFace.x < 0.0 || toFace.y < 0.0 || toFace.z < 0.0)
       continue;
 
-    // Addressing convention lives in Core/Shared/IrradianceVolumeData.h. Nodes sit
-    // on a world lattice, so the WORLD sample position goes in as is - the rotated
+    // Addressing convention lives in Core/Shared/IrradianceVolumeData.h. Bricks sit
+    // on the world lattice, so the WORLD sample position goes in as is - the rotated
     // box above only decided whether this volume applies, not where to look it up.
-    // The + 0.5 lands on a texel center, which is the half-texel margin that keeps
-    // hardware trilinear filtering from reaching into the neighbouring sub-box.
-    // The clamp is belt and braces: the lattice covers the whole AABB of the box,
-    // so a point that passed the containment test is already inside it.
-    vec3 gridSize = u_Volumes.volumes[i].gridSize.xyz;
-    vec4 lattice = u_Volumes.volumes[i].latticeOrigin;
-    vec3 gridCoord = clamp((samplePos - lattice.xyz) / max(lattice.w, 1e-6),
-      vec3(0.0), gridSize - 1.0);
-    vec3 atlasTexel = u_Volumes.volumes[i].atlasOrigin.xyz + gridCoord + 0.5;
-    vec3 atlasUVW = atlasTexel * u_Volumes.atlasInvSize.xyz;
+    // Within 1 mm of a box face the point may miss every brick; the volume then gives
+    // nothing and the walk goes on as if the point were outside it.
+    vec4 indirectionOrigin = u_Volumes.volumes[i].indirectionOrigin;
+    ivec4 indirectionDims = u_Volumes.volumes[i].indirectionDims;
+    ivec3 cell = ivec3(floor((samplePos - indirectionOrigin.xyz) / indirectionOrigin.w));
+    if (any(lessThan(cell, ivec3(0))) || any(greaterThanEqual(cell, indirectionDims.xyz)))
+      continue;
+
+    uint entry = texelFetch(irradianceVolumeIndirection,
+      u_Volumes.volumes[i].indirectionAtlas.xyz + cell, 0).r;
+    if (entry == IRRADIANCE_INDIRECTION_INVALID)
+      continue;
+
+    uint slot = entry & IRRADIANCE_POOL_SLOT_MASK;
+    int level = int(entry >> IRRADIANCE_POOL_SPACING_SHIFT);
+    float spacing = IRRADIANCE_FINEST_SPACING * float(1 << level);
+    // Cells per brick side. Truncating integer division is the floor here, cell being
+    // non-negative, and exact because the grid origin is a multiple of every brick size.
+    int ratio = 1 << (level - indirectionDims.w);
+    ivec3 brickCell = (cell / ratio) * ratio;
+    vec3 brickOrigin = indirectionOrigin.xyz + vec3(brickCell) * indirectionOrigin.w;
+    vec3 local = clamp((samplePos - brickOrigin) / spacing, vec3(0.0),
+      vec3(float(IRRADIANCE_POOL_BRICK_TEXELS - 1)));
+
+    uint slotsX = uint(u_Volumes.poolSlotsX);
+    uint slotsY = uint(u_Volumes.poolSlotsY);
+    uvec3 slotCoord = uvec3(slot % slotsX, (slot / slotsX) % slotsY, slot / (slotsX * slotsY));
+    // local 0..4 plus 0.5 stays between the first and last texel centers of the slot,
+    // so hardware trilinear filtering never reaches into the neighbouring brick.
+    vec3 poolUVW = (vec3(slotCoord * uint(IRRADIANCE_POOL_BRICK_TEXELS)) + local + 0.5)
+      * u_Volumes.poolInvSize.xyz;
 
     // SH coefficients are linear, so three filtered fetches are exact.
-    vec4 shR = texture(irradianceVolumeR, atlasUVW);
-    vec4 shG = texture(irradianceVolumeG, atlasUVW);
-    vec4 shB = texture(irradianceVolumeB, atlasUVW);
+    vec4 shR = texture(irradianceVolumeR, poolUVW);
+    vec4 shG = texture(irradianceVolumeG, poolUVW);
+    vec4 shB = texture(irradianceVolumeB, poolUVW);
 
     vec3 irradiance = vec3(
       shR.x + dot(shR.yzw, normal),
@@ -317,16 +356,18 @@ vec3 computeDiffuseIBL(vec3 worldPos, vec3 normal)
 
     // Without this the box edge is a hard seam. The fade hands the remainder to
     // whatever encloses this volume, or to the skybox if nothing does.
-    // Fade width defaults to half the node spacing.
     float fadeWidth = u_Volumes.volumes[i].halfExtentsFade.w;
     float edgeDistance = min(min(toFace.x, toFace.y), toFace.z);
-    float blend = fadeWidth > 1e-6 ? clamp(edgeDistance / fadeWidth, 0.0, 1.0) : 1.0;
+    float blend = clamp(edgeDistance / fadeWidth, 0.0, 1.0);
 
-    // The coverage view names the innermost volume that actually contributes.
+    // The coverage and level views name the innermost volume that actually contributes.
     // A point exactly on a box face has blend == 0 and supplies nothing, so
     // colouring it for that volume would be a lie in the fade band.
     if (g_VolumeDebugIndex < 0 && blend > 0.0)
+    {
       g_VolumeDebugIndex = i;
+      g_VolumeDebugLevel = level;
+    }
 
     float share = remaining * blend;
     accumulated += share * irradiance;

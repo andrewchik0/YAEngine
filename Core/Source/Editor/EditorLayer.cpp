@@ -129,6 +129,10 @@ namespace YAEngine
       m_Context.StopCameraPreview();
     }
 
+    // Entities die through the outliner, the bridge and model reloads alike, so previews of
+    // gone ones are dropped here rather than on each of those paths.
+    GetRender().PruneIrradianceVolumePlacementPreviews(GetScene());
+
     uint32_t w = m_Context.viewportWidth;
     uint32_t h = m_Context.viewportHeight;
     if (w > 0 && h > 0 && (w != m_LastViewportWidth || h != m_LastViewportHeight))
@@ -565,10 +569,35 @@ namespace YAEngine
         if (data.validity[i] == 0)
           continue;
 
-        const SHL1RGB& sh = data.coefficients[i];
+        const SHL1RGB sh = UnpackSHL1RGBHalf(data.coefficients[i]);
         peak = std::max({ peak, sh.r.l0, sh.g.l0, sh.b.l0 });
       }
       return peak;
+    }
+
+    // A node shared by bricks of different spacings is sized by the finest of them.
+    void BuildVolumeNodeGizmos(const IrradianceVolumeFileData& data, std::vector<glm::vec4>& outNodes)
+    {
+      outNodes.assign(data.GetNodeCount(), glm::vec4(0.0f));
+      for (size_t b = 0; b < data.bricks.size(); b++)
+      {
+        const IrradianceBrick& brick = data.bricks[b];
+        const int32_t stepKeys = GetIrradianceBrickStepKeys(brick.spacingIndex);
+        const float halfSize = std::max(0.08f * IRRADIANCE_SPACINGS[brick.spacingIndex], 0.01f);
+        size_t local = b * IRRADIANCE_BRICK_NODE_COUNT;
+        for (int32_t z = 0; z < int32_t(IRRADIANCE_BRICK_NODES); z++)
+        {
+          for (int32_t y = 0; y < int32_t(IRRADIANCE_BRICK_NODES); y++)
+          {
+            for (int32_t x = 0; x < int32_t(IRRADIANCE_BRICK_NODES); x++)
+            {
+              glm::vec4& node = outNodes[data.brickNodeIndices[local++]];
+              const glm::vec3 position = GetIrradianceKeyWorldPosition(brick.originKey + glm::ivec3(x, y, z) * stepKeys);
+              node = glm::vec4(position, node.w > 0.0f ? std::min(node.w, halfSize) : halfSize);
+            }
+          }
+        }
+      }
     }
 
     // irradiance(n) = l0 + dot(l1, n) reaches its minimum at l0 - |l1|, so the
@@ -604,6 +633,35 @@ namespace YAEngine
     }
   }
 
+  void EditorLayer::DebugDrawIrradianceVolumeBricks()
+  {
+    auto* render = m_Context.render;
+    if (!render || !render->GetVolumeBricksVisible())
+      return;
+
+    Entity selected = m_Context.selectedEntity;
+    if (selected == entt::null || !GetScene().HasComponent<IrradianceVolumeComponent>(selected))
+      return;
+
+    const IrradianceVolumePlacementPreview* preview = render->FindIrradianceVolumePlacementPreview(selected);
+    if (preview == nullptr)
+      return;
+
+    const auto strides = Render::GetPreviewBrickDrawStrides(*preview, render->GetVolumeNodeGizmosDrawn());
+    std::array<uint32_t, IRRADIANCE_SPACINGS.size()> seen {};
+    auto& gizmo = render->GetGizmoRenderer();
+    for (const IrradianceBrick& brick : preview->bricks)
+    {
+      const uint32_t level = std::min(brick.spacingIndex, uint32_t(IRRADIANCE_SPACINGS.size() - 1));
+      if (seen[level]++ % strides[level] != 0)
+        continue;
+
+      glm::vec3 halfSize(0.5f * float(GetIrradianceBrickSizeKeys(brick.spacingIndex)) * IRRADIANCE_SPACINGS[0]);
+      gizmo.DrawWireBoxDepthTested(GetIrradianceKeyWorldPosition(brick.originKey) + halfSize, halfSize,
+        Render::GetPlacementBrickColor(brick.spacingIndex));
+    }
+  }
+
   void EditorLayer::DebugDrawIrradianceVolumeNodes()
   {
     auto* render = m_Context.render;
@@ -619,24 +677,33 @@ namespace YAEngine
     {
       m_VolumeNodeCachePath.clear();
       b_VolumeNodeCacheValid = false;
+      m_VolumeNodeGizmos.clear();
       m_VolumeNodePeakL0 = 0.0f;
       return;
     }
 
-    if (m_VolumeNodeCachePath != volume.bakedVolumePath)
+    // A rebake writes to the same path, so the cache also follows the uploaded set: every bake,
+    // reload and scene load replaces it.
+    const uint32_t generation = render->GetIrradianceVolumeGeneration();
+    if (m_VolumeNodeCachePath != volume.bakedVolumePath || m_VolumeNodeCacheGeneration != generation)
     {
       m_VolumeNodeCachePath = volume.bakedVolumePath;
+      m_VolumeNodeCacheGeneration = generation;
       std::string resolved = m_Context.assetManager->ResolvePath(volume.bakedVolumePath);
       b_VolumeNodeCacheValid = IrradianceVolumeFile::Load(resolved, m_VolumeNodeCache);
       m_VolumeNodePeakL0 = b_VolumeNodeCacheValid ? FindPeakNodeL0(m_VolumeNodeCache) : 0.0f;
+      if (b_VolumeNodeCacheValid)
+        BuildVolumeNodeGizmos(m_VolumeNodeCache, m_VolumeNodeGizmos);
+      else
+        m_VolumeNodeGizmos.clear();
     }
 
     if (!b_VolumeNodeCacheValid)
       return;
 
     const IrradianceVolumeFileData& data = m_VolumeNodeCache;
-    uint32_t nodeCount = uint32_t(data.coefficients.size());
-    if (nodeCount == 0 || data.nodesX == 0 || data.nodesY == 0)
+    uint32_t nodeCount = uint32_t(m_VolumeNodeGizmos.size());
+    if (nodeCount == 0)
       return;
 
     // Every node is a wire box, so a dense grid is drawn sparsely instead of
@@ -648,22 +715,19 @@ namespace YAEngine
     bool showRejected = render->GetVolumeInvalidNodesVisible();
     VolumeNodeColorMode colorMode = render->GetVolumeNodeColorMode();
 
-    glm::vec3 nodeHalfExtents(std::max(0.08f * data.spacing, 0.01f));
-
-    // The lattice stored in the asset is used on purpose: a volume that moved or
+    // The bricks stored in the asset are used on purpose: a volume that moved or
     // was resized since it was baked then visibly disagrees with its bounds gizmo.
+    uint32_t drawn = 0;
     for (uint32_t index = 0; index < nodeCount; index += stride)
     {
       bool valid = data.validity[index] != 0;
       if (!valid && !showRejected)
         continue;
 
-      uint32_t x = index % data.nodesX;
-      uint32_t y = (index / data.nodesX) % data.nodesY;
-      uint32_t z = index / (data.nodesX * data.nodesY);
-
-      glm::vec3 world = data.latticeOrigin
-        + glm::vec3(float(x), float(y), float(z)) * data.spacing;
+      // A node no brick references has no position to draw at
+      const glm::vec4& node = m_VolumeNodeGizmos[index];
+      if (node.w <= 0.0f)
+        continue;
 
       glm::vec4 color;
       if (!valid)
@@ -672,11 +736,11 @@ namespace YAEngine
       }
       else if (colorMode == VolumeNodeColorMode::Ringing)
       {
-        color = RingingNodeColor(NodeRingingRatio(data.coefficients[index]));
+        color = RingingNodeColor(NodeRingingRatio(UnpackSHL1RGBHalf(data.coefficients[index])));
       }
       else
       {
-        const SHL1RGB& sh = data.coefficients[index];
+        const SHL1RGB sh = UnpackSHL1RGBHalf(data.coefficients[index]);
         glm::vec3 l0 = glm::max(glm::vec3(sh.r.l0, sh.g.l0, sh.b.l0), glm::vec3(0.0f));
         // Relative to the peak of this volume, so the contrast fills the ramp
         // whatever the absolute scene brightness is. Gizmos are drawn after the
@@ -688,8 +752,10 @@ namespace YAEngine
         color = glm::vec4(glm::pow(normalized, glm::vec3(1.0f / 2.2f)), 0.9f);
       }
 
-      gizmo.DrawWireBoxDepthTested(world, nodeHalfExtents, color);
+      gizmo.DrawWireBoxDepthTested(glm::vec3(node), glm::vec3(node.w), color);
+      drawn++;
     }
+    render->SetVolumeNodeGizmosDrawn(drawn);
   }
 
   // Light and probe icons are camera-facing quads drawn in the overlay pass with no depth
@@ -1044,6 +1110,7 @@ namespace YAEngine
   void EditorLayer::DebugDrawGizmos()
   {
     DebugDrawIrradianceVolumeNodes();
+    DebugDrawIrradianceVolumeBricks();
 
     // Reflection probe icons. Queued from the scene rather than from the snapshot the
     // renderer draws the influence volumes from: that snapshot skips unbaked probes, and
@@ -1149,6 +1216,7 @@ namespace YAEngine
     m_Registry->Get<SystemScheduler>().NotifySceneClear();
     GetAssets().DestroyAll();
     GetScene().ClearScene();
+    GetRender().ClearIrradianceVolumePlacementPreviews();
     GetRender().ResetBoundState();
 
     GetAssets().Init(GetScene(), [this](uint32_t size) { return GetRender().AllocateInstanceData(size); });
@@ -1228,6 +1296,7 @@ namespace YAEngine
     m_Registry->Get<SystemScheduler>().NotifySceneClear();
     GetAssets().DestroyAll();
     GetScene().ClearScene();
+    GetRender().ClearIrradianceVolumePlacementPreviews();
     GetRender().ResetBoundState();
 
     GetAssets().Init(GetScene(), [this](uint32_t size) { return GetRender().AllocateInstanceData(size); });

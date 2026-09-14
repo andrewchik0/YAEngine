@@ -22,7 +22,8 @@ namespace YAEngine
   // edits to be missed from. The tradeoff flips only at tens of thousands of materials.
   //
   // Per frame in flight for the same reason the TLAS records are: frame N-1 can still be
-  // tracing while frame N is recorded, and this buffer is host mapped.
+  // tracing while frame N is recorded, and this buffer is host mapped. Like the TLAS, editor
+  // builds keep one extra bake slot past them, for bakes that trace outside the frame loop.
   class RayTracingMaterialTable
   {
   public:
@@ -30,10 +31,10 @@ namespace YAEngine
     void Init(const RenderContext& ctx);
     void Destroy(const RenderContext& ctx);
 
-    // Refills the frame slot from the material manager. Must run only after this slot's
-    // frame fence has been waited on, and before anything that reads the buffer is
-    // recorded - the host write is ordered against the read by the barrier TlasBuilder
-    // already issues for its own host writes.
+    // Refills the slot from the material manager. Must run only once nothing that reads
+    // this slot is still in flight (for a frame slot, after its frame fence), and before
+    // anything that reads the buffer is recorded - the host write is ordered against the
+    // read by the barrier TlasBuilder already issues for its own host writes.
     void Update(const RenderContext& ctx, uint32_t frameIndex,
       MaterialManager& materials, TextureManager& textures);
 
@@ -44,6 +45,11 @@ namespace YAEngine
 
     // Records actually written this frame. The buffer beyond it is zeroed padding.
     uint32_t GetRecordCount(uint32_t frameIndex) const;
+
+#ifdef YA_EDITOR
+    // Past every frame index, so the frame loop never updates it.
+    uint32_t GetBakeSlot() const { return m_BakeSlot; }
+#endif
 
   private:
 
@@ -65,6 +71,9 @@ namespace YAEngine
     uint32_t EnsureCapacity(const RenderContext& ctx, FrameSlot& slot, uint32_t required);
 
     std::vector<FrameSlot> m_Slots;
+#ifdef YA_EDITOR
+    uint32_t m_BakeSlot = 0;
+#endif
     // Staging for one frame's records. The mapped buffer is write-combined, so the table is
     // assembled here and copied across in one go rather than field by field.
     std::vector<RayTracingMaterialRecord> m_Staging;

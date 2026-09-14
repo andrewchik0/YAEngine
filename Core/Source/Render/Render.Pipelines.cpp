@@ -18,6 +18,8 @@ namespace YAEngine
         m_VolumeStorage.GetValidityView(), m_VolumeStorage.GetValiditySampler());
       m_IBLDescriptorSets[i].WriteUniformBuffer(9,
         m_VolumeStorage.GetBuffer(uint32_t(i)), sizeof(IrradianceVolumeBuffer));
+      m_IBLDescriptorSets[i].WriteCombinedImageSampler(10,
+        m_VolumeStorage.GetIndirectionView(), m_VolumeStorage.GetIndirectionSampler());
     }
   }
 
@@ -67,7 +69,7 @@ namespace YAEngine
   {
     auto& ctx = m_Backend.GetContext();
 
-    // One extra slot past frames-in-flight: probe/irradiance volume bakes render the shadow atlas on a single-time command buffer outside the frame loop and must not write into a slot the frame loop still owns.
+    // One extra slot past frames-in-flight: reflection probe bakes render the shadow atlas on a single-time command buffer outside the frame loop and must not write into a slot the frame loop still owns.
     uint32_t slotCount = ctx.maxFramesInFlight + 1;
 
     SetDescription modelDesc = {
@@ -883,7 +885,7 @@ namespace YAEngine
     }
 
     // IBL descriptor set (irradiance array, prefilter array, BRDF LUT, skybox cubemap,
-    // probe SSBO, three SH volume atlases, volume validity, volume UBO)
+    // probe SSBO, three SH brick pool textures, brick validity, volume UBO, brick indirection)
     SetDescription iblDesc = {
       .set = 3,
       .bindings = {
@@ -898,6 +900,8 @@ namespace YAEngine
           { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 9, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          // Brick indirection (usampler3D)
+          { 10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
@@ -1423,28 +1427,4 @@ namespace YAEngine
     }
 #endif
   }
-
-#ifdef YA_EDITOR
-  void Render::InitBackfaceMaskPipelines(VkRenderPass renderPass)
-  {
-    auto& ctx = m_Backend.GetContext();
-
-    // doubleSided (VK_CULL_MODE_NONE) is intentional: with back faces culled, a node behind a wall would never see it, defeating the classification. Depth write plus the usual reversed-Z GREATER keeps the nearest surface in the mask regardless of facing.
-    PipelineCreateInfo maskInfo = {
-      .fragmentShaderFile = "backface_mask.frag",
-      .vertexShaderFile = "mesh_depth.vert",
-      .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
-      .doubleSided = true,
-      .vertexInputFormat = "f3",
-      .sets = std::vector({ m_FrameUniformBuffer.GetLayout() })
-    };
-    m_BackfaceMaskPipelines[0] = m_PSOCache.Register(ctx.device, renderPass, maskInfo,
-      ctx.pipelineCache);
-
-    maskInfo.vertexShaderFile = "mesh_instanced_depth.vert";
-    maskInfo.sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_InstanceDescriptorSet.GetLayout() });
-    m_BackfaceMaskPipelines[1] = m_PSOCache.Register(ctx.device, renderPass, maskInfo,
-      ctx.pipelineCache);
-  }
-#endif
 }

@@ -8,6 +8,7 @@
 #include "Editor/Utils/CurveEditor.h"
 #include "Editor/Utils/SplinePathEditor.h"
 #include "Scene/Scene.h"
+#include "Scene/BakeExclusion.h"
 #include "Scene/Components.h"
 #include "Scene/ModelOverrides.h"
 #include "Assets/AssetManager.h"
@@ -389,51 +390,163 @@ namespace YAEngine
     return false;
   }
 
-  // Overlapping volumes must share capture resolution, or shared lattice nodes disagree
-  // by SH projection error; warn but never block - a cheap outer volume may be wanted.
-  static void DrawVolumeResolutionConflicts(EditorContext& context,
-    const IrradianceVolumeComponent& iv, const glm::vec3& center, const glm::quat& rotation)
+  static void DrawIrradianceVolumePlacement(EditorContext& context, bool bakeAvailable)
   {
-    glm::vec3 half = ComputeRotatedBoxAabbHalfExtents(rotation, iv.halfExtents);
-    glm::vec3 selfMin = center - half;
-    glm::vec3 selfMax = center + half;
+    const ImVec4 warningColor(1.0f, 0.6f, 0.2f, 1.0f);
+    const ImVec4 errorColor(1.0f, 0.4f, 0.4f, 1.0f);
 
-    auto view = context.scene->GetView<IrradianceVolumeComponent, WorldTransform>();
-    for (auto entity : view)
+    ImGui::Separator();
+    ImGui::BeginDisabled(!bakeAvailable);
+    if (ImGui::Button(ICON_FA_BORDER_ALL " Preview Placement", ImVec2(-1, 0)))
+      context.render->PreviewIrradianceVolumePlacement(context.selectedEntity, *context.scene, *context.assetManager);
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
     {
-      if (entity == context.selectedEntity) continue;
-
-      auto& other = view.get<IrradianceVolumeComponent>(entity);
-      if (other.captureResolution == iv.captureResolution) continue;
-
-      auto& wt = view.get<WorldTransform>(entity);
-      glm::vec3 otherCenter = glm::vec3(wt.world[3]);
-      glm::vec3 otherHalf = ComputeRotatedBoxAabbHalfExtents(
-        ExtractIrradianceBoxRotation(wt.world), other.halfExtents);
-
-      glm::vec3 otherMin = otherCenter - otherHalf;
-      glm::vec3 otherMax = otherCenter + otherHalf;
-      if (glm::any(glm::greaterThan(selfMin, otherMax))) continue;
-      if (glm::any(glm::greaterThan(otherMin, selfMax))) continue;
-
-      ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f),
-        "Overlaps '%s' at capture resolution %u, not %u -\nshared nodes will not match. Use the same resolution.",
-        context.scene->GetName(entity).c_str(), other.captureResolution, iv.captureResolution);
+      if (bakeAvailable)
+        ImGui::SetTooltip("Lays out the sparse bricks the volume would bake with: they refine from\n"
+          "Max Spacing down to Min Spacing where ray traced queries find geometry near.\n"
+          "Nothing is baked.");
+      else
+        ImGui::SetTooltip("The placement preview finds geometry by ray tracing, and the ray traced baker is\n"
+          "unavailable: no hardware ray tracing pipeline or no bindless texture table.");
     }
+
+    const IrradianceVolumePlacementPreview* preview =
+      context.render->FindIrradianceVolumePlacementPreview(context.selectedEntity);
+    if (preview == nullptr)
+      return;
+
+    if (Render::ComputeIrradianceVolumePlacementFingerprint(*context.scene, context.selectedEntity) != preview->fingerprint)
+    {
+      ImGui::TextColored(warningColor, "Stale: the volume changed since the preview");
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Only this volume's own parameters are tracked: its transform, half extents,\n"
+          "spacings and backface threshold. Scene geometry, bake overrides, hidden entities\n"
+          "and model reloads are not - preview again after changing those.");
+    }
+
+    if (!preview->error.empty())
+    {
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextColored(errorColor, "Preview failed: %s", preview->error.c_str());
+      ImGui::PopTextWrapPos();
+      return;
+    }
+
+    if (!preview->validationPassed)
+    {
+      ImGui::PushTextWrapPos(0.0f);
+      ImGui::TextColored(errorColor, "Validation failed: %s", preview->validationFailure.c_str());
+      ImGui::PopTextWrapPos();
+    }
+
+    const IrradianceVolumePlacementEstimate estimate = Render::EstimateIrradianceVolumePlacement(*preview, 0);
+
+    if (ImGui::BeginTable("PlacementLevels", 4, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_SizingStretchSame))
+    {
+      ImGui::TableSetupColumn("Spacing");
+      ImGui::TableSetupColumn("Bricks");
+      ImGui::TableSetupColumn("Nodes");
+      ImGui::TableSetupColumn("Stitched");
+      ImGui::TableHeadersRow();
+
+      for (uint32_t level = preview->maxSpacingIndex + 1; level-- > preview->minSpacingIndex;)
+      {
+        const IrradianceBrickLevelStats& stats = preview->levelStats[level];
+        const glm::vec4 color = Render::GetPlacementBrickColor(level);
+        ImGui::TableNextRow();
+        ImGui::TableNextColumn();
+        ImGui::TextColored(ImVec4(color.r, color.g, color.b, 1.0f), "%g m", double(IRRADIANCE_SPACINGS[level]));
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", stats.bricks);
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", stats.uniqueNodes);
+        ImGui::TableNextColumn();
+        ImGui::Text("%u", stats.stitchedNodes);
+      }
+
+      ImGui::TableNextRow();
+      ImGui::TableNextColumn();
+      ImGui::TextUnformatted("Total");
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", estimate.bricks);
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", estimate.uniqueNodes);
+      ImGui::TableNextColumn();
+      ImGui::Text("%u", estimate.stitchedNodes);
+      ImGui::EndTable();
+    }
+
+    constexpr double BYTES_PER_MB = 1024.0 * 1024.0;
+    ImGui::Text("VRAM ~%.1f MB, disk ~%.1f MB", double(estimate.runtimeBytes) / BYTES_PER_MB,
+      double(estimate.diskBytes) / BYTES_PER_MB);
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Estimated for the planned brick format. VRAM: 25 bytes per brick texel\n"
+        "(three RGBA16F coefficient textures, one R8 validity) plus 4 per indirection cell.\n"
+        "Disk: 25 bytes per unique node, node indices per brick, 4 per indirection cell.\n"
+        "%u indirection cells.", estimate.indirectionCells);
+    ImGui::TextDisabled("Layout %.2f s (GPU queries %.2f s, %u points), total %.2f s",
+      preview->layoutSeconds, preview->querySeconds, preview->queryPoints, preview->totalSeconds);
+
+    ImGui::Checkbox("Show Bricks", &context.render->GetVolumeBricksVisible());
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("Wireframes of the previewed bricks while this volume is selected,\n"
+        "colored by spacing as in the table above.");
+    // With gizmos off no brick is drawn, so a drawn share would be wrong.
+    if (!context.render->GetVolumeBricksVisible() || !context.render->GetGizmosEnabled())
+      return;
+
+    const auto strides = Render::GetPreviewBrickDrawStrides(*preview, context.render->GetVolumeNodeGizmosDrawn());
+    uint32_t drawnBricks = 0;
+    for (uint32_t level = 0; level < uint32_t(strides.size()); level++)
+      drawnBricks += (preview->levelStats[level].bricks + strides[level] - 1) / strides[level];
+    if (drawnBricks < estimate.bricks)
+    {
+      ImGui::SameLine();
+      ImGui::TextColored(warningColor, "%u of %u drawn", drawnBricks, estimate.bricks);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Every k-th brick of each spacing level, so every level stays visible.\n"
+          "At most %u bricks, fewer by the nodes Volume Nodes draws, down to %u.",
+          Render::MAX_DRAWN_PREVIEW_BRICKS, Render::MAX_DRAWN_PREVIEW_BRICKS_WITH_NODES);
+    }
+  }
+
+  // The bake lays its bricks out exactly as the placement preview does, so the kept preview is
+  // what predicts its cost.
+  static void DrawIrradianceVolumeBakeEstimate(EditorContext& context)
+  {
+    const ImVec4 warningColor(1.0f, 0.6f, 0.2f, 1.0f);
+
+    const IrradianceVolumePlacementPreview* preview =
+      context.render->FindIrradianceVolumePlacementPreview(context.selectedEntity);
+    if (preview == nullptr || !preview->error.empty())
+    {
+      ImGui::TextDisabled("Bake: Preview Placement shows the node count");
+      return;
+    }
+
+    const uint32_t volumeSamples = uint32_t(std::clamp(context.render->GetVolumeSampleCount(),
+      Render::MIN_VOLUME_SAMPLES, Render::MAX_VOLUME_SAMPLES));
+    const IrradianceVolumePlacementEstimate estimate = Render::EstimateIrradianceVolumePlacement(*preview, volumeSamples);
+    const bool stale = Render::ComputeIrradianceVolumePlacementFingerprint(*context.scene, context.selectedEntity)
+      != preview->fingerprint;
+    const bool manySamples = estimate.primarySamples > BakeLimits::VOLUME_WARN_PRIMARY_SAMPLES;
+
+    ImGui::TextColored(manySamples ? warningColor : ImGui::GetStyleColorVec4(ImGuiCol_Text),
+      "Bake: %u nodes x %u = %llu primary samples%s", estimate.bakedNodes, volumeSamples,
+      (unsigned long long)estimate.primarySamples, stale ? " (stale preview)" : "");
+    if (ImGui::IsItemHovered())
+      ImGui::SetTooltip("From the placement preview below. Unique nodes that are not stitched, times\n"
+        "Volume Samples (Render Settings), each tracing paths of up to Volume Bounces bounces.\n"
+        "Buried nodes are traced like the rest and only rejected afterwards, those near a back\n"
+        "face once more from their virtual offset; stitched nodes are interpolated from their\n"
+        "coarser neighbour instead of baked.");
+    if (manySamples)
+      ImGui::TextColored(warningColor, "Warning: many primary samples, the bake will take a while");
   }
 
   static bool DrawIrradianceVolume(EditorContext& context, IrradianceVolumeComponent& iv)
   {
-    // Node counts that make bake time explode. One node is six offscreen renders,
-    // so the count, not memory, is what has to stay in check.
-    constexpr uint32_t WARN_NODE_COUNT = 8192;
-    constexpr uint32_t MAX_NODE_COUNT = BakeLimits::VOLUME_MAX_NODE_COUNT;
-    constexpr const char* GRID_COST_TOOLTIP =
-      "16x8x16 = 2048 nodes = 12288 face renders - tens of seconds, fine.\n"
-      "64x32x64 = 131072 nodes - the cap, and only affordable because\n"
-      "classification skips the captures of everything it rejects.\n"
-      "The face render count above assumes NO node is rejected.";
-
     ImGui::PushID("IrradianceVolume");
     bool open = ImGui::CollapsingHeader(ICON_FA_CUBES " Irradiance Volume", ImGuiTreeNodeFlags_DefaultOpen | ImGuiTreeNodeFlags_AllowOverlap);
 
@@ -464,81 +577,76 @@ namespace YAEngine
       static_assert(IM_ARRAYSIZE(spacingOptions) == IRRADIANCE_SPACINGS.size(),
         "Spacing combo labels must match IRRADIANCE_SPACINGS");
       // A value from a hand-edited scene or from code is pulled onto the set here,
-      // so what the combo shows is also what gets saved.
-      iv.spacing = SnapIrradianceSpacing(iv.spacing);
-      int spacingIdx = 0;
+      // so what the combos show is also what gets saved.
+      iv.minSpacing = SnapIrradianceSpacing(iv.minSpacing);
+      iv.maxSpacing = std::max(SnapIrradianceSpacing(iv.maxSpacing), iv.minSpacing);
+      int minSpacingIdx = 0;
+      int maxSpacingIdx = 0;
       for (int i = 0; i < IM_ARRAYSIZE(spacingOptions); i++)
-        if (IRRADIANCE_SPACINGS[i] == iv.spacing) spacingIdx = i;
-      if (ImGui::Combo("Spacing", &spacingIdx, spacingOptions, IM_ARRAYSIZE(spacingOptions)))
-        iv.spacing = IRRADIANCE_SPACINGS[spacingIdx];
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Node spacing in meters, exact and never recomputed.\n"
-          "Nodes sit on one world lattice shared by every volume, so the box is\n"
-          "snapped to the spacing instead. Overlapping volumes then agree.");
-
-      const char* resOptions[] = { "16", "32", "64" };
-      uint32_t resValues[] = { 16, 32, 64 };
-      int resIdx = -1;
-      for (int i = 0; i < 3; i++)
-        if (resValues[i] == iv.captureResolution) resIdx = i;
-
-      // Snapped, not just relabeled: an out-of-range value would display as e.g. "32"
-      // while staying different internally, and the conflict warning compares raw values.
-      if (resIdx < 0)
       {
-        resIdx = 1;
-        iv.captureResolution = resValues[resIdx];
+        if (IRRADIANCE_SPACINGS[i] == iv.minSpacing) minSpacingIdx = i;
+        if (IRRADIANCE_SPACINGS[i] == iv.maxSpacing) maxSpacingIdx = i;
       }
-      if (ImGui::Combo("Capture Resolution", &resIdx, resOptions, IM_ARRAYSIZE(resOptions)))
-        iv.captureResolution = resValues[resIdx];
+      if (ImGui::Combo("Min Spacing", &minSpacingIdx, spacingOptions, IM_ARRAYSIZE(spacingOptions)))
+      {
+        iv.minSpacing = IRRADIANCE_SPACINGS[minSpacingIdx];
+        iv.maxSpacing = std::max(iv.maxSpacing, iv.minSpacing);
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Finest node spacing in meters, reached next to geometry.\n"
+          "Nodes sit on one world lattice shared by every volume, so the box is\n"
+          "snapped to the lattice instead. Overlapping volumes then agree.");
+      if (ImGui::Combo("Max Spacing", &maxSpacingIdx, spacingOptions, IM_ARRAYSIZE(spacingOptions)))
+      {
+        iv.maxSpacing = IRRADIANCE_SPACINGS[maxSpacingIdx];
+        iv.minSpacing = std::min(iv.minSpacing, iv.maxSpacing);
+      }
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Coarsest node spacing in meters, kept in open air.");
 
       ImGui::DragFloat("Backface Threshold", &iv.backfaceRatioThreshold, 0.01f,
         BakeLimits::VOLUME_MIN_BACKFACE_THRESHOLD, BakeLimits::VOLUME_MAX_BACKFACE_THRESHOLD,
         "%.2f", ImGuiSliderFlags_AlwaysClamp);
       if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("How much of the sphere a node may see from the inside\n"
-          "before the bake rejects it as buried behind a wall or under the ground.\n"
-          "Rejected nodes inherit their nearest valid neighbour, so rejecting is cheap.\n"
-          "Lower catches more leaks, higher keeps more nodes. 1.00 switches the test off.");
+        ImGui::SetTooltip("Fraction of a node's probe rays that may hit the inside of single-sided\n"
+          "geometry before the bake rejects the node as buried behind a wall or under the ground.\n"
+          "Rejected nodes take the average of their nearest valid neighbours.\n"
+          "Lower catches more leaks, higher keeps more nodes. 1.00 keeps every node.");
 
-      // Shown before baking as the only warning before minutes of offscreen rendering;
-      // count follows the world-space AABB of the rotated box, so it must be fed the
-      // same transform the baker feeds it.
-      const glm::mat4& volumeWorld = context.scene->GetWorldTransform(context.selectedEntity).world;
-      glm::vec3 center = glm::vec3(volumeWorld[3]);
-      glm::quat rotation = ExtractIrradianceBoxRotation(volumeWorld);
+      ImGui::Checkbox("Virtual Offset", &iv.virtualOffset);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Buried nodes within their spacing of a back face are moved past that face\n"
+          "and integrated again instead of taking their neighbours' light. An offset node that\n"
+          "is still buried, too close to geometry or enclosed is dilated as before.\n"
+          "Integrates those nodes a second time. Applies on the next bake.");
 
-      IrradianceGridLayout layout = ComputeIrradianceGridLayout(center, rotation,
-        iv.halfExtents, iv.spacing);
-      uint32_t nodeCount = layout.GetNodeCount();
+      ImGui::BeginDisabled(!iv.virtualOffset);
+      ImGui::DragFloat("Virtual Offset Bias", &iv.virtualOffsetBias, 0.001f,
+        BakeLimits::VOLUME_MIN_VIRTUAL_OFFSET_BIAS, BakeLimits::VOLUME_MAX_VIRTUAL_OFFSET_BIAS,
+        "%.3f m", ImGuiSliderFlags_AlwaysClamp);
+      ImGui::EndDisabled();
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Extra clearance in meters beyond the minimum probe clearance, %.2f of the node's\n"
+          "spacing, at which a virtual offset node is placed in front of its nearest back face.\n"
+          "The whole offset, face distance plus clearance plus bias, stays within the node's\n"
+          "spacing: a node that would need more is dilated instead. Applies on the next bake.",
+          double(BakeLimits::VOLUME_MIN_PROBE_CLEARANCE_FRACTION));
+
+      ImGui::DragFloat("Edge Fade", &iv.edgeFade, 0.01f, BakeLimits::VOLUME_MIN_EDGE_FADE,
+        BakeLimits::VOLUME_MAX_EDGE_FADE, "%.2f m", ImGuiSliderFlags_AlwaysClamp);
+      if (ImGui::IsItemHovered())
+        ImGui::SetTooltip("Width in meters over which the volume blends into the volume enclosing it,\n"
+          "or into the sky, at its box faces. Wide suits faces in open air and seams between\n"
+          "nested volumes; narrow keeps the outside from reaching into a box fitted to walls.\n"
+          "Stored in the baked file: a change applies on the next bake.");
 
       ImGui::Separator();
-      if (nodeCount > WARN_NODE_COUNT)
-      {
-        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Grid: %ux%ux%u = %u nodes (%u face renders)",
-          layout.nodeCounts.x, layout.nodeCounts.y, layout.nodeCounts.z,
-          nodeCount, layout.GetFaceRenderCount());
-        // Tooltip attached here, before the second line: IsItemHovered() refers to
-        // the last item, so putting it after the warning bound it to the wrong one.
-        if (ImGui::IsItemHovered())
-          ImGui::SetTooltip("%s", GRID_COST_TOOLTIP);
-        ImGui::TextColored(ImVec4(1.0f, 0.6f, 0.2f, 1.0f), "Warning: bake will take many minutes");
-      }
-      else
-      {
-        ImGui::Text("Grid: %ux%ux%u = %u nodes (%u face renders)",
-          layout.nodeCounts.x, layout.nodeCounts.y, layout.nodeCounts.z,
-          nodeCount, layout.GetFaceRenderCount());
-        if (ImGui::IsItemHovered())
-          ImGui::SetTooltip("%s", GRID_COST_TOOLTIP);
-      }
+      DrawIrradianceVolumeBakeEstimate(context);
 
-      // A rotated box costs nodes: the lattice is world axis aligned, so it has to
-      // cover the AABB. Roughly twice as many at 45 degrees around one axis.
+      // Must be the rotation the baker extracts, or the hint disagrees with the bake.
+      const glm::quat rotation = ExtractIrradianceBoxRotation(context.scene->GetWorldTransform(context.selectedEntity).world);
       if (std::abs(rotation.w) < 0.9999f)
-        ImGui::TextDisabled("Box is rotated - the lattice covers its world AABB, so\nthere are more nodes than an unrotated box would need.");
-
-      DrawVolumeResolutionConflicts(context, iv, center, rotation);
+        ImGui::TextDisabled("Box is rotated - bricks stay world axis aligned, so covering\nit takes more of them than an unrotated box would need.");
 
       if (iv.baked)
       {
@@ -551,15 +659,16 @@ namespace YAEngine
         ImGui::TextColored(ImVec4(0.8f, 0.8f, 0.3f, 1.0f), "Not baked");
       }
 
-      bool tooDense = nodeCount > MAX_NODE_COUNT;
-      ImGui::BeginDisabled(tooDense);
+      const bool bakeAvailable = context.render->IsRayTracedBakeAvailable();
+      ImGui::BeginDisabled(!bakeAvailable);
       if (ImGui::Button(ICON_FA_CIRCLE_PLAY " Bake", ImVec2(-1, 0)))
         context.render->BakeIrradianceVolume(context.selectedEntity, *context.scene, *context.assetManager);
       ImGui::EndDisabled();
+      if (!bakeAvailable && ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+        ImGui::SetTooltip("Irradiance volumes bake by ray tracing, and the ray traced baker is\n"
+          "unavailable: no hardware ray tracing pipeline or no bindless texture table.");
 
-      if (tooDense)
-        ImGui::TextColored(ImVec4(1.0f, 0.4f, 0.4f, 1.0f),
-          "Grid above %u nodes - raise the spacing to bake", MAX_NODE_COUNT);
+      DrawIrradianceVolumePlacement(context, bakeAvailable);
     }
 
     ImGui::PopID();
@@ -1213,6 +1322,69 @@ namespace YAEngine
     ImGui::Separator();
   }
 
+  // Drawn for every entity rather than behind a component header: absence of the
+  // component is a state too, and the effective line matters most exactly then.
+  static void DrawBakeOverride(EditorContext& context, Entity entity)
+  {
+    auto& scene = *context.scene;
+    auto& registry = scene.GetRegistry();
+
+    ImGui::PushID("BakeOverride");
+
+    // Scatter output is regenerated and never serialized, so an override set on it would
+    // silently vanish on the next regeneration.
+    const bool scatterInstance = registry.all_of<ScatterInstanceTag>(entity);
+
+    const char* modes[] = { "Auto", "Include", "Exclude" };
+    const auto* component = registry.try_get<BakeOverrideComponent>(entity);
+    int mode = static_cast<int>(component != nullptr ? component->mode : BakeOverride::Auto);
+    ImGui::BeginDisabled(scatterInstance);
+    if (ImGui::Combo("Bake", &mode, modes, IM_ARRAYSIZE(modes)))
+    {
+      if (static_cast<BakeOverride>(mode) == BakeOverride::Auto)
+        scene.RemoveComponent<BakeOverrideComponent>(entity);
+      else
+        registry.emplace_or_replace<BakeOverrideComponent>(entity,
+          BakeOverrideComponent { .mode = static_cast<BakeOverride>(mode) });
+    }
+    ImGui::EndDisabled();
+    if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+    {
+      if (scatterInstance)
+        ImGui::SetTooltip("Runtime scatter output, regenerated by its scatter parent.\n"
+          "Set the override on the scatter parent; it covers this whole subtree.");
+      else
+        ImGui::SetTooltip("Auto leaves out anything with a dynamic collider on itself or an ancestor.\n"
+          "Include and Exclude override that for this entity and everything below it;\n"
+          "the nearest override up the hierarchy wins.");
+    }
+
+    if (registry.all_of<HiddenTag>(entity))
+    {
+      ImGui::TextDisabled("Effective: hidden - its meshes are not rendered into bakes, its lights still contribute");
+    }
+    else
+    {
+      const BakeInclusion inclusion = ResolveBakeInclusion(registry, entity);
+      const char* verdict = inclusion.excluded ? "excluded" : "included";
+      const bool byOverride = inclusion.reason != BakeInclusionReason::DynamicCollider;
+
+      if (inclusion.reason == BakeInclusionReason::Default)
+        ImGui::TextDisabled("Effective: %s", verdict);
+      else if (inclusion.source == entity)
+        ImGui::TextDisabled("Effective: %s by %s", verdict,
+          byOverride ? "this override" : "its dynamic collider");
+      else if (scene.HasComponent<Name>(inclusion.source))
+        ImGui::TextDisabled("Effective: %s by the %s on '%s'", verdict,
+          byOverride ? "override" : "dynamic collider", scene.GetName(inclusion.source).c_str());
+      else
+        ImGui::TextDisabled("Effective: %s by the %s on 'Entity %u'", verdict,
+          byOverride ? "override" : "dynamic collider", static_cast<uint32_t>(inclusion.source));
+    }
+
+    ImGui::PopID();
+  }
+
   void DetailsPanel::OnRender(EditorContext& context)
   {
     if (!ImGui::Begin("Details"))
@@ -1368,6 +1540,9 @@ namespace YAEngine
       if (DrawCollider(scene.GetComponent<ColliderComponent>(entity)))
         scene.RemoveComponent<ColliderComponent>(entity);
     }
+
+    ImGui::Separator();
+    DrawBakeOverride(context, entity);
 
     ImGui::Separator();
 

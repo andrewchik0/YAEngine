@@ -649,6 +649,12 @@ namespace YAEngine
     const std::string bakeNote = " The editor does nothing else until the bake is done, which can take minutes. "
       "Baked files go to <asset base path>/Assets/Probes, named after the entity, and replace earlier ones.";
 
+    const std::string volumeBakeNote = " Volumes are baked by ray tracing, with the volumeSamples, volumeBounces and "
+      "volumeFireflyClamp render settings; fails on a device without the ray traced baker.";
+
+    const std::string volumeBakeUnavailable = "irradiance volumes are baked by ray tracing, and the ray traced baker "
+      "is unavailable: no hardware ray tracing pipeline or no bindless texture table";
+
     actions.Register({
       .name = "bake.allProbes",
       .description = "Bake every reflection probe of the scene, as Bake All Reflection Probes in Render Settings "
@@ -678,10 +684,15 @@ namespace YAEngine
 
     actions.Register({
       .name = "bake.allVolumes",
-      .description = "Bake every irradiance volume of the scene, as Bake All Volumes in Render Settings does, with "
-        "the configured bounce count." + bakeNote + " Returns {volumes: [{entity, name, baked, bakedVolume}]}.",
+      .description = "Bake every irradiance volume of the scene, as Bake All Volumes in Render Settings does."
+        + volumeBakeNote + bakeNote + " Fails, with nothing baked, when the ray traced bake scene cannot be built. "
+        "Returns {volumes: [{entity, name, baked, bakedVolume, rebaked}], allRebaked}. rebaked is whether this call "
+        "baked and saved the volume; one that failed (invalid volume description, InvalidDesc: e.g. min spacing above "
+        "max spacing; brick layout limit or validation; integration; every integrated node buried with no virtual "
+        "offset accepted, too close to geometry or enclosed by it, nothing saved; or file write, see log.tail) keeps "
+        "its earlier file, which baked and bakedVolume then describe.",
       .refusedWhileCapturing = true,
-      .handler = [this, volumeResult](const BridgeActionArgs&, const BridgeReply& reply) {
+      .handler = [this, volumeResult, volumeBakeUnavailable](const BridgeActionArgs&, const BridgeReply& reply) {
         Scene& scene = GetScene();
         std::vector<Entity> volumes = CollectEntitiesWith<IrradianceVolumeComponent>(scene);
         if (volumes.empty())
@@ -690,14 +701,37 @@ namespace YAEngine
           return;
         }
 
-        GetRender().BakeAllIrradianceVolumes(scene, GetAssets());
+        if (!GetRender().IsRayTracedBakeAvailable())
+        {
+          reply.Fail(BridgeErrorCode::FAILED, volumeBakeUnavailable);
+          return;
+        }
+
+        const IrradianceVolumeBakeAllResult bake = GetRender().BakeAllIrradianceVolumes(scene, GetAssets());
+        if (!bake.bakeSceneBuilt)
+        {
+          reply.Fail(BridgeErrorCode::FAILED, "no volume was baked: the ray traced bake scene could not be built, "
+            "nothing in the scene is traceable (no objects, or every object excluded from bakes); see log.tail");
+          return;
+        }
 
         Json list = Json::array();
+        bool allRebaked = true;
         for (Entity volume : volumes)
-          list.push_back(volumeResult(scene, volume));
+        {
+          auto outcome = std::find_if(bake.volumes.begin(), bake.volumes.end(),
+            [volume](const IrradianceVolumeBakeAllResult::Volume& v) { return v.entity == volume; });
+          const bool rebaked = outcome != bake.volumes.end() && outcome->rebaked;
+          allRebaked = allRebaked && rebaked;
+
+          Json entry = volumeResult(scene, volume);
+          entry["rebaked"] = rebaked;
+          list.push_back(std::move(entry));
+        }
 
         Json result = Json::object();
         result["volumes"] = std::move(list);
+        result["allRebaked"] = allRebaked;
         reply.Ok(std::move(result));
       }
     });
@@ -734,11 +768,11 @@ namespace YAEngine
 
     actions.Register({
       .name = "bake.volume",
-      .description = "Bake one irradiance volume, as the Bake button in its Details panel does." + bakeNote
-        + " Returns {entity, name, baked, bakedVolume}.",
+      .description = "Bake one irradiance volume, as the Bake button in its Details panel does." + volumeBakeNote
+        + bakeNote + " Returns {entity, name, baked, bakedVolume}.",
       .params = { RequiredParam("entity", ParamType::Entity, "Entity with an irradianceVolume component.") },
       .refusedWhileCapturing = true,
-      .handler = [this, volumeResult](const BridgeActionArgs& args, const BridgeReply& reply) {
+      .handler = [this, volumeResult, volumeBakeUnavailable](const BridgeActionArgs& args, const BridgeReply& reply) {
         Scene& scene = GetScene();
         Entity entity = args.GetEntity("entity");
         if (!scene.HasComponent<IrradianceVolumeComponent>(entity))
@@ -748,14 +782,125 @@ namespace YAEngine
           return;
         }
 
+        if (!GetRender().IsRayTracedBakeAvailable())
+        {
+          reply.Fail(BridgeErrorCode::FAILED, volumeBakeUnavailable);
+          return;
+        }
+
         if (!GetRender().BakeIrradianceVolume(entity, scene, GetAssets()))
         {
-          reply.Fail(BridgeErrorCode::FAILED, "the bake of '" + scene.GetName(entity) + "' failed: more nodes than "
-            "the bake allows for its spacing, or the file could not be written; see log.tail");
+          reply.Fail(BridgeErrorCode::FAILED, "the bake of '" + scene.GetName(entity) + "' failed: the ray traced bake "
+            "scene could not be built (nothing traceable in the scene), the volume description is invalid (InvalidDesc: "
+            "e.g. min spacing above max spacing), the brick layout exceeded a limit or failed validation, the "
+            "integration failed, every integrated node was buried with no virtual offset accepted, too close to geometry or "
+            "enclosed by it (nothing saved), or the "
+            "file could not be written (a complete bake that could not replace the old file is kept as <file>.tmp); "
+            "see log.tail");
           return;
         }
 
         reply.Ok(volumeResult(scene, entity));
+      }
+    });
+
+    actions.Register({
+      .name = "bake.previewVolumePlacement",
+      .description = "Lay out the sparse adaptive bricks of one irradiance volume without baking, as Preview Placement "
+        "in its Details panel does: bricks refine from maxSpacing down to minSpacing where ray traced geometry queries "
+        "find surfaces near. The preview is kept for that panel and the brick gizmo. The editor does nothing else "
+        "until it is done; fails on a device without the ray traced baker. Returns {entity, name, error, minSpacing, "
+        "maxSpacing, levels: [{spacing, bricks, uniqueNodes, stitchedNodes}] coarse to fine, totals: {bricks, "
+        "uniqueNodes, stitchedNodes, bakedNodes, indirectionCells}, estimates: {runtimeVramBytes, diskBytes, "
+        "bakePrimarySamples, volumeSamples}, validation: {passed, failure}, timings: {totalSeconds, layoutSeconds, "
+        "querySeconds, queryBatches, queryPoints}}. error is null unless the volume description is invalid "
+        "(InvalidDesc: e.g. non-positive half extents, min spacing above max spacing, a box too far from the origin), "
+        "the layout exceeded a limit or a query failed; levels, totals and estimates are then empty and validation "
+        "is null. Stitched nodes are interpolated "
+        "rather than baked, so bakePrimarySamples is bakedNodes times the volumeSamples render setting.",
+      .params = { RequiredParam("entity", ParamType::Entity, "Entity with an irradianceVolume component.") },
+      .refusedWhileCapturing = true,
+      .handler = [this, volumeBakeUnavailable](const BridgeActionArgs& args, const BridgeReply& reply) {
+        Scene& scene = GetScene();
+        Entity entity = args.GetEntity("entity");
+        if (!scene.HasComponent<IrradianceVolumeComponent>(entity))
+        {
+          reply.Fail(BridgeErrorCode::NOT_FOUND, "entity " + std::to_string(entt::to_integral(entity))
+            + " has no 'irradianceVolume' component");
+          return;
+        }
+
+        if (!GetRender().IsRayTracedBakeAvailable())
+        {
+          reply.Fail(BridgeErrorCode::FAILED, volumeBakeUnavailable);
+          return;
+        }
+
+        const IrradianceVolumePlacementPreview* preview =
+          GetRender().PreviewIrradianceVolumePlacement(entity, scene, GetAssets());
+        if (preview == nullptr)
+        {
+          reply.Fail(BridgeErrorCode::FAILED, "the placement preview of '" + scene.GetName(entity) + "' could not "
+            "run: the ray traced bake scene could not be built (nothing traceable in the scene); see log.tail");
+          return;
+        }
+
+        const bool layoutBuilt = preview->error.empty();
+        const uint32_t volumeSamples = uint32_t(std::clamp(GetRender().GetVolumeSampleCount(),
+          Render::MIN_VOLUME_SAMPLES, Render::MAX_VOLUME_SAMPLES));
+        const IrradianceVolumePlacementEstimate estimate =
+          Render::EstimateIrradianceVolumePlacement(*preview, volumeSamples);
+
+        Json result = EntityResult(scene, entity);
+        result["error"] = layoutBuilt ? Json(nullptr) : Json(preview->error);
+        result["minSpacing"] = preview->fingerprint.minSpacing;
+        result["maxSpacing"] = preview->fingerprint.maxSpacing;
+
+        Json levels = Json::array();
+        Json totals = Json::object();
+        Json estimates = Json::object();
+        Json validation = nullptr;
+        if (layoutBuilt)
+        {
+          for (uint32_t level = preview->maxSpacingIndex + 1; level-- > preview->minSpacingIndex;)
+          {
+            const IrradianceBrickLevelStats& stats = preview->levelStats[level];
+            Json entry = Json::object();
+            entry["spacing"] = IRRADIANCE_SPACINGS[level];
+            entry["bricks"] = stats.bricks;
+            entry["uniqueNodes"] = stats.uniqueNodes;
+            entry["stitchedNodes"] = stats.stitchedNodes;
+            levels.push_back(std::move(entry));
+          }
+
+          totals["bricks"] = estimate.bricks;
+          totals["uniqueNodes"] = estimate.uniqueNodes;
+          totals["stitchedNodes"] = estimate.stitchedNodes;
+          totals["bakedNodes"] = estimate.bakedNodes;
+          totals["indirectionCells"] = estimate.indirectionCells;
+
+          estimates["runtimeVramBytes"] = estimate.runtimeBytes;
+          estimates["diskBytes"] = estimate.diskBytes;
+          estimates["bakePrimarySamples"] = estimate.primarySamples;
+          estimates["volumeSamples"] = volumeSamples;
+
+          validation = Json::object();
+          validation["passed"] = preview->validationPassed;
+          validation["failure"] = preview->validationFailure;
+        }
+        result["levels"] = std::move(levels);
+        result["totals"] = std::move(totals);
+        result["estimates"] = std::move(estimates);
+        result["validation"] = std::move(validation);
+
+        Json timings = Json::object();
+        timings["totalSeconds"] = preview->totalSeconds;
+        timings["layoutSeconds"] = preview->layoutSeconds;
+        timings["querySeconds"] = preview->querySeconds;
+        timings["queryBatches"] = preview->queryBatches;
+        timings["queryPoints"] = preview->queryPoints;
+        result["timings"] = std::move(timings);
+        reply.Ok(std::move(result));
       }
     });
 

@@ -276,7 +276,7 @@ namespace YAEngine
     uniforms.aoStrength = 0.0f;
     uniforms.aoSpecularStrength = 0.0f;
     uniforms.aoMultiBounce = 0.0f;
-    // Forced off like AO and SSR above: probe and volume bakes must not read
+    // Forced off like AO and SSR above: probe bakes must not read
     // screen-space GI that the cube faces never rendered.
     uniforms.ssgiEnabled = 0;
     uniforms.ssrEnabled = 0;
@@ -288,7 +288,9 @@ namespace YAEngine
     uniforms.jitterX = 0.0f;
     uniforms.jitterY = 0.0f;
     uniforms.time = 0.0f;
-    uniforms.gamma = 2.2f;
+    // Not a display encode here: the G-buffer decodes base color with it, so the
+    // capture has to use the live setting to shade the albedo the camera sees.
+    uniforms.gamma = m_Render->GetGamma();
     uniforms.exposure = 1.0f;
     uniforms.currentTexture = 0;
     uniforms.tonemapMode = 0;

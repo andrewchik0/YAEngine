@@ -33,10 +33,16 @@ namespace YAEngine
 
   void RayTracingMaterialTable::Init(const RenderContext& ctx)
   {
+    uint32_t slotCount = ctx.maxFramesInFlight;
+#ifdef YA_EDITOR
+    m_BakeSlot = ctx.maxFramesInFlight;
+    slotCount++;
+#endif
+
     if (!ctx.raytracingSupported)
       return;
 
-    m_Slots.resize(ctx.maxFramesInFlight);
+    m_Slots.resize(slotCount);
     for (FrameSlot& slot : m_Slots)
       EnsureCapacity(ctx, slot, INITIAL_CAPACITY);
   }
@@ -61,8 +67,9 @@ namespace YAEngine
 
     if (target > capacity)
     {
-      // The slot's own frame has retired - the caller waited on its fence - so the old
-      // allocation can go now rather than onto a deferred destroy queue.
+      // Nothing in flight still reads the old allocation - a frame slot's fence has been
+      // waited on, and the bake slot is only used on single-time command buffers, which wait
+      // for completion - so it can go now rather than onto a deferred destroy queue.
       slot.records.Destroy(ctx);
       slot.records = VulkanBuffer::CreateMapped(ctx,
         VkDeviceSize(target) * sizeof(RayTracingMaterialRecord), RECORD_BUFFER_USAGE);
