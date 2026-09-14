@@ -96,7 +96,7 @@ namespace YAEngine
     constexpr const char* GBUFFER_GROUP[] = { "gbuffer0", "gbuffer1", "mainDepth", "mainVelocity" };
     constexpr const char* PT_GROUP[] = {
       "pt_noisy", "pt_accum", "ptHitDistance", "ptSpecularMotion", "ptDiffuseAlbedo", "ptSpecularAlbedo",
-      "ptNormalRoughness"
+      "ptNormalRoughness", "ptPrimaryAlbedo", "ptPrimaryNormal", "ptPrimaryThroughput", "ptDepth", "ptMotion"
     };
     constexpr const char* DEFAULT_GROUP[] = { "final", "resolved" };
 

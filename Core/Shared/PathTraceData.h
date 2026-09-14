@@ -77,6 +77,26 @@ namespace YAEngine {
 #define PT_REFLECTOR_LOOKUP_RELATIVE_TOLERANCE 0.005
 #define PT_REFLECTOR_LOOKUP_ABSOLUTE_TOLERANCE 0.02
 
+// Primary Surface Replacement: what ray reconstruction is told about a pixel whose first vertex
+// is a metallic delta mirror (alpha <= PT_DELTA_MAX_ALPHA). RR cannot keep a reflection sharp
+// under camera translation from the specular guides alone - measured, reflection detail fell to
+// a tenth of the reference - but handles an ordinary surface fine, so the guides, depth and
+// motion describe the first non-mirror surface seen through the mirror instead, as NVIDIA's
+// vk_denoise_dlssrr sample does. Only what RR sees changes; the radiance estimator does not.
+//
+// Metals only: a smooth dielectric shows its own surface and the reflection at once, and
+// replacing it would hide the first. Just under one so 8-bit and texture rounding of a
+// metallic of 1 still qualifies.
+#define PT_PSR_MIN_METALLIC 0.99
+// Mirrors followed before the chain stops and the last one is described as itself. Also capped
+// by the bounce budget, beyond which the estimator never reaches the surface behind.
+#define PT_PSR_MAX_CHAIN_DEPTH 3
+
+// PROTOTYPE (dielectric reflection layer spike), dev-only A/B, not a setting: where the Fresnel
+// weight of the smooth dielectric reflection layer is applied. 1 = composite (layer radiance
+// unweighted, F carried in the RR colour alpha), 0 = folded into the layer radiance and guides.
+#define PT_LAYER_F_IN_COMPOSITE 1
+
 struct PathTraceConstants
 {
   int maxBounces;

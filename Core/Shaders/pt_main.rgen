@@ -11,8 +11,9 @@
 // The first path vertex is NOT traced. It is read back out of the G-buffer, which means the
 // tracer starts from exactly the surface the raster pipeline shaded, sub-pixel jitter
 // included, and the two images are comparable pixel for pixel instead of only statistically.
-// It also hands stage 5 its guide buffers for free - the same normals, albedo and depth the
-// raster pass already wrote.
+// What ray reconstruction is told about that vertex is written separately (outPrimary*,
+// outPTDepth, outPTMotion): a copy of the G-buffer, except on metallic delta mirrors, where
+// Primary Surface Replacement describes the surface seen through the mirror instead.
 //
 // Always bindless: every bounce resolves its material through the texture table, so there is
 // no non-bindless permutation to be, exactly as for pathtrace.rgen.
@@ -57,6 +58,22 @@ layout(set = 1, binding = 10, r16f) uniform writeonly image2D outHitDistance;
 layout(set = 1, binding = 11, rg16f) uniform writeonly image2D outSpecularMotion;
 // Read where the virtual image sits on the surface itself: unlit and emissive texels.
 layout(set = 1, binding = 12) uniform sampler2D u_MainVelocity;
+// The first path vertex as ray reconstruction is told about it - see Render.h. A copy of the
+// G-buffer everywhere except on metallic delta mirrors, which are replaced by what they show.
+layout(set = 1, binding = 13, rgba8) uniform writeonly image2D outPrimaryAlbedo;
+layout(set = 1, binding = 14, rgba16f) uniform writeonly image2D outPrimaryNormal;
+layout(set = 1, binding = 15, rgba16f) uniform writeonly image2D outPrimaryThroughput;
+layout(set = 1, binding = 16, r32f) uniform writeonly image2D outPTDepth;
+layout(set = 1, binding = 17, rg16f) uniform writeonly image2D outPTMotion;
+// PROTOTYPE (dielectric reflection layer spike): the mirror path of a smooth dielectric first
+// vertex, denoised by a second RR instance, and that instance's first vertex, PSR-style on
+// layer pixels and a copy of the primary one elsewhere.
+layout(set = 1, binding = 18, rgba16f) uniform writeonly image2D outLayerRadiance;
+layout(set = 1, binding = 19, rgba8) uniform writeonly image2D outLayerAlbedo;
+layout(set = 1, binding = 20, rgba16f) uniform writeonly image2D outLayerNormal;
+layout(set = 1, binding = 21, rgba16f) uniform writeonly image2D outLayerThroughput;
+layout(set = 1, binding = 22, r32f) uniform writeonly image2D outLayerDepth;
+layout(set = 1, binding = 23, rg16f) uniform writeonly image2D outLayerMotion;
 
 layout(push_constant) uniform PathTracePushBlock
 {
@@ -598,6 +615,120 @@ bool sampleBrdfDirection(vec3 N, vec3 V, vec3 albedo, float metallic, float roug
   return true;
 }
 
+// Primary Surface Replacement - see PT_PSR_MIN_METALLIC. The first vertex (P, N) is a metallic
+// delta mirror whose probe ray came back as probePayload. The chain is followed to the first
+// surface that is not one, and the first-vertex outputs are rewritten to describe it as a
+// virtual surface on the camera ray: its material, its normal mirrored back through every mirror
+// (which keeps the angle to the camera ray the real hit had), the chain's Fresnel as throughput,
+// and the depth and motion of the virtual point. The radiance estimator is not touched.
+void replacePrimarySurface(vec3 P, vec3 N, vec3 f0, float NdotV, float depth,
+  float primaryDistance, vec3 previousP, vec3 previousN, vec3 probeDirection,
+  RayTracingPayload probePayload, vec2 currentNDC,
+  inout vec4 primaryAlbedo, inout vec4 primaryNormal, inout vec4 primaryThroughput,
+  inout float ptDepth, inout vec2 ptMotion)
+{
+  // Every mirror of the chain, primary vertex first, with its plane as of the previous frame.
+  vec3 mirrorNormals[PT_PSR_MAX_CHAIN_DEPTH];
+  vec3 previousMirrorPoints[PT_PSR_MAX_CHAIN_DEPTH];
+  vec3 previousMirrorNormals[PT_PSR_MAX_CHAIN_DEPTH];
+  mirrorNormals[0] = N;
+  previousMirrorPoints[0] = previousP;
+  previousMirrorNormals[0] = previousN;
+  int mirrorCount = 1;
+  int maxMirrors = min(PT_PSR_MAX_CHAIN_DEPTH, pc.maxBounces);
+
+  // The delta branch's expected weight, Fresnel. Its division by the lobe probability is the
+  // estimator's business, not a property of the surface RR is told about.
+  vec3 throughput = fresnelSchlick(NdotV, f0);
+  float chainDistance = primaryDistance;
+  vec3 segmentBase = P;
+  // Where the segment's ray actually left from, which hitT is measured against.
+  vec3 segmentOrigin = offsetRayOrigin(P, N);
+  vec3 direction = probeDirection;
+  RayTracingPayload hitPayload = probePayload;
+
+  for (int link = 0; link < PT_PSR_MAX_CHAIN_DEPTH; link++)
+  {
+    if (hitPayload.hit == 0u)
+    {
+      // The sky through the chain: a direction at infinity, mirrored back across last frame's
+      // planes the way the probe's own motion vector does it.
+      vec3 previousDirection = direction;
+      for (int i = mirrorCount - 1; i >= 0; i--)
+        previousDirection = mirrorDirection(previousDirection, previousMirrorNormals[i]);
+
+      primaryAlbedo = vec4(0.0);
+      primaryNormal = vec4(0.0, 0.0, 0.0, 1.0);
+      primaryThroughput = vec4(throughput, 0.0);
+      ptDepth = PT_SKY_DEPTH;
+      ptMotion = specularMotionFromPrevClip(
+        u_Frame.prevProj * (u_Frame.prevView * vec4(previousDirection, 0.0)), currentNDC);
+      return;
+    }
+
+    RayHitGeometry hit = resolveHitGeometry(hitPayload.instanceIndex, hitPayload.primitiveIndex,
+      hitPayload.objectToWorld, hitPayload.barycentrics, direction);
+    PathSurface surface = resolveHitMaterial(hit, hitPayload.barycentrics);
+    vec4 hitDelta[3] = u_Instances[hitPayload.instanceIndex].worldToPrevWorld;
+
+    // Based at the unoffset segment start for the same reason the probe's motion vector is:
+    // the ray origin offset runs along the normal and would carry the point off the camera ray.
+    // Only the offset's component along the ray is added back to hitT.
+    float segmentLength = hitPayload.hitT + dot(segmentOrigin - segmentBase, direction);
+    vec3 X = segmentBase + direction * segmentLength;
+    chainDistance += segmentLength;
+    vec3 previousX = applyWorldToPrevWorldPoint(hitDelta, X);
+
+    bool isMirror = !surface.emissiveTexel
+      && surface.roughness * surface.roughness <= PT_DELTA_MAX_ALPHA
+      && surface.metallic >= PT_PSR_MIN_METALLIC;
+
+    if (isMirror && mirrorCount < maxMirrors)
+    {
+      float hitNdotV = clamp(abs(dot(hit.normal, direction)), 0.01, 0.99);
+      throughput *= fresnelSchlick(hitNdotV, mix(vec3(0.04), surface.albedo, surface.metallic));
+
+      mirrorNormals[mirrorCount] = hit.normal;
+      previousMirrorPoints[mirrorCount] = previousX;
+      previousMirrorNormals[mirrorCount] = applyWorldToPrevWorldDirection(hitDelta, hit.normal);
+      mirrorCount++;
+
+      segmentBase = X;
+      segmentOrigin = offsetRayOrigin(hit.position, hit.normal);
+      direction = reflect(direction, hit.normal);
+
+      payload.hit = 0u;
+      traceRayEXT(u_Tlas, gl_RayFlagsNoneEXT, RT_MASK_OPAQUE,
+        0u, 0u, uint(PT_PRIMARY_MISS_INDEX),
+        segmentOrigin, PT_RAY_TMIN, direction, PT_RAY_TMAX,
+        0);
+      hitPayload = payload;
+      continue;
+    }
+
+    // The last mirror of the chain images the point first, the primary vertex last.
+    vec3 virtualNormal = hit.normal;
+    vec3 previousVirtual = previousX;
+    for (int i = mirrorCount - 1; i >= 0; i--)
+    {
+      virtualNormal = mirrorDirection(virtualNormal, mirrorNormals[i]);
+      previousVirtual = mirrorPoint(previousVirtual, previousMirrorPoints[i], previousMirrorNormals[i]);
+    }
+
+    bool hasPbrResponse = !surface.emissiveTexel;
+    primaryAlbedo = vec4(surface.albedo, surface.metallic);
+    primaryNormal = vec4(virtualNormal, hasPbrResponse ? surface.roughness : 1.0);
+    primaryThroughput = vec4(throughput, hasPbrResponse ? 1.0 : 0.0);
+    // Reversed-Z is near / viewZ, and viewZ grows linearly along the camera ray, so the virtual
+    // point's depth is the primary depth scaled by the distance ratio - no reprojection, and
+    // exact to the G-buffer's own value at a chain length of zero.
+    ptDepth = depth * (primaryDistance / chainDistance);
+    ptMotion = specularMotionFromPrevClip(
+      u_Frame.prevProj * (u_Frame.prevView * vec4(previousVirtual, 1.0)), currentNDC);
+    return;
+  }
+}
+
 void main()
 {
   ivec2 pixel = ivec2(gl_LaunchIDEXT.xy);
@@ -647,6 +778,28 @@ void main()
   vec2 currentNDC = pixelNDC + vec2(u_Frame.jitterX, u_Frame.jitterY);
   vec2 specularMotion = vec2(0.0);
 
+  // The first vertex as ray reconstruction is told about it. Defaults are the sky's; a surface
+  // copies the G-buffer below, and Primary Surface Replacement overwrites all of it on a mirror.
+  vec4 primaryAlbedo = vec4(0.0);
+  vec4 primaryNormal = vec4(0.0, 0.0, 0.0, 1.0);
+  vec4 primaryThroughput = vec4(1.0, 1.0, 1.0, 0.0);
+  // Unfiltered copies for RR; the estimator keeps its own filtered reads.
+  float ptDepth = texelFetch(u_Depth, pixel, 0).r;
+  vec2 ptMotion = texelFetch(u_MainVelocity, pixel, 0).rg;
+
+  // PROTOTYPE (dielectric reflection layer spike). A layer pixel is a smooth dielectric first
+  // vertex: its mirror lobe is traced as a path of its own into layerRadiance, weighted by F -
+  // the delta branch without the lobe coin - and the second RR instance is told about the
+  // reflected surface. Everywhere else the layer first vertex copies the primary one.
+  bool layerPixel = false;
+  vec3 layerF = vec3(0.0);
+  vec3 layerRadiance = vec3(0.0);
+  vec4 layerAlbedo = vec4(0.0);
+  vec4 layerNormal = vec4(0.0, 0.0, 0.0, 1.0);
+  vec4 layerThroughput = vec4(1.0, 1.0, 1.0, 0.0);
+  float layerDepth = PT_SKY_DEPTH;
+  vec2 layerMotion = vec2(0.0);
+
   if (depth <= PT_SKY_DEPTH)
   {
     // The sky is not a surface: there is no vertex to shade and no path to start.
@@ -657,6 +810,9 @@ void main()
   {
     vec4 gb0 = texture(u_GBuffer0, uv);
     vec4 gb1 = texture(u_GBuffer1, uv);
+    vec4 gb0Texel = texelFetch(u_GBuffer0, pixel, 0);
+    vec4 gb1Texel = texelFetch(u_GBuffer1, pixel, 0);
+    vec3 texelNormal = octDecode(gb1Texel.rg * 2.0 - 1.0);
 
     // The same reconstruction deferred_lighting.frag performs, out of the same reversed-Z
     // depth and the same inverse matrices.
@@ -665,6 +821,9 @@ void main()
     primaryDistance = length(worldPos - u_Frame.cameraPosition);
 
     int shadingModel = decodeShadingModel(gb1.a);
+    // Full roughness unless the PBR branch says otherwise: the widest filter for a texel with
+    // no lobe, exactly what the guides wrote for it before.
+    primaryNormal = vec4(texelNormal, 1.0);
 
     if (shadingModel == SHADING_UNLIT)
     {
@@ -687,6 +846,10 @@ void main()
       float metallic = gb0.a;
       float roughness = gb1.b;
       vec3 N = octDecode(gb1.rg * 2.0 - 1.0);
+
+      primaryAlbedo = gb0Texel;
+      primaryNormal = vec4(texelNormal, gb1Texel.b);
+      primaryThroughput = vec4(1.0);
       vec3 P = worldPos;
       // The view vector deferred_lighting.frag builds, not -rayDirection: the two differ by
       // the pixel centre and the sub-pixel jitter, and matching the raster is the whole
@@ -721,6 +884,7 @@ void main()
         bool probeHit = payload.hit != 0u;
         float probeHitT = payload.hitT;
         uint probeInstanceIndex = payload.instanceIndex;
+        RayTracingPayload probePayload = payload;
 
         // The G-buffer does not say which instance P belongs to, so the reflector is found by
         // tracing the camera ray to it. A hit that lands off the reconstructed depth found
@@ -748,7 +912,8 @@ void main()
         {
           // Based at P, not at the probe origin: that offset runs along N, and mirroring would
           // carry it off the camera ray - a constant bias even on a frame where nothing moves.
-          vec3 X = P + probeDirection * probeHitT;
+          // hitT runs from the probe origin, so the offset's component along the ray is added.
+          vec3 X = P + probeDirection * (probeHitT + dot(probeOrigin - P, probeDirection));
           vec3 previousX = applyWorldToPrevWorldPoint(
             u_Instances[probeInstanceIndex].worldToPrevWorld, X);
           vec3 previousVirtual = mirrorPoint(previousX, previousP, previousN);
@@ -763,7 +928,60 @@ void main()
         }
 
         specularMotion = specularMotionFromPrevClip(previousClip, currentNDC);
+
+        if (roughness * roughness <= PT_DELTA_MAX_ALPHA && metallic >= PT_PSR_MIN_METALLIC)
+        {
+          replacePrimarySurface(P, N, mix(vec3(0.04), albedo, metallic),
+            clamp(abs(dot(N, V)), 0.01, 0.99), depth, primaryDistance, previousP, previousN,
+            probeDirection, probePayload, currentNDC,
+            primaryAlbedo, primaryNormal, primaryThroughput, ptDepth, ptMotion);
+          // On a replaced pixel the reflection is the surface RR is told about: the two motion
+          // tags agree, and ptDepth already sits at the reflected hit, so no reflection distance
+          // is left beyond it.
+          specularMotion = ptMotion;
+          specularHitDistance = 0.0;
+        }
+        else if (roughness * roughness <= PT_DELTA_MAX_ALPHA)
+        {
+          // PROTOTYPE (dielectric reflection layer spike): the metallic PSR machinery, pointed
+          // at the layer first vertex instead of the primary one. f0 and NdotV exactly as the
+          // bounce loop builds them, so layerF is the delta branch's weight.
+          vec3 layerF0 = mix(vec3(0.04), albedo, metallic);
+          float layerNdotV = clamp(abs(dot(N, V)), 0.01, 0.99);
+          layerPixel = true;
+          layerF = fresnelSchlick(layerNdotV, layerF0);
+          replacePrimarySurface(P, N, layerF0, layerNdotV, depth, primaryDistance, previousP,
+            previousN, probeDirection, probePayload, currentNDC,
+            layerAlbedo, layerNormal, layerThroughput, layerDepth, layerMotion);
+#if PT_LAYER_F_IN_COMPOSITE
+          // F rides the RR colour alpha instead of the guides.
+          layerThroughput.rgb /= max(layerF, vec3(1e-4));
+#endif
+        }
       }
+
+      // PROTOTYPE (dielectric reflection layer spike): a layer pixel runs the loop twice from the
+      // same first vertex - pass 0 the base path (NEE and the diffuse lobe), pass 1 the mirror
+      // path - so both lobes are sampled every frame instead of one by the coin. The expected
+      // value is the coin's: each lobe keeps its weight and only loses the 1 / p it paid for
+      // being picked. Pass 1's radiance is moved into layerRadiance afterwards.
+      vec3 firstP = P;
+      vec3 firstN = N;
+      vec3 firstV = V;
+      vec3 firstAlbedo = albedo;
+      float firstMetallic = metallic;
+      float firstRoughness = roughness;
+      int pathPasses = layerPixel ? 2 : 1;
+
+      for (int pathPass = 0; pathPass < pathPasses; pathPass++)
+      {
+      P = firstP;
+      N = firstN;
+      V = firstV;
+      albedo = firstAlbedo;
+      metallic = firstMetallic;
+      roughness = firstRoughness;
+      vec3 passRadianceStart = radiance;
 
       vec3 throughput = vec3(1.0);
 
@@ -782,21 +1000,37 @@ void main()
         float lobeSelector = randomFloat(rngState);
         float lightSelector = randomFloat(rngState);
 
-        vec3 directLight = estimateDirectLight(P, N, V, albedo, metallic, roughness, f0,
-          NdotV, lightSelector);
-        recordNonFinite(directLight, PT_NF_DIRECT_LIGHT);
+        // PROTOTYPE: the mirror pass gathers no NEE at its first vertex - a delta lobe sees no
+        // delta light, and the diffuse half is the base pass's.
+        if (pathPass == 0 || bounce > 0)
+        {
+          vec3 directLight = estimateDirectLight(P, N, V, albedo, metallic, roughness, f0,
+            NdotV, lightSelector);
+          recordNonFinite(directLight, PT_NF_DIRECT_LIGHT);
 
-        vec3 neeContribution = throughput * directLight;
-        recordDebugContribution(neeContribution, bounce, debugMaxContribution, debugMaxBounce);
-        debugNee += neeContribution;
-        radiance += clampContribution(neeContribution);
+          vec3 neeContribution = throughput * directLight;
+          recordDebugContribution(neeContribution, bounce, debugMaxContribution, debugMaxBounce);
+          debugNee += neeContribution;
+          radiance += clampContribution(neeContribution);
+        }
 
         if (bounce >= pc.maxBounces)
           break;
 
         vec3 L;
         vec3 weight;
-        if (!sampleBrdfDirection(N, V, albedo, metallic, roughness, f0, NdotV, brdfXi,
+        if (layerPixel && bounce == 0)
+        {
+          // PROTOTYPE: forced lobe. A selector of 1 is never below the specular probability
+          // (clamped to at most 0.9) and 0 always is; multiplying that probability back in
+          // cancels the 1 / p the sampler divides by.
+          float pSpecular = specularLobeProbability(albedo, f0, metallic, roughness);
+          if (!sampleBrdfDirection(N, V, albedo, metallic, roughness, f0, NdotV, brdfXi,
+            pathPass == 0 ? 1.0 : 0.0, L, weight))
+            break;
+          weight *= pathPass == 0 ? (1.0 - pSpecular) : pSpecular;
+        }
+        else if (!sampleBrdfDirection(N, V, albedo, metallic, roughness, f0, NdotV, brdfXi,
           lobeSelector, L, weight))
           break;
 
@@ -876,6 +1110,13 @@ void main()
         metallic = surface.metallic;
         roughness = surface.roughness;
       }
+
+      if (pathPass == 1)
+      {
+        layerRadiance = radiance - passRadianceStart;
+        radiance = passRadianceStart;
+      }
+      }
     }
   }
 
@@ -884,6 +1125,46 @@ void main()
   // and that pixel stays poisoned for the rest of the run.
   if (any(isnan(radiance)) || any(isinf(radiance)))
     radiance = vec3(0.0);
+  if (any(isnan(layerRadiance)) || any(isinf(layerRadiance)))
+    layerRadiance = vec3(0.0);
+
+  // Ahead of the debug returns below: the guide pass and ray reconstruction still run while a
+  // diagnostic is selected, and they read these rather than the G-buffer.
+  imageStore(outPrimaryAlbedo, pixel, primaryAlbedo);
+  imageStore(outPrimaryNormal, pixel, primaryNormal);
+  imageStore(outPrimaryThroughput, pixel, primaryThroughput);
+  imageStore(outPTDepth, pixel, vec4(ptDepth));
+  imageStore(outPTMotion, pixel, vec4(ptMotion, 0.0, 0.0));
+
+  // PROTOTYPE (dielectric reflection layer spike)
+  if (!layerPixel)
+  {
+    layerAlbedo = primaryAlbedo;
+    layerNormal = primaryNormal;
+    layerThroughput = primaryThroughput;
+    layerDepth = ptDepth;
+    layerMotion = ptMotion;
+  }
+
+  vec4 layerOut = vec4(0.0);
+  if (layerPixel)
+  {
+#if PT_LAYER_F_IN_COMPOSITE
+    // Unweighted reflection, F in alpha for RR's alpha upscaling and the composite. The path was
+    // traced with F in its throughput so the firefly clamp and Russian roulette see exactly what
+    // the estimator's delta branch sees; it is divided back out here.
+    layerOut = vec4(layerRadiance / max(layerF, vec3(1e-4)), layerF.g);
+#else
+    layerOut = vec4(layerRadiance, 1.0);
+#endif
+  }
+
+  imageStore(outLayerRadiance, pixel, layerOut);
+  imageStore(outLayerAlbedo, pixel, layerAlbedo);
+  imageStore(outLayerNormal, pixel, layerNormal);
+  imageStore(outLayerThroughput, pixel, layerThroughput);
+  imageStore(outLayerDepth, pixel, vec4(layerDepth));
+  imageStore(outLayerMotion, pixel, vec4(layerMotion, 0.0, 0.0));
 
   // The diagnostics ride the noisy image rather than a target of their own: it is already
   // RGBA16F at render resolution and the tone map already samples it, so a debug view costs
@@ -926,7 +1207,10 @@ void main()
 
   if (pc.sampleIndex >= 0)
   {
-    vec4 accumulated = vec4(radiance, 1.0);
+    // PROTOTYPE (dielectric reflection layer spike): the reference is base + layer, which is
+    // the coin estimator's expectation - see the path split above.
+    vec3 fullRadiance = radiance + layerRadiance;
+    vec4 accumulated = vec4(fullRadiance, 1.0);
 
     if (pc.sampleIndex > 0)
     {
@@ -935,7 +1219,7 @@ void main()
       // outright, which IS the reset - the buffer never has to be cleared.
       vec4 previous = imageLoad(outAccumulation, pixel);
       float blend = 1.0 / float(pc.sampleIndex + 1);
-      accumulated = mix(previous, vec4(radiance, 1.0), blend);
+      accumulated = mix(previous, vec4(fullRadiance, 1.0), blend);
     }
 
     imageStore(outAccumulation, pixel, accumulated);

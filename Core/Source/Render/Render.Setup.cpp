@@ -42,6 +42,11 @@ namespace YAEngine
     auto& hitDistance = m_Graph.GetResource(m_PTHitDistance);
     auto& specularMotion = m_Graph.GetResource(m_PTSpecularMotion);
     auto& velocity = m_Graph.GetResource(m_MainVelocity);
+    auto& primaryAlbedo = m_Graph.GetResource(m_PTPrimaryAlbedo);
+    auto& primaryNormal = m_Graph.GetResource(m_PTPrimaryNormal);
+    auto& primaryThroughput = m_Graph.GetResource(m_PTPrimaryThroughput);
+    auto& ptDepth = m_Graph.GetResource(m_PTDepth);
+    auto& ptMotion = m_Graph.GetResource(m_PTMotion);
 
     m_PathTraceDescriptorSets[frameIndex].Writer()
       .WriteAccelerationStructure(0, m_TlasBuilder.Get(frameIndex))
@@ -65,6 +70,18 @@ namespace YAEngine
       .WriteStorageImage(11, specularMotion.GetView())
       .WriteCombinedImageSampler(12, velocity.GetView(), velocity.GetSampler(),
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteStorageImage(13, primaryAlbedo.GetView())
+      .WriteStorageImage(14, primaryNormal.GetView())
+      .WriteStorageImage(15, primaryThroughput.GetView())
+      .WriteStorageImage(16, ptDepth.GetView())
+      .WriteStorageImage(17, ptMotion.GetView())
+      // PROTOTYPE (dielectric reflection layer spike)
+      .WriteStorageImage(18, m_Graph.GetResource(m_PTLayerRadiance).GetView())
+      .WriteStorageImage(19, m_Graph.GetResource(m_PTLayerAlbedo).GetView())
+      .WriteStorageImage(20, m_Graph.GetResource(m_PTLayerNormal).GetView())
+      .WriteStorageImage(21, m_Graph.GetResource(m_PTLayerThroughput).GetView())
+      .WriteStorageImage(22, m_Graph.GetResource(m_PTLayerDepth).GetView())
+      .WriteStorageImage(23, m_Graph.GetResource(m_PTLayerMotion).GetView())
       .Flush();
   }
 
@@ -73,19 +90,22 @@ namespace YAEngine
     // Every binding names a graph resource a resize reallocates, so the set is rewritten at
     // this frame's own slot rather than once at setup - the same rule the tracer's set
     // above follows, for the same reason.
-    auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
-    auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
-    auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+    auto& primaryAlbedo = m_Graph.GetResource(m_PTPrimaryAlbedo);
+    auto& primaryNormal = m_Graph.GetResource(m_PTPrimaryNormal);
+    auto& ptDepth = m_Graph.GetResource(m_PTDepth);
+    auto& primaryThroughput = m_Graph.GetResource(m_PTPrimaryThroughput);
     auto& diffuseAlbedo = m_Graph.GetResource(m_PTDiffuseAlbedo);
     auto& specularAlbedo = m_Graph.GetResource(m_PTSpecularAlbedo);
     auto& normalRoughness = m_Graph.GetResource(m_PTNormalRoughness);
 
     m_PathTraceGuideDescriptorSets[frameIndex].Writer()
-      .WriteCombinedImageSampler(0, gbuffer0.GetView(), gbuffer0.GetSampler(),
+      .WriteCombinedImageSampler(0, primaryAlbedo.GetView(), primaryAlbedo.GetSampler(),
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-      .WriteCombinedImageSampler(1, gbuffer1.GetView(), gbuffer1.GetSampler(),
+      .WriteCombinedImageSampler(1, primaryNormal.GetView(), primaryNormal.GetSampler(),
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
-      .WriteCombinedImageSampler(2, mainDepth.GetView(), mainDepth.GetSampler(),
+      .WriteCombinedImageSampler(2, ptDepth.GetView(), ptDepth.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteCombinedImageSampler(7, primaryThroughput.GetView(), primaryThroughput.GetSampler(),
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
       .WriteStorageImage(3, diffuseAlbedo.GetView())
       .WriteStorageImage(4, specularAlbedo.GetView())
@@ -96,6 +116,43 @@ namespace YAEngine
       // live texture. The IBL set binds the very same image at set 3 binding 2.
       .WriteCombinedImageSampler(6,
         m_CubicResources.brdfLut.GetView(), m_CubicResources.brdfLut.GetSampler())
+      .Flush();
+  }
+
+  // PROTOTYPE (dielectric reflection layer spike): pt_guides.comp over the layer first vertex.
+  void Render::WritePathTraceLayerGuideDescriptors(uint32_t frameIndex)
+  {
+    auto& albedo = m_Graph.GetResource(m_PTLayerAlbedo);
+    auto& normal = m_Graph.GetResource(m_PTLayerNormal);
+    auto& depth = m_Graph.GetResource(m_PTLayerDepth);
+    auto& throughput = m_Graph.GetResource(m_PTLayerThroughput);
+
+    m_PathTraceLayerGuideDescriptorSets[frameIndex].Writer()
+      .WriteCombinedImageSampler(0, albedo.GetView(), albedo.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteCombinedImageSampler(1, normal.GetView(), normal.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteCombinedImageSampler(2, depth.GetView(), depth.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteCombinedImageSampler(7, throughput.GetView(), throughput.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteStorageImage(3, m_Graph.GetResource(m_PTLayerDiffuseAlbedo).GetView())
+      .WriteStorageImage(4, m_Graph.GetResource(m_PTLayerSpecularAlbedo).GetView())
+      .WriteStorageImage(5, m_Graph.GetResource(m_PTLayerNormalRoughness).GetView())
+      .WriteCombinedImageSampler(6,
+        m_CubicResources.brdfLut.GetView(), m_CubicResources.brdfLut.GetSampler())
+      .Flush();
+  }
+
+  // PROTOTYPE (dielectric reflection layer spike)
+  void Render::WriteRRLayerCompositeDescriptors(uint32_t frameIndex)
+  {
+    auto& layer = m_Graph.GetResource(m_DLSSLayerOutput);
+
+    m_RRLayerCompositeDescriptorSets[frameIndex].Writer()
+      .WriteStorageImage(0, m_Graph.GetResource(m_DLSSOutput).GetView())
+      .WriteCombinedImageSampler(1, layer.GetView(), layer.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
       .Flush();
   }
 
@@ -201,6 +258,15 @@ namespace YAEngine
         | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
       .resolution = RGResolution::Output
     });
+    // PROTOTYPE (dielectric reflection layer spike): the second RR instance's output, same
+    // usage as DLSSOutput for the same reasons.
+    m_DLSSLayerOutput = m_Graph.CreateResource({
+      .name = "dlssLayerOutput",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_STORAGE_BIT
+        | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .resolution = RGResolution::Output
+    });
 
     // Visualization of one inline ray query per pixel. Allocated like every other graph
     // resource, on a device that can never fill it too: the tonemap pass samples it from a
@@ -245,17 +311,19 @@ namespace YAEngine
       .filter = VK_FILTER_NEAREST
     });
 
-    // Ray reconstruction guides, written from the G-buffer while the path tracing render
-    // path is effective. Allocated on every device for the same reason rtDebug is: the
-    // tonemap pass samples all three from statically accessed bindings.
+    // Ray reconstruction guides, written by pt_guides.comp from the first path vertex as RR
+    // sees it while the path tracing render path is effective. Allocated on every device for
+    // the same reason rtDebug is: the tonemap pass samples all three from statically accessed
+    // bindings. The albedos are float because PSR scales them by a mirror chain's Fresnel,
+    // which bands in 8 bits on a dark tint.
     m_PTDiffuseAlbedo = m_Graph.CreateResource({
       .name = "ptDiffuseAlbedo",
-      .format = VK_FORMAT_R8G8B8A8_UNORM,
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
       .filter = VK_FILTER_NEAREST
     });
     m_PTSpecularAlbedo = m_Graph.CreateResource({
       .name = "ptSpecularAlbedo",
-      .format = VK_FORMAT_R8G8B8A8_UNORM,
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
       .filter = VK_FILTER_NEAREST
     });
     // World-space normal in rgb, roughness in a - the PACKED layout sl_dlss_d.h names
@@ -283,6 +351,96 @@ namespace YAEngine
       .name = "ptSpecularMotion",
       .format = VK_FORMAT_R16G16_SFLOAT,
       .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    // The first path vertex as ray reconstruction sees it - see Render.h. Same writer and same
+    // TRANSFER_DST reason as the two guides above.
+    m_PTPrimaryAlbedo = m_Graph.CreateResource({
+      .name = "ptPrimaryAlbedo",
+      .format = VK_FORMAT_R8G8B8A8_UNORM,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTPrimaryNormal = m_Graph.CreateResource({
+      .name = "ptPrimaryNormal",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTPrimaryThroughput = m_Graph.CreateResource({
+      .name = "ptPrimaryThroughput",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    // Reversed-Z in a colour image rather than a depth attachment: nothing rasterizes into it,
+    // and the SL 2.12 DLSS-D plugin reads kBufferTypeDepth with no format check - it only picks
+    // NGX's hardware depth mode and honours sl::Constants::depthInverted, so the constants the
+    // raster depth is tagged with stay valid unchanged.
+    m_PTDepth = m_Graph.CreateResource({
+      .name = "ptDepth",
+      .format = VK_FORMAT_R32_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTMotion = m_Graph.CreateResource({
+      .name = "ptMotion",
+      .format = VK_FORMAT_R16G16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+
+    // PROTOTYPE (dielectric reflection layer spike) - see Render.h. Formats mirror the primary
+    // counterparts; the layer radiance carries the Fresnel weight in alpha.
+    m_PTLayerRadiance = m_Graph.CreateResource({
+      .name = "ptLayerRadiance",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTLayerAlbedo = m_Graph.CreateResource({
+      .name = "ptLayerAlbedo",
+      .format = VK_FORMAT_R8G8B8A8_UNORM,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTLayerNormal = m_Graph.CreateResource({
+      .name = "ptLayerNormal",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTLayerThroughput = m_Graph.CreateResource({
+      .name = "ptLayerThroughput",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTLayerDepth = m_Graph.CreateResource({
+      .name = "ptLayerDepth",
+      .format = VK_FORMAT_R32_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTLayerMotion = m_Graph.CreateResource({
+      .name = "ptLayerMotion",
+      .format = VK_FORMAT_R16G16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTLayerDiffuseAlbedo = m_Graph.CreateResource({
+      .name = "ptLayerDiffuseAlbedo",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTLayerSpecularAlbedo = m_Graph.CreateResource({
+      .name = "ptLayerSpecularAlbedo",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .filter = VK_FILTER_NEAREST
+    });
+    m_PTLayerNormalRoughness = m_Graph.CreateResource({
+      .name = "ptLayerNormalRoughness",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
       .filter = VK_FILTER_NEAREST
     });
 
@@ -419,7 +577,11 @@ namespace YAEngine
     m_PathTracePassIndex = m_Graph.AddPass({
       .name = "PathTrace",
       .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_MainVelocity},
-      .storageOutputs = {m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance, m_PTSpecularMotion},
+      .storageOutputs = {m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance, m_PTSpecularMotion,
+        m_PTPrimaryAlbedo, m_PTPrimaryNormal, m_PTPrimaryThroughput, m_PTDepth, m_PTMotion,
+        // PROTOTYPE (dielectric reflection layer spike)
+        m_PTLayerRadiance, m_PTLayerAlbedo, m_PTLayerNormal, m_PTLayerThroughput, m_PTLayerDepth,
+        m_PTLayerMotion},
       .isCompute = true,
       .shaderStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
       .isEnabled = [this]() { return IsPathTracePassEnabled(); },
@@ -478,16 +640,15 @@ namespace YAEngine
       }
     });
 
-    // 2e. Ray reconstruction guides. A plain compute pass over the G-buffer rather than an
-    // epilogue in pt_main.rgen, for two reasons: the raygen shader returns early on sky,
-    // unlit and emissive texels, so folding the stores in would mean restructuring its
-    // control flow for a consumer that does not exist yet, and its already forked set 1
-    // would grow three more storage images. What that costs is one full-screen G-buffer
-    // read plus three stores, and only on frames the path tracing render path owns - the
-    // isEnabled below is what keeps it at exactly zero everywhere else.
+    // 2e. Ray reconstruction guides, derived from the first path vertex as RR sees it (see
+    // pt_main.rgen). A compute pass of its own rather than more stores in the raygen shader:
+    // the derivation needs the environment BRDF table, and the ray tracing pass's forked set 1
+    // would grow by three storage images and a sampler for it. What that costs is one
+    // full-screen read plus three stores, and only on frames the path tracing render path owns
+    // - the isEnabled below is what keeps it at exactly zero everywhere else.
     m_PathTraceGuidesPassIndex = m_Graph.AddPass({
       .name = "PathTraceGuides",
-      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth},
+      .inputs = {m_PTPrimaryAlbedo, m_PTPrimaryNormal, m_PTPrimaryThroughput, m_PTDepth},
       .storageOutputs = {m_PTDiffuseAlbedo, m_PTSpecularAlbedo, m_PTNormalRoughness},
       .isCompute = true,
       .isEnabled = [this]() { return IsPathTracingActive(); },
@@ -497,24 +658,54 @@ namespace YAEngine
 
         // The same gap the path tracing pass covers by hand, for the same reason: the
         // shared barrier table makes a sampled input visible to the FRAGMENT stage, and
-        // this pass reads the G-buffer and depth from a compute shader. A pass whose input
-        // is already in SHADER_READ_ONLY emits no barrier at all, so the dependency on the
-        // G-buffer write has to be stated here rather than relied on.
-        VkMemoryBarrier gbufferBarrier {};
-        gbufferBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
-        gbufferBarrier.srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT
-          | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-        gbufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        // this pass reads what the ray tracing stage just stored from a compute shader. The
+        // ray tracing stage bit is legal here because the pass only runs on the path tracing
+        // render path, which a device without the extension never gets.
+        VkMemoryBarrier traceOutputBarrier {};
+        traceOutputBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        traceOutputBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        traceOutputBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
         vkCmdPipelineBarrier(ctx.cmd,
-          VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT
-            | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT,
+          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-          0, 1, &gbufferBarrier, 0, nullptr, 0, nullptr);
+          0, 1, &traceOutputBarrier, 0, nullptr, 0, nullptr);
 
         auto& pipeline = m_PSOCache.GetCompute(m_PathTraceGuidesPipeline);
         pipeline.Bind(ctx.cmd);
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_PathTraceGuideDescriptorSets[currentFrame].Get()}, 1);
+
+        uint32_t w = m_Graph.GetExtent().width;
+        uint32_t h = m_Graph.GetExtent().height;
+        pipeline.Dispatch(ctx.cmd, (w + 7) / 8, (h + 7) / 8, 1);
+      }
+    });
+
+    // PROTOTYPE (dielectric reflection layer spike): the same guide derivation over the layer
+    // first vertex, for the second RR instance.
+    m_PathTraceLayerGuidesPassIndex = m_Graph.AddPass({
+      .name = "PathTraceLayerGuides",
+      .inputs = {m_PTLayerAlbedo, m_PTLayerNormal, m_PTLayerThroughput, m_PTLayerDepth},
+      .storageOutputs = {m_PTLayerDiffuseAlbedo, m_PTLayerSpecularAlbedo, m_PTLayerNormalRoughness},
+      .isCompute = true,
+      .isEnabled = [this]() { return IsRayReconstructionResolve(); },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        WritePathTraceLayerGuideDescriptors(currentFrame);
+
+        VkMemoryBarrier traceOutputBarrier {};
+        traceOutputBarrier.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+        traceOutputBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        traceOutputBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        vkCmdPipelineBarrier(ctx.cmd,
+          VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
+          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          0, 1, &traceOutputBarrier, 0, nullptr, 0, nullptr);
+
+        auto& pipeline = m_PSOCache.GetCompute(m_PathTraceGuidesPipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_PathTraceLayerGuideDescriptorSets[currentFrame].Get()}, 1);
 
         uint32_t w = m_Graph.GetExtent().width;
         uint32_t h = m_Graph.GetExtent().height;
@@ -940,16 +1131,56 @@ namespace YAEngine
     // tagged inputs are different: the noisy sample and the four guides instead of the
     // rasterized SSRColor, and declaring those in the raster pass would only make the graph
     // order and barrier frames that never touch them.
+    // PROTOTYPE (dielectric reflection layer spike): the second RR instance, over the mirror path
+    // of smooth dielectric pixels. It has to evaluate before the base instance, which clears the
+    // reset flag both read.
+    m_DLSSRayReconstructionLayerPassIndex = m_Graph.AddPass({
+      .name = "DLSSRayReconstructionLayer",
+      .inputs = {m_PTLayerRadiance, m_PTLayerDepth, m_PTLayerMotion, m_PTLayerDiffuseAlbedo,
+        m_PTLayerSpecularAlbedo, m_PTLayerNormalRoughness},
+      .storageOutputs = {m_DLSSLayerOutput},
+      .isCompute = true,
+      .isEnabled = [this]() { return IsRayReconstructionResolve(); },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
+        RunRayReconstructionLayerEvaluate(ctx.cmd, *frame);
+      }
+    });
+
     m_DLSSRayReconstructionPassIndex = m_Graph.AddPass({
       .name = "DLSSRayReconstruction",
-      .inputs = {m_PathTraceNoisy, m_MainDepth, m_MainVelocity, m_PTDiffuseAlbedo,
-        m_PTSpecularAlbedo, m_PTNormalRoughness, m_PTHitDistance, m_PTSpecularMotion},
+      .inputs = {m_PathTraceNoisy, m_PTDepth, m_PTMotion, m_PTDiffuseAlbedo,
+        m_PTSpecularAlbedo, m_PTNormalRoughness, m_PTHitDistance, m_PTSpecularMotion,
+        // PROTOTYPE: not read here - declared only so the graph orders the layer instance first.
+        m_DLSSLayerOutput},
       .storageOutputs = {m_DLSSOutput},
       .isCompute = true,
       .isEnabled = [this]() { return IsRayReconstructionResolve(); },
       .execute = [this](const RGExecuteContext& ctx) {
         auto* frame = static_cast<FrameContext*>(ctx.userData);
         RunRayReconstructionEvaluate(ctx.cmd, *frame);
+      }
+    });
+
+    // PROTOTYPE (dielectric reflection layer spike): base + layer into DLSSOutput in place, after
+    // both instances and before every reader of DLSSOutput (the write chain orders it here).
+    m_RRLayerCompositePassIndex = m_Graph.AddPass({
+      .name = "RRLayerComposite",
+      .inputs = {m_DLSSLayerOutput},
+      .storageOutputs = {m_DLSSOutput},
+      .isCompute = true,
+      .isEnabled = [this]() { return IsRayReconstructionResolve(); },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        WriteRRLayerCompositeDescriptors(currentFrame);
+
+        auto& pipeline = m_PSOCache.GetCompute(m_RRLayerCompositePipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_RRLayerCompositeDescriptorSets[currentFrame].Get()}, 1);
+
+        VkExtent2D outputExtent = m_Graph.GetOutputExtent();
+        pipeline.Dispatch(ctx.cmd, (outputExtent.width + 7) / 8, (outputExtent.height + 7) / 8, 1);
       }
     });
 
@@ -1573,7 +1804,11 @@ namespace YAEngine
 
     auto cmd = m_Backend.GetCommandBuffer().BeginSingleTimeCommands();
 
-    for (RGHandle handle : { m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance, m_PTSpecularMotion })
+    for (RGHandle handle : { m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance, m_PTSpecularMotion,
+      m_PTPrimaryAlbedo, m_PTPrimaryNormal, m_PTPrimaryThroughput, m_PTDepth, m_PTMotion,
+      // PROTOTYPE (dielectric reflection layer spike)
+      m_PTLayerRadiance, m_PTLayerAlbedo, m_PTLayerNormal, m_PTLayerThroughput, m_PTLayerDepth,
+      m_PTLayerMotion })
     {
       auto& image = m_Graph.GetResource(handle);
 

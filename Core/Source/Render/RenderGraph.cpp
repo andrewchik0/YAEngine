@@ -547,7 +547,9 @@ namespace YAEngine
 
   void RenderGraph::InsertBarriers(VkCommandBuffer cmd, uint32_t passIndex)
   {
-    static constexpr uint32_t MAX_BARRIERS = 16;
+    // PROTOTYPE (dielectric reflection layer spike): the path tracing pass declares 15 storage
+    // outputs plus its inputs, past the former 16.
+    static constexpr uint32_t MAX_BARRIERS = 32;
 
     auto& pass = m_Passes[passIndex];
 

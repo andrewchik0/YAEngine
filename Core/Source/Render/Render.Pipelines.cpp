@@ -685,6 +685,8 @@ namespace YAEngine
             // binding 2. The specular guide is a reflectance, and a reflectance is what this
             // table integrates - see pt_guides.comp.
             { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+            // Mirror chain throughput, which scales both albedos on a replaced surface
+            { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
           }
         }
       };
@@ -695,6 +697,52 @@ namespace YAEngine
       {
         m_FrameUniformBuffer.GetLayout(),
         m_PathTraceGuideDescriptorSets[0].GetLayout(),
+      },
+      0,
+      pipelineCache);
+
+    // PROTOTYPE (dielectric reflection layer spike): the same guide pipeline runs a second time
+    // over the layer first-vertex images, so only the sets are new; the composite adds the
+    // denoised layer onto DLSSOutput in place.
+    m_PathTraceLayerGuideDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    m_RRLayerCompositeDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
+    {
+      SetDescription layerGuideDesc = {
+        .set = 1,
+        .bindings = {
+          {
+            { 0, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 4, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 5, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+            { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+          }
+        }
+      };
+      m_PathTraceLayerGuideDescriptorSets[i].Init(ctx, layerGuideDesc);
+
+      SetDescription compositeDesc = {
+        .set = 1,
+        .bindings = {
+          {
+            // DLSSOutput, read and written in place
+            { 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
+            // The layer instance's output, rgb = denoised reflection, a = upscaled Fresnel
+            { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+          }
+        }
+      };
+      m_RRLayerCompositeDescriptorSets[i].Init(ctx, compositeDesc);
+    }
+
+    m_RRLayerCompositePipeline = m_PSOCache.RegisterCompute(ctx.device, "rr_layer_composite.comp",
+      {
+        m_FrameUniformBuffer.GetLayout(),
+        m_RRLayerCompositeDescriptorSets[0].GetLayout(),
       },
       0,
       pipelineCache);
@@ -1119,6 +1167,21 @@ namespace YAEngine
             // image sits on the surface itself
             { 11, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
             { 12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, rtSceneStages },
+            // The first path vertex as ray reconstruction sees it: albedo, normal, throughput,
+            // depth and motion - see Render.h
+            { 13, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            { 14, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            { 15, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            { 16, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            { 17, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            // PROTOTYPE (dielectric reflection layer spike): layer radiance, then the layer
+            // first-vertex images - albedo, normal, throughput, depth, motion
+            { 18, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            { 19, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            { 20, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            { 21, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            { 22, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            { 23, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
           }
         };
 

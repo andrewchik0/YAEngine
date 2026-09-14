@@ -641,10 +641,12 @@ namespace YAEngine
     }
 
     sl::FrameToken& frame = *static_cast<sl::FrameToken*>(desc.frameToken);
-    sl::ViewportHandle viewport(kStreamlineViewport);
+    sl::ViewportHandle viewport(desc.viewport);
 
     sl::DLSSDOptions options {};
     options.mode = ToStreamlineMode(desc.quality);
+    // PROTOTYPE: the reflection layer instance carries its Fresnel weight in the colour alpha.
+    options.alphaUpscalingEnabled = desc.alphaUpscaling ? sl::Boolean::eTrue : sl::Boolean::eFalse;
     options.outputWidth = desc.colorOut.width;
     options.outputHeight = desc.colorOut.height;
     // Mandatory, not a choice: ProgrammingGuideDLSS_RR.md 5.0 says RR only supports HDR
@@ -788,12 +790,20 @@ namespace YAEngine
       return false;
     }
 
-    if (optionsChanged || !b_RREvaluateLogged)
+    const bool layerFirstLog = desc.viewport != 0 && !b_RRLayerEvaluateLogged;
+    if (optionsChanged || !b_RREvaluateLogged || layerFirstLog)
     {
       b_RREvaluateLogged = true;
-      YA_LOG_INFO("Render", "Ray reconstruction evaluate running: %ux%u -> %ux%u, %u tag(s)",
-        desc.colorIn.width, desc.colorIn.height, desc.colorOut.width, desc.colorOut.height,
-        tagCount);
+      if (desc.viewport != 0)
+        b_RRLayerEvaluateLogged = true;
+      // PROTOTYPE: SL's estimate is global rather than per viewport (see sl.dlss_d getData), so
+      // the second instance's cost is the difference against a single-viewport run.
+      sl::DLSSDState state {};
+      uint64_t vramBytes = slDLSSDGetState(viewport, state) == sl::Result::eOk
+        ? state.estimatedVRAMUsageInBytes : 0;
+      YA_LOG_INFO("Render", "Ray reconstruction evaluate running (viewport %u): %ux%u -> %ux%u, %u tag(s), SL VRAM estimate %llu MB",
+        desc.viewport, desc.colorIn.width, desc.colorIn.height, desc.colorOut.width,
+        desc.colorOut.height, tagCount, static_cast<unsigned long long>(vramBytes / (1024 * 1024)));
     }
 
     // Same caveat as the super resolution evaluate: Streamline leaves its own pipeline and
@@ -828,15 +838,20 @@ namespace YAEngine
     if (!IsRayReconstructionAvailable())
       return;
 
-    sl::Result result = slFreeResources(sl::kFeatureDLSS_RR, sl::ViewportHandle(kStreamlineViewport));
-    // Nothing was allocated yet on the first extent change of a run, which is not an error.
-    if (result != sl::Result::eOk && result != sl::Result::eErrorInvalidParameter)
-      YA_LOG_WARN("Render", "Ray reconstruction resources could not be released: %s",
-        sl::getResultAsStr(result));
+    // PROTOTYPE: viewport 1 is the dielectric reflection layer instance.
+    for (uint32_t viewportId : { kStreamlineViewport, kStreamlineViewport + 1 })
+    {
+      sl::Result result = slFreeResources(sl::kFeatureDLSS_RR, sl::ViewportHandle(viewportId));
+      // Nothing was allocated yet on the first extent change of a run, which is not an error.
+      if (result != sl::Result::eOk && result != sl::Result::eErrorInvalidParameter)
+        YA_LOG_WARN("Render", "Ray reconstruction resources could not be released (viewport %u): %s",
+          viewportId, sl::getResultAsStr(result));
+    }
 
     m_RROptionsWidth = 0;
     m_RROptionsHeight = 0;
     b_RREvaluateLogged = false;
+    b_RRLayerEvaluateLogged = false;
 #endif
   }
 

@@ -655,6 +655,10 @@ namespace YAEngine
     // carries the primary hit distance, which is tagged separately below because a
     // Streamline tag names a resource and not a channel.
     desc.colorIn = DescribeStreamlineImage(m_PathTraceNoisy, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    // The tracer's own depth and motion instead of the raster ones: on a metallic mirror they
+    // describe the surface seen through it, which is what the guides below describe too.
+    desc.depth = DescribeStreamlineImage(m_PTDepth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    desc.motionVectors = DescribeStreamlineImage(m_PTMotion, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     desc.diffuseAlbedo = DescribeStreamlineImage(m_PTDiffuseAlbedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     desc.specularAlbedo = DescribeStreamlineImage(m_PTSpecularAlbedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     desc.normalRoughness = DescribeStreamlineImage(m_PTNormalRoughness, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -668,6 +672,35 @@ namespace YAEngine
 
     if (m_Backend.GetStreamline().EvaluateRayReconstruction(desc))
       b_ResetDLSSPending = false;
+  }
+
+  void Render::RunRayReconstructionLayerEvaluate(VkCommandBuffer cmd, FrameContext& frame)
+  {
+    // PROTOTYPE (dielectric reflection layer spike): the second RR instance (viewport 1) over the
+    // mirror path of smooth dielectric pixels. Its pass is declared ahead of the base instance's,
+    // so it still sees this frame's reset flag - the base evaluate is what clears it.
+    StreamlineFrameToken token = m_Backend.GetStreamline().GetFrameToken(
+      static_cast<uint32_t>(m_GlobalFrameIndex));
+    if (token == nullptr)
+      return;
+
+    DLSSEvaluateDesc desc = MakeStreamlineEvaluateDesc(cmd, frame, token);
+    desc.rrSettings = m_RRSettings;
+    desc.rrSettings.specularGuide = RayReconstructionSpecularGuide::MotionVectors;
+    desc.viewport = 1;
+    desc.alphaUpscaling = true;
+    desc.colorOut = DescribeStreamlineImage(m_DLSSLayerOutput, VK_IMAGE_LAYOUT_GENERAL);
+    desc.colorIn = DescribeStreamlineImage(m_PTLayerRadiance, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    desc.depth = DescribeStreamlineImage(m_PTLayerDepth, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    desc.motionVectors = DescribeStreamlineImage(m_PTLayerMotion, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    desc.diffuseAlbedo = DescribeStreamlineImage(m_PTLayerDiffuseAlbedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    desc.specularAlbedo = DescribeStreamlineImage(m_PTLayerSpecularAlbedo, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    desc.normalRoughness = DescribeStreamlineImage(m_PTLayerNormalRoughness, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    // On a layer pixel the reflection is the surface this instance is told about, so its specular
+    // motion equals its surface motion, as on a PSR pixel.
+    desc.specularMotionVectors = DescribeStreamlineImage(m_PTLayerMotion, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+    m_Backend.GetStreamline().EvaluateRayReconstruction(desc);
   }
 
   void Render::SetUpCamera(FrameContext& frame)

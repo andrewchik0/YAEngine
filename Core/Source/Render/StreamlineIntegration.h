@@ -189,6 +189,10 @@ namespace YAEngine
 
     // Read only by EvaluateRayReconstruction.
     RayReconstructionSettings rrSettings;
+    // PROTOTYPE (dielectric reflection layer spike): which RR instance evaluates, and whether it
+    // carries the colour input's alpha through to the output.
+    uint32_t viewport = 0;
+    bool alphaUpscaling = false;
   };
 
   // Bootstraps Streamline alongside the engine's own Vulkan setup (manual hooking: the
@@ -276,5 +280,7 @@ namespace YAEngine
     uint32_t m_RROptionsWidth = 0;
     uint32_t m_RROptionsHeight = 0;
     bool b_RREvaluateLogged = false;
+    // PROTOTYPE: first evaluate of the reflection layer instance (viewport 1) logged.
+    bool b_RRLayerEvaluateLogged = false;
   };
 }

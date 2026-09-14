@@ -558,6 +558,8 @@ namespace YAEngine
     // The path tracer's resolve: the noisy sample plus the four guides through ray
     // reconstruction, into the same DLSSOutput super resolution writes.
     void RunRayReconstructionEvaluate(VkCommandBuffer cmd, FrameContext& frame);
+    // PROTOTYPE (dielectric reflection layer spike): the second RR instance (viewport 1).
+    void RunRayReconstructionLayerEvaluate(VkCommandBuffer cmd, FrameContext& frame);
     // Everything both evaluates describe identically - the camera, the frame, the depth and
     // velocity tags and the reset flag - so the two conventions-heavy halves are written
     // once. Each caller then names its own scaling input and, for ray reconstruction, its
@@ -633,6 +635,9 @@ namespace YAEngine
     void WritePathTraceDescriptors(uint32_t frameIndex);
     // The guide pass's set 1: the G-buffer in, the three ray reconstruction guides out.
     void WritePathTraceGuideDescriptors(uint32_t frameIndex);
+    // PROTOTYPE (dielectric reflection layer spike).
+    void WritePathTraceLayerGuideDescriptors(uint32_t frameIndex);
+    void WriteRRLayerCompositeDescriptors(uint32_t frameIndex);
     // Decides whether this frame extends the reference image or starts it over, and advances
     // the sample index. Runs before the graph, because the pass reads the result as a push
     // constant.
@@ -741,11 +746,12 @@ namespace YAEngine
     // across frames and is never cleared, the sample index resets it instead.
     RGHandle m_PathTraceNoisy {};
     RGHandle m_PathTraceAccum {};
-    // Guide buffers for ray reconstruction, all at render resolution and written from the
-    // G-buffer by pt_guides.comp while the path tracing render path is effective. The two
-    // albedos are what the denoiser demodulates the radiance by, so 8 bits each is the
-    // format it wants; normal and roughness share one RGBA16F in the PACKED layout
-    // sl_dlss_d.h documents - world normal in xyz, roughness in w.
+    // Guide buffers for ray reconstruction, all at render resolution and written by
+    // pt_guides.comp from the first path vertex below while the path tracing render path is
+    // effective. The two albedos are what the denoiser demodulates the radiance by; they are
+    // RGBA16F because PSR scales them by a mirror chain's Fresnel, which bands in 8 bits on a
+    // dark tint. Normal and roughness share one RGBA16F in the PACKED layout sl_dlss_d.h
+    // documents - world normal in xyz, roughness in w.
     RGHandle m_PTDiffuseAlbedo {};
     RGHandle m_PTSpecularAlbedo {};
     RGHandle m_PTNormalRoughness {};
@@ -757,6 +763,37 @@ namespace YAEngine
     // RG16F, render resolution: specular motion vectors written by pt_main.rgen in exactly
     // MainVelocity's convention, since both tags share one sl::Constants::mvecScale.
     RGHandle m_PTSpecularMotion {};
+    // The first path vertex as ray reconstruction is told about it, written by pt_main.rgen for
+    // every pixel: a copy of the raster G-buffer, except on metallic delta mirrors, where Primary
+    // Surface Replacement writes the first non-mirror surface seen through them instead.
+    // pt_guides.comp builds the demodulation guides out of these, and RR's depth and motion tags
+    // name the last two. Nothing raster reads them - every later raster pass keeps m_MainDepth.
+    //  - albedo RGBA8: albedo in rgb, metallic in a, the G-buffer's own precision;
+    //  - normal RGBA16F: world normal in xyz (mirrored back through the chain), roughness in w;
+    //  - throughput RGBA16F: mirror chain reflectance in rgb, 1 in a where the surface has a PBR
+    //    response. Float because a dark tint through a coloured metal would band in 8 bits;
+    //  - depth R32F: reversed-Z like m_MainDepth, the virtual point for a replaced surface;
+    //  - motion RG16F: MainVelocity's convention, the virtual point's motion where replaced.
+    RGHandle m_PTPrimaryAlbedo {};
+    RGHandle m_PTPrimaryNormal {};
+    RGHandle m_PTPrimaryThroughput {};
+    RGHandle m_PTDepth {};
+    RGHandle m_PTMotion {};
+    // PROTOTYPE (dielectric reflection layer spike): on smooth dielectric pixels the first
+    // vertex is split into a base path (m_PathTraceNoisy) and a mirror path whose radiance goes
+    // to m_PTLayerRadiance and is denoised by a second RR instance (viewport 1). The layer
+    // first-vertex images describe the reflected surface the way PSR does for metal mirrors;
+    // everywhere else they copy the primary ones. m_DLSSLayerOutput is that instance's output.
+    RGHandle m_PTLayerRadiance {};
+    RGHandle m_PTLayerAlbedo {};
+    RGHandle m_PTLayerNormal {};
+    RGHandle m_PTLayerThroughput {};
+    RGHandle m_PTLayerDepth {};
+    RGHandle m_PTLayerMotion {};
+    RGHandle m_PTLayerDiffuseAlbedo {};
+    RGHandle m_PTLayerSpecularAlbedo {};
+    RGHandle m_PTLayerNormalRoughness {};
+    RGHandle m_DLSSLayerOutput {};
 
 #ifdef YA_EDITOR
     RGHandle m_SceneColor {};
@@ -857,6 +894,10 @@ namespace YAEngine
     uint32_t m_TAAPassIndex {};
     uint32_t m_DLSSEvaluatePassIndex {};
     uint32_t m_DLSSRayReconstructionPassIndex {};
+    // PROTOTYPE (dielectric reflection layer spike).
+    uint32_t m_PathTraceLayerGuidesPassIndex {};
+    uint32_t m_DLSSRayReconstructionLayerPassIndex {};
+    uint32_t m_RRLayerCompositePassIndex {};
     uint32_t m_ForwardTransparentPassIndex {};
     uint32_t m_HistogramPassIndex {};
     uint32_t m_ExposureAdaptPassIndex {};
@@ -922,6 +963,10 @@ namespace YAEngine
     // Set 1 of the guide pass. Plain compute over the G-buffer, so it needs none of the
     // scene bindings above and exists on every device, ray tracing or not.
     std::vector<VulkanDescriptorSet> m_PathTraceGuideDescriptorSets;
+    // PROTOTYPE (dielectric reflection layer spike): the same guide layout over the layer
+    // first-vertex images, and the composite's own set.
+    std::vector<VulkanDescriptorSet> m_PathTraceLayerGuideDescriptorSets;
+    std::vector<VulkanDescriptorSet> m_RRLayerCompositeDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingLightDescriptorSets;
     std::vector<VulkanDescriptorSet> m_IBLDescriptorSets;
@@ -959,6 +1004,8 @@ namespace YAEngine
     // The guide buffer pass. A plain compute shader over the G-buffer, so unlike the tracer
     // it builds everywhere and needs no availability test.
     PipelineHandle m_PathTraceGuidesPipeline {};
+    // PROTOTYPE (dielectric reflection layer spike): base + layer composite into DLSSOutput.
+    PipelineHandle m_RRLayerCompositePipeline {};
     PipelineHandle m_LightCullPipeline {};
     PipelineHandle m_DeferredLightingPipeline {};
     PipelineHandle m_BloomDownsamplePipeline {};
