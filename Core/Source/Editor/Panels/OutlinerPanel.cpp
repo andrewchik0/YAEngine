@@ -2,6 +2,7 @@
 
 #include <imgui.h>
 
+#include "Editor/EditorCommands.h"
 #include "Editor/EditorContext.h"
 #include "Editor/Utils/EditorIcons.h"
 #include "Scene/Scene.h"
@@ -56,38 +57,6 @@ namespace YAEngine
     ImGui::SetWindowFocus("Outliner");
   }
 
-  Entity OutlinerPanel::DuplicateModel(EditorContext& context, Entity entity)
-  {
-    auto& scene = *context.scene;
-
-    // A Model asset points back at exactly one root entity, so a second instance can only
-    // come from loading the file again - copying the components would give two roots one asset
-    auto& source = scene.GetComponent<ModelSourceComponent>(entity);
-    std::string path = source.path;
-    bool combined = source.combinedTextures;
-
-    Entity parent = scene.GetHierarchy(entity).parent;
-    LocalTransform transform = scene.GetTransform(entity);
-    Name name = scene.MakeUniqueEntityName(scene.GetName(entity) + " (Copy)");
-
-    auto handle = context.assetManager->Models().Load(path, combined);
-    if (!handle)
-    {
-      YA_LOG_WARN("Assets", "Duplicate failed: model '%s' could not be loaded", path.c_str());
-      return entt::null;
-    }
-
-    Entity copy = context.assetManager->Models().Get(handle).rootEntity;
-    scene.GetName(copy) = name;
-    scene.GetTransform(copy) = transform;
-
-    if (parent != entt::null)
-      scene.SetParent(copy, parent);
-
-    scene.MarkDirty(copy);
-    return copy;
-  }
-
   bool OutlinerPanel::MatchesFilter(EditorContext& context, Entity entity)
   {
     if (m_FilterText[0] == '\0')
@@ -129,9 +98,11 @@ namespace YAEngine
 
     if (ImGui::BeginMenu("Create"))
     {
+      using Kind = EditorCommands::NewEntityKind;
+
       if (ImGui::MenuItem(ICON_FA_CUBE " Empty Entity"))
       {
-        Entity e = scene.CreateEntity("Entity");
+        Entity e = EditorCommands::CreateEntity(scene, *context.assetManager, Kind::Empty);
         context.SelectEntity(e);
         BeginRename(context, e);
       }
@@ -140,24 +111,21 @@ namespace YAEngine
 
       if (ImGui::MenuItem(ICON_FA_LIGHTBULB " Point Light"))
       {
-        Entity e = scene.CreateEntity("PointLight");
-        scene.AddComponent<LightComponent>(e, LightType::Point);
+        Entity e = EditorCommands::CreateEntity(scene, *context.assetManager, Kind::PointLight);
         context.SelectEntity(e);
         BeginRename(context, e);
       }
 
       if (ImGui::MenuItem(ICON_FA_LIGHTBULB " Spot Light"))
       {
-        Entity e = scene.CreateEntity("SpotLight");
-        scene.AddComponent<LightComponent>(e, LightType::Spot);
+        Entity e = EditorCommands::CreateEntity(scene, *context.assetManager, Kind::SpotLight);
         context.SelectEntity(e);
         BeginRename(context, e);
       }
 
       if (ImGui::MenuItem(ICON_FA_SUN " Directional Light"))
       {
-        Entity e = scene.CreateEntity("DirectionalLight");
-        scene.AddComponent<LightComponent>(e, LightType::Directional);
+        Entity e = EditorCommands::CreateEntity(scene, *context.assetManager, Kind::DirectionalLight);
         context.SelectEntity(e);
         BeginRename(context, e);
       }
@@ -166,22 +134,20 @@ namespace YAEngine
 
       if (ImGui::BeginMenu(ICON_FA_SHAPES " Primitives"))
       {
-        struct PrimitiveEntry { const char* icon; const char* label; const char* name; PrimitiveType type; };
+        struct PrimitiveEntry { const char* icon; PrimitiveType type; };
         PrimitiveEntry primitives[] = {
-          { ICON_FA_CUBE,   " Cube",   "Cube",   PrimitiveType::Box },
-          { ICON_FA_CIRCLE, " Sphere", "Sphere", PrimitiveType::Sphere },
-          { ICON_FA_SQUARE, " Plane",  "Plane",  PrimitiveType::Plane },
+          { ICON_FA_CUBE,   PrimitiveType::Box },
+          { ICON_FA_CIRCLE, PrimitiveType::Sphere },
+          { ICON_FA_SQUARE, PrimitiveType::Plane },
         };
 
-        for (auto& [pIcon, pLabel, pName, pType] : primitives)
+        for (auto& [pIcon, pType] : primitives)
         {
           char menuLabel[64];
-          snprintf(menuLabel, sizeof(menuLabel), "%s%s", pIcon, pLabel);
+          snprintf(menuLabel, sizeof(menuLabel), "%s %s", pIcon, EditorCommands::GetPrimitiveName(pType));
           if (ImGui::MenuItem(menuLabel))
           {
-            Entity e = scene.CreateEntity(pName);
-            scene.AddComponent<MeshComponent>(e, context.assetManager->Primitives().Create(pType));
-            scene.AddComponent<MaterialComponent>(e, context.assetManager->FindOrCreateDefaultMaterial());
+            Entity e = EditorCommands::CreatePrimitive(scene, *context.assetManager, pType);
             context.SelectEntity(e);
             BeginRename(context, e);
           }
@@ -194,10 +160,7 @@ namespace YAEngine
 
       if (ImGui::MenuItem(ICON_FA_MOUNTAIN " Terrain"))
       {
-        Entity e = scene.CreateEntity("Terrain");
-        scene.AddComponent<TerrainComponent>(e);
-        scene.AddComponent<MaterialComponent>(e, context.assetManager->FindOrCreateDefaultMaterial());
-        scene.GetRegistry().emplace<TerrainDirty>(e);
+        Entity e = EditorCommands::CreateEntity(scene, *context.assetManager, Kind::Terrain);
         context.SelectEntity(e);
         BeginRename(context, e);
       }
@@ -212,12 +175,9 @@ namespace YAEngine
         std::string path = FileDialog::OpenFile(filters, 1);
         if (!path.empty())
         {
-          auto handle = context.assetManager->Models().Load(path);
-          if (handle)
-          {
-            auto& model = context.assetManager->Models().Get(handle);
-            context.SelectEntity(model.rootEntity);
-          }
+          Entity root = EditorCommands::ImportModel(*context.assetManager, path);
+          if (root != entt::null)
+            context.SelectEntity(root);
         }
       }
 
@@ -312,8 +272,7 @@ namespace YAEngine
       if (ImGui::InputText("##rename", m_RenameBuffer, sizeof(m_RenameBuffer),
         ImGuiInputTextFlags_EnterReturnsTrue | ImGuiInputTextFlags_AutoSelectAll))
       {
-        if (m_RenameBuffer[0] != '\0')
-          scene.GetName(entity) = m_RenameBuffer;
+        EditorCommands::RenameEntity(scene, entity, m_RenameBuffer);
         m_RenamingEntity = entt::null;
         b_RenameNeedsFocus = false;
       }
@@ -329,8 +288,7 @@ namespace YAEngine
       }
       else if (!ImGui::IsItemActive() && !ImGui::IsItemFocused())
       {
-        if (m_RenameBuffer[0] != '\0')
-          scene.GetName(entity) = m_RenameBuffer;
+        EditorCommands::RenameEntity(scene, entity, m_RenameBuffer);
         m_RenamingEntity = entt::null;
       }
     }
@@ -360,7 +318,7 @@ namespace YAEngine
         && ImGui::MenuItem(ICON_FA_CLONE " Duplicate"))
       {
         Entity copy = isModelInstance
-          ? DuplicateModel(context, entity)
+          ? EditorCommands::DuplicateModel(scene, *context.assetManager, entity)
           : scene.DuplicateEntity(entity, *context.componentRegistry);
 
         ImGui::EndPopup();
@@ -456,10 +414,8 @@ namespace YAEngine
 
       if (ImGui::MenuItem(ICON_FA_TRASH_CAN " Delete"))
       {
-        if (context.selectedEntity == entity)
-          context.ClearSelection();
         bool hadChildren = (hc.firstChild != entt::null);
-        scene.DestroyEntity(entity);
+        EditorCommands::DeleteEntity(context, entity);
         ImGui::EndPopup();
         if (opened && hadChildren)
           ImGui::TreePop();

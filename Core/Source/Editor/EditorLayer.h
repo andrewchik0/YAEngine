@@ -4,6 +4,8 @@
 #include "Editor/EditorContext.h"
 #include "Editor/IEditorPanel.h"
 #include "Editor/Utils/EditorTextureCache.h"
+#include "Editor/Bridge/EditorBridge.h"
+#include "Editor/EditorPreferences.h"
 #include "Assets/IrradianceVolumeFile.h"
 #include "Scene/ComponentRegistry.h"
 #include "Utils/Ray.h"
@@ -14,6 +16,7 @@ namespace YAEngine
   enum class GizmoAxis : uint8_t;
   enum class GizmoMode : uint8_t;
   struct CameraTrackKey;
+  class BridgeActions;
 
   class EditorLayer : public Layer
   {
@@ -22,6 +25,7 @@ namespace YAEngine
     void OnAttach() override;
     void OnSceneReady() override;
     void Update(double deltaTime) override;
+    void LateUpdate(double deltaTime) override;
     void RenderUI() override;
     void DebugDrawGizmos() override;
     void OnDetach() override;
@@ -32,6 +36,8 @@ namespace YAEngine
     void NewScene();
     void SaveScene();
     void SaveSceneAs();
+    // Save Scene As past its dialog: the editor continues on the new path
+    bool SaveSceneTo(const std::string& path);
     void OpenScene();
     void LoadSceneDeferred(const std::string& path);
     void EnsureBasePath(const std::string& scenePath);
@@ -39,6 +45,15 @@ namespace YAEngine
     void DebugDrawIrradianceVolumeNodes();
     void DebugDrawSceneCameras();
     void DebugDrawCameraTrack();
+
+    // EditorLayer.Actions.cpp: the editor operations agents run through actions.run
+    void RegisterBridgeActions();
+    void RegisterSelectionActions(BridgeActions& actions);
+    void RegisterEntityActions(BridgeActions& actions);
+    void RegisterViewActions(BridgeActions& actions);
+    void RegisterSceneActions(BridgeActions& actions);
+    void RegisterRenderActions(BridgeActions& actions);
+    void RegisterPlaybackActions(BridgeActions& actions);
 
     // Picking, most specific first: overlay icons, then the entity id the renderer
     // rasterized into the clicked pixel, then the ray test for what has no geometry.
@@ -58,6 +73,9 @@ namespace YAEngine
     std::string m_PendingScenePath;
     bool b_PendingNewScene = false;
     EditorTextureCache m_TextureCache;
+    // Declared before the panels so AgentPanel, which refers to both, is destroyed first
+    EditorPreferences m_Preferences;
+    EditorBridge m_Bridge;
     std::vector<std::unique_ptr<IEditorPanel>> m_Panels;
     bool b_LayoutBuilt = false;
     bool b_ResetLayout = false;

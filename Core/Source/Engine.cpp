@@ -68,6 +68,10 @@ namespace YAEngine
     m_CaptureSpec = specs.captureSpec;
     m_Registry.Register<FrameCaptureSpec>(&m_CaptureSpec);
     m_Registry.Register<FrameCaptureSessionResult>(&m_CaptureSessionResult);
+#ifdef YA_EDITOR
+    m_EditorOverrides = specs.editorOverrides;
+    m_Registry.Register<EditorPreferenceOverrides>(&m_EditorOverrides);
+#endif
     m_LayerManager.SetRegistry(m_Registry);
 
     auto& terrainSystem = m_Scheduler.AddSystem<TerrainSystem>(m_AssetManager, &m_ThreadPool);

@@ -2,9 +2,19 @@
 
 #include "Input/InputSystem.h"
 #include "Scene/Components.h"
+#include "Utils/CameraOrientation.h"
 
 namespace YAEngine
 {
+  namespace
+  {
+    float ClampPitch(float pitch)
+    {
+      float maxPitch = glm::radians(90.0f);
+      return glm::clamp(pitch, -maxPitch, maxPitch);
+    }
+  }
+
   void EditorCameraLayer::OnSceneReady()
   {
     auto& camState = GetScene().GetEditorCameraState();
@@ -16,11 +26,7 @@ namespace YAEngine
     GetScene().GetTransform(m_Camera).position = camState.position;
     GetScene().SetActiveCamera(m_Camera);
 
-    glm::quat qPitch = glm::angleAxis(m_Pitch, glm::vec3(1.0f, 0.0f, 0.0f));
-    glm::quat qYaw   = glm::angleAxis(m_Yaw,   glm::vec3(0.0f, 1.0f, 0.0f));
-
-    glm::quat orientation = qYaw * qPitch;
-    GetScene().GetTransform(m_Camera).rotation = glm::normalize(orientation);
+    ApplyRotation();
   }
 
   glm::vec3 EditorCameraLayer::GetPosition()
@@ -28,6 +34,22 @@ namespace YAEngine
     if (m_Camera != entt::null && GetScene().HasComponent<LocalTransform>(m_Camera))
       return GetScene().GetTransform(m_Camera).position;
     return GetScene().GetEditorCameraState().position;
+  }
+
+  void EditorCameraLayer::SetPose(const glm::vec3& position, float yaw, float pitch)
+  {
+    if (m_Camera == entt::null || !GetScene().HasComponent<LocalTransform>(m_Camera))
+      return;
+
+    m_Yaw = yaw;
+    m_Pitch = ClampPitch(pitch);
+    GetScene().GetTransform(m_Camera).position = position;
+    ApplyRotation();
+  }
+
+  void EditorCameraLayer::ApplyRotation()
+  {
+    GetScene().GetTransform(m_Camera).rotation = MakeYawPitchRotation(m_Yaw, m_Pitch);
   }
 
   void EditorCameraLayer::Update(double deltaTime)
@@ -52,15 +74,9 @@ namespace YAEngine
 
       m_Yaw   -= delta.x * .0015f;
       m_Pitch -= delta.y * .0015f;
+      m_Pitch = ClampPitch(m_Pitch);
 
-      float maxPitch = glm::radians(90.0f);
-      m_Pitch = glm::clamp(m_Pitch, -maxPitch, maxPitch);
-
-      glm::quat qPitch = glm::angleAxis(m_Pitch, glm::vec3(1.0f, 0.0f, 0.0f));
-      glm::quat qYaw   = glm::angleAxis(m_Yaw,   glm::vec3(0.0f, 1.0f, 0.0f));
-
-      glm::quat orientation = qYaw * qPitch;
-      GetScene().GetTransform(m_Camera).rotation = glm::normalize(orientation);
+      ApplyRotation();
     }
 
     auto& rot = GetScene().GetTransform(m_Camera).rotation;

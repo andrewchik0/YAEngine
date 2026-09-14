@@ -60,6 +60,9 @@ namespace YAEngine
     // Puts a node back on its imported material: reattaches the shared slot material and
     // resets its values. A hand-assigned material is left alive - it may be shared.
     void RevertMaterial(Scene& scene, AssetManager& assets, Entity entity);
+
+    // Sets the combined textures flag on the material of every entity in the subtree
+    void SetCombinedTextures(Scene& scene, AssetManager& assets, Entity entity, bool value);
 #endif
   }
 }

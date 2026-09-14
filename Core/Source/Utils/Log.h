@@ -5,6 +5,10 @@
 #include <cstdio>
 #include <cstring>
 
+#ifdef YA_EDITOR
+#include "Pch.h"
+#endif
+
 namespace YAEngine
 {
   enum class LogLevel : uint8_t
@@ -18,6 +22,14 @@ namespace YAEngine
   class Log
   {
   public:
+#ifdef YA_EDITOR
+    // Receives every line that passed the level filter, already formatted, on the thread that
+    // logged it. It must be thread-safe and must never log itself.
+    using Sink = void (*)(LogLevel level, const char* tag, const char* file, int line, const char* text);
+
+    static void SetSink(Sink sink) { s_Sink.store(sink); }
+#endif
+
     static void SetLevel(LogLevel level) { s_Level = level; }
     static LogLevel GetLevel() { return s_Level; }
 
@@ -52,9 +64,35 @@ namespace YAEngine
 
       fprintf(out, "%s\n", colorEnd);
       fflush(out);
+
+#ifdef YA_EDITOR
+      if (Sink sink = s_Sink.load(std::memory_order_relaxed))
+      {
+        va_list sinkArgs;
+        va_start(sinkArgs, fmt);
+        ForwardToSink(sink, level, tag, filename, line, fmt, sinkArgs);
+        va_end(sinkArgs);
+      }
+#endif
     }
 
   private:
+#ifdef YA_EDITOR
+    // Out of Write so the formatting buffer is never paid for while no sink is installed.
+    // Longer lines reach the sink truncated; stdout above still prints them whole.
+    static void ForwardToSink(Sink sink, LogLevel level, const char* tag, const char* file, int line,
+      const char* fmt, va_list args)
+    {
+      char text[4096];
+      if (vsnprintf(text, sizeof(text), fmt, args) < 0)
+        return;
+
+      sink(level, tag, file, line, text);
+    }
+
+    static inline std::atomic<Sink> s_Sink { nullptr };
+#endif
+
 #ifdef NDEBUG
     static inline LogLevel s_Level = LogLevel::Info;
 #else

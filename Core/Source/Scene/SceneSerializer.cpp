@@ -137,14 +137,8 @@ namespace YAEngine
     }
   }
 
-  void SceneSerializer::Save(const std::string& path,
-    Scene& scene, AssetManager& assets,
-    const ComponentRegistry& registry, Render& render,
-    const std::string& basePath)
+  YAML::Node SceneSerializer::SerializeRenderSettings(Scene& scene, AssetManager& assets, Render& render)
   {
-    YAML::Node root;
-
-    // Settings
     YAML::Node settings;
     auto skyboxPath = assets.CubeMaps().GetPath(scene.GetSkybox());
     if (!skyboxPath.empty())
@@ -208,8 +202,16 @@ namespace YAEngine
     settings["volumeBounces"] = render.GetVolumeBounceCount();
     settings["irradianceVolumes"] = render.GetIrradianceVolumesEnabled();
     settings["irradianceNormalBias"] = render.GetIrradianceNormalBias();
+    return settings;
+  }
 
-    root["settings"] = settings;
+  bool SceneSerializer::Save(const std::string& path,
+    Scene& scene, AssetManager& assets,
+    const ComponentRegistry& registry, Render& render,
+    const std::string& basePath)
+  {
+    YAML::Node root;
+    root["settings"] = SerializeRenderSettings(scene, assets, render);
 
 #ifdef YA_EDITOR
     {
@@ -241,12 +243,13 @@ namespace YAEngine
     if (!fout.is_open())
     {
       YA_LOG_ERROR("Scene", "Failed to save scene: %s", path.c_str());
-      return;
+      return false;
     }
     fout << root;
     fout.close();
 
     YA_LOG_INFO("Scene", "Scene saved: %s", path.c_str());
+    return true;
   }
 
   // Shared: load settings (Pass 1)
@@ -261,10 +264,13 @@ namespace YAEngine
       if (ec["pitch"]) camState.pitch = ec["pitch"].as<float>();
     }
 
-    if (!root["settings"])
-      return;
+    if (root["settings"])
+      SceneSerializer::ApplyRenderSettings(root["settings"], scene, assets, render);
+  }
 
-    auto settings = root["settings"];
+  void SceneSerializer::ApplyRenderSettings(const YAML::Node& settings, Scene& scene, AssetManager& assets,
+    Render& render)
+  {
     if (settings["skybox"])
       scene.SetSkybox(assets.CubeMaps().Load(assets.ResolvePath(settings["skybox"].as<std::string>())));
     if (settings["gamma"]) render.GetGamma() = settings["gamma"].as<float>();

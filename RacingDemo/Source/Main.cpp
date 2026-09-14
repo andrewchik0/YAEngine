@@ -14,8 +14,15 @@ int main(int argc, char** argv)
 
   for (int i = 1; i < argc; i++)
   {
-    if (std::string_view(argv[i]) == "--no-dlss")
+    std::string_view arg(argv[i]);
+    if (arg == "--no-dlss")
       specs.enableDLSS = false;
+#ifdef YA_EDITOR
+    else if (arg == "--mcp")
+      specs.editorOverrides.mcpEnabled = true;
+    else if (arg == "--no-mcp")
+      specs.editorOverrides.mcpEnabled = false;
+#endif
   }
 
   // Parsed before the window opens so a malformed capture flag costs nothing but a message.

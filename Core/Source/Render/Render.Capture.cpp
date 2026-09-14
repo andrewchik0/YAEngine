@@ -1,5 +1,6 @@
 #include "Render.h"
 
+#include "DebugMarker.h"
 #include "Utils/Log.h"
 
 // The vendored header stays byte-for-byte upstream, and its HDR writer uses sprintf, which
@@ -74,6 +75,42 @@ namespace YAEngine
       default:                                 return nullptr;
       }
     }
+
+    struct CaptureAlias
+    {
+      const char* name;
+      const char* description;
+    };
+
+    // Single targets whose resource depends on build, render path or frame; ResolveCaptureAlias
+    // maps each name to its handle.
+    constexpr CaptureAlias CAPTURE_ALIASES[] = {
+      { "final",         "sceneColor (editor builds only)" },
+      { "resolved",      "this frame's resolved colour" },
+      { "prev_resolved", "the previous frame's resolved colour" },
+      { "taa",           "the TAA history slot this frame wrote" },
+      { "pt_noisy",      "pathTraceNoisy" },
+      { "pt_accum",      "pathTraceAccum" },
+    };
+
+    constexpr const char* GBUFFER_GROUP[] = { "gbuffer0", "gbuffer1", "mainDepth", "mainVelocity" };
+    constexpr const char* PT_GROUP[] = {
+      "pt_noisy", "pt_accum", "ptHitDistance", "ptSpecularMotion", "ptDiffuseAlbedo", "ptSpecularAlbedo",
+      "ptNormalRoughness"
+    };
+    constexpr const char* DEFAULT_GROUP[] = { "final", "resolved" };
+
+    struct CaptureGroup
+    {
+      const char* name;
+      std::span<const char* const> members;
+    };
+
+    constexpr CaptureGroup CAPTURE_GROUPS[] = {
+      { "gbuffer", GBUFFER_GROUP },
+      { "pt",      PT_GROUP },
+      { "default", DEFAULT_GROUP },
+    };
 
     SampleKind GetSampleKind(VkFormat format)
     {
@@ -413,6 +450,9 @@ namespace YAEngine
       bool outputResolution = false;
       VkDeviceSize size = 0;
       VulkanBuffer staging;
+      // After-pass mode: the copy the graph hook recorded, shared by every target naming the
+      // same resource and freed with the staged outputs rather than with the target.
+      const VulkanBuffer* stagedCopy = nullptr;
       TargetStats stats;
       std::string rawFile;
       std::string pngFile;
@@ -451,6 +491,8 @@ namespace YAEngine
       float pathTraceFireflyClamp = 0.0f;
       int pathTraceSampleCount = 0;
       int pathTraceDebugMode = 0;
+      // Null unless the targets were copied right after this pass instead of at the frame end.
+      const char* capturedAfterPass = nullptr;
     };
 
     void WriteManifest(const ManifestContext& mc, const std::vector<CaptureTarget>& targets)
@@ -482,6 +524,8 @@ namespace YAEngine
       out << "  \"shot\": { \"index\": " << request.shotIndex
           << ", \"name\": \"" << JsonEscape(request.shotName)
           << "\", \"requestedBy\": \"" << JsonEscape(request.requestedBy) << "\" },\n";
+      if (mc.capturedAfterPass != nullptr)
+        out << "  \"capturedAfterPass\": \"" << JsonEscape(mc.capturedAfterPass) << "\",\n";
       out << "  \"timing\": { \"globalFrameIndex\": " << mc.globalFrameIndex
           << ", \"warmupFrames\": " << request.warmupFrames
           << ", \"frameInShot\": " << request.frameInShot
@@ -604,10 +648,20 @@ namespace YAEngine
     }
   }
 
-  void Render::RequestCapture(const FrameCaptureRequest& request)
+  bool Render::RequestCapture(const FrameCaptureRequest& request)
   {
+    if (b_CaptureRequested)
+    {
+      YA_LOG_WARN("Render", "Capture: request for '%s' refused, the request for '%s' has not been serviced yet",
+        request.directory.c_str(), m_CaptureRequest.directory.c_str());
+      return false;
+    }
+
     m_CaptureRequest = request;
     b_CaptureRequested = true;
+    b_CaptureResultReady = false;
+    m_CaptureResult = {};
+    return true;
   }
 
   bool Render::ConsumeCaptureResult(FrameCaptureResult& outResult)
@@ -620,39 +674,142 @@ namespace YAEngine
     return true;
   }
 
-  void Render::LogCaptureTargets()
+  namespace
   {
-    YA_LOG_INFO("Render", "Capture: %u graph targets", m_Graph.GetResourceCount());
+    // What 'all' sweeps. A resource nothing has written yet, or one this build cannot decode,
+    // is left out quietly rather than warned about once per name.
+    bool IsInCaptureSweep(RenderGraph& graph, RGHandle handle)
+    {
+      return graph.IsResourceManaged(handle)
+        && FindCaptureFormat(graph.GetResourceDesc(handle).format) != nullptr
+        && graph.GetResource(handle).GetLayout() != VK_IMAGE_LAYOUT_UNDEFINED;
+    }
+
+    // Every image a pass writes, in the order a shot without a targets key lists them.
+    std::vector<RGHandle> GetPassOutputs(const RGPassInfo& pass)
+    {
+      std::vector<RGHandle> outputs = pass.colorOutputs;
+      outputs.insert(outputs.end(), pass.storageOutputs.begin(), pass.storageOutputs.end());
+      if (pass.depthOutput != RG_INVALID_HANDLE)
+        outputs.push_back(pass.depthOutput);
+      return outputs;
+    }
+  }
+
+  RGHandle Render::ResolveCaptureAlias(std::string_view name) const
+  {
+    if (name == "resolved")      return GetResolvedColorHandle();
+    if (name == "prev_resolved") return GetPreviousResolvedColorHandle();
+    // The history slot this frame writes: m_TAAIndex advances only after the capture point
+    if (name == "taa")           return m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
+    if (name == "pt_noisy")      return m_PathTraceNoisy;
+    if (name == "pt_accum")      return m_PathTraceAccum;
+#ifdef YA_EDITOR
+    if (name == "final")         return m_SceneColor;
+#endif
+    return m_Graph.FindResource(name);
+  }
+
+  FrameCaptureTargetList Render::GetCaptureTargets()
+  {
+    FrameCaptureTargetList list;
+
     for (RGHandle handle = 0; handle < m_Graph.GetResourceCount(); handle++)
     {
-      if (!m_Graph.IsResourceManaged(handle))
-        continue;
-
       const auto& desc = m_Graph.GetResourceDesc(handle);
       const CaptureFormat* format = FindCaptureFormat(desc.format);
-      VkExtent2D extent = desc.resolution == RGResolution::Output
-        ? m_Graph.GetOutputExtent() : m_Graph.GetExtent();
+      bool outputResolution = desc.resolution == RGResolution::Output;
+      VkExtent2D extent = m_Graph.GetResourceExtent(handle);
+
+      list.targets.push_back(FrameCaptureTargetInfo {
+        .name = desc.name,
+        .format = format ? format->name : "UNSUPPORTED",
+        .width = extent.width,
+        .height = extent.height,
+        .outputResolution = outputResolution,
+        .managed = m_Graph.IsResourceManaged(handle),
+        .mipLevels = desc.mipLevels,
+        .depth = desc.aspect == VK_IMAGE_ASPECT_DEPTH_BIT
+      });
+    }
+
+    auto appendGraphName = [this](std::string_view alias, std::vector<std::string>& out) {
+      RGHandle handle = ResolveCaptureAlias(alias);
+      if (handle != RG_INVALID_HANDLE && handle < m_Graph.GetResourceCount())
+        out.push_back(m_Graph.GetResourceDesc(handle).name);
+    };
+
+    for (const CaptureAlias& alias : CAPTURE_ALIASES)
+    {
+      FrameCaptureAliasInfo info { .name = alias.name, .description = alias.description };
+      appendGraphName(alias.name, info.resolvesTo);
+      list.aliases.push_back(std::move(info));
+    }
+
+    for (const CaptureGroup& group : CAPTURE_GROUPS)
+    {
+      FrameCaptureAliasInfo info { .name = group.name };
+      for (const char* member : group.members)
+      {
+        if (!info.description.empty())
+          info.description += ",";
+        info.description += member;
+        appendGraphName(member, info.resolvesTo);
+      }
+      list.aliases.push_back(std::move(info));
+    }
+
+    FrameCaptureAliasInfo all { .name = "all", .description = "every capturable graph resource" };
+    for (RGHandle handle = 0; handle < m_Graph.GetResourceCount(); handle++)
+    {
+      if (IsInCaptureSweep(m_Graph, handle))
+        all.resolvesTo.push_back(m_Graph.GetResourceDesc(handle).name);
+    }
+    list.aliases.push_back(std::move(all));
+
+    const std::vector<uint32_t>& order = m_Graph.GetExecutionOrder();
+    for (uint32_t position = 0; position < order.size(); position++)
+    {
+      const RGPassInfo& pass = m_Graph.GetPassInfo(order[position]);
+      FrameCapturePassInfo info {
+        .name = pass.name,
+        .altName = pass.altName,
+        .executionIndex = position,
+        .enabled = m_Graph.IsPassEnabled(order[position])
+      };
+      for (RGHandle handle : pass.colorOutputs)
+        info.colorOutputs.push_back(m_Graph.GetResourceDesc(handle).name);
+      for (RGHandle handle : pass.storageOutputs)
+        info.storageOutputs.push_back(m_Graph.GetResourceDesc(handle).name);
+      if (pass.depthOutput != RG_INVALID_HANDLE)
+        info.depthOutput = m_Graph.GetResourceDesc(pass.depthOutput).name;
+      list.passes.push_back(std::move(info));
+    }
+
+    return list;
+  }
+
+  void Render::LogCaptureTargets()
+  {
+    FrameCaptureTargetList list = GetCaptureTargets();
+
+    YA_LOG_INFO("Render", "Capture: %u graph targets", static_cast<uint32_t>(list.targets.size()));
+    for (const FrameCaptureTargetInfo& target : list.targets)
+    {
+      if (!target.managed)
+        continue;
 
       YA_LOG_INFO("Render", "Capture:   %-18s %-24s %-6s %ux%u mips=%u%s",
-        desc.name.c_str(),
-        format ? format->name : "UNSUPPORTED",
-        desc.resolution == RGResolution::Output ? "Output" : "Render",
-        extent.width, extent.height, desc.mipLevels,
-        desc.aspect == VK_IMAGE_ASPECT_DEPTH_BIT ? " depth" : "");
+        target.name.c_str(),
+        target.format.c_str(),
+        target.outputResolution ? "Output" : "Render",
+        target.width, target.height, target.mipLevels,
+        target.depth ? " depth" : "");
     }
 
     YA_LOG_INFO("Render", "Capture: aliases");
-    YA_LOG_INFO("Render", "Capture:   final          -> sceneColor (editor builds only)");
-    YA_LOG_INFO("Render", "Capture:   resolved       -> this frame's resolved colour");
-    YA_LOG_INFO("Render", "Capture:   prev_resolved  -> the previous frame's resolved colour");
-    YA_LOG_INFO("Render", "Capture:   taa            -> the TAA history slot this frame wrote");
-    YA_LOG_INFO("Render", "Capture:   pt_noisy       -> pathTraceNoisy");
-    YA_LOG_INFO("Render", "Capture:   pt_accum       -> pathTraceAccum");
-    YA_LOG_INFO("Render", "Capture:   gbuffer        -> gbuffer0,gbuffer1,mainDepth,mainVelocity");
-    YA_LOG_INFO("Render", "Capture:   pt             -> pt_noisy,pt_accum,ptHitDistance,"
-      "ptSpecularMotion,ptDiffuseAlbedo,ptSpecularAlbedo,ptNormalRoughness");
-    YA_LOG_INFO("Render", "Capture:   default        -> final,resolved");
-    YA_LOG_INFO("Render", "Capture:   all            -> every capturable graph resource");
+    for (const FrameCaptureAliasInfo& alias : list.aliases)
+      YA_LOG_INFO("Render", "Capture:   %-14s -> %s", alias.name.c_str(), alias.description.c_str());
 
     // The other half of what a shot can name. Listed from the same table --shot parses, so a
     // slug that is missing here is missing everywhere.
@@ -662,6 +819,103 @@ namespace YAEngine
       YA_LOG_INFO("Render", "Capture:   %-2d %-18s %s",
         view, GetDebugViewSlug(view), GetDebugViewName(view));
     }
+
+    // Where a shot can capture mid-frame. A disabled pass is listed too: it runs again as soon
+    // as the path or setting that gates it changes.
+    YA_LOG_INFO("Render", "Capture: passes in execution order, as after=<name> or after=<alt name>");
+    for (const FrameCapturePassInfo& pass : list.passes)
+    {
+      std::string label = pass.altName.empty() ? pass.name : pass.name + " (" + pass.altName + ")";
+      std::string outputs;
+      auto appendOutput = [&outputs](const std::string& name) {
+        outputs += outputs.empty() ? name : "," + name;
+      };
+      for (const std::string& name : pass.colorOutputs)
+        appendOutput(name);
+      for (const std::string& name : pass.storageOutputs)
+        appendOutput(name);
+      if (!pass.depthOutput.empty())
+        appendOutput("depth:" + pass.depthOutput);
+
+      YA_LOG_INFO("Render", "Capture:   %-2u %-40s -> %s%s",
+        pass.executionIndex, label.c_str(),
+        outputs.empty() ? "(no image outputs)" : outputs.c_str(),
+        pass.enabled ? "" : "  [disabled]");
+    }
+  }
+
+  bool Render::ArmCaptureAfterPass()
+  {
+    m_CaptureAfterPassIndex = RG_INVALID_PASS;
+    b_CaptureAfterPassRecorded = false;
+    if (m_CaptureRequest.afterPass.empty())
+      return false;
+
+    m_CaptureAfterPassIndex = m_Graph.FindPass(m_CaptureRequest.afterPass);
+    if (m_CaptureAfterPassIndex == RG_INVALID_PASS)
+      return false;
+
+    m_Graph.ArmAfterPass(m_CaptureAfterPassIndex, [this](VkCommandBuffer cmd) { RecordCaptureAfterPass(cmd); });
+    return true;
+  }
+
+  void Render::RecordCaptureAfterPass(VkCommandBuffer cmd)
+  {
+    b_CaptureAfterPassRecorded = true;
+    m_CaptureAfterPassRenderExtent = m_Graph.GetExtent();
+    m_CaptureAfterPassOutputExtent = m_Graph.GetOutputExtent();
+
+    auto& ctx = m_Backend.GetContext();
+    DebugMarker::BeginLabel(cmd, "CaptureAfterPass");
+
+    for (RGHandle handle : GetPassOutputs(m_Graph.GetPassInfo(m_CaptureAfterPassIndex)))
+    {
+      // Anything left out here is reported by CaptureFrame, and only if a target names it.
+      const auto& desc = m_Graph.GetResourceDesc(handle);
+      const CaptureFormat* format = FindCaptureFormat(desc.format);
+      VkImageLayout layout = m_Graph.GetResourceLayout(handle);
+      if (!m_Graph.IsResourceManaged(handle) || format == nullptr || layout == VK_IMAGE_LAYOUT_UNDEFINED)
+        continue;
+
+      VkExtent2D extent = m_Graph.GetResourceExtent(handle);
+
+      CaptureStagedOutput staged;
+      staged.handle = handle;
+      staged.extent = extent;
+      staged.staging = VulkanBuffer::CreateReadback(ctx,
+        VkDeviceSize(extent.width) * extent.height * format->bytesPerPixel);
+
+      VkImage image = m_Graph.GetResourceImage(handle);
+      CaptureBarrier(cmd, image, desc.aspect, layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+      VkBufferImageCopy region{};
+      region.imageSubresource = { desc.aspect, 0, 0, 1 };
+      region.imageExtent = { extent.width, extent.height, 1 };
+      vkCmdCopyImageToBuffer(cmd, image,
+        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, staged.staging.Get(), 1, &region);
+
+      // Back to exactly the tracked layout: the next pass touching this image emits its
+      // barrier from that value, not from what the image really is.
+      CaptureBarrier(cmd, image, desc.aspect, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, layout);
+
+      m_CaptureStagedOutputs.push_back(std::move(staged));
+    }
+
+    DebugMarker::EndLabel(cmd);
+  }
+
+  void Render::ReleaseCaptureStagedOutputs(bool deviceIdle)
+  {
+    if (m_CaptureStagedOutputs.empty())
+      return;
+
+    auto& ctx = m_Backend.GetContext();
+    // The frame the copies were recorded into may still be running.
+    if (!deviceIdle)
+      vkDeviceWaitIdle(ctx.device);
+    for (auto& staged : m_CaptureStagedOutputs)
+      staged.staging.Destroy(ctx);
+    m_CaptureStagedOutputs.clear();
   }
 
   void Render::CaptureFrame()
@@ -670,6 +924,7 @@ namespace YAEngine
 
     const FrameCaptureRequest& request = m_CaptureRequest;
     m_CaptureResult = {};
+    bool afterPass = !request.afterPass.empty();
 
     auto warn = [this](const std::string& message) {
       YA_LOG_WARN("Render", "Capture: %s", message.c_str());
@@ -677,24 +932,34 @@ namespace YAEngine
       m_CaptureResult.complete = false;
     };
 
-    // historyWrite for this frame - m_TAAIndex has not been advanced yet at the call site
-    RGHandle taaOutput = m_TAAIndex == 0 ? m_TAAHistory0 : m_TAAHistory1;
-
-    auto resolveAlias = [&](const std::string& name) -> RGHandle {
-      if (name == "resolved")      return GetResolvedColorHandle();
-      if (name == "prev_resolved") return GetPreviousResolvedColorHandle();
-      if (name == "taa")           return taaOutput;
-      if (name == "pt_noisy")      return m_PathTraceNoisy;
-      if (name == "pt_accum")      return m_PathTraceAccum;
-#ifdef YA_EDITOR
-      if (name == "final")         return m_SceneColor;
-#endif
-      return m_Graph.FindResource(name);
+    auto fail = [this](const std::string& message) {
+      YA_LOG_ERROR("Render", "Capture: %s", message.c_str());
+      m_CaptureResult.warnings.push_back(message);
+      m_CaptureResult.failed = true;
     };
+
+    // Falling back to the finished frame, or to what an image held before a pass that did not
+    // run, would be exactly the silent wrong answer capture exists to avoid.
+    std::vector<RGHandle> passOutputs;
+    if (afterPass)
+    {
+      if (m_CaptureAfterPassIndex == RG_INVALID_PASS)
+      {
+        fail("unknown pass '" + request.afterPass + "'; --capture-list-targets and capture.targets list the passes");
+      }
+      else
+      {
+        passOutputs = GetPassOutputs(m_Graph.GetPassInfo(m_CaptureAfterPassIndex));
+        if (passOutputs.empty())
+          fail("pass '" + request.afterPass + "' writes no render graph image, so nothing can be captured after it");
+        else if (!b_CaptureAfterPassRecorded)
+          fail("pass '" + request.afterPass + "' was not executed in the captured frame: it is disabled in the current render path or settings");
+      }
+    }
 
     std::vector<CaptureTarget> targets;
     auto addTarget = [&](const std::string& alias) {
-      RGHandle handle = resolveAlias(alias);
+      RGHandle handle = ResolveCaptureAlias(alias);
       if (handle == RG_INVALID_HANDLE)
       {
 #ifndef YA_EDITOR
@@ -704,10 +969,13 @@ namespace YAEngine
           return true;
         }
 #endif
-        std::string message = "unknown target '" + alias + "'";
-        YA_LOG_ERROR("Render", "Capture: %s", message.c_str());
-        m_CaptureResult.warnings.push_back(message);
-        m_CaptureResult.failed = true;
+        fail("unknown target '" + alias + "'");
+        return false;
+      }
+
+      if (afterPass && std::find(passOutputs.begin(), passOutputs.end(), handle) == passOutputs.end())
+      {
+        fail("target '" + alias + "' is not an output of pass '" + request.afterPass + "'");
         return false;
       }
 
@@ -719,17 +987,42 @@ namespace YAEngine
         return true;
       }
 
-      // After a resize the graph recreates images with UNDEFINED layout. Restoring to
-      // UNDEFINED is illegal, and the contents would be garbage anyway.
-      VkImageLayout layout = m_Graph.GetResource(handle).GetLayout();
-      if (layout == VK_IMAGE_LAYOUT_UNDEFINED)
-      {
-        warn("target '" + alias + "' skipped: layout UNDEFINED");
-        return true;
-      }
-
       bool outputResolution = desc.resolution == RGResolution::Output;
-      VkExtent2D extent = outputResolution ? m_Graph.GetOutputExtent() : m_Graph.GetExtent();
+      VkExtent2D extent = m_Graph.GetResourceExtent(handle);
+
+      VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
+      const VulkanBuffer* stagedCopy = nullptr;
+      if (afterPass)
+      {
+        // The hook copies only images the graph allocates itself, so an imported one has no staged copy.
+        if (!m_Graph.IsResourceManaged(handle))
+        {
+          warn("target '" + alias + "' skipped: imported image, not captured after a pass");
+          return true;
+        }
+
+        auto staged = std::find_if(m_CaptureStagedOutputs.begin(), m_CaptureStagedOutputs.end(),
+          [handle](const CaptureStagedOutput& output) { return output.handle == handle; });
+        // Every managed output in a supported format is copied unless its layout was undefined.
+        if (staged == m_CaptureStagedOutputs.end())
+        {
+          warn("target '" + alias + "' skipped: layout UNDEFINED");
+          return true;
+        }
+        stagedCopy = &staged->staging;
+        extent = staged->extent;
+      }
+      else
+      {
+        // After a resize the graph recreates images with UNDEFINED layout. Restoring to
+        // UNDEFINED is illegal, and the contents would be garbage anyway.
+        layout = m_Graph.GetResource(handle).GetLayout();
+        if (layout == VK_IMAGE_LAYOUT_UNDEFINED)
+        {
+          warn("target '" + alias + "' skipped: layout UNDEFINED");
+          return true;
+        }
+      }
 
       CaptureTarget target;
       target.alias = alias;
@@ -739,6 +1032,7 @@ namespace YAEngine
       target.vkFormat = desc.format;
       target.aspect = desc.aspect;
       target.layout = layout;
+      target.stagedCopy = stagedCopy;
       target.extent = extent;
       target.outputResolution = outputResolution;
       target.size = VkDeviceSize(extent.width) * extent.height * format->bytesPerPixel;
@@ -747,34 +1041,34 @@ namespace YAEngine
     };
 
     auto addGroup = [&](const std::string& name) {
-      if (name == "gbuffer")
-        return addTarget("gbuffer0") && addTarget("gbuffer1")
-          && addTarget("mainDepth") && addTarget("mainVelocity");
+      for (const CaptureGroup& group : CAPTURE_GROUPS)
+      {
+        if (name != group.name)
+          continue;
 
-      if (name == "pt")
-        return addTarget("pt_noisy") && addTarget("pt_accum") && addTarget("ptHitDistance")
-          && addTarget("ptSpecularMotion") && addTarget("ptDiffuseAlbedo") && addTarget("ptSpecularAlbedo")
-          && addTarget("ptNormalRoughness");
-
-      if (name == "default")
-        return addTarget("final") && addTarget("resolved");
+        for (const char* member : group.members)
+        {
+          if (!addTarget(member))
+            return false;
+        }
+        return true;
+      }
 
       if (name == "all")
       {
+        // Otherwise it would fail on the first resource the pass does not write, with a
+        // message naming that resource instead of the actual mistake.
+        if (afterPass)
+        {
+          fail("target 'all' cannot be combined with after=; omit targets to capture every output of pass '"
+            + request.afterPass + "'");
+          return false;
+        }
+
         for (RGHandle handle = 0; handle < m_Graph.GetResourceCount(); handle++)
         {
-          if (!m_Graph.IsResourceManaged(handle))
-            continue;
-
-          const auto& desc = m_Graph.GetResourceDesc(handle);
-          // 'all' is a sweep, not a request: a resource nothing has written or that this
-          // build cannot decode is left out quietly rather than warned about once per name.
-          if (FindCaptureFormat(desc.format) == nullptr)
-            continue;
-          if (m_Graph.GetResource(handle).GetLayout() == VK_IMAGE_LAYOUT_UNDEFINED)
-            continue;
-
-          addTarget(desc.name);
+          if (IsInCaptureSweep(m_Graph, handle))
+            addTarget(m_Graph.GetResourceDesc(handle).name);
         }
         return true;
       }
@@ -782,9 +1076,18 @@ namespace YAEngine
       return addTarget(name);
     };
 
-    for (const auto& name : request.targets)
+    // Without a targets key, a shot after a pass captures everything that pass writes.
+    std::vector<std::string> passOutputNames;
+    if (afterPass && request.targets.empty())
     {
-      if (!addGroup(name))
+      for (RGHandle handle : passOutputs)
+        passOutputNames.push_back(m_Graph.GetResourceDesc(handle).name);
+    }
+    const std::vector<std::string>& names = passOutputNames.empty() ? request.targets : passOutputNames;
+
+    for (const auto& name : names)
+    {
+      if (m_CaptureResult.failed || !addGroup(name))
         break;
     }
 
@@ -792,6 +1095,7 @@ namespace YAEngine
     {
       if (targets.empty() && !m_CaptureResult.failed)
         warn("no capturable target resolved");
+      ReleaseCaptureStagedOutputs(false);
       b_CaptureResultReady = true;
       return;
     }
@@ -805,33 +1109,38 @@ namespace YAEngine
       YA_LOG_ERROR("Render", "Capture: cannot create '%s': %s",
         request.directory.c_str(), ec.message().c_str());
       m_CaptureResult.failed = true;
+      ReleaseCaptureStagedOutputs(false);
       b_CaptureResultReady = true;
       return;
     }
 
     auto& ctx = m_Backend.GetContext();
+    // After a pass this is also the wait for the frame the hook recorded its copies into.
     vkDeviceWaitIdle(ctx.device);
 
-    for (auto& target : targets)
-      target.staging = VulkanBuffer::CreateReadback(ctx, target.size);
-
-    // One submit for the whole shot: the wait around it dominates the cost, and doing it
-    // per target would multiply that by the target count for no benefit.
-    VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
-    for (auto& target : targets)
+    if (!afterPass)
     {
-      VkImage image = m_Graph.GetResource(target.handle).GetImage();
-      CaptureBarrier(cmd, image, target.aspect, target.layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+      for (auto& target : targets)
+        target.staging = VulkanBuffer::CreateReadback(ctx, target.size);
 
-      VkBufferImageCopy region{};
-      region.imageSubresource = { target.aspect, 0, 0, 1 };
-      region.imageExtent = { target.extent.width, target.extent.height, 1 };
-      vkCmdCopyImageToBuffer(cmd, image,
-        VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.staging.Get(), 1, &region);
+      // One submit for the whole shot: the wait around it dominates the cost, and doing it
+      // per target would multiply that by the target count for no benefit.
+      VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
+      for (auto& target : targets)
+      {
+        VkImage image = m_Graph.GetResource(target.handle).GetImage();
+        CaptureBarrier(cmd, image, target.aspect, target.layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
 
-      CaptureBarrier(cmd, image, target.aspect, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.layout);
+        VkBufferImageCopy region{};
+        region.imageSubresource = { target.aspect, 0, 0, 1 };
+        region.imageExtent = { target.extent.width, target.extent.height, 1 };
+        vkCmdCopyImageToBuffer(cmd, image,
+          VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.staging.Get(), 1, &region);
+
+        CaptureBarrier(cmd, image, target.aspect, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, target.layout);
+      }
+      ctx.commandBuffer->EndSingleTimeCommands(cmd);
     }
-    ctx.commandBuffer->EndSingleTimeCommands(cmd);
 
     bool multiFrame = request.frameCount > 1;
     char frameSuffix[8] = "";
@@ -840,7 +1149,8 @@ namespace YAEngine
 
     for (auto& target : targets)
     {
-      const uint8_t* mapped = static_cast<const uint8_t*>(target.staging.GetMapped());
+      const VulkanBuffer& source = target.stagedCopy != nullptr ? *target.stagedCopy : target.staging;
+      const uint8_t* mapped = static_cast<const uint8_t*>(source.GetMapped());
 
       target.rawFile = target.alias + "." + target.format->suffix + frameSuffix + ".bin";
       std::string rawPath = request.directory + "/" + target.rawFile;
@@ -874,12 +1184,14 @@ namespace YAEngine
       target.staging.Destroy(ctx);
     }
 
+    // After a pass the extents come from the frame the copies were recorded in: a failed present
+    // resizes the graph before this point.
     ManifestContext manifestContext {
       .request = &request,
       .uniforms = &m_FrameUniformBuffer.uniforms,
       .warnings = &m_CaptureResult.warnings,
-      .renderExtent = m_Graph.GetExtent(),
-      .outputExtent = m_Graph.GetOutputExtent(),
+      .renderExtent = afterPass ? m_CaptureAfterPassRenderExtent : m_Graph.GetExtent(),
+      .outputExtent = afterPass ? m_CaptureAfterPassOutputExtent : m_Graph.GetOutputExtent(),
       .globalFrameIndex = m_GlobalFrameIndex,
       .selectedPath = m_RenderPath,
       .effectivePath = m_EffectiveRenderPath,
@@ -903,14 +1215,27 @@ namespace YAEngine
       .pathTraceMaxBounces = m_PathTraceMaxBounces,
       .pathTraceFireflyClamp = m_PathTraceFireflyClamp,
       .pathTraceSampleCount = m_PathTraceSampleIndex,
-      .pathTraceDebugMode = GetPathTraceDebugMode()
+      .pathTraceDebugMode = GetPathTraceDebugMode(),
+      // As requested, which may be the alt name
+      .capturedAfterPass = afterPass ? request.afterPass.c_str() : nullptr
     };
     WriteManifest(manifestContext, targets);
 
-    YA_LOG_INFO("Render", "Capture: shot %03d '%s' frame %d/%d -> '%s' (%zu targets)",
-      request.shotIndex, request.shotName.c_str(), request.frameInShot + 1, request.frameCount,
-      request.directory.c_str(), targets.size());
+    if (afterPass)
+    {
+      YA_LOG_INFO("Render", "Capture: shot %03d '%s' frame %d/%d after pass '%s' -> '%s' (%zu targets)",
+        request.shotIndex, request.shotName.c_str(), request.frameInShot + 1, request.frameCount,
+        manifestContext.capturedAfterPass, request.directory.c_str(), targets.size());
+    }
+    else
+    {
+      YA_LOG_INFO("Render", "Capture: shot %03d '%s' frame %d/%d -> '%s' (%zu targets)",
+        request.shotIndex, request.shotName.c_str(), request.frameInShot + 1, request.frameCount,
+        request.directory.c_str(), targets.size());
+    }
 
+    // The wait before the copies were read already covered their frame, and nothing was submitted since
+    ReleaseCaptureStagedOutputs(true);
     b_CaptureResultReady = true;
   }
 

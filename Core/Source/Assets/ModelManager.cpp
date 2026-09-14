@@ -84,14 +84,22 @@ namespace YAEngine
       return;
 
     auto& model = Get(handle);
-    DestroyEntityAssets(model.rootEntity);
-    m_Scene->DestroyEntity(model.rootEntity);
+    if (m_Scene->GetRegistry().valid(model.rootEntity))
+    {
+      DestroyEntityAssets(model.rootEntity);
+      m_Scene->DestroyEntity(model.rootEntity);
+    }
     Remove(handle);
   }
 
   void ModelManager::DestroyAll()
   {
     ForEach([this](Model& model) {
+      // The editor deletes a root, or one of its ancestors, through the scene alone. Its meshes and
+      // materials are then still owned by their managers, whose DestroyAll frees them.
+      if (!m_Scene->GetRegistry().valid(model.rootEntity))
+        return;
+
       DestroyEntityAssets(model.rootEntity);
       m_Scene->DestroyEntity(model.rootEntity);
     });

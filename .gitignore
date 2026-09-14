@@ -8,3 +8,6 @@ CLAUDE.md
 docs/
 imgui.ini
 pipeline_cache.bin
+.venv/
+__pycache__/
+.pytest_cache/

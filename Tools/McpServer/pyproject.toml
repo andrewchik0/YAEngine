@@ -1,0 +1,33 @@
+[project]
+name = "yaengine-mcp"
+version = "0.1.0"
+description = "MCP server for the YAEngine editor agent bridge"
+authors = [
+    { name = "Andrei_Vasilev", email = "vasilev6026@gmail.com" }
+]
+requires-python = ">=3.10"
+dependencies = [
+    "mcp>=2.2.0",
+    "numpy>=2.2.6",
+    "pillow>=12.3.0",
+]
+
+[project.scripts]
+yaengine-mcp = "yaengine_mcp.server:main"
+yaengine-mcp-smoke = "yaengine_mcp.smoke:main"
+
+[build-system]
+requires = ["uv_build>=0.11.7,<0.12.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.1.1",
+    "pytest-asyncio>=1.4.0",
+    "pyyaml>=6.0.3",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"

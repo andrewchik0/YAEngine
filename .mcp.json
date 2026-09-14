@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "yaengine": {
+      "command": "uv",
+      "args": ["run", "--directory", "Tools/McpServer", "yaengine-mcp"]
+    }
+  }
+}

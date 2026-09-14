@@ -2,10 +2,11 @@ include(FetchContent)
 
 set(BUILD_SHARED_LIBS OFF CACHE BOOL "" FORCE)
 
+# A commit on the docking branch (IMGUI_VERSION_NUM 19297), pinned together with imgui_test_engine
+# below, which tracks ImGui internals. Bump both at once. A commit cannot be cloned shallow.
 FetchContent_Declare(ImGui
   GIT_REPOSITORY https://github.com/ocornut/imgui
-  GIT_TAG docking
-  GIT_SHALLOW ON
+  GIT_TAG 367b2c24f399988ddafc0bb4628da0106bcc09be
   EXCLUDE_FROM_ALL
   SYSTEM)
 FetchContent_MakeAvailable(ImGui)
@@ -102,4 +103,46 @@ if(YA_EDITOR)
   )
   target_include_directories(implot PUBLIC ${implot_SOURCE_DIR})
   target_link_libraries(implot PUBLIC imgui)
+
+  # The agent bridge speaks JSON lines and only exists in editor builds.
+  FetchContent_Declare(nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json
+    GIT_TAG v3.12.0
+    GIT_SHALLOW ON
+    EXCLUDE_FROM_ALL
+    SYSTEM)
+  FetchContent_MakeAvailable(nlohmann_json)
+
+  # Dear ImGui Test Engine drives the editor UI for the agent bridge (ui.* methods). Its own
+  # license (imgui_test_engine/LICENSE.txt) applies, free for individuals and open source.
+  # Pinned to a commit that matches the ImGui commit above: it tracks ImGui internals. The
+  # repository has no CMakeLists.txt.
+  FetchContent_Declare(imgui_test_engine
+    GIT_REPOSITORY https://github.com/ocornut/imgui_test_engine
+    GIT_TAG cf4b9749fad4cfdf2096a27f9a688ea71c47fe49
+    EXCLUDE_FROM_ALL
+    SYSTEM)
+  FetchContent_MakeAvailable(imgui_test_engine)
+
+  # Compiled into imgui itself: imgui.cpp calls the hooks the test engine defines, and every
+  # translation unit that sees imgui_internal.h has to agree on IMGUI_ENABLE_TEST_ENGINE.
+  set(IMGUI_TEST_ENGINE_DIR ${imgui_test_engine_SOURCE_DIR}/imgui_test_engine)
+  target_sources(imgui PRIVATE
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_engine.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_context.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_coroutine.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_utils.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_exporters.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_perftool.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_te_ui.cpp
+    ${IMGUI_TEST_ENGINE_DIR}/imgui_capture_tool.cpp
+  )
+  target_include_directories(imgui PUBLIC ${imgui_test_engine_SOURCE_DIR})
+  # Screenshots come from the swapchain readback, so the capture tool and its stb copy stay out.
+  target_compile_definitions(imgui PUBLIC
+    IMGUI_ENABLE_TEST_ENGINE
+    IMGUI_TEST_ENGINE_ENABLE_COROUTINE_STDTHREAD_IMPL=1
+    IMGUI_TEST_ENGINE_ENABLE_CAPTURE=0
+    IMGUI_TEST_ENGINE_ENABLE_IMPLOT=0
+  )
 endif()

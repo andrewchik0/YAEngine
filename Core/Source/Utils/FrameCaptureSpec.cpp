@@ -70,6 +70,12 @@ namespace YAEngine
       { "dlss-ultraperf",  AntialiasingMode::DLSSUltraPerformance },
     };
 
+    const std::vector<std::string>& GetDefaultShotTargets()
+    {
+      static const std::vector<std::string> targets = { "final", "resolved" };
+      return targets;
+    }
+
     std::vector<std::string> Split(std::string_view text, char separator)
     {
       std::vector<std::string> parts;
@@ -149,7 +155,25 @@ namespace YAEngine
       return true;
     }
 
-    bool ParseShotKey(const std::string& key, const std::string& value, FrameCaptureShot& shot)
+    // The parser never logs: the command line turns the reason into a log line, the agent
+    // bridge into a reply.
+    bool Reject(std::string& outError, const char* format, ...)
+    {
+      va_list args;
+      va_start(args, format);
+      va_list sizing;
+      va_copy(sizing, args);
+      int length = std::vsnprintf(nullptr, 0, format, sizing);
+      va_end(sizing);
+
+      outError.assign(length > 0 ? static_cast<size_t>(length) : 0, '\0');
+      if (length > 0)
+        std::vsnprintf(outError.data(), outError.size() + 1, format, args);
+      va_end(args);
+      return false;
+    }
+
+    bool ParseShotKey(const std::string& key, const std::string& value, FrameCaptureShot& shot, std::string& outError)
     {
       if (key == "name")
       {
@@ -160,18 +184,21 @@ namespace YAEngine
       {
         shot.targets = Split(value, ',');
         if (shot.targets.empty())
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key 'targets' needs at least one name");
-          return false;
-        }
+          return Reject(outError, "shot key 'targets' needs at least one name");
+        return true;
+      }
+      if (key == "after")
+      {
+        if (value.empty())
+          return Reject(outError, "shot key 'after' needs a render graph pass name");
+        shot.afterPass = value;
         return true;
       }
       if (key == "path")
       {
         if (value == "raster")   { shot.renderPath = RenderPath::Raster; return true; }
         if (value == "pt")       { shot.renderPath = RenderPath::PathTracing; return true; }
-        YA_LOG_ERROR("Render", "Capture: shot key 'path' expects raster or pt, got '%s'", value.c_str());
-        return false;
+        return Reject(outError, "shot key 'path' expects raster or pt, got '%s'", value.c_str());
       }
       if (key == "aa")
       {
@@ -183,18 +210,14 @@ namespace YAEngine
             return true;
           }
         }
-        YA_LOG_ERROR("Render", "Capture: shot key 'aa' expects one of "
+        return Reject(outError, "shot key 'aa' expects one of "
           "none|taa|dlaa|dlss-quality|dlss-balanced|dlss-perf|dlss-ultraperf, got '%s'", value.c_str());
-        return false;
       }
       if (key == "view")
       {
         int view = ParseDebugView(value);
         if (view < 0)
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key 'view' does not name a debug view: '%s'", value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key 'view' does not name a debug view: '%s'", value.c_str());
         shot.debugView = view;
         return true;
       }
@@ -203,9 +226,8 @@ namespace YAEngine
         int bounces = 0;
         if (!ParseInt(value, bounces) || bounces < PT_MIN_BOUNCES || bounces > PT_MAX_BOUNCES)
         {
-          YA_LOG_ERROR("Render", "Capture: shot key 'bounces' expects %d..%d, got '%s'",
+          return Reject(outError, "shot key 'bounces' expects %d..%d, got '%s'",
             PT_MIN_BOUNCES, PT_MAX_BOUNCES, value.c_str());
-          return false;
         }
         shot.pathTraceBounces = bounces;
         return true;
@@ -214,10 +236,7 @@ namespace YAEngine
       {
         float clamp = 0.0f;
         if (!ParseFloat(value, clamp) || clamp < 0.0f)
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key 'clamp' expects a non-negative float, got '%s'", value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key 'clamp' expects a non-negative float, got '%s'", value.c_str());
         shot.pathTraceClamp = clamp;
         return true;
       }
@@ -225,10 +244,7 @@ namespace YAEngine
       {
         bool enabled = false;
         if (!ParseBool(value, enabled))
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key 'devresolve' expects 0 or 1, got '%s'", value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key 'devresolve' expects 0 or 1, got '%s'", value.c_str());
         shot.pathTraceDevResolve = enabled;
         return true;
       }
@@ -236,10 +252,7 @@ namespace YAEngine
       {
         int samples = 0;
         if (!ParseInt(value, samples) || samples <= 0)
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key 'accum' expects a positive integer, got '%s'", value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key 'accum' expects a positive integer, got '%s'", value.c_str());
         shot.accumSamples = samples;
         return true;
       }
@@ -247,10 +260,7 @@ namespace YAEngine
       {
         float exposure = 0.0f;
         if (!ParseFloat(value, exposure))
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key 'exposure' expects a float, got '%s'", value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key 'exposure' expects a float, got '%s'", value.c_str());
         shot.exposure = exposure;
         return true;
       }
@@ -258,10 +268,7 @@ namespace YAEngine
       {
         bool enabled = false;
         if (!ParseBool(value, enabled))
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key 'autoexposure' expects 0 or 1, got '%s'", value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key 'autoexposure' expects 0 or 1, got '%s'", value.c_str());
         shot.autoExposure = enabled;
         return true;
       }
@@ -269,17 +276,13 @@ namespace YAEngine
       {
         if (value == "aces") { shot.tonemapMode = TONEMAP_ACES; return true; }
         if (value == "agx")  { shot.tonemapMode = TONEMAP_AGX;  return true; }
-        YA_LOG_ERROR("Render", "Capture: shot key 'tonemap' expects aces or agx, got '%s'", value.c_str());
-        return false;
+        return Reject(outError, "shot key 'tonemap' expects aces or agx, got '%s'", value.c_str());
       }
       if (key == "bloom")
       {
         bool enabled = false;
         if (!ParseBool(value, enabled))
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key 'bloom' expects 0 or 1, got '%s'", value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key 'bloom' expects 0 or 1, got '%s'", value.c_str());
         shot.bloom = enabled;
         return true;
       }
@@ -287,10 +290,7 @@ namespace YAEngine
       {
         int warmup = 0;
         if (!ParseInt(value, warmup) || warmup < 0)
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key 'warmup' expects a non-negative integer, got '%s'", value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key 'warmup' expects a non-negative integer, got '%s'", value.c_str());
         shot.warmupFrames = warmup;
         return true;
       }
@@ -298,10 +298,7 @@ namespace YAEngine
       {
         int frames = 0;
         if (!ParseInt(value, frames) || frames <= 0)
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key 'frames' expects a positive integer, got '%s'", value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key 'frames' expects a positive integer, got '%s'", value.c_str());
         shot.frames = frames;
         return true;
       }
@@ -309,10 +306,7 @@ namespace YAEngine
       {
         glm::vec3 position(0.0f);
         if (!ParseVec3(value, position))
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key '%s' expects x,y,z, got '%s'", key.c_str(), value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key '%s' expects x,y,z, got '%s'", key.c_str(), value.c_str());
         if (key == "camera")
           shot.cameraPosition = position;
         else
@@ -323,10 +317,7 @@ namespace YAEngine
       {
         float degrees = 0.0f;
         if (!ParseFloat(value, degrees))
-        {
-          YA_LOG_ERROR("Render", "Capture: shot key '%s' expects degrees, got '%s'", key.c_str(), value.c_str());
-          return false;
-        }
+          return Reject(outError, "shot key '%s' expects degrees, got '%s'", key.c_str(), value.c_str());
         if (key == "yaw")
           shot.yawDegrees = degrees;
         else
@@ -334,11 +325,10 @@ namespace YAEngine
         return true;
       }
 
-      YA_LOG_ERROR("Render", "Capture: unknown shot key '%s'", key.c_str());
-      return false;
+      return Reject(outError, "unknown shot key '%s'", key.c_str());
     }
 
-    bool ParseShot(const std::string& text, FrameCaptureShot& shot)
+    bool ParseShot(const std::string& text, FrameCaptureShot& shot, std::string& outError)
     {
       shot.requestedBy = text;
 
@@ -346,12 +336,9 @@ namespace YAEngine
       {
         size_t equals = pair.find('=');
         if (equals == std::string::npos)
-        {
-          YA_LOG_ERROR("Render", "Capture: shot entry '%s' is not key=value", pair.c_str());
-          return false;
-        }
+          return Reject(outError, "shot entry '%s' is not key=value", pair.c_str());
 
-        if (!ParseShotKey(pair.substr(0, equals), pair.substr(equals + 1), shot))
+        if (!ParseShotKey(pair.substr(0, equals), pair.substr(equals + 1), shot, outError))
           return false;
       }
 
@@ -451,6 +438,19 @@ namespace YAEngine
     return -1;
   }
 
+  bool ParseFrameCaptureShot(const std::string& text, FrameCaptureShot& outShot, std::string& outError)
+  {
+    FrameCaptureShot shot;
+    if (!ParseShot(text, shot, outError))
+      return false;
+
+    if (shot.targets.empty() && shot.afterPass.empty())
+      shot.targets = GetDefaultShotTargets();
+
+    outShot = std::move(shot);
+    return true;
+  }
+
   bool ParseFrameCaptureSpec(int argc, char** argv, FrameCaptureSpec& outSpec)
   {
     std::string commandLine;
@@ -485,8 +485,12 @@ namespace YAEngine
           return false;
 
         FrameCaptureShot shot;
-        if (!ParseShot(argv[++i], shot))
+        std::string error;
+        if (!ParseShot(argv[++i], shot, error))
+        {
+          YA_LOG_ERROR("Render", "Capture: %s", error.c_str());
           return false;
+        }
         outSpec.shots.push_back(std::move(shot));
       }
       else if (arg == "--capture-exit")
@@ -542,8 +546,8 @@ namespace YAEngine
         std::snprintf(generated, sizeof(generated), "shot%03zu", i);
         shot.name = generated;
       }
-      if (shot.targets.empty())
-        shot.targets = { "final", "resolved" };
+      if (shot.targets.empty() && shot.afterPass.empty())
+        shot.targets = GetDefaultShotTargets();
     }
 
     return true;

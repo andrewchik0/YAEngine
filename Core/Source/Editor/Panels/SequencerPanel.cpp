@@ -2,6 +2,7 @@
 
 #include <imgui.h>
 
+#include "Editor/EditorCommands.h"
 #include "Editor/EditorContext.h"
 #include "Editor/Utils/EditorIcons.h"
 #include "Scene/CameraTrackPlayer.h"
@@ -287,19 +288,8 @@ namespace YAEngine
       ImGui::BeginDisabled(player == nullptr || track.keys.empty());
       if (ImGui::Button(ICON_FA_PLAY " Play"))
       {
-        // Resuming exactly at the end would stop again on the next tick
-        bool resumable = active && player->GetElapsed() < double(duration) - 1e-4;
-        if (resumable)
-        {
-          player->Resume();
-        }
-        else
-        {
-          if (active)
-            player->Stop(scene);
-          player->Start(scene, m_Track);
+        if (!EditorCommands::PlayCameraTrack(*player, scene, m_Track))
           m_Playhead = 0.0f;
-        }
       }
       if (ImGui::IsItemHovered())
         ImGui::SetTooltip("Play from the start; Pause + scrub + Play to preview a segment");

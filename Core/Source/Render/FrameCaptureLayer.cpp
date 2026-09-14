@@ -8,24 +8,6 @@
 
 namespace YAEngine
 {
-  namespace
-  {
-    // The path tracer's sample counter can legitimately sit still for a while, but a wait
-    // that never advances would hang an unattended run. Give up, capture, and say so.
-    constexpr int ACCUMULATION_STALL_FRAMES = 300;
-    // The extent has to hold for two consecutive frames before a warmup means anything.
-    constexpr int EXTENT_STABLE_FRAMES = 2;
-
-    glm::quat MakeCameraRotation(float yawRadians, float pitchRadians)
-    {
-      // Same composition order as EditorCameraLayer, so a yaw the editor wrote and a yaw a
-      // shot asks for point the same way.
-      glm::quat pitch = glm::angleAxis(pitchRadians, glm::vec3(1.0f, 0.0f, 0.0f));
-      glm::quat yaw = glm::angleAxis(yawRadians, glm::vec3(0.0f, 1.0f, 0.0f));
-      return glm::normalize(yaw * pitch);
-    }
-  }
-
   void FrameCaptureLayer::OnAttach()
   {
     m_Spec = &m_Registry->Get<FrameCaptureSpec>();
@@ -38,7 +20,8 @@ namespace YAEngine
       return;
 
     TruncateOutputDirectory();
-    SnapshotSettings();
+    m_Snapshot = SnapshotFrameCaptureSettings(GetScene(), GetRender());
+    m_SessionResult->running = true;
 
     if (m_Spec->pinnedWidth > 0)
     {
@@ -81,112 +64,6 @@ namespace YAEngine
     }
   }
 
-  void FrameCaptureLayer::SnapshotSettings()
-  {
-    auto& render = GetRender();
-    m_Snapshot.renderPath = render.GetRenderPath();
-    m_Snapshot.antialiasing = render.GetAntialiasingMode();
-    m_Snapshot.debugView = render.GetDebugView();
-    m_Snapshot.pathTraceBounces = render.GetPathTraceMaxBounces();
-    m_Snapshot.pathTraceClamp = render.GetPathTraceFireflyClamp();
-    m_Snapshot.pathTraceDevResolve = render.IsPathTraceDevResolveEnabled();
-    m_Snapshot.exposure = render.GetExposure();
-    m_Snapshot.autoExposure = render.GetAutoExposureEnabled();
-    m_Snapshot.tonemapMode = render.GetTonemapMode();
-    m_Snapshot.bloom = render.GetBloomEnabled();
-#ifdef YA_EDITOR
-    m_Snapshot.viewportWidth = render.GetViewportWidth();
-    m_Snapshot.viewportHeight = render.GetViewportHeight();
-    m_Snapshot.gizmos = render.GetGizmosEnabled();
-    // The gizmo pass draws into sceneColor, so 'final' would carry light and probe icons
-    // over the scene and an agent could not tell one from geometry.
-    render.GetGizmosEnabled() = false;
-#endif
-
-    Entity camera = GetScene().GetActiveCamera();
-    if (camera != entt::null && GetScene().HasComponent<LocalTransform>(camera))
-    {
-      const auto& transform = GetScene().GetTransform(camera);
-      m_Snapshot.cameraPosition = transform.position;
-      m_Snapshot.cameraRotation = transform.rotation;
-    }
-  }
-
-  void FrameCaptureLayer::RestoreSettings()
-  {
-    auto& render = GetRender();
-    render.GetRenderPath() = m_Snapshot.renderPath;
-    render.GetAntialiasingMode() = m_Snapshot.antialiasing;
-    render.SetDebugView(m_Snapshot.debugView);
-    render.GetPathTraceMaxBounces() = m_Snapshot.pathTraceBounces;
-    render.GetPathTraceFireflyClamp() = m_Snapshot.pathTraceClamp;
-    render.SetPathTraceDevResolve(m_Snapshot.pathTraceDevResolve);
-    render.GetExposure() = m_Snapshot.exposure;
-    render.GetAutoExposureEnabled() = m_Snapshot.autoExposure;
-    render.GetTonemapMode() = m_Snapshot.tonemapMode;
-    render.GetBloomEnabled() = m_Snapshot.bloom;
-#ifdef YA_EDITOR
-    render.GetGizmosEnabled() = m_Snapshot.gizmos;
-    if (m_Spec->pinnedWidth > 0 && m_Snapshot.viewportWidth > 0)
-      render.RequestViewportResize(m_Snapshot.viewportWidth, m_Snapshot.viewportHeight);
-#endif
-
-    Entity camera = GetScene().GetActiveCamera();
-    if (camera != entt::null && GetScene().HasComponent<LocalTransform>(camera))
-    {
-      auto& transform = GetScene().GetTransform(camera);
-      transform.position = m_Snapshot.cameraPosition;
-      transform.rotation = m_Snapshot.cameraRotation;
-    }
-  }
-
-  void FrameCaptureLayer::ApplyShot(const FrameCaptureShot& shot)
-  {
-    auto& render = GetRender();
-
-    if (shot.renderPath)          render.GetRenderPath() = *shot.renderPath;
-    if (shot.antialiasing)        render.GetAntialiasingMode() = *shot.antialiasing;
-    if (shot.debugView)           render.SetDebugView(*shot.debugView);
-    if (shot.pathTraceBounces)    render.GetPathTraceMaxBounces() = *shot.pathTraceBounces;
-    if (shot.pathTraceClamp)      render.GetPathTraceFireflyClamp() = *shot.pathTraceClamp;
-    if (shot.pathTraceDevResolve) render.SetPathTraceDevResolve(*shot.pathTraceDevResolve);
-    if (shot.exposure)            render.GetExposure() = *shot.exposure;
-    if (shot.autoExposure)        render.GetAutoExposureEnabled() = *shot.autoExposure;
-    if (shot.tonemapMode)         render.GetTonemapMode() = *shot.tonemapMode;
-    if (shot.bloom)               render.GetBloomEnabled() = *shot.bloom;
-
-    ApplyShotCamera(shot);
-  }
-
-  void FrameCaptureLayer::ApplyShotCamera(const FrameCaptureShot& shot)
-  {
-    Entity camera = GetScene().GetActiveCamera();
-    if (camera == entt::null || !GetScene().HasComponent<LocalTransform>(camera))
-      return;
-
-    auto& transform = GetScene().GetTransform(camera);
-    if (shot.cameraPosition)
-      transform.position = *shot.cameraPosition;
-
-    if (shot.lookAt)
-    {
-      glm::vec3 forward = *shot.lookAt - transform.position;
-      if (glm::length(forward) > 1e-6f)
-      {
-        forward = glm::normalize(forward);
-        float pitch = std::asin(glm::clamp(forward.y, -1.0f, 1.0f));
-        float yaw = std::atan2(-forward.x, -forward.z);
-        transform.rotation = MakeCameraRotation(yaw, pitch);
-      }
-    }
-    else if (shot.yawDegrees || shot.pitchDegrees)
-    {
-      float yaw = glm::radians(shot.yawDegrees.value_or(0.0f));
-      float pitch = glm::radians(shot.pitchDegrees.value_or(0.0f));
-      transform.rotation = MakeCameraRotation(yaw, pitch);
-    }
-  }
-
   void FrameCaptureLayer::ApplyPinnedResolution()
   {
 #ifdef YA_EDITOR
@@ -216,56 +93,13 @@ namespace YAEngine
     return m_Spec->outputDir + "/" + name;
   }
 
-  void FrameCaptureLayer::RequestShotCapture()
-  {
-    const auto& shot = m_Spec->shots[m_ShotIndex];
-    GetRender().RequestCapture(FrameCaptureRequest {
-      .directory = GetShotDirectory(m_ShotIndex),
-      .targets = shot.targets,
-      .shotName = shot.name,
-      .requestedBy = shot.requestedBy,
-      .scenePath = GetScene().GetScenePath(),
-      .shotIndex = m_ShotIndex,
-      .frameInShot = m_FrameInShot,
-      .frameCount = shot.frames,
-      .warmupFrames = shot.warmupFrames,
-      .accumSamples = shot.accumSamples.value_or(0)
-    });
-  }
-
-  void FrameCaptureLayer::BeginShot()
-  {
-    const auto& shot = m_Spec->shots[m_ShotIndex];
-    ApplyShot(shot);
-
-    m_FrameInShot = 0;
-    m_ShotStatus = "ok";
-    m_WarmupLeft = shot.warmupFrames;
-    m_StableFrames = 0;
-    m_AccumWaitFrames = 0;
-    m_LastSampleCount = -1;
-    m_LastRenderExtent = {};
-    m_LastOutputExtent = {};
-
-    // The sample counter has to start from this shot's settings, or an accum wait inherited
-    // from the previous shot would pass on the first frame.
-    if (shot.accumSamples)
-      GetRender().ResetPathTraceAccumulation();
-
-    YA_LOG_INFO("Render", "Capture: shot %03d '%s' begins (%s)",
-      m_ShotIndex, shot.name.c_str(),
-      shot.requestedBy.empty() ? "current settings" : shot.requestedBy.c_str());
-
-    m_Stage = Stage::WaitExtent;
-  }
-
-  void FrameCaptureLayer::FinishShot()
+  void FrameCaptureLayer::OnShotFinished(const FrameCaptureShotOutcome& outcome)
   {
     m_SessionShots.push_back(FrameCaptureSessionShot {
       .index = m_ShotIndex,
       .name = m_Spec->shots[m_ShotIndex].name,
-      .dir = std::filesystem::path(GetShotDirectory(m_ShotIndex)).filename().string(),
-      .status = m_ShotStatus
+      .dir = std::filesystem::path(outcome.directory).filename().string(),
+      .status = outcome.status
     });
 
     // Rewritten after every shot, so a run that dies half way still leaves a readable
@@ -275,8 +109,6 @@ namespace YAEngine
     m_ShotIndex++;
     if (m_ShotIndex >= int(m_Spec->shots.size()))
       FinishSession();
-    else
-      m_Stage = Stage::ApplySettings;
   }
 
   std::string FrameCaptureLayer::GetSessionStatus() const
@@ -303,7 +135,8 @@ namespace YAEngine
     else if (status == "partial")
       m_SessionResult->exitCode = 2;
 
-    RestoreSettings();
+    RestoreFrameCaptureSettings(m_Snapshot, GetScene(), GetRender(), m_Spec->pinnedWidth > 0);
+    m_SessionResult->running = false;
 
     YA_LOG_INFO("Render", "Capture: session %s, %zu shot(s) in '%s'",
       status.c_str(), m_SessionShots.size(), m_Spec->outputDir.c_str());
@@ -332,7 +165,7 @@ namespace YAEngine
     if (m_Stage == Stage::ListTargets)
     {
       render.LogCaptureTargets();
-      m_Stage = m_Spec->armed ? Stage::ApplySettings : Stage::Finished;
+      m_Stage = m_Spec->armed ? Stage::Shots : Stage::Finished;
       if (m_Stage == Stage::Finished)
         GetWindow().Close();
       return;
@@ -344,100 +177,13 @@ namespace YAEngine
     if (m_Spec->pinnedWidth > 0)
       ApplyPinnedResolution();
 
-    const auto& shot = m_Spec->shots[m_ShotIndex];
-
-    // Re-applied every frame while the shot is live, so nothing - editor camera input, a
-    // running system, a camera track - can drift the pose between apply and capture.
-    if (m_Stage != Stage::ApplySettings)
-      ApplyShotCamera(shot);
-
-    switch (m_Stage)
+    // The next shot starts on the frame after the previous one finished, as each shot always has.
+    if (!m_Runner.IsRunning())
     {
-    case Stage::ApplySettings:
-      BeginShot();
-      break;
-
-    case Stage::WaitExtent:
-    {
-      VkExtent2D renderExtent = render.GetRenderExtent();
-      VkExtent2D outputExtent = render.GetOutputExtent();
-      bool unchanged = renderExtent.width == m_LastRenderExtent.width
-        && renderExtent.height == m_LastRenderExtent.height
-        && outputExtent.width == m_LastOutputExtent.width
-        && outputExtent.height == m_LastOutputExtent.height;
-
-      m_StableFrames = unchanged ? m_StableFrames + 1 : 0;
-      m_LastRenderExtent = renderExtent;
-      m_LastOutputExtent = outputExtent;
-
-      if (m_StableFrames >= EXTENT_STABLE_FRAMES)
-        m_Stage = Stage::Warmup;
-      break;
+      m_Runner.Start(m_Spec->shots[m_ShotIndex], m_ShotIndex, GetShotDirectory(m_ShotIndex),
+        [this](const FrameCaptureShotOutcome& outcome) { OnShotFinished(outcome); });
     }
 
-    case Stage::Warmup:
-      if (m_WarmupLeft > 0)
-      {
-        m_WarmupLeft--;
-        break;
-      }
-      m_Stage = shot.accumSamples ? Stage::WaitAccumulation : Stage::WaitCapture;
-      if (m_Stage == Stage::WaitCapture)
-        RequestShotCapture();
-      break;
-
-    case Stage::WaitAccumulation:
-    {
-      int samples = render.GetPathTraceSampleCount();
-      bool rising = samples > m_LastSampleCount;
-      m_LastSampleCount = samples;
-      m_AccumWaitFrames = rising ? 0 : m_AccumWaitFrames + 1;
-
-      bool reached = samples >= *shot.accumSamples;
-      bool stalled = m_AccumWaitFrames >= ACCUMULATION_STALL_FRAMES;
-      if (stalled && !reached)
-        YA_LOG_WARN("Render", "Capture: accumulation stalled at %d of %d samples, capturing anyway",
-          samples, *shot.accumSamples);
-
-      if (!reached && !stalled)
-        break;
-
-      RequestShotCapture();
-      m_Stage = Stage::WaitCapture;
-      break;
-    }
-
-    case Stage::WaitCapture:
-    {
-      FrameCaptureResult result;
-      if (!render.ConsumeCaptureResult(result))
-        break;
-
-      if (result.failed)
-      {
-        m_ShotStatus = "failed";
-        FinishShot();
-        break;
-      }
-      if (!result.complete && m_ShotStatus == "ok")
-        m_ShotStatus = "partial";
-
-      m_FrameInShot++;
-      if (m_FrameInShot >= shot.frames)
-      {
-        FinishShot();
-        break;
-      }
-
-      // Consecutive frames of a multi-frame shot need no second warmup: the point is the
-      // frame-to-frame difference the temporal analysis measures.
-      RequestShotCapture();
-      break;
-    }
-
-    case Stage::ListTargets:
-    case Stage::Finished:
-      break;
-    }
+    m_Runner.Tick(GetScene(), render);
   }
 }

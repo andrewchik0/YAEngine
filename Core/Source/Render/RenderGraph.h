@@ -12,6 +12,7 @@ namespace YAEngine
 
   using RGHandle = uint32_t;
   static constexpr RGHandle RG_INVALID_HANDLE = UINT32_MAX;
+  static constexpr uint32_t RG_INVALID_PASS = UINT32_MAX;
 
   // Which of the graph's two extents a resource or pass is sized against. Everything the
   // scene is rasterized and shaded into is Render; everything downstream of the upscaler
@@ -43,6 +44,7 @@ namespace YAEngine
   };
 
   using RGCallback = std::function<void(const RGExecuteContext&)>;
+  using RGAfterPassCallback = std::function<void(VkCommandBuffer cmd)>;
 
   struct RGPassInfo
   {
@@ -110,6 +112,8 @@ namespace YAEngine
     VkRenderPass GetPassRenderPass(uint32_t pass) const;
     VkExtent2D GetExtent() const { return m_Extent; }
     VkExtent2D GetOutputExtent() const { return m_OutputExtent; }
+    // The extent a resource is allocated at: its resolution's extent times its width and height scale.
+    VkExtent2D GetResourceExtent(RGHandle handle) const { return ScaledExtent(m_Resources[handle].desc); }
     void SetResourceLayout(RGHandle handle, VkImageLayout layout);
 
     VkImage GetResourceImage(RGHandle handle);
@@ -125,6 +129,23 @@ namespace YAEngine
     uint32_t GetResourceCount() const { return static_cast<uint32_t>(m_Resources.size()); }
     // False for an imported image, which the graph neither allocates nor resizes.
     bool IsResourceManaged(RGHandle handle) const { return m_Resources[handle].managed; }
+
+    // Pass enumeration for frame capture. Pass indices are AddPass order; the execution order
+    // lists them the way Execute runs them.
+    const RGPassInfo& GetPassInfo(uint32_t pass) const { return m_Passes[pass].info; }
+    const std::vector<uint32_t>& GetExecutionOrder() const { return m_ExecutionOrder; }
+    // What Execute would decide for the pass in the current state.
+    bool IsPassEnabled(uint32_t pass) const;
+    // Matches the primary name or the alt name; RG_INVALID_PASS when neither does.
+    uint32_t FindPass(std::string_view name) const;
+    // The layout the barrier tracking holds, which is what the next pass transitions from.
+    VkImageLayout GetResourceLayout(RGHandle handle) const { return m_CurrentLayouts[handle]; }
+
+    // Execute invokes the callback right after the armed pass has finished recording, outside
+    // any render pass instance. The callback has to leave every image in the layout
+    // GetResourceLayout reports. Disarmed, the cost is one index comparison per pass.
+    void ArmAfterPass(uint32_t pass, RGAfterPassCallback callback);
+    void DisarmAfterPass();
 
   private:
 
@@ -171,6 +192,9 @@ namespace YAEngine
     // on RGPassInfo::shaderStage - a later reader has to wait on the stage that actually
     // produced the image, not on the compute stage the barrier table assumes.
     std::vector<VkPipelineStageFlags> m_ResourceWriteStages;
+
+    uint32_t m_AfterPass = RG_INVALID_PASS;
+    RGAfterPassCallback m_AfterPassCallback;
 
     bool m_Compiled = false;
 

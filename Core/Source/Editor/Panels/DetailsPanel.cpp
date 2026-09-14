@@ -862,28 +862,6 @@ namespace YAEngine
     return false;
   }
 
-  static void SetCombinedTexturesRecursive(Scene& scene, AssetManager& assets, Entity entity, bool value)
-  {
-    if (scene.HasComponent<MaterialComponent>(entity))
-    {
-      auto& mc = scene.GetComponent<MaterialComponent>(entity);
-      if (assets.Materials().Has(mc.asset))
-      {
-        auto& mat = assets.Materials().Get(mc.asset);
-        mat.combinedTextures = value;
-        mat.MarkChanged();
-      }
-    }
-
-    auto& hc = scene.GetComponent<HierarchyComponent>(entity);
-    Entity child = hc.firstChild;
-    while (child != entt::null)
-    {
-      SetCombinedTexturesRecursive(scene, assets, child, value);
-      child = scene.GetComponent<HierarchyComponent>(child).nextSibling;
-    }
-  }
-
   static void DrawModel(EditorContext& context, ModelSourceComponent& model)
   {
     if (ImGui::CollapsingHeader(ICON_FA_FILE_IMPORT " Model", ImGuiTreeNodeFlags_DefaultOpen))
@@ -893,7 +871,7 @@ namespace YAEngine
 
       if (ImGui::Checkbox("Combined Textures", &model.combinedTextures))
       {
-        SetCombinedTexturesRecursive(*context.scene, *context.assetManager,
+        ModelOverrides::SetCombinedTextures(*context.scene, *context.assetManager,
           context.selectedEntity, model.combinedTextures);
       }
 

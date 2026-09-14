@@ -11,6 +11,8 @@ namespace YAEngine
   class EditorTextureCache;
   class ComponentRegistry;
   class CameraTrackPlayer;
+  struct FrameCaptureSessionResult;
+  struct BridgeCaptureStatus;
 
   struct EditorContext
   {
@@ -24,6 +26,10 @@ namespace YAEngine
     EditorTextureCache* textureCache = nullptr;
     // The engine's player, so editor playback is the same code path as F9 in a game build
     CameraTrackPlayer* cameraTrackPlayer = nullptr;
+    // Capture work that owns Render's single capture request while it runs: a --capture session
+    // and an agent bridge shot
+    const FrameCaptureSessionResult* captureSession = nullptr;
+    const BridgeCaptureStatus* bridgeCapture = nullptr;
     bool selectionChangedFlag = false;
     bool viewportHovered = false;
     uint32_t viewportWidth = 0;

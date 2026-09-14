@@ -62,17 +62,17 @@ namespace YAEngine
     return false;
   }
 
-  void ShaderHotReload::RecompileAll()
+  uint32_t ShaderHotReload::RecompileAll()
   {
     if (m_PendingBatch)
-      return;
+      return 0;
 
     auto tasks = m_DependencyGraph.GetAllCompileTasks();
     if (tasks.empty())
-      return;
+      return 0;
 
-    YA_LOG_INFO("ShaderHotReload", "Force recompiling all %u shader(s)...",
-      static_cast<uint32_t>(tasks.size()));
+    uint32_t taskCount = static_cast<uint32_t>(tasks.size());
+    YA_LOG_INFO("ShaderHotReload", "Force recompiling all %u shader(s)...", taskCount);
 
     PendingBatch batch;
     for (auto& task : tasks)
@@ -88,6 +88,7 @@ namespace YAEngine
     }
 
     m_PendingBatch = std::move(batch);
+    return taskCount;
   }
 
   bool ShaderHotReload::ProcessCompilationResults()
@@ -100,6 +101,7 @@ namespace YAEngine
 
     bool allSuccess = true;
     std::vector<std::string> successOutputs;
+    m_LastBatchFailureCount = 0;
 
     for (auto& entry : m_PendingBatch->entries)
     {
@@ -111,6 +113,7 @@ namespace YAEngine
       else
       {
         allSuccess = false;
+        m_LastBatchFailureCount++;
         YA_LOG_ERROR("ShaderHotReload", "Failed to compile '%s': %s",
           entry.outputName.c_str(), result.errorMessage.c_str());
       }

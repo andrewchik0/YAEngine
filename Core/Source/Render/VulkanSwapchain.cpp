@@ -35,7 +35,7 @@ namespace YAEngine
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    createInfo.imageUsage = ChooseImageUsage(swapChainSupport.capabilities);
 
     QueueFamilyIndices indices = VulkanPhysicalDevice::FindQueueFamilies(m_PhysicalDevice, m_Surface);
     uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
@@ -70,8 +70,23 @@ namespace YAEngine
 
     m_SwapChainImageFormat = surfaceFormat.format;
     m_SwapChainExtent = extent;
+#ifdef YA_EDITOR
+    b_TransferSource = (createInfo.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+#endif
 
     CreateImageViews(m_Device);
+  }
+
+  VkImageUsageFlags VulkanSwapChain::ChooseImageUsage(const VkSurfaceCapabilitiesKHR& capabilities) const
+  {
+    VkImageUsageFlags usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+#ifdef YA_EDITOR
+    if ((capabilities.supportedUsageFlags & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0)
+      usage |= VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+#else
+    (void)capabilities;
+#endif
+    return usage;
   }
 
   VkSurfaceFormatKHR VulkanSwapChain::ChooseSwapSurfaceFormat(const std::vector<VkSurfaceFormatKHR>& availableFormats)
@@ -253,11 +268,21 @@ namespace YAEngine
     vkDestroySwapchainKHR(m_Device, m_SwapChain, nullptr);
   }
 
-  void VulkanSwapChain::Recreate(VkRenderPass renderPass)
+  bool VulkanSwapChain::Recreate(VkRenderPass renderPass)
   {
     m_RenderPass = renderPass;
 
     vkDeviceWaitIdle(m_Device);
+
+    SwapChainSupportDetails swapChainSupport = VulkanPhysicalDevice::QuerySwapChainSupport(m_PhysicalDevice, m_Surface);
+    VkExtent2D extent = ChooseSwapExtent(swapChainSupport.capabilities, m_Window);
+    // Neither a swapchain nor the depth image can have a zero extent. Checked before anything is
+    // destroyed, so the old swapchain stays whole until the restored window resizes it.
+    if (extent.width == 0 || extent.height == 0)
+      return false;
+
+    VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
+    VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.presentModes);
 
     VkSwapchainKHR oldSwapchain = m_SwapChain;
     m_SwapChain = VK_NULL_HANDLE;
@@ -269,11 +294,6 @@ namespace YAEngine
       vkDestroyFramebuffer(m_Device, framebuffer, nullptr);
     for (auto imageView : m_SwapChainImageViews)
       vkDestroyImageView(m_Device, imageView, nullptr);
-
-    SwapChainSupportDetails swapChainSupport = VulkanPhysicalDevice::QuerySwapChainSupport(m_PhysicalDevice, m_Surface);
-    VkSurfaceFormatKHR surfaceFormat = ChooseSwapSurfaceFormat(swapChainSupport.formats);
-    VkPresentModeKHR presentMode = ChooseSwapPresentMode(swapChainSupport.presentModes);
-    VkExtent2D extent = ChooseSwapExtent(swapChainSupport.capabilities, m_Window);
 
     uint32_t imageCount = swapChainSupport.capabilities.minImageCount + 1;
     if (swapChainSupport.capabilities.maxImageCount > 0 && imageCount > swapChainSupport.capabilities.maxImageCount)
@@ -287,7 +307,7 @@ namespace YAEngine
     createInfo.imageColorSpace = surfaceFormat.colorSpace;
     createInfo.imageExtent = extent;
     createInfo.imageArrayLayers = 1;
-    createInfo.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
+    createInfo.imageUsage = ChooseImageUsage(swapChainSupport.capabilities);
 
     QueueFamilyIndices indices = VulkanPhysicalDevice::FindQueueFamilies(m_PhysicalDevice, m_Surface);
     uint32_t queueFamilyIndices[] = {indices.graphicsFamily.value(), indices.presentFamily.value()};
@@ -322,8 +342,12 @@ namespace YAEngine
 
     m_SwapChainImageFormat = surfaceFormat.format;
     m_SwapChainExtent = extent;
+#ifdef YA_EDITOR
+    b_TransferSource = (createInfo.imageUsage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0;
+#endif
 
     CreateImageViews(m_Device);
     CreateFrameBuffers(m_RenderPass);
+    return true;
   }
 }

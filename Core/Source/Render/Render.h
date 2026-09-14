@@ -61,6 +61,24 @@ namespace YAEngine
     bool hit = false;      // false means nothing was rasterized into the clicked pixel
     uint32_t entityId = 0; // raw entt handle, only meaningful when hit is set
   };
+
+  enum class SwapchainReadbackState : uint8_t
+  {
+    Idle,
+    Requested, // the next Draw copies the image it presents
+    Recorded,  // the copy sits in a command buffer that is still in flight
+    Ready      // ConsumeSwapchainReadback hands out the pixels or the error
+  };
+
+  // One presented editor frame, 8-bit RGBA in the swapchain's encoding.
+  struct SwapchainReadback
+  {
+    std::vector<uint8_t> rgba;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    // Set instead of the pixels when the frame could not be copied
+    std::string error;
+  };
 #endif
 
   class Render
@@ -296,12 +314,21 @@ namespace YAEngine
     // FrameCapture. Draw services a request at the end of the frame it is already
     // recording, which is the only point where "the frame that just finished" is
     // unambiguous - the TAA and global frame indices have not advanced yet.
-    void RequestCapture(const FrameCaptureRequest& request);
+    // Refused, with a warning, while an earlier request has not been serviced yet. Drops a result
+    // nobody consumed, so it cannot be mistaken for this request's.
+    bool RequestCapture(const FrameCaptureRequest& request);
+    bool IsCaptureRequestPending() const { return b_CaptureRequested; }
     // True once per serviced request; the result is dropped after it is taken.
     bool ConsumeCaptureResult(FrameCaptureResult& outResult);
+    // Whether after=<name> names a pass of the graph, by name or alt name. The pass may still be
+    // disabled by the time the capture frame comes.
+    bool HasCapturePass(std::string_view name) const { return m_Graph.FindPass(name) != RG_INVALID_PASS; }
     void WriteCaptureSession(const FrameCaptureSessionInfo& info);
     // One log line per capturable target, for --capture-list-targets.
     void LogCaptureTargets();
+    // Every graph resource with its capture format, and every alias with what it names in
+    // the current state. The data behind LogCaptureTargets and the agent bridge listing.
+    FrameCaptureTargetList GetCaptureTargets();
     uint64_t GetGlobalFrameIndex() const { return m_GlobalFrameIndex; }
 
     // Rebuilds the volume atlas from freshly loaded assets and rewrites the IBL
@@ -636,6 +663,17 @@ namespace YAEngine
     }
 
     void CaptureFrame();
+    // A single-target alias to its handle, or the graph resource of that name.
+    RGHandle ResolveCaptureAlias(std::string_view name) const;
+    // Capture after a named pass. Draw arms the graph for the Execute of the frame that
+    // services the request; the hook copies the pass outputs into staging buffers inside that
+    // frame's own command buffer, and CaptureFrame reads them once the frame has finished.
+    // Returns false when the request names no pass, or one the graph does not have.
+    bool ArmCaptureAfterPass();
+    void RecordCaptureAfterPass(VkCommandBuffer cmd);
+    // Waits for the frame the copies were recorded into before freeing them, unless the caller
+    // already waited for the device.
+    void ReleaseCaptureStagedOutputs(bool deviceIdle);
 
     RenderBackend m_Backend;
     RenderGraph m_Graph;
@@ -648,6 +686,21 @@ namespace YAEngine
     FrameCaptureResult m_CaptureResult;
     bool b_CaptureRequested = false;
     bool b_CaptureResultReady = false;
+
+    struct CaptureStagedOutput
+    {
+      RGHandle handle = RG_INVALID_HANDLE;
+      // As recorded: a failed present resizes the graph before CaptureFrame reads the copy.
+      VkExtent2D extent {};
+      VulkanBuffer staging;
+    };
+    uint32_t m_CaptureAfterPassIndex = RG_INVALID_PASS;
+    // Set by the hook, which is what tells a pass skipped this frame apart from one that ran.
+    bool b_CaptureAfterPassRecorded = false;
+    // The graph extents the copies were recorded at, for the manifest of the same reason.
+    VkExtent2D m_CaptureAfterPassRenderExtent {};
+    VkExtent2D m_CaptureAfterPassOutputExtent {};
+    std::vector<CaptureStagedOutput> m_CaptureStagedOutputs;
 
     // Render graph resource handles - G-buffer
     RGHandle m_GBuffer0 {};       // R8G8B8A8_UNORM: albedo.rgb + metallic
@@ -762,6 +815,18 @@ namespace YAEngine
     void DrawPickIds(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame);
     void CopyPickId(VkCommandBuffer cmd);
     void LatchPickResult();
+
+    // Swapchain readback. Copied inside the presenting frame's own command buffer: once an
+    // image is presented its contents belong to the presentation engine.
+    VulkanBuffer m_SwapchainReadbackBuffer;
+    VkExtent2D m_SwapchainReadbackExtent {};
+    VkFormat m_SwapchainReadbackFormat = VK_FORMAT_UNDEFINED;
+    uint32_t m_SwapchainReadbackSlot = 0;
+    SwapchainReadbackState m_SwapchainReadbackState = SwapchainReadbackState::Idle;
+    SwapchainReadback m_SwapchainReadback;
+    void RecordSwapchainReadback(VkCommandBuffer cmd, uint32_t imageIndex);
+    void LatchSwapchainReadback();
+    void DestroySwapchainReadback();
 
     // Backface mask pipelines for the irradiance volume node classification. Their
     // render pass belongs to BackfaceRatioSampler, which is built lazily when a bake
@@ -1127,6 +1192,14 @@ namespace YAEngine
     GizmoRenderer& GetGizmoRenderer() { return m_GizmoRenderer; }
     void SetSelectedEntityPosition(const glm::vec3& pos) { b_HasSelectedEntity = true; m_SelectedEntityPosition = pos; }
     void ClearSelectedEntity() { b_HasSelectedEntity = false; }
+    // The whole editor window as presented, for agent screenshots. The copy is recorded into
+    // the frame that presents the image and read once that frame's fence has been waited on.
+    bool IsSwapchainReadbackSupported() const { return m_Backend.GetSwapChain().SupportsTransferSource(); }
+    void RequestSwapchainReadback();
+    SwapchainReadbackState GetSwapchainReadbackState() const { return m_SwapchainReadbackState; }
+    // True once per request, with the pixels or an error; the state returns to Idle.
+    bool ConsumeSwapchainReadback(SwapchainReadback& outReadback);
+
     // Asks for the entity under a normalized [0,1] viewport position. The ID pass renders
     // during the next Draw and the answer lands a few frames later.
     void RequestPick(const glm::vec2& normalizedPos);

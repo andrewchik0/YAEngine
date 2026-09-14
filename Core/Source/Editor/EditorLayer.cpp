@@ -14,6 +14,7 @@
 #include "Editor/Panels/MaterialBrowserPanel.h"
 #include "Editor/Panels/MaterialInspectorPanel.h"
 #include "Editor/Panels/SequencerPanel.h"
+#include "Editor/Panels/AgentPanel.h"
 #include "Editor/EditorCameraLayer.h"
 #include "Editor/Utils/FileDialog.h"
 
@@ -36,6 +37,12 @@ namespace YAEngine
   {
     FileDialog::Init();
     EditorStyle::Apply();
+
+    m_Preferences.Load();
+    const EditorPreferenceOverrides& overrides = m_Registry->Get<EditorPreferenceOverrides>();
+    m_Bridge.Init(*m_Registry, overrides.mcpEnabled.value_or(m_Preferences.mcpEnabled));
+    RegisterBridgeActions();
+
     GetLayerManager().PushLayer<EditorCameraLayer>();
     m_Panels.push_back(std::make_unique<ViewportPanel>());
     m_Panels.push_back(std::make_unique<OutlinerPanel>());
@@ -45,6 +52,7 @@ namespace YAEngine
     m_Panels.push_back(std::make_unique<MaterialBrowserPanel>());
     m_Panels.push_back(std::make_unique<MaterialInspectorPanel>());
     m_Panels.push_back(std::make_unique<SequencerPanel>());
+    m_Panels.push_back(std::make_unique<AgentPanel>(m_Bridge, m_Preferences));
   }
 
   void EditorLayer::OnSceneReady()
@@ -55,6 +63,8 @@ namespace YAEngine
     m_Context.timer = &GetTimer();
     m_Context.componentRegistry = &m_Registry->Get<ComponentRegistry>();
     m_Context.cameraTrackPlayer = &m_Registry->Get<CameraTrackPlayer>();
+    m_Context.captureSession = &m_Registry->Get<FrameCaptureSessionResult>();
+    m_Context.bridgeCapture = &m_Registry->Get<BridgeCaptureStatus>();
 
     m_TextureCache.Init(m_Context.assetManager);
     m_Context.textureCache = &m_TextureCache;
@@ -64,6 +74,13 @@ namespace YAEngine
 
     for (auto& panel : m_Panels)
       panel->OnSceneReady(m_Context);
+
+    m_Bridge.OnSceneReady(m_CurrentScenePath);
+  }
+
+  void EditorLayer::LateUpdate(double deltaTime)
+  {
+    m_Bridge.LateUpdate();
   }
 
   static glm::vec3 AxisToDirection(GizmoAxis axis)
@@ -471,6 +488,29 @@ namespace YAEngine
         }
 
         ImGui::EndMenu();
+      }
+
+      size_t agentClients = m_Bridge.GetClientCount();
+      if (agentClients > 0)
+      {
+        char label[32];
+        snprintf(label, sizeof(label), "AI Agent (%zu)", agentClients);
+        const ImGuiStyle& style = ImGui::GetStyle();
+        float width = ImGui::CalcTextSize(label).x + style.ItemSpacing.x * 2.0f;
+        ImGui::SetCursorPosX(ImGui::GetWindowWidth() - width - style.WindowPadding.x);
+
+        ImGui::PushStyleColor(ImGuiCol_Text, AGENT_ACTIVE_COLOR);
+        bool clicked = ImGui::MenuItem(label);
+        ImGui::PopStyleColor();
+        if (clicked)
+        {
+          for (auto& panel : m_Panels)
+          {
+            if (std::strcmp(panel->GetName(), "AI Agent") == 0)
+              panel->SetVisible(true);
+          }
+          ImGui::SetWindowFocus("AI Agent");
+        }
       }
 
       ImGui::EndMainMenuBar();
@@ -1069,6 +1109,7 @@ namespace YAEngine
 
   void EditorLayer::OnDetach()
   {
+    m_Bridge.Shutdown();
     GetRender().WaitIdle();
     m_Panels.clear();
     m_TextureCache.Destroy();
@@ -1121,6 +1162,7 @@ namespace YAEngine
     m_LastViewportHeight = 0;
 
     m_CurrentScenePath.clear();
+    m_Bridge.SetScenePath(m_CurrentScenePath);
   }
 
   void EditorLayer::SyncEditorCameraState()
@@ -1142,10 +1184,7 @@ namespace YAEngine
       SaveSceneAs();
       return;
     }
-    EnsureBasePath(m_CurrentScenePath);
-    SyncEditorCameraState();
-    SceneSerializer::Save(m_CurrentScenePath, GetScene(), GetAssets(),
-      *m_Context.componentRegistry, GetRender());
+    SaveSceneTo(m_CurrentScenePath);
   }
 
   void EditorLayer::SaveSceneAs()
@@ -1153,11 +1192,20 @@ namespace YAEngine
     auto path = FileDialog::SaveFile(s_SceneFilters, 1, "scene.scene");
     if (path.empty())
       return;
-    m_CurrentScenePath = path;
-    EnsureBasePath(m_CurrentScenePath);
+    SaveSceneTo(path);
+  }
+
+  bool EditorLayer::SaveSceneTo(const std::string& path)
+  {
+    EnsureBasePath(path);
     SyncEditorCameraState();
-    SceneSerializer::Save(m_CurrentScenePath, GetScene(), GetAssets(),
-      *m_Context.componentRegistry, GetRender());
+    if (!SceneSerializer::Save(path, GetScene(), GetAssets(), *m_Context.componentRegistry, GetRender()))
+      return false;
+
+    // Only now: after a failed write the next plain Save still has to target the path that works
+    m_CurrentScenePath = path;
+    m_Bridge.SetScenePath(m_CurrentScenePath);
+    return true;
   }
 
   void EditorLayer::OpenScene()
@@ -1202,6 +1250,7 @@ namespace YAEngine
     m_LastViewportHeight = 0;
 
     m_CurrentScenePath = path;
+    m_Bridge.SetScenePath(m_CurrentScenePath);
   }
 
   void EditorLayer::BuildDefaultLayout(ImGuiID dockspaceId)
@@ -1236,6 +1285,7 @@ namespace YAEngine
     ImGui::DockBuilderDockWindow("Material Inspector", dockRightBottom);
     ImGui::DockBuilderDockWindow("Sequencer", dockBottom);
     ImGui::DockBuilderDockWindow("Performance", dockBottom);
+    ImGui::DockBuilderDockWindow("AI Agent", dockBottom);
     ImGui::DockBuilderDockWindow("Console", dockBottom);
     ImGui::DockBuilderDockWindow("Content Browser", dockBottom);
 

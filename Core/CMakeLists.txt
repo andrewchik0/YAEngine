@@ -100,9 +100,15 @@ if(YA_EDITOR)
     SHADER_SHARED_DIR="${CMAKE_CURRENT_SOURCE_DIR}/Shared"
     GLSLC_PATH="${GLSLC_EXECUTABLE}"
     SHADER_PERMUTATIONS_FILE="${SHADER_PERMUTATIONS_FILE}"
+    YA_REPO_ROOT="${CMAKE_SOURCE_DIR}"
   )
   target_link_libraries(Core PRIVATE nfd)
   target_link_libraries(Core PRIVATE implot)
+  target_link_libraries(Core PRIVATE nlohmann_json::nlohmann_json ws2_32)
+  # winsock2.h has to come before windows.h, and the precompiled header already includes a
+  # full windows.h (through vulkan.h) that drags in the conflicting winsock.h.
+  set_source_files_properties(Source/Editor/Bridge/BridgeSocket.cpp PROPERTIES
+    SKIP_PRECOMPILE_HEADERS ON)
 endif()
 
 # Match VS filters to folder tree

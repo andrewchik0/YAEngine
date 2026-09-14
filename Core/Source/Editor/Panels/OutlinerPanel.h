@@ -19,7 +19,6 @@ namespace YAEngine
     bool MatchesFilter(EditorContext& context, Entity entity);
     void BeginRename(EditorContext& context, Entity entity);
     void TakeRevealRequest(EditorContext& context);
-    Entity DuplicateModel(EditorContext& context, Entity entity);
 
     char m_FilterText[256] = {};
     Entity m_RenamingEntity = entt::null;

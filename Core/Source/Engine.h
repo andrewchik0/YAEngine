@@ -20,6 +20,10 @@
 #include "Utils/MainThreadDispatcher.h"
 #include "Utils/Log.h"
 
+#ifdef YA_EDITOR
+#include "Editor/EditorPreferences.h"
+#endif
+
 namespace YAEngine
 {
   struct EngineSpecs
@@ -31,6 +35,10 @@ namespace YAEngine
     // Disarmed unless argv (or the retired YA_CAPTURE_DIR) asked for a capture. Registered
     // in the service registry so FrameCaptureLayer can read it in OnAttach.
     FrameCaptureSpec captureSpec;
+#ifdef YA_EDITOR
+    // --mcp / --no-mcp. Registered the same way, for EditorLayer.
+    EditorPreferenceOverrides editorOverrides;
+#endif
   };
 
   class Engine
@@ -114,6 +122,9 @@ namespace YAEngine
 
     FrameCaptureSpec m_CaptureSpec;
     FrameCaptureSessionResult m_CaptureSessionResult;
+#ifdef YA_EDITOR
+    EditorPreferenceOverrides m_EditorOverrides;
+#endif
 
     static constexpr double FIXED_DT = 1.0 / 144.0;
     static constexpr int MAX_FIXED_STEPS = 5;

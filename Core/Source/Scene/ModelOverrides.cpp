@@ -677,5 +677,27 @@ namespace YAEngine::ModelOverrides
     model->pristineMaterials[slot].generation = material.generation;
   }
 
+  void SetCombinedTextures(Scene& scene, AssetManager& assets, Entity entity, bool value)
+  {
+    if (scene.HasComponent<MaterialComponent>(entity))
+    {
+      auto& mc = scene.GetComponent<MaterialComponent>(entity);
+      if (assets.Materials().Has(mc.asset))
+      {
+        auto& mat = assets.Materials().Get(mc.asset);
+        mat.combinedTextures = value;
+        mat.MarkChanged();
+      }
+    }
+
+    auto& hc = scene.GetComponent<HierarchyComponent>(entity);
+    Entity child = hc.firstChild;
+    while (child != entt::null)
+    {
+      SetCombinedTextures(scene, assets, child, value);
+      child = scene.GetComponent<HierarchyComponent>(child).nextSibling;
+    }
+  }
+
 #endif
 }

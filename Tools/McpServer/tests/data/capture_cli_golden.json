@@ -1,0 +1,177 @@
+{
+  "commit": "7a9dd96a29c82c24d3a9f1dcc983af147f6a69f7",
+  "cases": {
+    "summary-session": {
+      "returncode": 0,
+      "stdout": "session ok  2026-09-13T12:00:00Z  Test GPU\nscene Assets/Scenes/test.scene\nshot           path         aa             exposure view           targets (max/mean of first channel)\nraster         Raster       TAA               1.000 Off            final 1/0.498  resolved 20/10  mainDepth 1/0.5  gbuffer1 1/1\nbright         Raster       TAA               2.000 Off            final 1/0.498  resolved 40/20  mainDepth 1/0.5  gbuffer1 1/1\n    ! target 'pt_noisy' skipped: layout UNDEFINED\nmulti          Raster       TAA               1.000 Off            final 0.988/0.49  resolved 20/10  mainDepth 1/0.5  gbuffer1 1/1\n",
+      "stderr": ""
+    },
+    "summary-folders": {
+      "returncode": 0,
+      "stdout": "shot           path         aa             exposure view           targets (max/mean of first channel)\nfirst          Raster       TAA               1.000 Off            final 1/0.498  resolved 20/10  mainDepth 1/0.5  gbuffer1 1/1\nsecond         Raster       TAA               0.500 Normals        final 1/0.498  resolved 10/5  mainDepth 1/0.5  gbuffer1 1/1\n    ! target 'taa' skipped: not in the graph\n",
+      "stderr": ""
+    },
+    "stats-first-target": {
+      "returncode": 0,
+      "stdout": "final  R8G8B8A8_UNORM  64x36  ldr_display\n  pixels=2304  NaN=0  Inf=0\n  chan          min         p1        p50       mean        p99      p99.9        max\n  r               0          0      0.498     0.4982          1          1          1\n  g               0          0      0.498     0.4984          1          1          1\n  b           0.502      0.502      0.502      0.502      0.502      0.502      0.502\n  a               1          1          1          1          1          1          1\n  fraction over 1/10/100: 0.00000 0.00000 0.00000\n",
+      "stderr": ""
+    },
+    "stats-hdr": {
+      "returncode": 0,
+      "stdout": "resolved  R16G16B16A16_SFLOAT  64x36  linear_hdr\n  pixels=2304  NaN=1  Inf=1\n  chan          min         p1        p50       mean        p99      p99.9        max\n  r               0          0      10.16         10         20         20         20\n  g             0.5        0.5        0.5        0.5        0.5        0.5        0.5\n  b            0.25       0.25       0.25       0.25       0.25       0.25       0.25\n  a               1          1          1          1          1          1          1\n  fraction over 1/10/100: 0.93750 0.50000 0.00000\n",
+      "stderr": ""
+    },
+    "stats-rect": {
+      "returncode": 0,
+      "stdout": "resolved rect=10,5,4,2  R16G16B16A16_SFLOAT  64x36  linear_hdr\n  pixels=8  NaN=0  Inf=0\n  chan          min         p1        p50       mean        p99      p99.9        max\n  r           3.174      3.174       3.65      3.651      4.129      4.129      4.129\n  g             0.5        0.5        0.5        0.5        0.5        0.5        0.5\n  b            0.25       0.25       0.25       0.25       0.25       0.25       0.25\n  a               1          1          1          1          1          1          1\n  fraction over 1/10/100: 1.00000 0.00000 0.00000\n",
+      "stderr": ""
+    },
+    "stats-depth": {
+      "returncode": 0,
+      "stdout": "mainDepth  D32_SFLOAT  64x36  data\n  pixels=2304  NaN=0  Inf=0\n  reversed-Z: 0 is the far plane, 1 is the near plane\n  chan          min         p1        p50       mean        p99      p99.9        max\n  depth           0          0        0.5        0.5          1          1          1\n  fraction over 1/10/100: 0.00000 0.00000 0.00000\n",
+      "stderr": ""
+    },
+    "stats-packed": {
+      "returncode": 0,
+      "stdout": "gbuffer1  A2B10G10R10_UNORM_PACK32  64x36  data\n  pixels=2304  NaN=0  Inf=0\n  chan          min         p1        p50       mean        p99      p99.9        max\n  r               1          1          1          1          1          1          1\n  g          0.5005     0.5005     0.5005     0.5005     0.5005     0.5005     0.5005\n  b               0          0          0          0          0          0          0\n  a               1          1          1          1          1          1          1\n  fraction over 1/10/100: 0.00000 0.00000 0.00000\n",
+      "stderr": ""
+    },
+    "px-hdr": {
+      "returncode": 0,
+      "stdout": "resolved (1, 0) R16G16B16A16_SFLOAT\n  r      0.317382812\n  g      inf\n  b      0.25\n  a      1\n",
+      "stderr": ""
+    },
+    "px-ldr": {
+      "returncode": 0,
+      "stdout": "final (63, 35) R8G8B8A8_UNORM\n  r      1\n  g      1\n  b      0.501960814\n  a      1\n",
+      "stderr": ""
+    },
+    "rect-stats": {
+      "returncode": 0,
+      "stdout": "resolved rect=8,4,16,8  R16G16B16A16_SFLOAT  64x36  linear_hdr\n  pixels=128  NaN=0  Inf=0\n  chan          min         p1        p50       mean        p99      p99.9        max\n  r           2.539      2.539       4.92      4.921      7.301      7.301      7.301\n  g             0.5        0.5        0.5        0.5        0.5        0.5        0.5\n  b            0.25       0.25       0.25       0.25       0.25       0.25       0.25\n  a               1          1          1          1          1          1          1\n  fraction over 1/10/100: 1.00000 0.00000 0.00000\n",
+      "stderr": ""
+    },
+    "rect-dump": {
+      "returncode": 0,
+      "stdout": "mainDepth rect=0,0,2,2  D32_SFLOAT  64x36  data\n  pixels=4  NaN=0  Inf=0\n  reversed-Z: 0 is the far plane, 1 is the near plane\n  chan          min         p1        p50       mean        p99      p99.9        max\n  depth           0          0    0.01429    0.01429    0.02857    0.02857    0.02857\n  fraction over 1/10/100: 0.00000 0.00000 0.00000\n       depth\n  (0,0)          0\n  (1,0)          0\n  (0,1)    0.02857\n  (1,1)    0.02857\n",
+      "stderr": ""
+    },
+    "preview-default": {
+      "returncode": 0,
+      "stdout": "resolved -> <CAPTURE>\\session\\000_raster\\resolved.auto.preview.png  (auto, exposure 1)\n",
+      "stderr": "",
+      "png": {
+        "size": [
+          64,
+          36
+        ],
+        "mode": "RGB",
+        "sha256": "d1d04ba8ac01faac907f3faa10d0ac1e5a0ef039f6a6f4d66fd6419de0d93894"
+      }
+    },
+    "preview-log-out": {
+      "returncode": 0,
+      "stdout": "resolved -> <CAPTURE>/log.png  (log, exposure 2)\n",
+      "stderr": "",
+      "png": {
+        "size": [
+          64,
+          36
+        ],
+        "mode": "RGB",
+        "sha256": "fab64136b33397ee02fef57520b63c3345640a982883bd458f58e612e95a5f2f"
+      }
+    },
+    "preview-falsecolor": {
+      "returncode": 0,
+      "stdout": "resolved -> <CAPTURE>\\session\\000_raster\\resolved.falsecolor.preview.png  (falsecolor, exposure 1)\n",
+      "stderr": "",
+      "png": {
+        "size": [
+          64,
+          36
+        ],
+        "mode": "RGB",
+        "sha256": "2d9fdfba1d5971f03db818f06945b3b98302ff9cb284e272501b033ea3dd061f"
+      }
+    },
+    "preview-linear-ldr": {
+      "returncode": 0,
+      "stdout": "final -> <CAPTURE>\\session\\002_multi\\final.linear.preview.png  (linear, exposure 1)\n",
+      "stderr": "",
+      "png": {
+        "size": [
+          64,
+          36
+        ],
+        "mode": "RGB",
+        "sha256": "03b9c16f35a217730c89f7389be26fda878df0dff5bc4668426407edb64a2b0a"
+      }
+    },
+    "diff-default": {
+      "returncode": 0,
+      "stdout": "settings that differ (raster vs bright):\n  exposure               1.0  ->  2.0\nimage diff on 'final':\n  r      mean=+0  mean|d|=0  max|d|=0\n  g      mean=+0  mean|d|=0  max|d|=0\n  b      mean=+0  mean|d|=0  max|d|=0\n  a      mean=+0  mean|d|=0  max|d|=0\n  where the difference lives:\n                            \n                            \n                            \n                            \n                            \n                            \n                            \n                            \n                            \n                            \n                            \n                            \n",
+      "stderr": ""
+    },
+    "diff-hdr": {
+      "returncode": 0,
+      "stdout": "settings that differ (raster vs bright):\n  exposure               1.0  ->  2.0\nimage diff on 'resolved':\n  r      mean=+9.9999  mean|d|=9.9999  max|d|=20\n  g      mean=+0.49978  mean|d|=0.49978  max|d|=0.5\n  b      mean=+0  mean|d|=0  max|d|=0\n  a      mean=+0  mean|d|=0  max|d|=0\n  where the difference lives:\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n      ..:::--==+++**###%%@@@\n",
+      "stderr": ""
+    },
+    "diff-extent-mismatch": {
+      "returncode": 0,
+      "stdout": "settings that differ (raster vs wide):\n  (none)\nextents differ ([64, 36] vs [80, 45]), skipping the image diff\n",
+      "stderr": ""
+    },
+    "temporal-hdr": {
+      "returncode": 0,
+      "stdout": "resolved  3 frames  mean_lum=49230661925589331272806650754367488.0000\n  frame-to-frame |d| = 0.33316  (0.00% of mean)\n  two-frame      |d| = 0.00000  (0.00% of mean)\n  period-2 ratio d2/d1 = 0.000   ALTERNATING (period 2)\n  pixels unstable = 0.00%\n  instability map:\n    #@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n",
+      "stderr": ""
+    },
+    "temporal-ldr": {
+      "returncode": 0,
+      "stdout": "final  3 frames  mean_lum=0.4973\n  frame-to-frame |d| = 0.00390  (0.78% of mean)\n  two-frame      |d| = 0.00776  (1.56% of mean)\n  period-2 ratio d2/d1 = 1.990   (no period-2 pattern)\n  pixels unstable = 1.56%\n  instability map:\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n    @@@@@@@@@@@@@@@@@@@@@@@@\n",
+      "stderr": ""
+    },
+    "error-no-manifest": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "no manifest.json in <CAPTURE>/missing\n"
+    },
+    "error-unknown-target": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "no target 'nosuch'; have final, resolved, mainDepth, gbuffer1\n"
+    },
+    "error-rect-outside": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "rect (60, 0, 10, 10) does not fit in 64x36\n"
+    },
+    "error-rect-syntax": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "rect wants x,y,w,h\n"
+    },
+    "error-px-outside": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "pixel (64, 0) is outside 64x36\n"
+    },
+    "error-dump-too-large": {
+      "returncode": 1,
+      "stdout": "resolved rect=0,0,16,16  R16G16B16A16_SFLOAT  64x36  linear_hdr\n  pixels=256  NaN=1  Inf=1\n  chan          min         p1        p50       mean        p99      p99.9        max\n  r               0          0      2.539       2.39      4.762      4.762      4.762\n  g             0.5        0.5        0.5        0.5        0.5        0.5        0.5\n  b            0.25       0.25       0.25       0.25       0.25       0.25       0.25\n  a               1          1          1          1          1          1          1\n  fraction over 1/10/100: 0.75000 0.00000 0.00000\n",
+      "stderr": "--dump refuses 256 pixels; keep the rect at 64 or fewer\n"
+    },
+    "error-temporal-single-frame": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "'resolved' holds a single frame; capture it with frames=N for a temporal run\n"
+    },
+    "error-diff-missing": {
+      "returncode": 1,
+      "stdout": "",
+      "stderr": "no manifest.json in <CAPTURE>/missing\n"
+    }
+  }
+}

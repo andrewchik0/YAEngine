@@ -148,6 +148,7 @@ namespace YAEngine
     m_VolumeBaker.Destroy();
     DestroySceneImGuiDescriptor();
     DestroyPickResources();
+    DestroySwapchainReadback();
     for (auto& set : m_DepthCopyDescriptorSets)
       set.Destroy();
     m_GizmoRenderer.Destroy(ctx);
@@ -315,9 +316,10 @@ namespace YAEngine
   {
     b_Resized = false;
 
-    // Recreate swapchain first to get actual surface dimensions
-    m_Backend.GetSwapChain().Recreate(
-      m_Graph.GetPassRenderPass(m_SwapchainPassIndex));
+    // Recreate swapchain first to get actual surface dimensions. A minimized window has none; the
+    // resize that restoring it brings does the work then.
+    if (!m_Backend.GetSwapChain().Recreate(m_Graph.GetPassRenderPass(m_SwapchainPassIndex)))
+      return;
 
 #ifdef YA_EDITOR
     // In editor mode, graph extent = viewport size (independent of window size).
@@ -472,6 +474,7 @@ namespace YAEngine
     // landed and can be read without stalling.
     LatchPickResult();
     BeginPickFrame();
+    LatchSwapchainReadback();
 #endif
 
     m_Stats = {};
@@ -780,7 +783,15 @@ namespace YAEngine
     // already final by now.
     UpdatePathTraceAccumulation(frame);
 
+    // Armed for this one Execute only, and only by a capture request that names a pass.
+    bool captureAfterPass = b_CaptureRequested && ArmCaptureAfterPass();
     m_Graph.Execute(cmd, &frame);
+    if (captureAfterPass)
+      m_Graph.DisarmAfterPass();
+
+#ifdef YA_EDITOR
+    RecordSwapchainReadback(cmd, *imageIndex);
+#endif
 
     // Particles are drawn by the forward transparent pass, which the path tracing render
     // path switches off - transparency as a whole is stage 6's problem. Dropping this

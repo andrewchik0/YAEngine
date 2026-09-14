@@ -165,6 +165,107 @@ namespace YAEngine
     b_PickResultReady = true;
   }
 
+  void Render::RequestSwapchainReadback()
+  {
+    // A copy already in flight answers this request as well
+    if (m_SwapchainReadbackState == SwapchainReadbackState::Recorded)
+      return;
+
+    m_SwapchainReadback = {};
+    m_SwapchainReadbackState = SwapchainReadbackState::Requested;
+  }
+
+  bool Render::ConsumeSwapchainReadback(SwapchainReadback& outReadback)
+  {
+    if (m_SwapchainReadbackState != SwapchainReadbackState::Ready)
+      return false;
+
+    outReadback = std::move(m_SwapchainReadback);
+    m_SwapchainReadback = {};
+    m_SwapchainReadbackState = SwapchainReadbackState::Idle;
+    return true;
+  }
+
+  void Render::RecordSwapchainReadback(VkCommandBuffer cmd, uint32_t imageIndex)
+  {
+    if (m_SwapchainReadbackState != SwapchainReadbackState::Requested)
+      return;
+
+    auto& swapchain = m_Backend.GetSwapChain();
+    VkFormat format = swapchain.GetFormat();
+    VkExtent2D extent = swapchain.GetExt();
+    bool eightBitRgba = format == VK_FORMAT_B8G8R8A8_SRGB || format == VK_FORMAT_B8G8R8A8_UNORM
+      || format == VK_FORMAT_R8G8B8A8_SRGB || format == VK_FORMAT_R8G8B8A8_UNORM;
+
+    const char* error = nullptr;
+    if (!swapchain.SupportsTransferSource())
+      error = "the window surface does not allow copying presented images";
+    else if (!eightBitRgba)
+      error = "the swapchain format is not 8-bit RGBA";
+    else if (extent.width == 0 || extent.height == 0)
+      error = "the editor window has no size";
+
+    if (error != nullptr)
+    {
+      m_SwapchainReadback = {};
+      m_SwapchainReadback.error = error;
+      m_SwapchainReadbackState = SwapchainReadbackState::Ready;
+      return;
+    }
+
+    auto& ctx = m_Backend.GetContext();
+    m_SwapchainReadbackBuffer = VulkanBuffer::CreateReadback(ctx, VkDeviceSize(extent.width) * extent.height * 4);
+
+    // The swapchain pass has just left the image ready to present
+    VkImage image = swapchain.GetImage(imageIndex);
+    PickCopyBarrier(cmd, image, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL);
+
+    VkBufferImageCopy region{};
+    region.imageSubresource = { VK_IMAGE_ASPECT_COLOR_BIT, 0, 0, 1 };
+    region.imageExtent = { extent.width, extent.height, 1 };
+    vkCmdCopyImageToBuffer(cmd, image,
+      VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, m_SwapchainReadbackBuffer.Get(), 1, &region);
+
+    PickCopyBarrier(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+
+    m_SwapchainReadbackExtent = extent;
+    m_SwapchainReadbackFormat = format;
+    m_SwapchainReadbackSlot = m_Backend.GetCurrentFrameIndex();
+    m_SwapchainReadbackState = SwapchainReadbackState::Recorded;
+  }
+
+  void Render::LatchSwapchainReadback()
+  {
+    if (m_SwapchainReadbackState != SwapchainReadbackState::Recorded
+      || m_SwapchainReadbackSlot != m_Backend.GetCurrentFrameIndex())
+      return;
+
+    size_t byteCount = size_t(m_SwapchainReadbackExtent.width) * m_SwapchainReadbackExtent.height * 4;
+    m_SwapchainReadback = {};
+    m_SwapchainReadback.width = m_SwapchainReadbackExtent.width;
+    m_SwapchainReadback.height = m_SwapchainReadbackExtent.height;
+    m_SwapchainReadback.rgba.resize(byteCount);
+    std::memcpy(m_SwapchainReadback.rgba.data(), m_SwapchainReadbackBuffer.GetMapped(), byteCount);
+
+    if (m_SwapchainReadbackFormat == VK_FORMAT_B8G8R8A8_SRGB || m_SwapchainReadbackFormat == VK_FORMAT_B8G8R8A8_UNORM)
+    {
+      for (size_t i = 0; i < byteCount; i += 4)
+        std::swap(m_SwapchainReadback.rgba[i], m_SwapchainReadback.rgba[i + 2]);
+    }
+
+    m_SwapchainReadbackBuffer.Destroy(m_Backend.GetContext());
+    m_SwapchainReadbackState = SwapchainReadbackState::Ready;
+  }
+
+  void Render::DestroySwapchainReadback()
+  {
+    if (m_SwapchainReadbackState == SwapchainReadbackState::Recorded)
+      m_SwapchainReadbackBuffer.Destroy(m_Backend.GetContext());
+
+    m_SwapchainReadback = {};
+    m_SwapchainReadbackState = SwapchainReadbackState::Idle;
+  }
+
   void Render::ResizeViewport()
   {
     // The panel size is the output resolution; the render half follows from the mode.

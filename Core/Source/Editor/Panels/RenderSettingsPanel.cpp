@@ -2,6 +2,8 @@
 
 #include <imgui.h>
 
+#include "Editor/Bridge/BridgeTypes.h"
+#include "Editor/EditorCommands.h"
 #include "Editor/EditorContext.h"
 #include "Editor/Utils/EditorIcons.h"
 #include "Editor/Utils/FileDialog.h"
@@ -51,11 +53,7 @@ namespace YAEngine
         };
         std::string path = FileDialog::OpenFile(filters, 1);
         if (!path.empty())
-        {
-          auto handle = assets.CubeMaps().Load(path);
-          if (handle)
-            scene.SetSkybox(handle);
-        }
+          EditorCommands::LoadSkybox(scene, assets, path);
       }
 
       if (currentSkybox)
@@ -90,43 +88,12 @@ namespace YAEngine
 
       // Spelled out rather than an ImGui::Combo because several entries need device
       // capabilities or a render path, which only the per-item form can disable.
-      bool rayQueryAvailable = context.render->IsRayQueryAvailable();
-      bool rtPipelineAvailable = context.render->IsRayTracingPipelineAvailable();
-      bool pathTracerAvailable = context.render->IsPathTracerAvailable();
-      bool pathTracingActive = context.render->IsPathTracingActive();
       if (ImGui::BeginCombo("Debug View", debugViews[debugViewIndex]))
       {
         for (int i = 0; i < IM_ARRAYSIZE(debugViews); i++)
         {
-          bool selectable = true;
-          const char* unavailableReason = nullptr;
-          if (i == DEBUG_VIEW_RAY_QUERY && !rayQueryAvailable)
-          {
-            selectable = false;
-            unavailableReason = "Ray queries are unavailable on this device";
-          }
-          else if (i == DEBUG_VIEW_RT_PIPELINE && !rtPipelineAvailable)
-          {
-            selectable = false;
-            unavailableReason = "The ray tracing pipeline is unavailable on this device.\nIt needs hardware ray tracing and bindless descriptors.";
-          }
-          else if ((i == DEBUG_VIEW_PT_NOISY || i == DEBUG_VIEW_PT_REFERENCE
-            || (i >= DEBUG_VIEW_PT_MAX_CONTRIB && i <= DEBUG_VIEW_PT_NONFINITE))
-            && !pathTracerAvailable)
-          {
-            selectable = false;
-            unavailableReason = "The path tracer is unavailable on this device.\nIt needs hardware ray tracing and bindless descriptors.";
-          }
-          else if ((i == DEBUG_VIEW_PT_GUIDES || i == DEBUG_VIEW_PT_SPECULAR_MOTION) && !pathTracingActive)
-          {
-            selectable = false;
-            unavailableReason = "The guide buffers are only written while the Path Tracing\nrender path is the effective one.";
-          }
-          else if (pathTracingActive && IS_RASTER_ONLY_DEBUG_VIEW(i))
-          {
-            selectable = false;
-            unavailableReason = "Written by a pass the Path Tracing render path switches off:\nthe AO chain, SSR, the deferred lighting diagnostics or the\ntemporal resolve.";
-          }
+          const char* unavailableReason = EditorCommands::GetDebugViewUnavailableReason(*context.render, i);
+          bool selectable = unavailableReason == nullptr;
 
           ImGui::BeginDisabled(!selectable);
           if (ImGui::Selectable(debugViews[i], i == debugViewIndex) && selectable)
@@ -500,9 +467,22 @@ namespace YAEngine
       if (ImGui::Button(ICON_FA_ROTATE " Recompile Shaders"))
         context.render->GetShaderHotReload().RecompileAll();
 
+      // Render services one capture request at a time, and a shot takes whatever result comes back
+      // as its own, so a click must not slip a frame into running capture work.
+      const char* captureBlocked = nullptr;
+      if (context.render->IsCaptureRequestPending())
+        captureBlocked = "A capture request is still waiting for its frame.";
+      else if (context.captureSession != nullptr && context.captureSession->running)
+        captureBlocked = "A --capture session is running.";
+      else if (context.bridgeCapture != nullptr && context.bridgeCapture->shotRunning)
+        captureBlocked = "An agent capture shot is running; it restores the view when it ends.";
+
       // Secondary to the --capture command line, which is what an unattended agent uses.
       // Deliberately without settings of its own: FrameCapture introduces no scene state.
-      if (ImGui::Button(ICON_FA_CAMERA " Capture Frame"))
+      ImGui::BeginDisabled(captureBlocked != nullptr);
+      bool captureClicked = ImGui::Button(ICON_FA_CAMERA " Capture Frame");
+      ImGui::EndDisabled();
+      if (captureClicked)
       {
         static int captureIndex = 0;
         char directory[128];
@@ -515,9 +495,14 @@ namespace YAEngine
           .scenePath = context.scene ? context.scene->GetScenePath() : std::string()
         });
       }
-      if (ImGui::IsItemHovered())
-        ImGui::SetTooltip("Dumps the current frame into Captures/NNN_manual next to the\n"
-          "executable, in the same layout a --capture run produces.");
+      if (ImGui::IsItemHovered(ImGuiHoveredFlags_AllowWhenDisabled))
+      {
+        if (captureBlocked != nullptr)
+          ImGui::SetTooltip("%s", captureBlocked);
+        else
+          ImGui::SetTooltip("Dumps the current frame into Captures/NNN_manual next to the\n"
+            "executable, in the same layout a --capture run produces.");
+      }
     }
 
     ImGui::End();

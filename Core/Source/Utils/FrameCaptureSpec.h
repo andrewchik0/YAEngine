@@ -18,6 +18,10 @@ namespace YAEngine
     // The raw --shot string, copied into the manifest so a capture names its own recipe.
     std::string requestedBy;
     std::vector<std::string> targets;
+    // Render graph pass (name or alt name) to capture right after, instead of at the end of the
+    // frame. With a pass set and no targets key, targets stays empty: only Render knows which
+    // images the pass writes, and those are the default.
+    std::string afterPass;
 
     std::optional<RenderPath> renderPath;
     std::optional<AntialiasingMode> antialiasing;
@@ -58,11 +62,14 @@ namespace YAEngine
     std::vector<FrameCaptureShot> shots;
   };
 
-  // Where the capture session publishes its outcome, so main can hand it back as the
-  // process exit code: 0 ok, 2 partial, 3 failed.
+  // Where the capture session publishes its state and outcome, so main can hand the outcome
+  // back as the process exit code: 0 ok, 2 partial, 3 failed.
   struct FrameCaptureSessionResult
   {
     int exitCode = 0;
+    // From arming until the last shot finished. Other capture clients stay away meanwhile,
+    // since Render services one capture request at a time.
+    bool running = false;
   };
 
   // What the sequencer asks Render to dump at the end of the frame Draw is about to finish.
@@ -70,6 +77,8 @@ namespace YAEngine
   {
     std::string directory;
     std::vector<std::string> targets;
+    // Pass name or alt name to dump right after; empty dumps the finished frame.
+    std::string afterPass;
     std::string shotName;
     std::string requestedBy;
     std::string scenePath;
@@ -109,9 +118,61 @@ namespace YAEngine
     std::vector<FrameCaptureSessionShot> shots;
   };
 
+  // One render graph resource as capture sees it.
+  struct FrameCaptureTargetInfo
+  {
+    std::string name;
+    // The capture format name, or "UNSUPPORTED" when capture cannot decode the resource.
+    std::string format;
+    uint32_t width = 0;
+    uint32_t height = 0;
+    bool outputResolution = false;
+    // False for an imported image, which the graph neither allocates nor resizes.
+    bool managed = true;
+    uint32_t mipLevels = 1;
+    bool depth = false;
+  };
+
+  struct FrameCaptureAliasInfo
+  {
+    std::string name;
+    // Graph resource names the alias stands for in the current state; aliases that follow the
+    // render path or the TAA ping-pong change between frames.
+    std::vector<std::string> resolvesTo;
+    // The fixed wording --capture-list-targets prints.
+    std::string description;
+  };
+
+  // One render graph pass as capture sees it, for after=<pass>.
+  struct FrameCapturePassInfo
+  {
+    std::string name;
+    // Empty for a pass without an alternate label; either name addresses the pass.
+    std::string altName;
+    uint32_t executionIndex = 0;
+    std::vector<std::string> colorOutputs;
+    std::vector<std::string> storageOutputs;
+    // Empty when the pass writes no depth resource of the graph.
+    std::string depthOutput;
+    // Whether the pass runs in the current state; capturing after a disabled one fails.
+    bool enabled = true;
+  };
+
+  struct FrameCaptureTargetList
+  {
+    std::vector<FrameCaptureTargetInfo> targets;
+    std::vector<FrameCaptureAliasInfo> aliases;
+    // In execution order.
+    std::vector<FrameCapturePassInfo> passes;
+  };
+
   // Parses argv into a spec. Returns false, after logging the reason, on any malformed
   // flag or shot key - the caller is expected to abort before the window opens.
   bool ParseFrameCaptureSpec(int argc, char** argv, FrameCaptureSpec& outSpec);
+  // Parses one --shot string. Nothing is logged; on failure outError says why. The name is
+  // left empty when the string sets none, and targets default to final,resolved unless the
+  // shot names a pass with after=.
+  bool ParseFrameCaptureShot(const std::string& text, FrameCaptureShot& outShot, std::string& outError);
 
   // Debug view id <-> name. The table mirrors the DEBUG_VIEW_* ids in
   // Core/Shared/FrameUniforms.h and the labels in RenderSettingsPanel; it lives here

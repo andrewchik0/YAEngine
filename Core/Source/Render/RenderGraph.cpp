@@ -709,10 +709,8 @@ namespace YAEngine
           ResolveResource(handle).SetLayout(VK_IMAGE_LAYOUT_GENERAL);
         }
         DebugMarker::EndLabel(cmd);
-        continue;
       }
-
-      if (pass.info.depthOnly)
+      else if (pass.info.depthOnly)
       {
         DebugMarker::BeginLabel(cmd, passLabel);
 
@@ -754,69 +752,106 @@ namespace YAEngine
           ResolveResource(pass.info.depthOutput).SetLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
         }
         DebugMarker::EndLabel(cmd);
-        continue;
       }
-
-      DebugMarker::BeginLabel(cmd, passLabel);
-
-      VkFramebuffer fb = pass.overrideFramebuffer != VK_NULL_HANDLE
-        ? pass.overrideFramebuffer : pass.framebuffer;
-
-      uint32_t attachmentCount = static_cast<uint32_t>(
-        std::max(pass.info.colorOutputs.size(), static_cast<size_t>(1)) + 1);
-
-      static constexpr uint32_t MAX_CLEAR_VALUES = 8;
-      assert(attachmentCount <= MAX_CLEAR_VALUES);
-      std::array<VkClearValue, MAX_CLEAR_VALUES> clearValues{};
-      clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
-      clearValues[1].depthStencil = {0.0f, 0};
-      for (uint32_t i = 2; i < attachmentCount; i++)
+      else
       {
-        clearValues[i].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+        DebugMarker::BeginLabel(cmd, passLabel);
+
+        VkFramebuffer fb = pass.overrideFramebuffer != VK_NULL_HANDLE
+          ? pass.overrideFramebuffer : pass.framebuffer;
+
+        uint32_t attachmentCount = static_cast<uint32_t>(
+          std::max(pass.info.colorOutputs.size(), static_cast<size_t>(1)) + 1);
+
+        static constexpr uint32_t MAX_CLEAR_VALUES = 8;
+        assert(attachmentCount <= MAX_CLEAR_VALUES);
+        std::array<VkClearValue, MAX_CLEAR_VALUES> clearValues{};
+        clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+        clearValues[1].depthStencil = {0.0f, 0};
+        for (uint32_t i = 2; i < attachmentCount; i++)
+        {
+          clearValues[i].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+        }
+
+        VkRenderPassBeginInfo rpInfo{};
+        rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+        rpInfo.renderPass = pass.renderPass;
+        rpInfo.framebuffer = fb;
+        rpInfo.renderArea.offset = {0, 0};
+        rpInfo.renderArea.extent = passExtent;
+        rpInfo.clearValueCount = attachmentCount;
+        rpInfo.pClearValues = clearValues.data();  // std::array, no heap allocation
+
+        vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
+
+        VkViewport viewport{};
+        viewport.width = static_cast<float>(passExtent.width);
+        viewport.height = static_cast<float>(passExtent.height);
+        viewport.minDepth = 0.0f;
+        viewport.maxDepth = 1.0f;
+        vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+        VkRect2D scissor{};
+        scissor.extent = passExtent;
+        vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+        pass.info.execute(ctx);
+
+        vkCmdEndRenderPass(cmd);
+
+        for (size_t i = 0; i < pass.info.colorOutputs.size(); i++)
+        {
+          auto handle = pass.info.colorOutputs[i];
+          VkImageLayout layout = (i == 0)
+            ? pass.info.finalColorLayout
+            : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+          m_CurrentLayouts[handle] = layout;
+          ResolveResource(handle).SetLayout(layout);
+        }
+        if (pass.info.depthOutput != RG_INVALID_HANDLE)
+        {
+          m_CurrentLayouts[pass.info.depthOutput] = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
+          ResolveResource(pass.info.depthOutput).SetLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
+        }
+        DebugMarker::EndLabel(cmd);
       }
 
-      VkRenderPassBeginInfo rpInfo{};
-      rpInfo.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
-      rpInfo.renderPass = pass.renderPass;
-      rpInfo.framebuffer = fb;
-      rpInfo.renderArea.offset = {0, 0};
-      rpInfo.renderArea.extent = passExtent;
-      rpInfo.clearValueCount = attachmentCount;
-      rpInfo.pClearValues = clearValues.data();  // std::array, no heap allocation
-
-      vkCmdBeginRenderPass(cmd, &rpInfo, VK_SUBPASS_CONTENTS_INLINE);
-
-      VkViewport viewport{};
-      viewport.width = static_cast<float>(passExtent.width);
-      viewport.height = static_cast<float>(passExtent.height);
-      viewport.minDepth = 0.0f;
-      viewport.maxDepth = 1.0f;
-      vkCmdSetViewport(cmd, 0, 1, &viewport);
-
-      VkRect2D scissor{};
-      scissor.extent = passExtent;
-      vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-      pass.info.execute(ctx);
-
-      vkCmdEndRenderPass(cmd);
-
-      for (size_t i = 0; i < pass.info.colorOutputs.size(); i++)
-      {
-        auto handle = pass.info.colorOutputs[i];
-        VkImageLayout layout = (i == 0)
-          ? pass.info.finalColorLayout
-          : VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
-        m_CurrentLayouts[handle] = layout;
-        ResolveResource(handle).SetLayout(layout);
-      }
-      if (pass.info.depthOutput != RG_INVALID_HANDLE)
-      {
-        m_CurrentLayouts[pass.info.depthOutput] = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-        ResolveResource(pass.info.depthOutput).SetLayout(VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL);
-      }
-      DebugMarker::EndLabel(cmd);
+      // Every branch above has already stored the layouts the pass leaves behind, so those
+      // are what the hook sees and restores.
+      if (passIndex == m_AfterPass)
+        m_AfterPassCallback(cmd);
     }
+  }
+
+  bool RenderGraph::IsPassEnabled(uint32_t pass) const
+  {
+    const RGPassInfo& info = m_Passes[pass].info;
+    return !info.isEnabled || info.isEnabled();
+  }
+
+  uint32_t RenderGraph::FindPass(std::string_view name) const
+  {
+    for (uint32_t pass : m_ExecutionOrder)
+    {
+      const RGPassInfo& info = m_Passes[pass].info;
+      if (info.name == name || info.altName == name)
+        return pass;
+    }
+
+    return RG_INVALID_PASS;
+  }
+
+  void RenderGraph::ArmAfterPass(uint32_t pass, RGAfterPassCallback callback)
+  {
+    assert(pass < m_Passes.size() && "ArmAfterPass: pass index out of range");
+    m_AfterPass = pass;
+    m_AfterPassCallback = std::move(callback);
+  }
+
+  void RenderGraph::DisarmAfterPass()
+  {
+    m_AfterPass = RG_INVALID_PASS;
+    m_AfterPassCallback = nullptr;
   }
 
   void RenderGraph::SetPassFramebuffer(uint32_t pass, VkFramebuffer fb)

@@ -18,6 +18,8 @@ set(SOURCE_FILES
   Source/Render/Render.Capture.cpp
   Source/Render/FrameCaptureLayer.cpp
   Source/Render/FrameCaptureLayer.h
+  Source/Render/FrameCaptureShotRunner.cpp
+  Source/Render/FrameCaptureShotRunner.h
   Source/Render/VulkanInstance.cpp
   Source/Render/VulkanInstance.h
   Source/Render/VulkanDebugExtension.cpp
@@ -117,6 +119,7 @@ set(SOURCE_FILES
   Source/Utils/ServiceRegistry.h
   Source/Utils/FrameCaptureSpec.cpp
   Source/Utils/FrameCaptureSpec.h
+  Source/Utils/CameraOrientation.h
   Source/LayerManager.h
   Source/Input/InputSystem.cpp
   Source/Input/InputSystem.h
@@ -240,7 +243,10 @@ if(YA_EDITOR)
     Source/Render/IrradianceVolumeBaker.h
     Source/Render/IrradianceVolumeBaker.cpp
     Source/Editor/EditorLayer.cpp
+    Source/Editor/EditorLayer.Actions.cpp
     Source/Editor/EditorLayer.h
+    Source/Editor/EditorCommands.h
+    Source/Editor/EditorCommands.cpp
     Source/Editor/IEditorPanel.h
     Source/Editor/EditorContext.h
     Source/Editor/Utils/EditorStyle.cpp
@@ -281,5 +287,34 @@ if(YA_EDITOR)
     Source/Editor/ShaderDependencyGraph.cpp
     Source/Editor/ShaderHotReload.h
     Source/Editor/ShaderHotReload.cpp
+    Source/Editor/EditorPreferences.h
+    Source/Editor/EditorPreferences.cpp
+    Source/Editor/Panels/AgentPanel.h
+    Source/Editor/Panels/AgentPanel.cpp
+    Source/Editor/Bridge/BridgeTypes.h
+    Source/Editor/Bridge/BridgeJson.h
+    Source/Editor/Bridge/BridgeJson.cpp
+    Source/Editor/Bridge/BridgeSocket.h
+    Source/Editor/Bridge/BridgeSocket.cpp
+    Source/Editor/Bridge/BridgeMethods.h
+    Source/Editor/Bridge/BridgeMethods.cpp
+    Source/Editor/Bridge/BridgeServer.h
+    Source/Editor/Bridge/BridgeServer.cpp
+    Source/Editor/Bridge/BridgeDiscovery.h
+    Source/Editor/Bridge/BridgeDiscovery.cpp
+    Source/Editor/Bridge/LogRingBuffer.h
+    Source/Editor/Bridge/LogRingBuffer.cpp
+    Source/Editor/Bridge/EditorBridge.h
+    Source/Editor/Bridge/EditorBridge.cpp
+    Source/Editor/Bridge/BridgeCapture.h
+    Source/Editor/Bridge/BridgeCapture.cpp
+    Source/Editor/Bridge/BridgeData.h
+    Source/Editor/Bridge/BridgeData.cpp
+    Source/Editor/Bridge/BridgeActions.h
+    Source/Editor/Bridge/BridgeActions.cpp
+    Source/Editor/Bridge/BridgeUi.h
+    Source/Editor/Bridge/BridgeUi.cpp
+    Source/Editor/Bridge/BridgeUiTree.h
+    Source/Editor/Bridge/BridgeUiTree.cpp
   )
 endif()

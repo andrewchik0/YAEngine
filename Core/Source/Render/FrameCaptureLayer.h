@@ -1,12 +1,13 @@
 #pragma once
 
 #include "Layer.h"
+#include "Render/FrameCaptureShotRunner.h"
 #include "Utils/FrameCaptureSpec.h"
 
 namespace YAEngine
 {
-  // Drives a FrameCapture session without a human in the loop: applies each shot's render
-  // settings, waits for the frame to settle, asks Render for a capture and moves on. Pushed
+  // Drives a command line FrameCapture session without a human in the loop: runs each shot
+  // through the shot runner, keeps the session manifest and publishes the exit code. Pushed
   // only when the command line armed a capture, so nothing here runs in an ordinary session.
   class FrameCaptureLayer : public Layer
   {
@@ -20,46 +21,13 @@ namespace YAEngine
     enum class Stage : uint8_t
     {
       ListTargets,
-      ApplySettings,
-      // A path or mode change resizes the graph; warming up across that boundary would
-      // spend the warmup on frames from the previous configuration.
-      WaitExtent,
-      Warmup,
-      WaitAccumulation,
-      WaitCapture,
+      Shots,
       Finished
     };
 
-    // Everything a shot may override, taken before the first one and put back after the
-    // last so an interactive session is left exactly as it was found.
-    struct SettingsSnapshot
-    {
-      RenderPath renderPath = RenderPath::Raster;
-      AntialiasingMode antialiasing = AntialiasingMode::None;
-      int debugView = 0;
-      int pathTraceBounces = 0;
-      float pathTraceClamp = 0.0f;
-      bool pathTraceDevResolve = false;
-      float exposure = 0.0f;
-      bool autoExposure = false;
-      int tonemapMode = 0;
-      bool bloom = false;
-      glm::vec3 cameraPosition { 0.0f };
-      glm::quat cameraRotation { 1.0f, 0.0f, 0.0f, 0.0f };
-      uint32_t viewportWidth = 0;
-      uint32_t viewportHeight = 0;
-      bool gizmos = true;
-    };
-
     void TruncateOutputDirectory();
-    void SnapshotSettings();
-    void RestoreSettings();
-    void ApplyShot(const FrameCaptureShot& shot);
-    void ApplyShotCamera(const FrameCaptureShot& shot);
     void ApplyPinnedResolution();
-    void RequestShotCapture();
-    void BeginShot();
-    void FinishShot();
+    void OnShotFinished(const FrameCaptureShotOutcome& outcome);
     void FinishSession();
     std::string GetSessionStatus() const;
     void WriteSession(const std::string& status);
@@ -68,18 +36,12 @@ namespace YAEngine
     const FrameCaptureSpec* m_Spec = nullptr;
     FrameCaptureSessionResult* m_SessionResult = nullptr;
 
-    Stage m_Stage = Stage::ApplySettings;
+    Stage m_Stage = Stage::Shots;
     int m_ShotIndex = 0;
-    int m_FrameInShot = 0;
-    int m_WarmupLeft = 0;
-    int m_StableFrames = 0;
-    int m_AccumWaitFrames = 0;
-    int m_LastSampleCount = 0;
-    VkExtent2D m_LastRenderExtent {};
-    VkExtent2D m_LastOutputExtent {};
 
-    std::string m_ShotStatus;
     std::vector<FrameCaptureSessionShot> m_SessionShots;
-    SettingsSnapshot m_Snapshot;
+    // Taken once before the first shot and put back after the last, not around each shot.
+    FrameCaptureSettingsSnapshot m_Snapshot;
+    FrameCaptureShotRunner m_Runner;
   };
 }

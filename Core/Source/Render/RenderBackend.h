@@ -41,6 +41,7 @@ namespace YAEngine
     VkPhysicalDevice GetPhysicalDevice() { return m_PhysicalDevice.Get(); }
 
     VulkanSwapChain& GetSwapChain() { return m_SwapChain; }
+    const VulkanSwapChain& GetSwapChain() const { return m_SwapChain; }
     VulkanCommandBuffer& GetCommandBuffer() { return m_CommandBuffer; }
     VulkanDescriptorPool& GetDescriptorPool() { return m_DescriptorPool; }
     DescriptorLayoutCache& GetLayoutCache() { return m_LayoutCache; }
