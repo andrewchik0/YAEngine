@@ -32,6 +32,23 @@ vec2 SpatioTemporalNoise(ivec2 pixCoord, int temporalIndex)
   return fract(0.5 + index * vec2(0.75487766624669276, 0.56984029099805327));
 }
 
+#ifdef SSGI
+// The screen stores the camera-facing side of an occluder, so an emitter facing away from the
+// receiver shows radiance the receiver cannot see. Callers weight only radiance and invalidity
+// by this: the rejected share stays a valid dark occluder, since handing it to the volume
+// fallback would bring the excess light back.
+float SSGIEmitterFacing(ivec2 texel, vec3 toReceiver)
+{
+  vec3 worldNormal = octDecode(texelFetch(gbuffer1Texture, texel, 0).rg * 2.0 - 1.0);
+  if (dot(worldNormal, worldNormal) < 1e-6)
+    return 1.0;
+
+  vec3 engineViewNormal = mat3(u_Frame.view) * worldNormal;
+  vec3 emitterNormal = vec3(engineViewNormal.x, engineViewNormal.y, -engineViewNormal.z);
+  return smoothstep(0.0, 0.1, dot(emitterNormal, toReceiver));
+}
+#endif
+
 void main()
 {
   ivec2 pixCoord = ivec2(gl_FragCoord.xy);
@@ -190,7 +207,8 @@ void main()
 
       // Snapping to whole pixels keeps the sampled depth and the direction the slope is
       // computed from referring to the same texel.
-      sampleOffset = round(sampleOffset) * u_GTAO.viewportPixelSize;
+      ivec2 samplePixelOffset = ivec2(round(sampleOffset));
+      sampleOffset = vec2(samplePixelOffset) * u_GTAO.viewportPixelSize;
 
       vec2 sampleScreenPos0 = normalizedScreenPos + sampleOffset;
       vec2 sampleScreenPos1 = normalizedScreenPos - sampleOffset;
@@ -260,9 +278,10 @@ void main()
       if (newBits0 != 0u)
       {
         float share = projNLAdj * sliceTotal * ssgiMaskFraction(newBits0);
+        float facing = SSGIEmitterFacing(clamp(pixCoord + samplePixelOffset, ivec2(0), maxCoord), -sampleHorizonVec0);
         vec4 rad = textureLod(ssgiRadianceTexture, sampleScreenPos0, mipLevel);
-        giRadiance += rad.rgb * rad.a * share;
-        giInvalid += (1.0 - rad.a) * share;
+        giRadiance += rad.rgb * rad.a * share * facing;
+        giInvalid += (1.0 - rad.a) * share * facing;
         giOccluded += share;
         bentAccum -= ssgiSliceDir(0.5 * (interval.x + interval.y), viewVec, sliceTangent) * share;
       }
@@ -276,9 +295,10 @@ void main()
       if (newBits1 != 0u)
       {
         float share = projNLAdj * sliceTotal * ssgiMaskFraction(newBits1);
+        float facing = SSGIEmitterFacing(clamp(pixCoord - samplePixelOffset, ivec2(0), maxCoord), -sampleHorizonVec1);
         vec4 rad = textureLod(ssgiRadianceTexture, sampleScreenPos1, mipLevel);
-        giRadiance += rad.rgb * rad.a * share;
-        giInvalid += (1.0 - rad.a) * share;
+        giRadiance += rad.rgb * rad.a * share * facing;
+        giInvalid += (1.0 - rad.a) * share * facing;
         giOccluded += share;
         bentAccum -= ssgiSliceDir(0.5 * (interval.x + interval.y), viewVec, sliceTangent) * share;
       }
