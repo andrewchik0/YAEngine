@@ -19,6 +19,9 @@ namespace YAEngine {
 #define RT_INSTANCE_UNLIT        0x08u
 #define RT_INSTANCE_DOUBLE_SIDED 0x10u
 
+// RayTracingInstanceRecord::emissiveIndex of an instance the emissive light table does not hold.
+#define RT_INSTANCE_NOT_EMISSIVE 0xFFFFFFFFu
+
 // Everything a hit needs that the acceleration structure itself does not carry. One
 // record per TLAS instance, in TLAS instance order, addressed by the instance's
 // instanceCustomIndex (gl_InstanceCustomIndexEXT).
@@ -47,7 +50,9 @@ struct RayTracingInstanceRecord
   // is addressed by material slot precisely so this field serves as both.
   uint materialIndex;
   uint flags;
-  uint _pad0;
+  // This instance's slot in the emissive light table (Shared/EmissiveLightData.h), or
+  // RT_INSTANCE_NOT_EMISSIVE.
+  uint emissiveIndex;
   // Maps a point of this instance from this frame's world space to where it was last frame,
   // as the top three rows of a row-major affine matrix - VkTransformMatrixKHR's layout. Rows
   // of vec4 rather than vec3 columns, which std430 would pad to a 16 byte stride anyway.

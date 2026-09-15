@@ -598,6 +598,8 @@ namespace YAEngine
     uint64_t m_PathTraceCachedIdentityDigest = 0;
     uint64_t m_PathTraceCachedTransformDigest = 0;
     uint64_t m_PathTraceCachedLightDigest = 0;
+    uint64_t m_PathTraceCachedLightBufferDigest = 0;
+    uint64_t m_PathTraceCachedEmissionDigest = 0;
     float m_LastFrameTime = 0.0f;
     float m_DeltaTime = 0.0f;
 

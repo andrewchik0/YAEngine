@@ -1,5 +1,6 @@
 #include "TlasBuilder.h"
 
+#include "MaterialUniforms.h"
 #include "RenderContext.h"
 #include "RenderObject.h"
 #include "VulkanVertexBuffer.h"
@@ -36,6 +37,13 @@ namespace YAEngine
       return result;
     }
 
+    // The same three rows as vec4s, the layout the shared records carry transforms in.
+    void WriteRows(const glm::mat4& matrix, glm::vec4 rows[3])
+    {
+      for (uint32_t row = 0; row < 3; row++)
+        rows[row] = glm::vec4(matrix[0][row], matrix[1][row], matrix[2][row], matrix[3][row]);
+    }
+
     // RayTracingInstanceRecord::worldToPrevWorld for one object. Identity for a singular
     // transform rather than the inf or NaN its inverse would put into the motion vectors.
     void WriteWorldToPrevWorld(const RenderObject& object, glm::vec4 rows[3])
@@ -44,8 +52,14 @@ namespace YAEngine
       if (std::abs(glm::determinant(glm::mat3(object.worldTransform))) > 0.0f)
         delta = object.prevWorldTransform * glm::affineInverse(object.worldTransform);
 
-      for (uint32_t row = 0; row < 3; row++)
-        rows[row] = glm::vec4(delta[0][row], delta[1][row], delta[2][row], delta[3][row]);
+      WriteRows(delta, rows);
+    }
+
+    // luminance() of utils.glsl, in float as the shader evaluates it: the membership test compares
+    // it against the shader's own cutoff, so a value right at the cutoff has to round alike.
+    float Luminance(const glm::vec3& color)
+    {
+      return glm::dot(color, glm::vec3(0.2126f, 0.7152f, 0.0722f));
     }
   }
 
@@ -62,7 +76,10 @@ namespace YAEngine
 
     m_Slots.resize(slotCount);
     for (FrameSlot& slot : m_Slots)
+    {
       EnsureCapacity(ctx, slot, INITIAL_INSTANCE_CAPACITY);
+      EnsureEmissiveCapacity(ctx, slot, INITIAL_EMISSIVE_CAPACITY);
+    }
   }
 
   void TlasBuilder::Destroy(const RenderContext& ctx)
@@ -75,6 +92,7 @@ namespace YAEngine
       slot.scratch.Destroy(ctx);
       slot.instances.Destroy(ctx);
       slot.records.Destroy(ctx);
+      slot.emissive.Destroy(ctx);
     }
 
     m_Slots.clear();
@@ -117,7 +135,6 @@ namespace YAEngine
       slot.records = VulkanBuffer::CreateMapped(ctx,
         VkDeviceSize(target) * sizeof(RayTracingInstanceRecord), RECORD_BUFFER_USAGE);
       slot.instanceAddress = slot.instances.GetDeviceAddress(ctx);
-      slot.recordBufferChanged = true;
       capacity = target;
 
       slot.addressUsable = slot.instanceAddress % INSTANCE_ADDRESS_ALIGNMENT == 0;
@@ -134,6 +151,116 @@ namespace YAEngine
     return capacity;
   }
 
+  void TlasBuilder::EnsureEmissiveCapacity(const RenderContext& ctx, FrameSlot& slot, uint64_t required)
+  {
+    const VkDeviceSize size = slot.emissive.GetSize();
+    uint32_t capacity = size > sizeof(EmissiveLightTableHeader)
+      ? uint32_t((size - sizeof(EmissiveLightTableHeader)) / sizeof(EmissiveLightRecord))
+      : 0;
+
+    uint32_t target = std::max(capacity, INITIAL_EMISSIVE_CAPACITY);
+    while (target < required && target < MAX_INSTANCE_CAPACITY)
+      target = std::min(target * 2, MAX_INSTANCE_CAPACITY);
+
+    if (target <= capacity)
+      return;
+
+    // Replaced at once for the reason EnsureCapacity gives.
+    slot.emissive.Destroy(ctx);
+    slot.emissive = VulkanBuffer::CreateMapped(ctx,
+      sizeof(EmissiveLightTableHeader) + VkDeviceSize(target) * sizeof(EmissiveLightRecord),
+      RECORD_BUFFER_USAGE);
+
+    const EmissiveLightTableHeader emptyHeader {};
+    std::memcpy(slot.emissive.GetMapped(), &emptyHeader, sizeof(emptyHeader));
+  }
+
+  void TlasBuilder::BuildEmissiveAliasTable()
+  {
+    // Vose's alias method: every slot is split between itself and at most one other record, so
+    // the shader draws an instance with two uniforms whatever the weights are.
+    const uint32_t count = uint32_t(m_EmissiveStaging.size());
+
+    double total = 0.0;
+    for (double weight : m_EmissiveWeights)
+      total += weight;
+
+    m_AliasScaled.resize(count);
+    m_AliasSmall.clear();
+    m_AliasLarge.clear();
+
+    for (uint32_t i = 0; i < count; i++)
+    {
+      m_AliasScaled[i] = m_EmissiveWeights[i] * double(count) / total;
+      (m_AliasScaled[i] < 1.0 ? m_AliasSmall : m_AliasLarge).push_back(i);
+    }
+
+    while (!m_AliasSmall.empty() && !m_AliasLarge.empty())
+    {
+      const uint32_t underfull = m_AliasSmall.back();
+      m_AliasSmall.pop_back();
+      const uint32_t overfull = m_AliasLarge.back();
+      m_AliasLarge.pop_back();
+
+      m_EmissiveStaging[underfull].aliasThreshold = float(m_AliasScaled[underfull]);
+      m_EmissiveStaging[underfull].aliasIndex = overfull;
+
+      m_AliasScaled[overfull] = (m_AliasScaled[overfull] + m_AliasScaled[underfull]) - 1.0;
+      (m_AliasScaled[overfull] < 1.0 ? m_AliasSmall : m_AliasLarge).push_back(overfull);
+    }
+
+    // Whatever is left sits at one up to rounding and keeps its whole slot.
+    for (uint32_t i : m_AliasSmall)
+    {
+      m_EmissiveStaging[i].aliasThreshold = 1.0f;
+      m_EmissiveStaging[i].aliasIndex = i;
+    }
+    for (uint32_t i : m_AliasLarge)
+    {
+      m_EmissiveStaging[i].aliasThreshold = 1.0f;
+      m_EmissiveStaging[i].aliasIndex = i;
+    }
+
+    // The pmf the shader divides by is summed back out of the float thresholds it compares
+    // against, so it describes the table as stored rather than the weights it was built from.
+    std::fill(m_AliasScaled.begin(), m_AliasScaled.end(), 0.0);
+    for (uint32_t i = 0; i < count; i++)
+    {
+      const EmissiveLightRecord& light = m_EmissiveStaging[i];
+      m_AliasScaled[i] += double(light.aliasThreshold);
+      if (light.aliasIndex != i)
+        m_AliasScaled[light.aliasIndex] += 1.0 - double(light.aliasThreshold);
+    }
+
+    for (uint32_t i = 0; i < count; i++)
+      m_EmissiveStaging[i].pmf = float(m_AliasScaled[i] / double(count));
+  }
+
+  void TlasBuilder::UploadEmissiveTable(const RenderContext& ctx, FrameSlot& slot)
+  {
+    // Never more entries than instances, and the instance count is capped at the same
+    // ceiling the table grows to, so everything staged fits.
+    const uint32_t count = uint32_t(m_EmissiveStaging.size());
+    if (count == 0)
+      return;
+
+    EnsureEmissiveCapacity(ctx, slot, count);
+    BuildEmissiveAliasTable();
+
+    const EmissiveLightTableHeader header {
+      .count = count,
+      ._pad0 = 0,
+      ._pad1 = 0,
+      ._pad2 = 0,
+    };
+
+    auto* mapped = static_cast<uint8_t*>(slot.emissive.GetMapped());
+    std::memcpy(mapped, &header, sizeof(header));
+    std::memcpy(mapped + sizeof(header), m_EmissiveStaging.data(),
+      size_t(count) * sizeof(EmissiveLightRecord));
+    slot.emissiveCount = count;
+  }
+
   void TlasBuilder::Build(const RenderContext& ctx, VkCommandBuffer cmd, uint32_t frameIndex,
     const SceneSnapshot& snapshot, MeshManager& meshes, MaterialManager& materials)
   {
@@ -145,7 +272,13 @@ namespace YAEngine
     // which is what a consumer tests.
     slot.instanceCount = 0;
     slot.built = false;
-    slot.recordBufferChanged = false;
+
+    // Emptied up front for the same reason: the table stays a valid binding either way.
+    slot.emissiveCount = 0;
+    const EmissiveLightTableHeader emptyHeader {};
+    std::memcpy(slot.emissive.GetMapped(), &emptyHeader, sizeof(emptyHeader));
+    m_EmissiveStaging.clear();
+    m_EmissiveWeights.clear();
 
     // Pass one only counts, because the buffers have to be grown before anything can be
     // written into them. It resolves exactly what pass two does, through the same helper.
@@ -222,7 +355,7 @@ namespace YAEngine
         .attributeOffset = uint32_t(vertexBuffer->GetAttribOffset()),
         .materialIndex = object.material.index,
         .flags = recordFlags,
-        ._pad0 = 0,
+        .emissiveIndex = RT_INSTANCE_NOT_EMISSIVE,
       };
       // The same for every instance too: prevWorld * offset * inverse(world * offset) cancels
       // the static instance offset down to prevWorld * inverse(world).
@@ -230,6 +363,33 @@ namespace YAEngine
 
       const VkDeviceAddress bottomLevel = vertexBuffer->GetBottomLevel().GetDeviceAddress();
       const uint32_t mask = object.isTransparent ? RT_MASK_TRANSPARENT : RT_MASK_OPAQUE;
+
+      // Whether the object's instances enter the emissive light table is the material's call, so
+      // it is made once; only the transform the selection weight scales with differs per instance.
+      // The emission this reads is the one RayTracingMaterialTable::Update writes from the same
+      // MaterialManager state this frame.
+      //
+      // Only a material that can produce an emissive texel enters, by gbuffer.frag's and
+      // resolveEmissiveTexel's rule on the constant emission, which an emissive map in [0, 1] only
+      // scales down. Imported materials routinely carry emission at or below the cutoff that no
+      // shader ever shows, and an entry for one would only waste candidates.
+      const Material& material = materials.Get(object.material);
+      const float emissiveLuminance = Luminance(material.emissivity * material.emissiveIntensity);
+      const uint32_t triangleCount = uint32_t(vertexBuffer->GetIndexCount() / 3);
+      const bool emissive = material.emissive && emissiveLuminance > EMISSIVE_SHADING_CUTOFF
+        && !object.isTerrain && triangleCount > 0;
+
+      // A crude stand-in for the power an instance emits: its luminance times the surface area of
+      // the mesh's object space bounding box, scaled to world space per instance below. It only
+      // decides how often the instance becomes a candidate - the shader divides by the probability
+      // it actually used - so a poor estimate costs variance and never bias.
+      double boundsArea = 0.0;
+      if (emissive)
+      {
+        const glm::dvec3 extent = glm::max(
+          glm::dvec3(meshes.GetMaxBB(object.mesh)) - glm::dvec3(meshes.GetMinBB(object.mesh)), glm::dvec3(0.0));
+        boundsArea = 2.0 * (extent.x * extent.y + extent.y * extent.z + extent.z * extent.x);
+      }
 
       for (uint32_t n = 0; n < count; n++)
       {
@@ -254,13 +414,46 @@ namespace YAEngine
         instance.flags = instanceFlags;
         instance.accelerationStructureReference = bottomLevel;
 
+        RayTracingInstanceRecord instanceRecord = record;
+        if (emissive)
+        {
+          // Area grows with the square of a linear scale and |det| with its cube.
+          const double areaScale = std::pow(std::abs(double(glm::determinant(glm::mat3(world)))), 2.0 / 3.0);
+          const double weight = emissiveLuminance * boundsArea * areaScale;
+
+          // A weight of zero would never be drawn, and leaving the instance out of the table instead
+          // gives a hit on it the full weight nothing else competes for.
+          if (weight > 0.0 && std::isfinite(weight))
+          {
+            instanceRecord.emissiveIndex = uint32_t(m_EmissiveStaging.size());
+
+            EmissiveLightRecord light {
+              .instanceIndex = cursor,
+              .triangleCount = triangleCount,
+              // Transparent instances sit in RT_MASK_TRANSPARENT, which no path ray traces.
+              .flags = object.isTransparent ? EMISSIVE_LIGHT_NEE_ONLY : 0u,
+              .pmf = 0.0f,
+              .aliasThreshold = 0.0f,
+              .aliasIndex = 0,
+              ._pad0 = 0,
+              ._pad1 = 0,
+            };
+            WriteRows(world, light.objectToWorld);
+
+            m_EmissiveStaging.push_back(light);
+            m_EmissiveWeights.push_back(weight);
+          }
+        }
+
         instances[cursor] = instance;
-        records[cursor] = record;
+        records[cursor] = instanceRecord;
         cursor++;
       }
     }
 
     slot.instanceCount = cursor;
+    UploadEmissiveTable(ctx, slot);
+
     if (cursor == 0)
       return;
 
@@ -285,10 +478,10 @@ namespace YAEngine
     // legal here because raytracingSupported is exactly what enabled VK_KHR_ray_tracing_pipeline.
     const VkPipelineStageFlags traceStages = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
 
-    // The instance array and the records were just written through a host mapping.
-    // vkQueueSubmit makes host writes visible on its own, but the two are read at
-    // different points - the build reads the instances, a tracing pass reads the
-    // records - and one barrier covers both scopes.
+    // The instance array, the records and the emissive light table were just written through a
+    // host mapping. vkQueueSubmit makes host writes visible on its own, but they are read at
+    // different points - the build reads the instances, a tracing pass reads the rest - and one
+    // barrier covers both scopes.
     VkMemoryBarrier hostBarrier {
       .sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER,
       .srcAccessMask = VK_ACCESS_HOST_WRITE_BIT,
@@ -317,8 +510,8 @@ namespace YAEngine
     {
       b_FirstBuildLogged = true;
       YA_LOG_INFO("Render",
-        "TLAS built: %u instances over %zu objects, %llu record bytes, %llu structure bytes",
-        slot.instanceCount, snapshot.objects.size(),
+        "TLAS built: %u instances over %zu objects, %u emissive, %llu record bytes, %llu structure bytes",
+        slot.instanceCount, snapshot.objects.size(), slot.emissiveCount,
         (unsigned long long)(slot.instanceCount * sizeof(RayTracingInstanceRecord)),
         (unsigned long long)slot.structure.GetSize());
     }
@@ -349,8 +542,18 @@ namespace YAEngine
     return frameIndex < m_Slots.size() ? m_Slots[frameIndex].instanceCount : 0;
   }
 
-  bool TlasBuilder::RecordBufferChanged(uint32_t frameIndex) const
+  VkBuffer TlasBuilder::GetEmissiveBuffer(uint32_t frameIndex) const
   {
-    return frameIndex < m_Slots.size() && m_Slots[frameIndex].recordBufferChanged;
+    return frameIndex < m_Slots.size() ? m_Slots[frameIndex].emissive.Get() : VK_NULL_HANDLE;
+  }
+
+  VkDeviceSize TlasBuilder::GetEmissiveBufferSize(uint32_t frameIndex) const
+  {
+    return frameIndex < m_Slots.size() ? m_Slots[frameIndex].emissive.GetSize() : 0;
+  }
+
+  uint32_t TlasBuilder::GetEmissiveCount(uint32_t frameIndex) const
+  {
+    return frameIndex < m_Slots.size() ? m_Slots[frameIndex].emissiveCount : 0;
   }
 }

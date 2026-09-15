@@ -20,8 +20,7 @@ const vec4 WORLD_TO_PREV_WORLD_IDENTITY[3] = vec4[3](
 
 vec3 applyWorldToPrevWorldPoint(vec4 rows[3], vec3 point)
 {
-  vec4 homogeneous = vec4(point, 1.0);
-  return vec3(dot(rows[0], homogeneous), dot(rows[1], homogeneous), dot(rows[2], homogeneous));
+  return transformPointByRows(rows, point);
 }
 
 // Linear part only, renormalized. Exact for rigid motion under a uniform scale, which is what

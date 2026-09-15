@@ -1,5 +1,8 @@
 // Requires common.glsl to be included before this file
 
+// EMISSIVE_SHADING_CUTOFF, which TlasBuilder's emissive light table decides by too.
+#include "../Shared/MaterialUniforms.h"
+
 // Reversed-Z with an infinite far plane: d = near / viewDistance. Sky texels hold exactly
 // 0, so the clamp keeps them a huge finite distance instead of inf (inf - inf is NaN in
 // every depth-difference test downstream).
@@ -34,10 +37,6 @@ vec2 computeVelocity(vec4 curClipPos, vec4 prevClipPos)
 // itself. That costs the metallic channel, which is why the pixel also has to switch its
 // shading model - an emissive texel is shaded as pure emission, never as PBR.
 const float EMISSIVE_MAX = 64.0;
-// A texel emitting more than a white lambertian surface under unit light is bright enough
-// that dropping its PBR response is invisible. Below that the surface still reads as lit,
-// so it stays on the PBR path and the emissive contribution is dropped instead.
-const float EMISSIVE_SHADING_CUTOFF = 1.0;
 
 float luminance(vec3 c)
 {

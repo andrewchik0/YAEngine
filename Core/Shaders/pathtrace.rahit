@@ -18,30 +18,6 @@ hitAttributeEXT vec2 hitBarycentrics;
 // looks like.
 void main()
 {
-  RayTracingInstanceRecord instance = u_Instances[gl_InstanceCustomIndexEXT];
-
-  // A mesh with no attribute block carries positions alone, so there is no texture
-  // coordinate to cut out with, and an out-of-range material slot cannot be read at all.
-  if (instance.attributeOffset == 0u || instance.materialIndex >= uint(u_Materials.length()))
-    return;
-
-  RayTracingMaterialRecord material = u_Materials[instance.materialIndex];
-  // Without a base color map the alpha is the material's own, which the cutout path never
-  // uses to discard - accepting the candidate is what the raster does there too.
-  if ((material.textureMask & RT_MATERIAL_BASE_COLOR) == 0u)
-    return;
-
-  IndexStream indices = IndexStream(instance.indexAddress);
-  VertexStream vertices = VertexStream(instance.vertexAddress);
-
-  uvec3 triIndices = fetchTriangle(indices, uint(gl_PrimitiveID));
-  vec2 texCoord = interpolateTexCoord(vertices, instance.attributeOffset, triIndices, hitBarycentrics);
-
-  // Mip 0 explicitly: a ray tracing invocation has no derivatives, so an implicit LOD
-  // would be undefined here.
-  float alpha = textureLod(u_BindlessTextures[nonuniformEXT(material.baseColorIndex)],
-    texCoord * material.uvScale, 0.0).a;
-
-  if (alpha < RT_ALPHA_CUTOFF)
+  if (isAlphaCutout(u_Instances[gl_InstanceCustomIndexEXT], uint(gl_PrimitiveID), hitBarycentrics))
     ignoreIntersectionEXT;
 }

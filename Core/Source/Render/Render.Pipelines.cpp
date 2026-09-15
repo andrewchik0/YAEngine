@@ -1114,6 +1114,8 @@ namespace YAEngine
             { 21, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
             { 22, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
             { 23, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
+            // The emissive light table, built with the instance records
+            { 24, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, rtSceneStages },
           }
         };
 

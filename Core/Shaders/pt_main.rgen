@@ -25,6 +25,7 @@
 #include "random.glsl"
 #include "light_eval.glsl"
 #include "../Shared/PathTraceData.h"
+#include "../Shared/EmissiveLightData.h"
 #include "specular_motion.glsl"
 
 // Set 1 bindings 3 and up are the pass's own: the G-buffer, the sky, the lights and the
@@ -72,6 +73,14 @@ layout(set = 1, binding = 20, rgba16f) uniform writeonly image2D outLayerNormal;
 layout(set = 1, binding = 21, rgba16f) uniform writeonly image2D outLayerThroughput;
 layout(set = 1, binding = 22, r32f) uniform writeonly image2D outLayerDepth;
 layout(set = 1, binding = 23, rg16f) uniform writeonly image2D outLayerMotion;
+
+// The emissive light table next event estimation samples emitting geometry from, see
+// EmissiveLightData.h. Built with this frame slot's instance records.
+layout(std430, set = 1, binding = 24) readonly buffer PathTraceEmissiveLightSSBO
+{
+  EmissiveLightTableHeader u_EmissiveHeader;
+  EmissiveLightRecord u_EmissiveLights[];
+};
 
 layout(push_constant) uniform PathTracePushBlock
 {

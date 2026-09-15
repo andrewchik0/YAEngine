@@ -46,6 +46,11 @@ namespace YAEngine
     // Records actually written this frame. The buffer beyond it is zeroed padding.
     uint32_t GetRecordCount(uint32_t frameIndex) const;
 
+    // A fold of every record field the path tracer's emission reads - the emissive shading and
+    // map bits, emissivity, the map slot and uvScale - over the records that emit, as of the
+    // slot's last Update. The path tracer restarts its accumulation when it changes.
+    uint64_t GetEmissionDigest(uint32_t frameIndex) const;
+
 #ifdef YA_EDITOR
     // Past every frame index, so the frame loop never updates it.
     uint32_t GetBakeSlot() const { return m_BakeSlot; }
@@ -64,6 +69,7 @@ namespace YAEngine
     {
       VulkanBuffer records;
       uint32_t recordCount = 0;
+      uint64_t emissionDigest = 0;
     };
 
     // Grows the slot's buffer to hold `required` records, doubling up to the cap. Returns

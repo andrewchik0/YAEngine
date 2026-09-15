@@ -29,6 +29,16 @@ namespace YAEngine
       textureMask |= maskBit;
       return textures.GetBindlessIndex(handle);
     }
+
+    // One step of SnapshotDigest's fold (SceneSnapshot.h), kept local for the reason
+    // Render.Draw.cpp gives for its own copy.
+    uint64_t FoldWord(uint64_t digest, uint64_t word)
+    {
+      word *= 0xff51afd7ed558ccdull;
+      word ^= word >> 33;
+      digest = (digest ^ word) * 1099511628211ull;
+      return digest ^ (digest >> 29);
+    }
   }
 
   void RayTracingMaterialTable::Init(const RenderContext& ctx)
@@ -87,6 +97,7 @@ namespace YAEngine
 
     FrameSlot& slot = m_Slots[frameIndex];
     slot.recordCount = 0;
+    slot.emissionDigest = 0;
 
     // The table is addressed by slot index, not by a compacted material order, so its
     // length is the highest live slot plus one and not the live material count.
@@ -170,6 +181,27 @@ namespace YAEngine
     std::memcpy(slot.records.GetMapped(), m_Staging.data(),
       size_t(count) * sizeof(RayTracingMaterialRecord));
     slot.recordCount = count;
+
+    // A record without emissive shading emits nothing, so it folds nothing and an edit to any
+    // other material never restarts the path tracer's accumulation.
+    uint64_t emissionDigest = 0;
+    for (uint32_t i = 0; i < count; i++)
+    {
+      const RayTracingMaterialRecord& record = m_Staging[i];
+      const uint32_t emissionMask =
+        record.textureMask & (RT_MATERIAL_EMISSIVE_SHADING | RT_MATERIAL_EMISSIVE_MAP);
+      if ((emissionMask & RT_MATERIAL_EMISSIVE_SHADING) == 0)
+        continue;
+
+      emissionDigest = FoldWord(emissionDigest, uint64_t(i) | (uint64_t(emissionMask) << 32));
+      emissionDigest = FoldWord(emissionDigest, uint64_t(glm::floatBitsToUint(record.emissivity.x))
+        | (uint64_t(glm::floatBitsToUint(record.emissivity.y)) << 32));
+      emissionDigest = FoldWord(emissionDigest, uint64_t(glm::floatBitsToUint(record.emissivity.z))
+        | (uint64_t(record.emissiveIndex) << 32));
+      emissionDigest = FoldWord(emissionDigest, uint64_t(glm::floatBitsToUint(record.uvScale.x))
+        | (uint64_t(glm::floatBitsToUint(record.uvScale.y)) << 32));
+    }
+    slot.emissionDigest = emissionDigest;
   }
 
   bool RayTracingMaterialTable::IsValid(uint32_t frameIndex) const
@@ -190,5 +222,10 @@ namespace YAEngine
   uint32_t RayTracingMaterialTable::GetRecordCount(uint32_t frameIndex) const
   {
     return frameIndex < m_Slots.size() ? m_Slots[frameIndex].recordCount : 0;
+  }
+
+  uint64_t RayTracingMaterialTable::GetEmissionDigest(uint32_t frameIndex) const
+  {
+    return frameIndex < m_Slots.size() ? m_Slots[frameIndex].emissionDigest : 0;
   }
 }

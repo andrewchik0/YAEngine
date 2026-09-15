@@ -353,13 +353,18 @@ namespace YAEngine
       m_FrameUniformBuffer.uniforms.view != m_PathTraceCachedView
       || m_UnjitteredProj != m_PathTraceCachedProj;
 
-    // The same three digests the shadow atlas cache keys on, which is exactly the right set:
-    // they cover which casters exist, where they are and what every light is doing, and the
-    // acceleration structure is rebuilt from the same snapshot.
+    // The shadow atlas cache's digests cover which casters exist and where they are, and the
+    // acceleration structure is rebuilt from the same snapshot. Its light digest leaves out all
+    // a shadow cannot see - intensity, colour, the sun direction, lights without shadows, emitter
+    // size - so the whole light buffer and the emission this frame's material table holds are
+    // compared on top.
+    const uint64_t emissionDigest = m_MaterialTable.GetEmissionDigest(m_Backend.GetCurrentFrameIndex());
     const bool sceneChanged =
       frame.snapshot.casterIdentityDigest != m_PathTraceCachedIdentityDigest
       || frame.snapshot.casterTransformDigest != m_PathTraceCachedTransformDigest
-      || frame.snapshot.lightDigest != m_PathTraceCachedLightDigest;
+      || frame.snapshot.lightDigest != m_PathTraceCachedLightDigest
+      || frame.snapshot.pathTraceLightDigest != m_PathTraceCachedLightBufferDigest
+      || emissionDigest != m_PathTraceCachedEmissionDigest;
 
     if (b_PathTraceResetPending || cameraMoved || sceneChanged)
     {
@@ -378,6 +383,8 @@ namespace YAEngine
     m_PathTraceCachedIdentityDigest = frame.snapshot.casterIdentityDigest;
     m_PathTraceCachedTransformDigest = frame.snapshot.casterTransformDigest;
     m_PathTraceCachedLightDigest = frame.snapshot.lightDigest;
+    m_PathTraceCachedLightBufferDigest = frame.snapshot.pathTraceLightDigest;
+    m_PathTraceCachedEmissionDigest = emissionDigest;
   }
 
   void Render::Draw(FrameContext& frame)

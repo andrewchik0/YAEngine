@@ -117,6 +117,12 @@ namespace YAEngine
     uint64_t casterTransformDigest = 0;
     uint64_t lightDigest = 0;
 
+    // Every LightBuffer field the path tracer and the probe baker light with, bit for bit: the
+    // header, sun direction and flags included, and each live point and spot light. Keys the
+    // path tracer's accumulation reset only; the shadow cache keeps lightDigest, which leaves
+    // the sun direction to the cascade fit.
+    uint64_t pathTraceLightDigest = 0;
+
     // Stage 6 dirty rects: union AABBs of the shadow-relevant casters that
     // moved in the tick right before this snapshot. The transform digest
     // stays the trigger; these attribute the change to footprints. A mover

@@ -26,6 +26,11 @@ namespace YAEngine {
 #define PT_LOBE_FLOOR_ROUGHNESS_MIN 0.15
 #define PT_LOBE_FLOOR_ROUGHNESS_MAX 0.4
 
+// Points on emitting geometry drawn at every next event estimation vertex, resampled together with
+// the one analytic light candidate down to the single sample the shadow ray is traced to. Each costs
+// a few buffer fetches and a BRDF evaluation, never a ray.
+#define PT_EMISSIVE_CANDIDATES 4
+
 // The bounce Russian roulette starts at. Killing paths before it costs more variance than
 // the traversal it saves - the first two bounces carry most of the energy of the path.
 #define PT_RR_START_BOUNCE 2

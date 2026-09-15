@@ -145,6 +145,13 @@ namespace YAEngine
     float outerCone = glm::radians(35.0f);
     float shadowDistance = 200.0f;
     bool castShadow = false;
+    // Path tracer and probe baker only, raster lighting ignores both. Meters for a point or spot
+    // (0 = delta light), degrees for the sun; neither changes how much light arrives.
+    float sourceRadius = 0.0f;
+    float angularDiameter = 0.53f;
+    // The path tracer and the probe baker treat the light as absent: it stands in for emissive
+    // geometry they already sample, and would otherwise be counted twice.
+    bool rasterOnly = false;
   };
 
   struct ModelSourceComponent

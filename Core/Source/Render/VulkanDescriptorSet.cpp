@@ -102,8 +102,19 @@ namespace YAEngine
     }
   }
 
+  void DescriptorWriter::ReserveWrite(uint32_t binding) const
+  {
+    if (m_WriteCount >= MAX_WRITES)
+    {
+      YA_LOG_ERROR("Render", "DescriptorWriter overflow: binding %u exceeds %u queued writes",
+        binding, MAX_WRITES);
+      throw std::runtime_error("DescriptorWriter overflow");
+    }
+  }
+
   DescriptorWriter& DescriptorWriter::WriteUniformBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size)
   {
+    ReserveWrite(binding);
     auto& bufferInfo = m_BufferInfos[m_BufferInfoCount++];
     bufferInfo = {};
     bufferInfo.buffer = buffer;
@@ -124,6 +135,7 @@ namespace YAEngine
 
   DescriptorWriter& DescriptorWriter::WriteStorageBuffer(uint32_t binding, VkBuffer buffer, VkDeviceSize size)
   {
+    ReserveWrite(binding);
     auto& bufferInfo = m_BufferInfos[m_BufferInfoCount++];
     bufferInfo = {};
     bufferInfo.buffer = buffer;
@@ -148,6 +160,7 @@ namespace YAEngine
     VkImageLayout layout,
     uint32_t arrayElement)
   {
+    ReserveWrite(binding);
     auto& imageInfo = m_ImageInfos[m_ImageInfoCount++];
     imageInfo = {};
     imageInfo.imageView = imageView;
@@ -171,6 +184,7 @@ namespace YAEngine
     VkImageView imageView,
     VkImageLayout layout)
   {
+    ReserveWrite(binding);
     auto& imageInfo = m_ImageInfos[m_ImageInfoCount++];
     imageInfo = {};
     imageInfo.imageView = imageView;
@@ -192,6 +206,7 @@ namespace YAEngine
     uint32_t binding,
     VkAccelerationStructureKHR structure)
   {
+    ReserveWrite(binding);
     auto& handle = m_AccelHandles[m_AccelInfoCount];
     handle = structure;
 

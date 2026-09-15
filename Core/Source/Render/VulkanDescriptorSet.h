@@ -58,9 +58,11 @@ namespace YAEngine
 
   private:
 
-    // The path tracer's set is the largest writer at 18 bindings. Nothing bounds-checks the
-    // arrays below, so exceeding this is an out-of-bounds write, not an error.
-    static constexpr uint32_t MAX_WRITES = 24;
+    // The path tracer's set is the largest writer at 25 bindings. Every Write* adds exactly one
+    // write and at most one info, so ReserveWrite guarding the write count guards all arrays.
+    static constexpr uint32_t MAX_WRITES = 32;
+
+    void ReserveWrite(uint32_t binding) const;
 
     VkDevice m_Device {};
     VkDescriptorSet m_Set {};

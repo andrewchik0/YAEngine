@@ -149,7 +149,43 @@ struct RayHitGeometry
   uint attributeOffset;
   uint materialIndex;
   uint flags;
+  // World space area of the hit triangle, which is what an emitter hit weighs its MIS with.
+  float area;
+  // Whether the ray arrived at the raster front face (isRasterFrontFace), judged before the
+  // normal above is flipped toward the ray.
+  bool frontFace;
 };
+
+// The face raster draws a single sided mesh from. Every mesh pipeline keeps COUNTER_CLOCKWISE
+// front faces and culls the back ones, the projection is right-handed with Y flipped for Vulkan,
+// and nothing compensates for a transform with a negative determinant. So the front is the side
+// cross(p1 - p0, p2 - p0) of the WORLD space vertices points to - for a mirrored instance too,
+// which raster then shows from its authored back - and a ray arrives at it when it runs against
+// that cross. Not gl_HitKindEXT, which judges winding in object space; see RayTracingPayload.
+bool isRasterFrontFace(vec3 worldCross, vec3 rayDirection)
+{
+  return dot(worldCross, rayDirection) < 0.0;
+}
+
+// Emission is one sided the way raster shows it: a single sided instance emits from its front
+// face only, one raster draws without culling from both - double sided materials, and alpha
+// tested and unlit ones, whose G-buffer pipelines always cull nothing. The back face is still
+// geometry - it occludes and reflects like any surface. Traced hits and emissive light samples
+// both decide through here, so the two halves of an emitter's MIS weight always describe the
+// same emitter.
+bool emitsFromFace(uint instanceFlags, bool frontFace)
+{
+  const uint twoSided = RT_INSTANCE_DOUBLE_SIDED | RT_INSTANCE_ALPHA_TEST | RT_INSTANCE_UNLIT;
+  return frontFace || (instanceFlags & twoSided) != 0u;
+}
+
+// A point through the top three rows of a row-major affine matrix, the layout of
+// RayTracingInstanceRecord::worldToPrevWorld and of the emissive light table's objectToWorld.
+vec3 transformPointByRows(vec4 rows[3], vec3 point)
+{
+  vec4 homogeneous = vec4(point, 1.0);
+  return vec3(dot(rows[0], homogeneous), dot(rows[1], homogeneous), dot(rows[2], homogeneous));
+}
 
 // Resolves one committed triangle hit into world space from the instance record alone. The
 // barycentrics are the fixed-function ones, so the interpolated position is the exact point
@@ -169,7 +205,9 @@ RayHitGeometry resolveHitGeometry(uint recordIndex, uint primitiveIndex, mat4x3 
 
   // Crossed after the transform rather than before it, so no inverse transpose is
   // needed and a non-uniform scale cannot skew the normal.
-  vec3 normal = normalize(cross(p1 - p0, p2 - p0));
+  vec3 crossed = cross(p1 - p0, p2 - p0);
+  vec3 normal = normalize(crossed);
+  bool frontFace = isRasterFrontFace(crossed, rayDirection);
   if (dot(normal, rayDirection) > 0.0)
     normal = -normal;
 
@@ -183,6 +221,8 @@ RayHitGeometry resolveHitGeometry(uint recordIndex, uint primitiveIndex, mat4x3 
   hit.attributeOffset = instance.attributeOffset;
   hit.materialIndex = instance.materialIndex;
   hit.flags = instance.flags;
+  hit.area = 0.5 * length(crossed);
+  hit.frontFace = frontFace;
   return hit;
 }
 
@@ -196,3 +236,34 @@ vec2 hitTexCoord(RayHitGeometry hit, vec2 barycentrics)
   return interpolateTexCoord(VertexStream(hit.vertexAddress), hit.attributeOffset,
     hit.triIndices, barycentrics);
 }
+
+#ifdef RT_BINDLESS
+// True where pathtrace.rahit discards the candidate: the texel does not exist for a ray. Shared with
+// the path tracer's emissive light sampling, which must not light the scene from a texel no ray hits.
+bool isAlphaCutout(RayTracingInstanceRecord instance, uint primitiveIndex, vec2 barycentrics)
+{
+  // A mesh with no attribute block carries positions alone, so there is no texture
+  // coordinate to cut out with, and an out-of-range material slot cannot be read at all.
+  if (instance.attributeOffset == 0u || instance.materialIndex >= uint(u_Materials.length()))
+    return false;
+
+  RayTracingMaterialRecord material = u_Materials[instance.materialIndex];
+  // Without a base color map the alpha is the material's own, which the cutout path never
+  // uses to discard - accepting the candidate is what the raster does there too.
+  if ((material.textureMask & RT_MATERIAL_BASE_COLOR) == 0u)
+    return false;
+
+  IndexStream indices = IndexStream(instance.indexAddress);
+  VertexStream vertices = VertexStream(instance.vertexAddress);
+
+  uvec3 triIndices = fetchTriangle(indices, primitiveIndex);
+  vec2 texCoord = interpolateTexCoord(vertices, instance.attributeOffset, triIndices, barycentrics);
+
+  // Mip 0 explicitly: a ray tracing invocation has no derivatives, so an implicit LOD
+  // would be undefined here.
+  float alpha = textureLod(u_BindlessTextures[nonuniformEXT(material.baseColorIndex)],
+    texCoord * material.uvScale, 0.0).a;
+
+  return alpha < RT_ALPHA_CUTOFF;
+}
+#endif

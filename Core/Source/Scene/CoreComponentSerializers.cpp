@@ -140,6 +140,12 @@ namespace YAEngine
           n["castShadow"] = true;
         if (l.type == LightType::Directional && l.shadowDistance != 200.0f)
           n["shadowDistance"] = l.shadowDistance;
+        if (l.type != LightType::Directional && l.sourceRadius != 0.0f)
+          n["sourceRadius"] = l.sourceRadius;
+        if (l.type == LightType::Directional && l.angularDiameter != 0.53f)
+          n["angularDiameter"] = l.angularDiameter;
+        if (l.rasterOnly)
+          n["rasterOnly"] = true;
         return n;
       },
       [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
@@ -158,6 +164,9 @@ namespace YAEngine
         if (n["outerCone"]) l.outerCone = n["outerCone"].as<float>();
         if (n["castShadow"]) l.castShadow = n["castShadow"].as<bool>();
         if (n["shadowDistance"]) l.shadowDistance = n["shadowDistance"].as<float>();
+        if (n["sourceRadius"]) l.sourceRadius = n["sourceRadius"].as<float>();
+        if (n["angularDiameter"]) l.angularDiameter = n["angularDiameter"].as<float>();
+        if (n["rasterOnly"]) l.rasterOnly = n["rasterOnly"].as<bool>();
         reg.emplace_or_replace<LightComponent>(e, l);
       }
     );

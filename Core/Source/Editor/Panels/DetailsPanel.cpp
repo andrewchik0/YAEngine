@@ -1067,6 +1067,21 @@ namespace YAEngine
         .disabledReason = light.type == LightType::Directional ? nullptr : "Directional lights only" });
       PopDependency();
 
+      PropertyFloat("Source Radius", light.sourceRadius, {
+        .min = 0.0f, .max = FLT_MAX, .speed = 0.01f, .format = "%.3f", .unit = "m", .defaultValue = 0.0f,
+        .tooltip = "Radius of the emitting sphere. Softens path traced and baked shadows without changing brightness; "
+                   "0 is a point source. Raster lighting ignores it.",
+        .disabledReason = ranged ? nullptr : "Point and Spot lights only" });
+      PropertyFloat("Angular Diameter", light.angularDiameter, {
+        .min = 0.0f, .max = 90.0f, .speed = 0.01f, .format = "%.2f", .unit = "deg", .defaultValue = 0.53f,
+        .tooltip = "Apparent size of the sun disk, 0.53 for the real sun. Softens path traced and baked shadows without "
+                   "changing brightness; 0 is a point source. Raster lighting ignores it.",
+        .disabledReason = light.type == LightType::Directional ? nullptr : "Directional lights only" });
+      PropertyBool("Raster Only", light.rasterOnly, {
+        .defaultValue = false,
+        .tooltip = "Ignored by the path tracer and the probe baker, which treat this light as absent. Meant for lights "
+                   "standing in for emissive geometry: those two already light the scene with the emitter itself." });
+
       EndPropertyGroup();
     }
 

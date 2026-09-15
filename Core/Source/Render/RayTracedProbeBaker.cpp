@@ -181,13 +181,15 @@ namespace YAEngine
     }
 
     // Worst case in the rays the submit caps count. selectLight walks every candidate twice at each
-    // of a sample's maxBounces + 1 path vertices, the directional slot included whether lit or not.
+    // of a sample's maxBounces + 1 path vertices, the directional slot included whether lit or not,
+    // and each vertex draws PT_EMISSIVE_CANDIDATES emissive candidates on top, counted one evaluation
+    // apiece whether the table holds anything or not.
     uint32_t IntegrateWorkPerSample(int32_t maxBounces, const LightBuffer& lights)
     {
       const uint32_t candidates = 1
         + uint32_t(std::clamp(lights.pointLightCount, 0, MAX_POINT_LIGHTS))
         + uint32_t(std::clamp(lights.spotLightCount, 0, MAX_SPOT_LIGHTS));
-      const uint32_t evaluations = 2 * uint32_t(maxBounces + 1) * candidates;
+      const uint32_t evaluations = uint32_t(maxBounces + 1) * (2 * candidates + PT_EMISSIVE_CANDIDATES);
       return IntegrateRaysPerSample(maxBounces)
         + (evaluations + LIGHT_EVALUATIONS_PER_RAY - 1) / LIGHT_EVALUATIONS_PER_RAY;
     }
@@ -217,10 +219,12 @@ namespace YAEngine
 
   // One point's pass has to fit into a single submit. A pass traces at most
   // RT_PROBE_MAX_RAYS_PER_POINT_PASS rays, and a sample evaluates light candidates at most rays x
-  // MAX_LIGHT_CANDIDATES times (two walks and two rays per vertex); the rest covers the rays
-  // themselves and the rounding.
+  // (MAX_LIGHT_CANDIDATES + PT_EMISSIVE_CANDIDATES / 2) times (two walks, the emissive draws and two
+  // rays per vertex), which the emissive term below overstates; the rest covers the rays themselves
+  // and the rounding.
   static_assert(uint64_t(BakeLimits::RT_PROBE_MAX_RAYS_PER_POINT_PASS)
-    * (2 + MAX_LIGHT_CANDIDATES / LIGHT_EVALUATIONS_PER_RAY + 1) <= BakeLimits::RT_PROBE_MAX_RAYS_PER_SUBMIT,
+    * (2 + (MAX_LIGHT_CANDIDATES + PT_EMISSIVE_CANDIDATES) / LIGHT_EVALUATIONS_PER_RAY + 1)
+    <= BakeLimits::RT_PROBE_MAX_RAYS_PER_SUBMIT,
     "One point's pass, light evaluations included, has to fit into a single submit");
 
   void RayTracedProbeBaker::Init(Render& render)
@@ -254,6 +258,8 @@ namespace YAEngine
         { 4, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, stages },
         { 5, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, stages },
         { 6, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, stages },
+        // The bake slot's emissive light table
+        { 7, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, stages },
       }
     };
     m_DescriptorSet.Init(ctx, setDesc);
@@ -396,6 +402,7 @@ namespace YAEngine
       .WriteStorageBuffer(4, m_LightBuffer.Get(), sizeof(LightBuffer))
       .WriteStorageBuffer(5, m_PointBuffer.Get(), pointBytes)
       .WriteStorageBuffer(6, m_RecordBuffer.Get(), recordBytes)
+      .WriteStorageBuffer(7, tlas.GetEmissiveBuffer(tlasSlot), tlas.GetEmissiveBufferSize(tlasSlot))
       .Flush();
 
     VulkanRaytracingPipeline& pipeline = m_Render->m_PSOCache.GetRayTracing(m_Pipeline);

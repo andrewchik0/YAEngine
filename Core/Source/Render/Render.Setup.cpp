@@ -65,6 +65,8 @@ namespace YAEngine
       .WriteStorageImage(21, m_Graph.GetResource(m_PTLayerThroughput).GetView())
       .WriteStorageImage(22, m_Graph.GetResource(m_PTLayerDepth).GetView())
       .WriteStorageImage(23, m_Graph.GetResource(m_PTLayerMotion).GetView())
+      .WriteStorageBuffer(24, m_TlasBuilder.GetEmissiveBuffer(frameIndex),
+        m_TlasBuilder.GetEmissiveBufferSize(frameIndex))
       .Flush();
   }
 

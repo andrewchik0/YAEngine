@@ -8,6 +8,13 @@ namespace YAEngine
 {
   struct RenderContext;
 
+  // std430: every light struct is made of vec4 only, so they stride 48, 64 and 32. The four ints
+  // after the directional light fill 32-47, which puts the point light array at 48.
+  static_assert(sizeof(DirectionalLight) == 32 && sizeof(PointLight) == 48 && sizeof(SpotLight) == 64
+    && offsetof(LightBuffer, directionalFlags) == 40 && offsetof(LightBuffer, pointLights) == 48
+    && sizeof(LightBuffer) == 48 + 48 * MAX_POINT_LIGHTS + 64 * MAX_SPOT_LIGHTS,
+    "LightBuffer no longer matches its std430 layout");
+
   class LightStorageBuffer
   {
   public:

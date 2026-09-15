@@ -17,8 +17,9 @@
 
 namespace YAEngine
 {
-  // FNV-1a-flavoured fold of shadow-relevant scene state, computed while the
-  // snapshot loops already run. Floats are hashed bit-wise: any actual change
+  // FNV-1a-flavoured fold of the scene state the shadow cache and the path
+  // tracer's accumulation key on, computed while the snapshot loops already
+  // run. Floats are hashed bit-wise: any actual change
   // flips the digest, bit-identical state keeps it. The fold consumes 64 bits
   // per step instead of one byte, because the per-caster loop below runs on
   // every frame including cache HITs. Local to the snapshot on purpose - this
@@ -345,6 +346,7 @@ namespace YAEngine
     lights.pointLightCount = 0;
     lights.spotLightCount = 0;
     lights.directional = {};
+    lights.directionalFlags = 0;
     bool hasDirectional = false;
     auto lightView = scene.GetView<LightComponent, WorldTransform>();
     for (auto entity : lightView)
@@ -367,7 +369,8 @@ namespace YAEngine
           auto& pl = lights.pointLights[lights.pointLightCount++];
           pl.positionRadius = glm::vec4(position, light.radius);
           pl.colorIntensity = glm::vec4(light.color, light.intensity);
-          pl.shadowPad = glm::vec4(glm::intBitsToFloat(-1), 0.0f, 0.0f, 0.0f);
+          pl.shadowPad = glm::vec4(glm::intBitsToFloat(-1), std::max(light.sourceRadius, 0.0f),
+            light.rasterOnly ? 1.0f : 0.0f, 0.0f);
 
           if (light.castShadow && snapshot.pointShadowRequests.size() < MAX_SHADOW_POINTS)
           {
@@ -388,7 +391,8 @@ namespace YAEngine
           sl.positionRadius = glm::vec4(position, light.radius);
           sl.directionInnerCone = glm::vec4(forward, std::cos(light.innerCone));
           sl.colorOuterCone = glm::vec4(light.color, std::cos(light.outerCone));
-          sl.intensityShadow = glm::vec4(light.intensity, glm::intBitsToFloat(-1), 0.0f, 0.0f);
+          sl.intensityShadow = glm::vec4(light.intensity, glm::intBitsToFloat(-1),
+            std::max(light.sourceRadius, 0.0f), light.rasterOnly ? 1.0f : 0.0f);
 
           if (light.castShadow && snapshot.spotShadowRequests.size() < MAX_SHADOW_SPOTS)
           {
@@ -408,7 +412,11 @@ namespace YAEngine
           if (!hasDirectional)
           {
             lights.directional.directionIntensity = glm::vec4(forward, light.intensity);
-            lights.directional.colorPad = glm::vec4(light.color, 0.0f);
+            // Capped at a 90 degree disk so the cone the path tracer samples stays well inside a
+            // hemisphere.
+            lights.directional.colorPad = glm::vec4(light.color,
+              glm::radians(std::clamp(light.angularDiameter, 0.0f, 90.0f)) * 0.5f);
+            lights.directionalFlags = light.rasterOnly ? LIGHT_FLAG_RASTER_ONLY : 0;
             snapshot.directionalShadow.direction = forward;
             snapshot.directionalShadow.position = position;
             snapshot.directionalShadow.shadowDistance = light.shadowDistance;
@@ -444,6 +452,18 @@ namespace YAEngine
       lightDigest.Add(req.lightIndex);
     }
     snapshot.lightDigest = lightDigest.value;
+
+    // What the path tracer lights with, the sun direction included: the header and every live
+    // light, bit for bit. Bounded by the light counts, so a few thousand folds at most.
+    SnapshotDigest pathTraceLightDigest;
+    pathTraceLightDigest.Add(lights.directional);
+    pathTraceLightDigest.AddPair(uint32_t(lights.pointLightCount), uint32_t(lights.spotLightCount));
+    pathTraceLightDigest.AddPair(uint32_t(lights.directionalFlags), 0u);
+    for (int32_t i = 0; i < lights.pointLightCount; i++)
+      pathTraceLightDigest.Add(lights.pointLights[i]);
+    for (int32_t i = 0; i < lights.spotLightCount; i++)
+      pathTraceLightDigest.Add(lights.spotLights[i]);
+    snapshot.pathTraceLightDigest = pathTraceLightDigest.value;
   }
 
 #ifdef YA_EDITOR

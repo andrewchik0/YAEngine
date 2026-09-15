@@ -74,8 +74,9 @@ namespace YAEngine
   // PRECONDITION of both calls: Render::BuildRayTracingBakeScene has filled the TLAS and material
   // table bake slots from the snapshot being baked. Only their validity is checked here - a bake
   // slot left over from an earlier snapshot is traced as it is. A build that grows either slot
-  // replaces its structure and buffers outright, so every call writes set 1 bindings 0-2 afresh
-  // from the slots' current handles rather than keeping what an earlier call bound.
+  // replaces its structure and buffers outright, so every call writes set 1 bindings 0-2 and the
+  // emissive light table at 7 afresh from the slots' current handles rather than keeping what an
+  // earlier call bound.
   class RayTracedProbeBaker
   {
   public:

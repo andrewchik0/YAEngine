@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Pch.h"
+#include "EmissiveLightData.h"
 #include "RayTracingInstanceData.h"
 #include "VulkanAccelerationStructure.h"
 #include "VulkanBuffer.h"
@@ -16,9 +17,15 @@ namespace YAEngine
 
   static_assert(sizeof(RayTracingInstanceRecord) == 80,
     "RayTracingInstanceRecord no longer matches its std430 layout");
+  static_assert(sizeof(EmissiveLightTableHeader) == 16,
+    "EmissiveLightTableHeader no longer matches its std430 layout");
+  static_assert(sizeof(EmissiveLightRecord) == 80 && offsetof(EmissiveLightRecord, objectToWorld) == 16
+    && offsetof(EmissiveLightRecord, aliasThreshold) == 64,
+    "EmissiveLightRecord no longer matches its std430 layout");
 
   // The scene's top level acceleration structure, rebuilt every frame, together with the
-  // parallel record buffer that tells a shader what a hit belongs to.
+  // parallel record buffer that tells a shader what a hit belongs to, and the emissive light
+  // table next event estimation samples emitting instances from.
   //
   // The instance list is built from the snapshot's FULL object list, the frustum-culled
   // tail included. A secondary ray leaves the camera frustum on its first bounce, so
@@ -37,8 +44,8 @@ namespace YAEngine
     void Init(const RenderContext& ctx);
     void Destroy(const RenderContext& ctx);
 
-    // Fills the frame slot's instance and record buffers from the snapshot and records
-    // the build into cmd. Two constraints on where it may be called:
+    // Fills the frame slot's instance, record and emissive light buffers from the snapshot and
+    // records the build into cmd. Two constraints on where it may be called:
     //  - outside any render pass instance, which a build may not be recorded inside;
     //  - only once nothing that read this slot is still in flight - for a frame slot, after
     //    its frame fence - because the buffers it overwrites may be replaced outright.
@@ -59,9 +66,13 @@ namespace YAEngine
 
     uint32_t GetInstanceCount(uint32_t frameIndex) const;
 
-    // True when the last Build replaced this slot's record buffer, which growth does.
-    // A descriptor pointing at the old handle has to be rewritten before it is used.
-    bool RecordBufferChanged(uint32_t frameIndex) const;
+    // An EmissiveLightTableHeader followed by one EmissiveLightRecord per instance whose material
+    // can produce an emissive texel, written by the same Build as the records. Always a bindable
+    // buffer: a slot with no emitters, or one whose last Build returned early, holds a count of zero.
+    // Growth replaces it like the record buffer, so a consumer rewrites its descriptor per use.
+    VkBuffer GetEmissiveBuffer(uint32_t frameIndex) const;
+    VkDeviceSize GetEmissiveBufferSize(uint32_t frameIndex) const;
+    uint32_t GetEmissiveCount(uint32_t frameIndex) const;
 
 #ifdef YA_EDITOR
     // Past every frame index, so the frame loop never builds into it.
@@ -80,6 +91,10 @@ namespace YAEngine
     // runaway scene, not a budget the scene is expected to reach; instances past it are
     // dropped with one warning.
     static constexpr uint32_t MAX_INSTANCE_CAPACITY = 256 * 1024;
+    // Emitting instances are a small share of a scene, so the emissive table starts at 20 KB per
+    // frame slot and doubles from there, up to MAX_INSTANCE_CAPACITY - it can never hold more
+    // entries than there are instances.
+    static constexpr uint32_t INITIAL_EMISSIVE_CAPACITY = 256;
 
     struct FrameSlot
     {
@@ -92,6 +107,9 @@ namespace YAEngine
       bool addressUsable = false;
       // One record per instance above, at the same index.
       VulkanBuffer records;
+      // The emissive light table header and records, host mapped like the records.
+      VulkanBuffer emissive;
+      uint32_t emissiveCount = 0;
       // Sized with the structure and replaced with it. A build reads it for as long as
       // the frame it was recorded in runs.
       AccelerationStructureScratch scratch;
@@ -101,12 +119,20 @@ namespace YAEngine
       uint32_t sizedForCount = 0;
       uint32_t instanceCount = 0;
       bool built = false;
-      bool recordBufferChanged = false;
     };
 
     // Grows both buffers to hold `required` instances, doubling up to the cap, and
     // returns the capacity that resulted. Zero means the slot has no usable buffers.
     uint32_t EnsureCapacity(const RenderContext& ctx, FrameSlot& slot, uint64_t required);
+
+    // Grows the emissive light buffer to hold `required` records the same way. A new buffer
+    // starts with a zeroed header, which is a valid empty table.
+    void EnsureEmissiveCapacity(const RenderContext& ctx, FrameSlot& slot, uint64_t required);
+
+    // Builds the alias table over the staged emissive records and writes header and records
+    // into the slot.
+    void UploadEmissiveTable(const RenderContext& ctx, FrameSlot& slot);
+    void BuildEmissiveAliasTable();
 
     // The mesh an object contributes geometry with, or null when it contributes none:
     // a stale mesh or material handle, or a mesh with no bottom level structure.
@@ -117,6 +143,14 @@ namespace YAEngine
 #ifdef YA_EDITOR
     uint32_t m_BakeSlot = 0;
 #endif
+    // One Build's emissive records and their selection weights, assembled here because the
+    // alias table needs all weights before anything is written, and because the mapped buffer
+    // is write-combined. The alias work lists are kept too; all of them are reused every frame.
+    std::vector<EmissiveLightRecord> m_EmissiveStaging;
+    std::vector<double> m_EmissiveWeights;
+    std::vector<double> m_AliasScaled;
+    std::vector<uint32_t> m_AliasSmall;
+    std::vector<uint32_t> m_AliasLarge;
     // One-time diagnostics of the frame slots only; a bake build logs its own summary.
     bool b_CapacityWarned = false;
     bool b_FirstBuildLogged = false;

@@ -7,10 +7,13 @@
 //
 // No version or extension directives here, for the reason raytracing_common.glsl gives. What a
 // consumer owes this file:
-//  - raytracing_common.glsl included under RT_BINDLESS, and light_eval.glsl included before
-//    u_Lights is declared, since LightBuffer comes from there;
-//  - declared ahead of this file: u_Lights (LightBuffer), u_Skybox (samplerCube), payload
-//    (RayTracingPayload at location 0) and shadowPayload (ShadowRayPayload at location 1);
+//  - raytracing_common.glsl included under RT_BINDLESS, and light_eval.glsl and
+//    Shared/EmissiveLightData.h included before u_Lights and the emissive light table are
+//    declared, since their structs come from there;
+//  - declared ahead of this file: u_Lights (LightBuffer), u_EmissiveHeader and u_EmissiveLights
+//    (an EmissiveLightTableHeader followed by the EmissiveLightRecord array, in one std430
+//    buffer), u_Skybox (samplerCube), payload (RayTracingPayload at location 0) and
+//    shadowPayload (ShadowRayPayload at location 1);
 //  - a shader binding table whose hit group record 0 is pathtrace.rchit + pathtrace.rahit, with
 //    pathtrace.rmiss at miss index PT_PRIMARY_MISS_INDEX and pt_shadow.rmiss at
 //    PT_SHADOW_MISS_INDEX. A wrong order still builds and runs, and silently zeroes next event
@@ -26,10 +29,11 @@
 #include "random.glsl"
 #include "light_eval.glsl"
 #include "../Shared/PathTraceData.h"
+#include "../Shared/EmissiveLightData.h"
 
 const float PT_RAY_TMIN = 1e-3;
 const float PT_RAY_TMAX = 100000.0;
-// Multiplied by the magnitude of the coordinate, see offsetRayOrigin.
+// Multiplied by the magnitude of the coordinate, see rayOffsetDistance.
 const float PT_ORIGIN_OFFSET = 1e-3;
 // Floor on the Russian roulette survival probability. Without it a nearly black throughput
 // would divide by nearly zero on the rare frame the path survives, which is a firefly the
@@ -61,14 +65,27 @@ const float PT_MIN_LOBE_PROBABILITY = 0.1;
 // The lever the guide does endorse for noise at this sample count is variance reduction in
 // the estimator itself, ReSTIR DI and GI by name, not a different point set.
 
-// Pushes a ray origin off the surface along the geometric normal, scaled with the magnitude
-// of the coordinate so a point far from the world origin still gets an offset above the
-// float spacing there. The first vertex needs it most: its position comes back through the
-// depth buffer and carries the reconstruction error with it, not just the triangle's.
+// How far offsetRayOrigin pushes a ray origin at this position: scaled with the magnitude of
+// the coordinate so a point far from the world origin still gets an offset above the float
+// spacing there.
+float rayOffsetDistance(vec3 position)
+{
+  return PT_ORIGIN_OFFSET * max(1.0, max(abs(position.x), max(abs(position.y), abs(position.z))));
+}
+
+// Pushes a ray origin off the surface along the geometric normal. The first vertex needs it
+// most: its position comes back through the depth buffer and carries the reconstruction error
+// with it, not just the triangle's.
 vec3 offsetRayOrigin(vec3 position, vec3 normal)
 {
-  float scale = max(1.0, max(abs(position.x), max(abs(position.y), abs(position.z))));
-  return position + normal * (PT_ORIGIN_OFFSET * scale);
+  return position + normal * rayOffsetDistance(position);
+}
+
+// sqrt of a value rounding can leave at or just below zero. sqrt itself is not trusted on an
+// exact zero either, see importanceSampleGGX in pbr.glsl.
+float safeSqrt(float x)
+{
+  return x > 0.0 ? sqrt(x) : 0.0;
 }
 
 // The one deliberate bias in the estimator. A single sample that lands on a small bright
@@ -166,10 +183,34 @@ struct PathSurface
   float metallic;
   float roughness;
   vec3 emissive;
-  // True for a texel the G-buffer pass would have written as pure emission, which has given
-  // up its PBR response - so the path ends there, exactly as the raster shading does.
+  // True for a texel the G-buffer pass would have written as pure emission, seen from a face
+  // that emits (emitsFromFace). It has given up its PBR response - so the path ends there,
+  // exactly as the raster shading does.
   bool emissiveTexel;
 };
+
+// The per-texel decision the G-buffer pass makes: below the cutoff the emission is dropped and
+// the texel stays PBR, above it the texel IS the emitter. A hit and an emissive light sample both
+// decide through here, and both settle the face through emitsFromFace first, because next event
+// estimation and a BSDF hit on the same point have to agree exactly or their MIS weights stop
+// adding the emitter up to one.
+bool resolveEmissiveTexel(RayTracingMaterialRecord material, vec2 texCoord, out vec3 emissive)
+{
+  emissive = vec3(0.0);
+  if ((material.textureMask & RT_MATERIAL_EMISSIVE_SHADING) == 0u)
+    return false;
+
+  vec3 texel = material.emissivity;
+  if ((material.textureMask & RT_MATERIAL_EMISSIVE_MAP) != 0u)
+    texel *= textureLod(u_BindlessTextures[nonuniformEXT(material.emissiveIndex)],
+      texCoord, 0.0).rgb;
+
+  if (luminance(texel) <= EMISSIVE_SHADING_CUTOFF)
+    return false;
+
+  emissive = texel;
+  return true;
+}
 
 PathSurface resolveHitMaterial(RayHitGeometry hit, vec2 barycentrics)
 {
@@ -214,21 +255,10 @@ PathSurface resolveHitMaterial(RayHitGeometry hit, vec2 barycentrics)
   surface.roughness = material.roughness
     * (((material.textureMask & RT_MATERIAL_COMBINED) != 0u) ? metallicSample.g : roughnessSample);
 
-  if ((material.textureMask & RT_MATERIAL_EMISSIVE_SHADING) != 0u)
-  {
-    vec3 emissive = material.emissivity;
-    if ((material.textureMask & RT_MATERIAL_EMISSIVE_MAP) != 0u)
-      emissive *= textureLod(u_BindlessTextures[nonuniformEXT(material.emissiveIndex)],
-        texCoord, 0.0).rgb;
-
-    // The same per-texel decision the G-buffer pass makes: below the cutoff the emission is
-    // dropped and the texel stays PBR, above it the texel IS the emitter.
-    if (luminance(emissive) > EMISSIVE_SHADING_CUTOFF)
-    {
-      surface.emissive = emissive;
-      surface.emissiveTexel = true;
-    }
-  }
+  // The back of a single sided emitter emits nothing and keeps the PBR response resolved above,
+  // so a path continues off it.
+  if (emitsFromFace(hit.flags, hit.frontFace))
+    surface.emissiveTexel = resolveEmissiveTexel(material, texCoord, surface.emissive);
 
   return surface;
 }
@@ -254,20 +284,29 @@ float traceShadowRay(vec3 origin, vec3 direction, float maxDistance)
   return float(shadowPayload.visible);
 }
 
+// --- Analytic lights ---
+
 struct PathLightSample
 {
+  // Toward the light's centre until sampleAnalyticLightDirection replaces it.
   vec3 direction;
   // Attenuated and cone-shaped, shadowing excluded - that is the shadow ray's job.
   vec3 radiance;
-  // How far the shadow ray may travel before the light itself is in the way.
+  // Distance to the light's centre, PT_RAY_TMAX for the sun.
   float lightDistance;
   // Probability this light was the one picked, which the estimator divides back out.
   float selectionPdf;
+  // Index into evaluateLightCandidate's flattened list.
+  int candidate;
 };
 
 // Flattens the light buffer into one candidate list so the two passes below can walk it with
 // the same code: candidate 0 is the directional light, then the point lights, then the spots.
 // False means the light does not reach the point at all.
+//
+// A raster only light stands in for emissive geometry this tracer samples itself, so it reaches
+// nothing here: a point or a spot is out of range, and the sun, which has no range, has nothing
+// to give and drops out on the weight test.
 bool evaluateLightCandidate(int candidate, vec3 worldPos,
   out vec3 L, out float lightDistance, out vec3 radiance)
 {
@@ -279,16 +318,26 @@ bool evaluateLightCandidate(int candidate, vec3 worldPos,
     // carries zero intensity and drops out on the weight test instead.
     radiance = evaluateDirectionalLight(u_Lights.directional.directionIntensity,
       u_Lights.directional.colorPad.rgb, L);
+    if ((u_Lights.directionalFlags & LIGHT_FLAG_RASTER_ONLY) != 0)
+      radiance = vec3(0.0);
     lightDistance = PT_RAY_TMAX;
     return true;
   }
 
   int index = candidate - 1;
   if (index < pointCount)
+  {
+    if (u_Lights.pointLights[index].shadowPad.z > 0.5)
+      return false;
+
     return evaluatePointLight(u_Lights.pointLights[index].positionRadius,
       u_Lights.pointLights[index].colorIntensity, worldPos, L, lightDistance, radiance);
+  }
 
   index -= pointCount;
+  if (u_Lights.spotLights[index].intensityShadow.w > 0.5)
+    return false;
+
   // A point past the outer cone comes back true with zero radiance rather than false, and
   // the weight test culls it - one rule for both kinds of miss.
   return evaluateSpotLight(u_Lights.spotLights[index].positionRadius,
@@ -310,10 +359,8 @@ bool evaluateLightCandidate(int candidate, vec3 worldPos,
 // soon as the cumulative weight crosses the target, so it walks half the candidates on
 // average, and the first one does no shadow ray and no BRDF work.
 //
-// Delta lights in v1: a point light's radius is its falloff range and not an emitter size,
-// so nothing samples an area here and every shadow is hard. Sphere light sampling would
-// replace the direction, the distance and the pdf below and leave the rest of the loop
-// untouched.
+// Everything written here describes the light's centre; sampleAnalyticLightDirection turns the
+// direction and the shadow distance into a point on the emitter afterwards.
 bool selectLight(vec3 worldPos, float lightSelector, out PathLightSample result)
 {
   int candidateCount = 1
@@ -324,6 +371,7 @@ bool selectLight(vec3 worldPos, float lightSelector, out PathLightSample result)
   result.radiance = vec3(0.0);
   result.lightDistance = PT_RAY_TMAX;
   result.selectionPdf = 1.0;
+  result.candidate = 0;
 
   float totalWeight = 0.0;
   for (int candidate = 0; candidate < candidateCount; candidate++)
@@ -362,6 +410,7 @@ bool selectLight(vec3 worldPos, float lightSelector, out PathLightSample result)
     result.direction = L;
     result.radiance = radiance;
     result.lightDistance = lightDistance;
+    result.candidate = candidate;
     chosenWeight = weight;
 
     cumulative += weight;
@@ -373,51 +422,220 @@ bool selectLight(vec3 worldPos, float lightSelector, out PathLightSample result)
   return true;
 }
 
-// Next event estimation at one path vertex: one light, one shadow ray, weighted back up by
-// the probability that light was picked.
-//
-// There is no MIS weight anywhere in this tracer and none is needed. The analytical lights
-// are delta lights, which BRDF sampling can never hit, and the environment is only ever
-// collected when a bounce ray misses, which next event estimation never samples. The two
-// strategies have disjoint supports, so every contribution is counted exactly once. Adding
-// environment NEE - which is what a bright sky needs - is what would make MIS weights
-// mandatory.
-vec3 estimateDirectLight(vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic,
-  float roughness, vec3 f0, float NdotV, float lightSelector)
+// A uniformly distributed direction inside the cone around axis whose half angle has the given
+// 1 - cos. Taking 1 - cos rather than cos is what keeps a half degree cone - the sun - from
+// cancelling down to a handful of float steps. Also hands back the cosine and sine^2 of the
+// sampled angle to the axis, off the same stable quantity.
+vec3 sampleUniformCone(vec3 axis, float oneMinusCosMax, vec2 xi,
+  out float cosTheta, out float sin2Theta)
 {
-  PathLightSample light;
-  if (!selectLight(worldPos, lightSelector, light))
+  float oneMinusCos = xi.x * oneMinusCosMax;
+  cosTheta = 1.0 - oneMinusCos;
+  sin2Theta = max(oneMinusCos * (2.0 - oneMinusCos), 0.0);
+  float sinTheta = safeSqrt(sin2Theta);
+  float phi = 2.0 * PI * xi.y;
+
+  // The tangent frame pbr.glsl's samplers build.
+  vec3 up = abs(axis.z) < 0.999 ? vec3(0.0, 0.0, 1.0) : vec3(1.0, 0.0, 0.0);
+  vec3 tangent = normalize(cross(up, axis));
+  vec3 bitangent = cross(axis, tangent);
+
+  return normalize(tangent * (cos(phi) * sinTheta) + bitangent * (sin(phi) * sinTheta)
+    + axis * cosTheta);
+}
+
+// Gives the light selectLight picked its emitter size: a sphere of the source radius around a
+// point or spot light, a disk of the angular radius for the sun. Next event estimation only -
+// neither is geometry, so no bounce ray can hit one and there is nothing to weigh against.
+//
+// The direction is drawn uniformly inside the cone the emitter subtends. The radiance stays the
+// one light_eval.glsl computed at the light's centre - falloff at the centre distance, spot cone
+// from the centre direction - and the BRDF and receiver cosine are evaluated for the sampled
+// direction. Spreading that radiance over the cone divides it by the cone's solid angle, and the
+// uniform cone pdf is exactly one over that solid angle, so the two cancel: the size softens
+// shadows and highlights without changing how much light arrives, and a size of zero is the delta
+// light this used to be.
+void sampleAnalyticLightDirection(inout PathLightSample light, vec3 worldPos, vec2 xi,
+  out float shadowDistance)
+{
+  shadowDistance = light.lightDistance;
+
+  float cosTheta;
+  float sin2Theta;
+
+  if (light.candidate == 0)
+  {
+    float angularRadius = u_Lights.directional.colorPad.w;
+    if (angularRadius > 0.0)
+    {
+      // 1 - cos(r) written as 2 sin^2(r / 2).
+      float halfSin = sin(0.5 * angularRadius);
+      light.direction = sampleUniformCone(light.direction, 2.0 * halfSin * halfSin, xi,
+        cosTheta, sin2Theta);
+    }
+    return;
+  }
+
+  int pointCount = min(u_Lights.pointLightCount, MAX_POINT_LIGHTS);
+  int index = light.candidate - 1;
+  float sourceRadius = index < pointCount
+    ? u_Lights.pointLights[index].shadowPad.y
+    : u_Lights.spotLights[index - pointCount].intensityShadow.z;
+
+  // Inside or on the sphere there is no cone, and the direction to the centre stays.
+  float centerDistance = light.lightDistance;
+  if (sourceRadius <= 0.0 || centerDistance <= sourceRadius)
+    return;
+
+  // 1 - cos(theta max) as sin^2 / (1 + cos), which does not cancel for a small sphere.
+  float sin2ThetaMax = (sourceRadius * sourceRadius) / (centerDistance * centerDistance);
+  float cosThetaMax = safeSqrt(1.0 - sin2ThetaMax);
+  light.direction = sampleUniformCone(light.direction, sin2ThetaMax / (1.0 + cosThetaMax), xi,
+    cosTheta, sin2Theta);
+
+  // The near intersection with the sphere along the sampled direction. Inside the cone the
+  // discriminant is non-negative up to rounding.
+  shadowDistance = centerDistance * cosTheta
+    - safeSqrt(sourceRadius * sourceRadius - centerDistance * centerDistance * sin2Theta);
+}
+
+// --- Emissive lights ---
+//
+// Emitting geometry as a next event estimation light. TlasBuilder lists every instance whose
+// material emits in the emissive light table, with a Vose alias table over a crude power estimate
+// and this frame's object to world transform, which is what lets a moving emitter light the scene
+// where it is now. A candidate is an instance drawn from the alias table, one of its triangles
+// uniformly by index, and a uniform point on that triangle in world space.
+
+// A uniform integer in [0, count), count above zero: a full 32 bit draw multiplied up and shifted
+// down, where a float draw scaled by count would stop resolving past 2^24.
+uint randomIndex(inout uint rngState, uint count)
+{
+  return uint((uint64_t(nextRandomUint(rngState)) * uint64_t(count)) >> 32);
+}
+
+struct EmissiveLightSample
+{
+  uint tableIndex;
+  uint primitiveIndex;
+  uvec3 triIndices;
+  // In the payload's convention, so the texture coordinate interpolates exactly as for a hit.
+  vec2 barycentrics;
+  vec3 position;
+  vec3 direction;
+  // Solid angle density of drawing this point as one emissive candidate from the receiver.
+  float sourcePdf;
+};
+
+// The solid angle density with which one emissive candidate lands on a point of the table's
+// instance tableIndex: the instance's pmf, one triangle out of triangleCount, a uniform point over
+// the triangle's world area, and area turned into solid angle at a receiver dist2 away that sees
+// the triangle at cosEmitter. Both sides of the emitter MIS use this one formula.
+float emissiveSourcePdf(uint tableIndex, float worldArea, float dist2, float cosEmitter)
+{
+  EmissiveLightRecord light = u_EmissiveLights[tableIndex];
+  return light.pmf * dist2 / (float(light.triangleCount) * worldArea * cosEmitter);
+}
+
+// Draws one emissive candidate for the receiver at worldPos. False for a point worth nothing
+// whatever it emits - a degenerate triangle, one the receiver sees exactly edge on, or the back face
+// of a single sided instance (emitsFromFace, the rule a hit follows) - which the caller still counts
+// as drawn: no resampling weight, never picked, no shadow ray.
+bool sampleEmissiveLight(vec3 worldPos, inout uint rngState, out EmissiveLightSample result)
+{
+  uint slot = randomIndex(rngState, u_EmissiveHeader.count);
+  result.tableIndex = randomFloat(rngState) < u_EmissiveLights[slot].aliasThreshold
+    ? slot : u_EmissiveLights[slot].aliasIndex;
+
+  EmissiveLightRecord light = u_EmissiveLights[result.tableIndex];
+  RayTracingInstanceRecord instance = u_Instances[light.instanceIndex];
+
+  result.primitiveIndex = randomIndex(rngState, light.triangleCount);
+  result.triIndices = fetchTriangle(IndexStream(instance.indexAddress), result.primitiveIndex);
+
+  VertexStream vertices = VertexStream(instance.vertexAddress);
+  vec3 p0 = transformPointByRows(light.objectToWorld, fetchPosition(vertices, result.triIndices.x));
+  vec3 p1 = transformPointByRows(light.objectToWorld, fetchPosition(vertices, result.triIndices.y));
+  vec3 p2 = transformPointByRows(light.objectToWorld, fetchPosition(vertices, result.triIndices.z));
+
+  // Uniform over the triangle: the square root makes the density grow with the area swept away
+  // from the first vertex.
+  vec2 xi = randomFloat2(rngState);
+  float su = safeSqrt(xi.x);
+  result.barycentrics = vec2(su * (1.0 - xi.y), su * xi.y);
+  result.position = (1.0 - su) * p0 + result.barycentrics.x * p1 + result.barycentrics.y * p2;
+  result.direction = vec3(0.0, 1.0, 0.0);
+  result.sourcePdf = 0.0;
+
+  vec3 crossed = cross(p1 - p0, p2 - p0);
+  float doubleArea = length(crossed);
+  vec3 toLight = result.position - worldPos;
+  float dist2 = dot(toLight, toLight);
+  if (doubleArea <= 0.0 || dist2 <= 0.0)
+    return false;
+
+  result.direction = toLight / sqrt(dist2);
+  float cosEmitter = abs(dot(crossed, result.direction)) / doubleArea;
+  if (cosEmitter <= 0.0)
+    return false;
+
+  // The density is the same whichever face the receiver sees - the facing decides what the point
+  // emits, never how it was drawn - so a front face hit's MIS weights still add up to one.
+  result.sourcePdf = emissiveSourcePdf(result.tableIndex, 0.5 * doubleArea, dist2, cosEmitter);
+  return emitsFromFace(instance.flags, isRasterFrontFace(crossed, result.direction));
+}
+
+// The emission a candidate is weighed by before anything is fetched from a texture: the
+// material's constant emissivity, as if its map were white and nothing were cut out. It is zero
+// only where the true emission is zero too, which is all the resampling target owes the estimator.
+vec3 emissiveTargetRadiance(uint tableIndex)
+{
+  uint materialIndex = u_Instances[u_EmissiveLights[tableIndex].instanceIndex].materialIndex;
+  if (materialIndex >= uint(u_Materials.length()))
     return vec3(0.0);
 
-  // Backfacing surfaces cost nothing but the test - no shadow ray is traced for them.
-  if (dot(N, light.direction) <= 0.0)
+  RayTracingMaterialRecord material = u_Materials[materialIndex];
+  return (material.textureMask & RT_MATERIAL_EMISSIVE_SHADING) != 0u
+    ? material.emissivity : vec3(0.0);
+}
+
+// What the chosen emissive candidate really emits, resolved exactly as resolveHitMaterial
+// resolves a hit on the same point: the emissive map at the interpolated coordinate and the
+// shading cutoff. A texel the alpha cutout removes does not exist for a ray, so it emits nothing
+// here either - pathtrace.rahit only runs for the alpha tested instances the TLAS leaves
+// non-opaque, hence the flag test.
+vec3 resolveEmissiveSampleRadiance(EmissiveLightSample emitter)
+{
+  RayTracingInstanceRecord instance = u_Instances[u_EmissiveLights[emitter.tableIndex].instanceIndex];
+  if (instance.materialIndex >= uint(u_Materials.length()))
     return vec3(0.0);
 
-  float visibility = traceShadowRay(offsetRayOrigin(worldPos, N), light.direction,
-    light.lightDistance);
-  if (visibility <= 0.0)
+  if ((instance.flags & RT_INSTANCE_ALPHA_TEST) != 0u
+    && isAlphaCutout(instance, emitter.primitiveIndex, emitter.barycentrics))
     return vec3(0.0);
 
-  // The same BRDF evaluation deferred_lighting.frag runs per light, from the same pbr.glsl:
-  // the D, G and F terms, the k remap and the kD split are one implementation, so a lit
-  // surface cannot shade differently just because it was reached by a ray.
-  float alpha = roughness * roughness;
+  RayTracingMaterialRecord material = u_Materials[instance.materialIndex];
 
-  vec3 diffuse;
-  vec3 specular;
-  vec3 total = evaluateDirectLightSplit(N, V, light.direction, light.radiance, albedo,
-    metallic, roughness, alpha, f0, NdotV, diffuse, specular);
+  // hitTexCoord's rule: no attribute block, no coordinate.
+  vec2 texCoord = vec2(0.0);
+  if (instance.attributeOffset != 0u)
+    texCoord = interpolateTexCoord(VertexStream(instance.vertexAddress), instance.attributeOffset,
+      emitter.triIndices, emitter.barycentrics);
 
-  // A delta lobe cannot see a delta light: the probability that the mirror direction lands
-  // exactly on a point or directional source is zero, so the correct specular contribution
-  // here is not small, it is identically nothing. The split evaluation exists precisely so
-  // the diffuse half - which a dielectric mirror still has - survives that. See
-  // PT_DELTA_MAX_ALPHA. The raster path needs no such branch: it never samples the lobe, so
-  // its narrow highlight is the intended stand-in for a light that has no area.
-  if (alpha <= PT_DELTA_MAX_ALPHA)
-    total = diffuse;
+  vec3 emissive;
+  resolveEmissiveTexel(material, texCoord * material.uvScale, emissive);
+  return emissive;
+}
 
-  return total / light.selectionPdf;
+// --- BRDF sampling ---
+
+// The Smith-Schlick k of every BRDF evaluation the path tracer makes: the GGX bounce weight in
+// sampleBrdfDirection and next event estimation's evaluateNeeResponse alike, so both strategies
+// of the emitter MIS weigh the identical BRDF. sampleBrdfDirection explains why it is alpha / 2
+// rather than the (roughness + 1)^2 / 8 raster shading keeps.
+float pathSmithK(float alpha)
+{
+  return alpha * 0.5;
 }
 
 // How much of the surface response is specular, which is what decides how often the
@@ -461,15 +679,17 @@ float specularLobeProbability(vec3 albedo, vec3 f0, float metallic, float roughn
 // the sampled direction ends up below the surface, which is a path that has to end rather
 // than a sample worth zero - a GGX lobe at grazing angles produces those regularly.
 //
-// Which lobe the coin landed on is no longer reported back: the ray reconstruction hit
-// distance guide used to need it, and now measures itself with a probe ray that does not care
-// what the path went on to do.
+// deltaLobe reports whether the direction came from the delta mirror branch. The emitter MIS
+// needs it: no light sample can reproduce a mirror direction, so an emitter hit through one keeps
+// its full weight. The ray reconstruction hit distance guide does not use it - it measures itself
+// with a probe ray that does not care what the path went on to do.
 bool sampleBrdfDirection(vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
   vec3 f0, float NdotV, vec2 xi, float lobeSelector,
-  out vec3 L, out vec3 weight)
+  out vec3 L, out vec3 weight, out bool deltaLobe)
 {
   float pSpecular = specularLobeProbability(albedo, f0, metallic, roughness);
   float alpha = roughness * roughness;
+  deltaLobe = false;
 
   if (lobeSelector < pSpecular)
   {
@@ -480,6 +700,7 @@ bool sampleBrdfDirection(vec3 N, vec3 V, vec3 albedo, float metallic, float roug
     // what a mirror cost before path tracing existed and what it should cost here.
     if (alpha <= PT_DELTA_MAX_ALPHA)
     {
+      deltaLobe = true;
       L = reflect(-V, N);
       if (dot(N, L) <= 0.0)
         return false;
@@ -493,7 +714,7 @@ bool sampleBrdfDirection(vec3 N, vec3 V, vec3 albedo, float metallic, float roug
     // Plain half-vector GGX sampling through importanceSampleGGX from pbr.glsl - the same
     // sampler prefilter.frag bakes the environment with. Reusing it is the point: the
     // tracer's specular lobe cannot drift from the engine's own GGX convention, and it
-    // already agrees with the D/G/F evaluateDirectLightSplit uses by construction. VNDF
+    // agrees with the D and F of evaluateDirectLightSplitSmithK by construction. VNDF
     // sampling would cut variance at grazing angles, where this one wastes samples on
     // microfacets that face away; a second GGX sampler in the codebase is its price.
     // Nothing is floored: the branch above owns everything at or below the delta threshold,
@@ -519,8 +740,8 @@ bool sampleBrdfDirection(vec3 N, vec3 V, vec3 albedo, float metallic, float roug
     // NdotH). Verified against f * NdotL / pdf written out in full - they agree to machine
     // epsilon, so the cancellation itself is exact.
     //
-    // k is alpha / 2, NOT the (roughness + 1)^2 / 8 that evaluateDirectLightSplit and every
-    // raster shader use. Those two remaps are not interchangeable and picking the wrong one
+    // k is alpha / 2 (pathSmithK), NOT the (roughness + 1)^2 / 8 that evaluateDirectLightSplit and
+    // every raster shader use. Those two remaps are not interchangeable and picking the wrong one
     // here was a real bug: (roughness + 1)^2 / 8 is UE4's remap for ANALYTIC lights, where the
     // direction is handed to the BRDF, and it keeps k at 0.125 even as roughness goes to zero.
     // A sampled lobe on a smooth surface then loses most of its energy - measured in a white
@@ -528,8 +749,9 @@ bool sampleBrdfDirection(vec3 N, vec3 V, vec3 albedo, float metallic, float roug
     // converge to Fresnel as roughness goes to zero, so it disagreed with the delta branch
     // above by a factor of 2.35 right at the handover. That step is what made the threshold
     // look load bearing. With alpha / 2 the two branches meet within a fraction of a percent
-    // and the threshold stops deciding anything visible.
-    float k = alpha * 0.5;
+    // and the threshold stops deciding anything visible. Next event estimation evaluates its
+    // BRDF with the same pathSmithK, so it and this sampler weigh one BRDF; raster keeps its remap.
+    float k = pathSmithK(alpha);
     float G = geometrySmith(k, NdotV, NdotL);
     recordNonFinite(G, PT_NF_GGX_G);
     vec3 F = fresnelSchlick(VdotH, f0);
@@ -557,6 +779,229 @@ bool sampleBrdfDirection(vec3 N, vec3 V, vec3 albedo, float metallic, float roug
   return true;
 }
 
+// PROTOTYPE (dielectric reflection layer spike): what the starting vertex samples. A layer pixel
+// runs the path twice from the same vertex, BASE then MIRROR - see pt_main.rgen.
+const int PT_FIRST_VERTEX_COIN = 0;
+// NEE and the diffuse lobe.
+const int PT_FIRST_VERTEX_BASE = 1;
+// The mirror lobe alone.
+const int PT_FIRST_VERTEX_MIRROR = 2;
+
+// The solid angle density with which sampleBrdfDirection, driven the way tracePath drives it at
+// this vertex, generates L. It is the BSDF half of every emitter MIS weight, so it follows the
+// sampler exactly: the lobe coin's mixture of the half vector GGX density and the cosine density,
+// with the same lobe probability and the same rejections. A delta mirror lobe has no density to
+// share and adds nothing; the sampler flags a direction it produces instead. PROTOTYPE: a forced
+// first vertex lobe (lobeMode PT_FIRST_VERTEX_BASE or _MIRROR) is sampled with that lobe's own
+// density, and nothing else.
+float brdfDirectionPdf(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic, float roughness,
+  vec3 f0, int lobeMode)
+{
+  float NdotL = dot(N, L);
+  if (NdotL <= 0.0)
+    return 0.0;
+
+  float diffusePdf = NdotL / PI;
+
+  float specularPdf = 0.0;
+  float alpha = roughness * roughness;
+  if (alpha > PT_DELTA_MAX_ALPHA)
+  {
+    vec3 H = normalize(V + L);
+    float NdotH = dot(N, H);
+    float VdotH = dot(V, H);
+    if (NdotH > 0.0 && VdotH > 0.0)
+    {
+      // The GGX distribution importanceSampleGGX draws from, with sin^2 taken off a cross
+      // product: normalDistributionGGX floors its denominator, which just above the delta
+      // threshold is orders of magnitude off the density the sampler really has, and 1 - cos^2
+      // cancels away there.
+      vec3 axis = cross(N, H);
+      float alpha2 = alpha * alpha;
+      float denominator = dot(axis, axis) + alpha2 * NdotH * NdotH;
+      float D = alpha2 / (PI * denominator * denominator);
+      // The half vector density D * NdotH through the reflection's Jacobian 1 / (4 VdotH).
+      specularPdf = D * NdotH / (4.0 * VdotH);
+    }
+  }
+
+  if (lobeMode == PT_FIRST_VERTEX_BASE)
+    return diffusePdf;
+  if (lobeMode == PT_FIRST_VERTEX_MIRROR)
+    return specularPdf;
+
+  float pSpecular = specularLobeProbability(albedo, f0, metallic, roughness);
+  return pSpecular * specularPdf + (1.0 - pSpecular) * diffusePdf;
+}
+
+// The power heuristic weight of the strategy that drew a sample with density a, against one that
+// could have drawn it with density b. A ratio rather than squares, so a density too large to
+// square - a tiny or grazing emitter triangle - still gives a finite weight. The two sides' weights
+// add up to one.
+float powerHeuristic(float a, float b)
+{
+  if (b <= 0.0)
+    return 1.0;
+  if (a <= 0.0)
+    return 0.0;
+
+  float ratio = b / a;
+  return 1.0 / (1.0 + ratio * ratio);
+}
+
+// --- Next event estimation ---
+
+// What next event estimation gets from radiance arriving along L: pbr.glsl's D, F and kD split that
+// deferred_lighting.frag evaluates per light, but with the path tracer's Smith-Schlick k
+// (pathSmithK) in place of the raster remap, so a light sample and a BSDF sample of one direction
+// weigh the identical BRDF - which the emitter MIS weights assume - times the receiver cosine. The
+// diffuse half does not depend on k and still matches the raster exactly.
+//
+// A delta lobe keeps the diffuse half only; see PT_DELTA_MAX_ALPHA. No light sample can land in
+// a mirror direction, so the specular term there is not small but identically nothing - the split
+// evaluation exists so the diffuse half a dielectric mirror still has survives. A sphere light or
+// the sun disk is therefore not reflected in a mirror at all; emitting geometry is, through the
+// mirror bounce hitting it. The raster path needs no such branch: it never samples the lobe, so
+// its narrow highlight is the intended stand-in for a light that has no area.
+vec3 evaluateNeeResponse(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic,
+  float roughness, vec3 f0, float NdotV)
+{
+  float alpha = roughness * roughness;
+
+  vec3 diffuse;
+  vec3 specular;
+  vec3 total = evaluateDirectLightSplitSmithK(N, V, L, radiance, albedo, metallic, alpha,
+    pathSmithK(alpha), f0, NdotV, diffuse, specular);
+
+  return alpha <= PT_DELTA_MAX_ALPHA ? diffuse : total;
+}
+
+// Next event estimation at one path vertex: candidates from two kinds of light resampled down to
+// one, and ONE shadow ray. Stateless resampled importance sampling - nothing survives the vertex,
+// so no sample is reused across pixels or frames and the white noise the ray reconstruction guide
+// asks for is kept.
+//  - The analytic kind draws one candidate: selectLight, then its emitter size.
+//  - The emissive kind draws PT_EMISSIVE_CANDIDATES points on emitting geometry.
+// The kinds sample disjoint light sources. Every candidate carries g, its own unshadowed
+// one-sample estimate already divided by the density it was drawn with, and is picked with a
+// probability proportional to luminance(g) over the number of candidates its kind drew - that
+// count is the whole balance weight when supports are disjoint. The pick is unbiased once its
+// value is scaled by sum(w) / luminance(g). A candidate that evaluates to zero was still drawn and
+// still counts.
+//
+// An emissive candidate is weighed by its material's constant emissivity; only the one picked
+// fetches its true emission. It then shares its emitter with the bounce ray that could hit the same
+// point, by the power heuristic over emissiveSourcePdf and brdfDirectionPdf - tracePath applies
+// the other half. The analytic lights need no MIS weight, since no bounce ray can hit them, and
+// neither does the environment: only a bounce ray that misses collects it, which next event
+// estimation never samples.
+vec3 estimateDirectLight(vec3 worldPos, vec3 N, vec3 V, vec3 albedo, float metallic,
+  float roughness, vec3 f0, float NdotV, int lobeMode, inout uint rngState)
+{
+  float weightSum = 0.0;
+  bool chosenEmissive = false;
+  // The analytic candidate's estimate, or an emissive candidate's per unit of emitted radiance.
+  vec3 chosenEstimate = vec3(0.0);
+  float chosenTarget = 0.0;
+  vec3 chosenDirection = vec3(0.0, 1.0, 0.0);
+  float chosenShadowDistance = 0.0;
+  EmissiveLightSample chosenEmitter;
+
+  float lightSelector = randomFloat(rngState);
+  vec2 lightXi = randomFloat2(rngState);
+  PathLightSample light;
+  if (selectLight(worldPos, lightSelector, light))
+  {
+    float shadowDistance;
+    sampleAnalyticLightDirection(light, worldPos, lightXi, shadowDistance);
+
+    // Backfacing directions cost nothing but the test - no shadow ray is traced for them.
+    vec3 estimate = vec3(0.0);
+    if (dot(N, light.direction) > 0.0)
+      estimate = evaluateNeeResponse(N, V, light.direction, light.radiance, albedo, metallic,
+        roughness, f0, NdotV) / light.selectionPdf;
+
+    // The one analytic candidate, so its weight is divided by one.
+    float target = max(luminance(estimate), 0.0);
+    weightSum += target;
+    if (target > 0.0 && randomFloat(rngState) * weightSum < target)
+    {
+      chosenEmissive = false;
+      chosenEstimate = estimate;
+      chosenTarget = target;
+      chosenDirection = light.direction;
+      chosenShadowDistance = shadowDistance;
+    }
+  }
+
+  if (u_EmissiveHeader.count > 0u)
+  {
+    for (int candidate = 0; candidate < PT_EMISSIVE_CANDIDATES; candidate++)
+    {
+      EmissiveLightSample emitter;
+      if (!sampleEmissiveLight(worldPos, rngState, emitter))
+        continue;
+      if (dot(N, emitter.direction) <= 0.0)
+        continue;
+
+      vec3 response = evaluateNeeResponse(N, V, emitter.direction, vec3(1.0), albedo, metallic,
+        roughness, f0, NdotV) / emitter.sourcePdf;
+      float target = max(luminance(response * emissiveTargetRadiance(emitter.tableIndex)), 0.0);
+      float weight = target / float(PT_EMISSIVE_CANDIDATES);
+
+      weightSum += weight;
+      if (weight > 0.0 && randomFloat(rngState) * weightSum < weight)
+      {
+        chosenEmissive = true;
+        chosenEstimate = response;
+        chosenTarget = target;
+        chosenDirection = emitter.direction;
+        chosenEmitter = emitter;
+      }
+    }
+  }
+
+  if (weightSum <= 0.0)
+    return vec3(0.0);
+
+  vec3 value = chosenEstimate;
+  float misWeight = 1.0;
+  vec3 shadowOrigin = offsetRayOrigin(worldPos, N);
+  vec3 shadowDirection = chosenDirection;
+  float shadowDistance = chosenShadowDistance;
+
+  if (chosenEmissive)
+  {
+    value *= resolveEmissiveSampleRadiance(chosenEmitter);
+
+    if ((u_EmissiveLights[chosenEmitter.tableIndex].flags & EMISSIVE_LIGHT_NEE_ONLY) == 0u)
+      misWeight = powerHeuristic(chosenEmitter.sourcePdf,
+        brdfDirectionPdf(N, V, chosenDirection, albedo, metallic, roughness, f0, lobeMode));
+
+    // Aimed at the sample from the offset origin itself and stopped short of it by the offset a
+    // ray origin gets there, so the triangle the point lies on cannot shadow its own sample.
+    vec3 toEmitter = chosenEmitter.position - shadowOrigin;
+    float emitterDistance = length(toEmitter);
+    shadowDistance = emitterDistance - rayOffsetDistance(chosenEmitter.position);
+    if (emitterDistance > 0.0)
+      shadowDirection = toEmitter / emitterDistance;
+  }
+
+  if (max(value.r, max(value.g, value.b)) <= 0.0)
+    return vec3(0.0);
+
+  // Nothing fits between a receiver and a light nearer than the ray's own start.
+  float visibility = shadowDistance > PT_RAY_TMIN
+    ? traceShadowRay(shadowOrigin, shadowDirection, shadowDistance)
+    : 1.0;
+  if (visibility <= 0.0)
+    return vec3(0.0);
+
+  return value * (weightSum / chosenTarget) * (visibility * misWeight);
+}
+
+// --- The path ---
+
 // The consumer's per-dispatch settings, handed in rather than read off its push constant block
 // so a pass with a different block can run the same estimator.
 struct PathSettings
@@ -578,14 +1023,6 @@ struct PathDebug
   vec3 environment;
 };
 
-// PROTOTYPE (dielectric reflection layer spike): what the starting vertex samples. A layer pixel
-// runs the path twice from the same vertex, BASE then MIRROR - see pt_main.rgen.
-const int PT_FIRST_VERTEX_COIN = 0;
-// NEE and the diffuse lobe.
-const int PT_FIRST_VERTEX_BASE = 1;
-// The mirror lobe alone.
-const int PT_FIRST_VERTEX_MIRROR = 2;
-
 // The bounce loop from a vertex whose surface is already known: P and its geometric normal N,
 // V pointing back along the ray that reached it. Contributions are added to radiance and
 // pathDebug rather than returned, so a pixel that runs the path twice sums both runs.
@@ -604,18 +1041,24 @@ void tracePath(vec3 P, vec3 N, vec3 V, vec3 albedo, float metallic, float roughn
     float NdotV = clamp(abs(dot(N, V)), 0.01, 0.99);
     vec3 f0 = mix(vec3(0.04), albedo, metallic);
 
-    // Four draws off one stream: the BRDF sample, the lobe coin and the light. Every
-    // vertex is treated the same, the first one included - see the sampling note above.
+    // Every dimension of the vertex comes off one stream, the first vertex included - see the
+    // sampling note above: the BRDF sample and the lobe coin here, then whatever next event
+    // estimation draws for its analytic light, the emitter size, the emissive candidates and
+    // the resampling coins.
     vec2 brdfXi = randomFloat2(rngState);
     float lobeSelector = randomFloat(rngState);
-    float lightSelector = randomFloat(rngState);
+
+    // PROTOTYPE: a forced first vertex lobe is sampled with that lobe's density alone, and the
+    // emitter MIS weights have to describe the sampler that actually runs.
+    int lobeMode = bounce == 0 ? firstVertex : PT_FIRST_VERTEX_COIN;
 
     // PROTOTYPE: the mirror pass gathers no NEE at its first vertex - a delta lobe sees no
     // delta light, and the diffuse half is the base pass's.
-    if (firstVertex != PT_FIRST_VERTEX_MIRROR || bounce > 0)
+    bool neeGathered = firstVertex != PT_FIRST_VERTEX_MIRROR || bounce > 0;
+    if (neeGathered)
     {
       vec3 directLight = estimateDirectLight(P, N, V, albedo, metallic, roughness, f0,
-        NdotV, lightSelector);
+        NdotV, lobeMode, rngState);
       recordNonFinite(directLight, PT_NF_DIRECT_LIGHT);
 
       vec3 neeContribution = throughput * directLight;
@@ -630,6 +1073,7 @@ void tracePath(vec3 P, vec3 N, vec3 V, vec3 albedo, float metallic, float roughn
 
     vec3 L;
     vec3 weight;
+    bool deltaBounce;
     if (firstVertex != PT_FIRST_VERTEX_COIN && bounce == 0)
     {
       // PROTOTYPE: forced lobe. A selector of 1 is never below the specular probability
@@ -638,12 +1082,12 @@ void tracePath(vec3 P, vec3 N, vec3 V, vec3 albedo, float metallic, float roughn
       float pSpecular = specularLobeProbability(albedo, f0, metallic, roughness);
       bool basePass = firstVertex == PT_FIRST_VERTEX_BASE;
       if (!sampleBrdfDirection(N, V, albedo, metallic, roughness, f0, NdotV, brdfXi,
-        basePass ? 1.0 : 0.0, L, weight))
+        basePass ? 1.0 : 0.0, L, weight, deltaBounce))
         break;
       weight *= basePass ? (1.0 - pSpecular) : pSpecular;
     }
     else if (!sampleBrdfDirection(N, V, albedo, metallic, roughness, f0, NdotV, brdfXi,
-      lobeSelector, L, weight))
+      lobeSelector, L, weight, deltaBounce))
       break;
 
     // Only on the accepting path: a rejected sample leaves both outputs unwritten, and
@@ -682,8 +1126,8 @@ void tracePath(vec3 P, vec3 N, vec3 V, vec3 albedo, float metallic, float roughn
     if (payload.hit == 0u)
     {
       // The environment is gathered here and only here - by BRDF sampling, never by
-      // next event estimation. That is what keeps the two strategies disjoint and the
-      // whole tracer free of MIS weights.
+      // next event estimation. That is what keeps the two strategies disjoint for it and
+      // leaves the sky without an MIS weight.
       vec3 environmentContribution = throughput * texture(u_Skybox, L).rgb;
       recordNonFinite(environmentContribution, PT_NF_ENVIRONMENT);
       recordDebugContribution(environmentContribution, bounce, pathDebug.maxContribution,
@@ -702,7 +1146,27 @@ void tracePath(vec3 P, vec3 N, vec3 V, vec3 albedo, float metallic, float roughn
     {
       // Same rule as the first vertex: an emissive texel is a pure emitter with no PBR
       // response left, so the path ends on it.
-      vec3 emissiveContribution = throughput * surface.emissive;
+      //
+      // Next event estimation at the vertex this ray left could have drawn the same point, so the
+      // two share it by the power heuristic, over the very densities that side uses. The hit keeps
+      // its full weight where nothing competed for it: after a mirror bounce, which no light sample
+      // reproduces, after a vertex that gathered no NEE, and on an emitter the table does not hold.
+      float misWeight = 1.0;
+      uint emissiveIndex = u_Instances[payload.instanceIndex].emissiveIndex;
+      if (neeGathered && !deltaBounce && emissiveIndex < u_EmissiveHeader.count)
+      {
+        vec3 toHit = hit.position - P;
+        float cosEmitter = abs(dot(hit.normal, L));
+        if ((u_EmissiveLights[emissiveIndex].flags & EMISSIVE_LIGHT_NEE_ONLY) == 0u
+          && hit.area > 0.0 && cosEmitter > 0.0)
+        {
+          misWeight = powerHeuristic(
+            brdfDirectionPdf(N, V, L, albedo, metallic, roughness, f0, lobeMode),
+            emissiveSourcePdf(emissiveIndex, hit.area, dot(toHit, toHit), cosEmitter));
+        }
+      }
+
+      vec3 emissiveContribution = throughput * surface.emissive * misWeight;
       recordNonFinite(emissiveContribution, PT_NF_EMISSIVE);
       recordDebugContribution(emissiveContribution, bounce, pathDebug.maxContribution,
         pathDebug.maxBounce);

@@ -17,6 +17,7 @@
 #include "light_eval.glsl"
 #include "../Shared/PathTraceData.h"
 #include "../Shared/ProbeBakeData.h"
+#include "../Shared/EmissiveLightData.h"
 
 // Bindings 0-2 are the scene, declared in raytracing_common.glsl; from 3 up the bake's own.
 // The display cubemap the path tracer samples on a miss.
@@ -37,6 +38,13 @@ layout(std430, set = 1, binding = 5) readonly buffer ProbeBakePointSSBO
 layout(std430, set = 1, binding = 6) writeonly buffer ProbeBakeRecordSSBO
 {
   ProbeBakeRecord u_Records[];
+};
+
+// The emissive light table of the bake slot, built with its instance records.
+layout(std430, set = 1, binding = 7) readonly buffer ProbeBakeEmissiveLightSSBO
+{
+  EmissiveLightTableHeader u_EmissiveHeader;
+  EmissiveLightRecord u_EmissiveLights[];
 };
 
 layout(push_constant) uniform ProbeBakePushBlock
@@ -181,6 +189,7 @@ void main()
         PathSurface surface = resolveHitMaterial(hit, payload.barycentrics);
 
         // tracePath starts from a PBR response and leaves an emitting first vertex to its caller.
+        // The back of a single sided emitter is no emitter (resolveHitMaterial) and continues.
         if (surface.emissiveTexel)
         {
           radiance = clampContribution(surface.emissive, pc.fireflyClamp);

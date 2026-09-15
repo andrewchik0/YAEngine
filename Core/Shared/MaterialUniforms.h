@@ -5,6 +5,13 @@
 namespace YAEngine {
 #endif
 
+// A texel emitting more than a white lambertian surface under unit light is bright enough
+// that dropping its PBR response is invisible. Below that the surface still reads as lit,
+// so it stays on the PBR path and the emissive contribution is dropped instead. The G-buffer
+// pass, the path tracer and TlasBuilder's emissive light table all decide by it: an emissive
+// texel is one whose luminance is strictly above it.
+#define EMISSIVE_SHADING_CUTOFF 1.0
+
 struct MaterialUniforms
 {
   vec3 albedo;

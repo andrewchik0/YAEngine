@@ -138,9 +138,11 @@ vec3 gtaoMultiBounce(float visibility, vec3 albedo)
     vec3(visibility), vec3(1.0));
 }
 
-vec3 evaluateDirectLightSplit(
+// The direct lighting BRDF with the Smith-Schlick k handed in, so the path tracer can evaluate it
+// with its own remap while every raster caller keeps evaluateDirectLightSplit's.
+vec3 evaluateDirectLightSplitSmithK(
   vec3 N, vec3 V, vec3 L, vec3 radiance,
-  vec3 albedo, float metallic, float roughness, float alpha, vec3 f0, float NdotV,
+  vec3 albedo, float metallic, float alpha, float k, vec3 f0, float NdotV,
   out vec3 outDiffuse, out vec3 outSpecular)
 {
   vec3 H = normalize(V + L);
@@ -149,7 +151,6 @@ vec3 evaluateDirectLightSplit(
   float HdotV = max(dot(H, V), 0.0);
 
   float NDF = normalDistributionGGX(alpha, NdotH);
-  float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
   float G = geometrySmith(k, NdotV, NdotL);
   vec3 F = fresnelSchlick(HdotV, f0);
 
@@ -161,6 +162,17 @@ vec3 evaluateDirectLightSplit(
   outDiffuse = kD * albedo / PI * radiance * NdotL;
   outSpecular = spec * radiance * NdotL;
   return outDiffuse + outSpecular;
+}
+
+// The raster direct lighting BRDF: UE4's analytic light remap k = (roughness + 1)^2 / 8.
+vec3 evaluateDirectLightSplit(
+  vec3 N, vec3 V, vec3 L, vec3 radiance,
+  vec3 albedo, float metallic, float roughness, float alpha, vec3 f0, float NdotV,
+  out vec3 outDiffuse, out vec3 outSpecular)
+{
+  float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+  return evaluateDirectLightSplitSmithK(N, V, L, radiance, albedo, metallic, alpha, k, f0, NdotV,
+    outDiffuse, outSpecular);
 }
 
 vec3 evaluateDirectLight(
