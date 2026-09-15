@@ -21,7 +21,6 @@ namespace YAEngine
   class OutlinerPanel;
   class DetailsPanel;
   class AgentPanel;
-  class DeveloperPanel;
 
   class EditorLayer : public Layer
   {
@@ -42,6 +41,8 @@ namespace YAEngine
     template<typename TPanel, typename... TArgs>
     TPanel& AddPanel(TArgs&&... args);
     void DrawViewMenu();
+    // View > Theme: picks a built-in palette and mode and saves the choice
+    void DrawThemeMenu();
     // Shows or hides a panel and saves the choice in the preferences
     void SetPanelVisible(IEditorPanel& panel, bool visible);
     // Records the panel's current visibility in the preferences without saving them
@@ -97,7 +98,6 @@ namespace YAEngine
     OutlinerPanel* m_OutlinerPanel = nullptr;
     DetailsPanel* m_DetailsPanel = nullptr;
     AgentPanel* m_AgentPanel = nullptr;
-    DeveloperPanel* m_DeveloperPanel = nullptr;
     bool b_LayoutBuilt = false;
     bool b_ResetLayout = false;
     // Window content scale the style was last applied at

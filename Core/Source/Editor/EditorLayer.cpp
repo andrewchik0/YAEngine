@@ -90,7 +90,7 @@ namespace YAEngine
     SequencerPanel& sequencer = AddPanel<SequencerPanel>();
     AddPanel<PerformancePanel>();
     m_AgentPanel = &AddPanel<AgentPanel>(m_Bridge, m_Preferences, overrides.mcpEnabled);
-    m_DeveloperPanel = &AddPanel<DeveloperPanel>(m_Preferences);
+    AddPanel<DeveloperPanel>(m_Preferences);
 
     m_DetailsPanel->LinkPanels(materialInspector, sequencer, [this](IEditorPanel& panel)
     {
@@ -154,7 +154,7 @@ namespace YAEngine
 
   void EditorLayer::Update(double deltaTime)
   {
-    m_DeveloperPanel->ApplyPendingTheme();
+    EditorStyle::ApplyRequestedTheme();
 
     // The node overlay runs from the gizmo callback, which the renderer skips while gizmos are off.
     if (!m_VolumeNodeCachePath.empty() && m_Context.render && !m_Context.render->GetGizmosEnabled())
@@ -613,6 +613,11 @@ namespace YAEngine
     }
 
     ImGui::Separator();
+    if (ImGui::BeginMenu("Theme"))
+    {
+      DrawThemeMenu();
+      ImGui::EndMenu();
+    }
     if (ImGui::MenuItem("Reset Layout"))
     {
       // The default arrangement has every regular panel open
@@ -631,6 +636,42 @@ namespace YAEngine
         m_Preferences.Save();
       b_ResetLayout = true;
     }
+  }
+
+  void EditorLayer::DrawThemeMenu()
+  {
+    EditorThemePreset preset = m_Preferences.themePreset;
+    bool picked = false;
+
+    for (size_t i = 0; i < size_t(EditorThemePalette::Count); i++)
+    {
+      const auto palette = EditorThemePalette(i);
+      if (ImGui::MenuItem(GetEditorThemePaletteName(palette), nullptr, preset.palette == palette))
+      {
+        preset.palette = palette;
+        picked = true;
+      }
+    }
+
+    ImGui::Separator();
+    for (size_t i = 0; i < size_t(EditorThemeMode::Count); i++)
+    {
+      const auto mode = EditorThemeMode(i);
+      if (ImGui::MenuItem(GetEditorThemeModeName(mode), nullptr, preset.mode == mode))
+      {
+        preset.mode = mode;
+        picked = true;
+      }
+    }
+
+    if (!picked)
+      return;
+
+    // Color overrides and unsaved Developer panel edits go; saved metrics and font sizes stay
+    m_Preferences.themePreset = preset;
+    ApplyEditorThemePreset(m_Preferences.theme, preset);
+    m_Preferences.Save();
+    EditorStyle::RequestTheme(m_Preferences.theme);
   }
 
   void EditorLayer::RenderUI()

@@ -16,8 +16,10 @@ namespace YAEngine
   struct EditorPreferenceValues
   {
     bool mcpEnabled = true;
-    // Defaults plus the overrides from the file's theme section; saved back as overrides only
-    EditorTheme theme;
+    // Built-in colors the theme starts from
+    EditorThemePreset themePreset;
+    // The preset's theme plus the token overrides from the file's theme section; saved back as overrides only
+    EditorTheme theme = MakeEditorTheme(themePreset);
     // Open state of collapsible property groups, keyed "<window>/<group>"; only groups toggled away
     // from their default open state are stored
     std::map<std::string, bool> groupOpenStates;

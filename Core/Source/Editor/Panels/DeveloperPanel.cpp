@@ -253,15 +253,6 @@ namespace YAEngine
     DrawImGuiToolWindows();
   }
 
-  void DeveloperPanel::ApplyPendingTheme()
-  {
-    if (!m_PendingTheme.has_value())
-      return;
-
-    EditorStyle::Apply(*m_PendingTheme, EditorStyle::GetContentScale());
-    m_PendingTheme.reset();
-  }
-
   void DeveloperPanel::DrawGtaoGroup(EditorContext& context)
   {
     Render* render = RequireRender(context);
@@ -610,8 +601,8 @@ namespace YAEngine
 
   void DeveloperPanel::DrawThemeGroup(EditorContext&)
   {
-    EditorTheme theme = m_PendingTheme.value_or(EditorStyle::GetTheme());
-    const EditorTheme defaults;
+    EditorTheme theme = EditorStyle::GetRequestedTheme();
+    const EditorTheme defaults = MakeEditorTheme(m_Preferences.themePreset);
     bool changed = false;
 
     if (PropertyButton("Save", {
@@ -625,8 +616,8 @@ namespace YAEngine
 
     if (PropertyButton("Reset to Defaults", {
       .icon = ICON_LC_ROTATE_CCW,
-      .tooltip = "Puts every token back to its default value; Save keeps the result",
-      .disabledReason = theme == defaults ? "Every token already has its default value" : nullptr }))
+      .tooltip = "Puts every token back to the value of the theme picked in View > Theme; Save keeps the result",
+      .disabledReason = theme == defaults ? "Every token already has the picked theme's value" : nullptr }))
     {
       theme = defaults;
       changed = true;
@@ -650,7 +641,7 @@ namespace YAEngine
     if (changed)
     {
       ClampEditorTheme(theme);
-      m_PendingTheme = theme;
+      EditorStyle::RequestTheme(theme);
     }
   }
 

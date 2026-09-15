@@ -21,6 +21,12 @@ namespace YAEngine
     // Maps the theme onto ImGuiStyle and, when its context exists, the ImPlot style, with sizes
     // multiplied by the window content scale. Call again whenever tokens or the scale change.
     static void Apply(const EditorTheme& theme, float contentScale);
+    // ImGui's style must not change inside a frame, so a theme changed during one is requested and applied
+    // by ApplyRequestedTheme between frames; a later request replaces an earlier one
+    static void RequestTheme(const EditorTheme& theme);
+    static void ApplyRequestedTheme();
+    // The requested theme, or the applied one when no request is waiting
+    static const EditorTheme& GetRequestedTheme();
     // For an ImPlot context created after the last Apply
     static void ApplyPlotStyle();
 

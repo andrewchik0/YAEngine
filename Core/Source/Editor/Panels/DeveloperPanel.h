@@ -1,7 +1,6 @@
 #pragma once
 
 #include "Editor/IEditorPanel.h"
-#include "Editor/Utils/EditorTheme.h"
 
 namespace YAEngine
 {
@@ -19,9 +18,6 @@ namespace YAEngine
 
     const EditorPanelDescriptor& GetDescriptor() const override { return DESCRIPTOR; }
     void OnRender(EditorContext& context) override;
-
-    // ImGui's style must not change inside a frame, so theme edits wait for this call between frames
-    void ApplyPendingTheme();
 
   private:
     struct Group
@@ -45,8 +41,6 @@ namespace YAEngine
     void DrawImGuiToolWindows();
 
     EditorPreferences& m_Preferences;
-    // Edited this frame, applied by ApplyPendingTheme
-    std::optional<EditorTheme> m_PendingTheme;
     // Theme token row labels in VisitEditorThemeTokens order, built on first use
     std::vector<std::string> m_TokenLabels;
     bool b_ShowMetrics = false;

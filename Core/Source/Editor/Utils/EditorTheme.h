@@ -13,40 +13,69 @@ namespace YAEngine
       float(alpha) / 255.0f);
   }
 
+  // Built-in color sets; each has a dark and a light variant
+  enum class EditorThemePalette : uint8_t
+  {
+    Lavender,
+    Sage,
+    Sand,
+    Teal,
+    Rose,
+    Blue,
+    Monochrome,
+    Count
+  };
+
+  enum class EditorThemeMode : uint8_t
+  {
+    Dark,
+    Light,
+    Count
+  };
+
+  struct EditorThemePreset
+  {
+    EditorThemePalette palette = EditorThemePalette::Lavender;
+    EditorThemeMode mode = EditorThemeMode::Dark;
+
+    bool operator==(const EditorThemePreset&) const = default;
+  };
+
   // The look of the editor as plain data, independent of ImGui. EditorStyle maps it onto
   // ImGuiStyle and ImPlot and multiplies sizes by the window content scale.
+  // Colors come from a preset (MakeEditorTheme); a default-constructed theme has only the metrics.
   struct EditorTheme
   {
-    glm::vec4 appBackground = EditorThemeColor(0x1E1F22);
-    glm::vec4 panel = EditorThemeColor(0x2B2D30);
-    glm::vec4 frame = EditorThemeColor(0x393B40);
-    glm::vec4 frameHovered = EditorThemeColor(0x43454A);
-    glm::vec4 frameActive = EditorThemeColor(0x4E5157);
+    glm::vec4 appBackground {};
+    glm::vec4 panel {};
+    glm::vec4 frame {};
+    glm::vec4 frameHovered {};
+    glm::vec4 frameActive {};
     // Strips drawn over the viewport image; the alpha is part of the token
-    glm::vec4 overlay = EditorThemeColor(0x2B2D30, 0xBF);
-    glm::vec4 popup = EditorThemeColor(0x2B2D30);
+    glm::vec4 overlay {};
+    glm::vec4 popup {};
 
-    glm::vec4 borderSubtle = EditorThemeColor(0x43454A);
-    glm::vec4 borderStrong = EditorThemeColor(0x5A5D63);
+    glm::vec4 borderSubtle {};
+    glm::vec4 borderStrong {};
 
-    glm::vec4 textPrimary = EditorThemeColor(0xDFE1E5);
-    glm::vec4 textSecondary = EditorThemeColor(0x9DA0A8);
-    glm::vec4 textDisabled = EditorThemeColor(0x6F737A);
+    glm::vec4 textPrimary {};
+    glm::vec4 textSecondary {};
+    glm::vec4 textDisabled {};
 
-    glm::vec4 accent = EditorThemeColor(0x4C8DFF);
-    glm::vec4 accentHovered = EditorThemeColor(0x6BA0FF);
-    glm::vec4 accentActive = EditorThemeColor(0x3A78E8);
-    // Selection backgrounds
-    glm::vec4 accentMuted = EditorThemeColor(0x2E436E);
+    glm::vec4 accent {};
+    glm::vec4 accentHovered {};
+    glm::vec4 accentActive {};
+    // Selection backgrounds and slider fills
+    glm::vec4 accentMuted {};
 
-    glm::vec4 success = EditorThemeColor(0x5FB865);
-    glm::vec4 warning = EditorThemeColor(0xE5A84B);
-    glm::vec4 error = EditorThemeColor(0xE5534B);
-    glm::vec4 info = EditorThemeColor(0x6BA0FF);
+    glm::vec4 success {};
+    glm::vec4 warning {};
+    glm::vec4 error {};
+    glm::vec4 info {};
 
-    glm::vec4 axisX = EditorThemeColor(0xE5534B);
-    glm::vec4 axisY = EditorThemeColor(0x6CC24A);
-    glm::vec4 axisZ = EditorThemeColor(0x4C8DFF);
+    glm::vec4 axisX {};
+    glm::vec4 axisY {};
+    glm::vec4 axisZ {};
 
     float radiusSmall = 4.0f;
     float radiusMedium = 6.0f;
@@ -111,4 +140,18 @@ namespace YAEngine
 
   // Pulls hand-edited values back into a range ImGui can lay out and draw with.
   void ClampEditorTheme(EditorTheme& theme);
+
+  // Display name ("Lavender") and editor.yaml key ("lavender")
+  const char* GetEditorThemePaletteName(EditorThemePalette palette);
+  const char* GetEditorThemePaletteKey(EditorThemePalette palette);
+  const char* GetEditorThemeModeName(EditorThemeMode mode);
+  const char* GetEditorThemeModeKey(EditorThemeMode mode);
+  // An unknown key leaves the output untouched
+  bool ParseEditorThemePalette(std::string_view key, EditorThemePalette& outPalette);
+  bool ParseEditorThemeMode(std::string_view key, EditorThemeMode& outMode);
+
+  // Replaces every color token with the preset's; metrics and font sizes stay
+  void ApplyEditorThemePreset(EditorTheme& theme, EditorThemePreset preset);
+  // The preset's colors with the default metrics and font sizes
+  EditorTheme MakeEditorTheme(EditorThemePreset preset);
 }

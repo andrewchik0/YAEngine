@@ -7,6 +7,7 @@ namespace YAEngine
   namespace
   {
     EditorTheme s_Theme;
+    std::optional<EditorTheme> s_RequestedTheme;
     float s_ContentScale = 1.0f;
 
     constexpr ImVec4 INVISIBLE(0.0f, 0.0f, 0.0f, 0.0f);
@@ -37,6 +38,27 @@ namespace YAEngine
   float EditorStyle::GetContentScale()
   {
     return s_ContentScale;
+  }
+
+  void EditorStyle::RequestTheme(const EditorTheme& theme)
+  {
+    s_RequestedTheme = theme;
+  }
+
+  void EditorStyle::ApplyRequestedTheme()
+  {
+    if (!s_RequestedTheme.has_value())
+      return;
+
+    // Copied out first: Apply stores its argument into s_Theme
+    const EditorTheme theme = *s_RequestedTheme;
+    s_RequestedTheme.reset();
+    Apply(theme, s_ContentScale);
+  }
+
+  const EditorTheme& EditorStyle::GetRequestedTheme()
+  {
+    return s_RequestedTheme.has_value() ? *s_RequestedTheme : s_Theme;
   }
 
   void EditorStyle::Apply(const EditorTheme& theme, float contentScale)

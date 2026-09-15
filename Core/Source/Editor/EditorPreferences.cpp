@@ -94,7 +94,8 @@ namespace YAEngine
       return YAML::Node(FormatEditorThemeColor(value));
     }
 
-    void LoadTheme(const YAML::Node& section, EditorTheme& theme)
+    // The preset is read first: the tokens are overrides of its theme
+    void LoadTheme(const YAML::Node& section, EditorThemePreset& preset, EditorTheme& theme)
     {
       if (!section.IsDefined() || section.IsNull())
         return;
@@ -105,30 +106,62 @@ namespace YAEngine
         return;
       }
 
+      const YAML::Node palette = section["palette"];
+      if (palette.IsDefined() && !(palette.IsScalar() && ParseEditorThemePalette(palette.Scalar(), preset.palette)))
+      {
+        YA_LOG_WARN("Editor", "Preferences: 'theme.palette' is not a known palette, using '%s'",
+          GetEditorThemePaletteKey(preset.palette));
+      }
+
+      const YAML::Node mode = section["mode"];
+      if (mode.IsDefined() && !(mode.IsScalar() && ParseEditorThemeMode(mode.Scalar(), preset.mode)))
+      {
+        YA_LOG_WARN("Editor", "Preferences: 'theme.mode' is neither 'dark' nor 'light', using '%s'",
+          GetEditorThemeModeKey(preset.mode));
+      }
+
+      theme = MakeEditorTheme(preset);
       VisitEditorThemeTokens([&](const char* key, auto member)
       {
         const YAML::Node value = section[key];
         if (value.IsDefined() && !ReadThemeToken(value, theme.*member))
-          YA_LOG_WARN("Editor", "Preferences: theme key '%s' is malformed, using its default", key);
+          YA_LOG_WARN("Editor", "Preferences: theme key '%s' is malformed, using the preset's value", key);
       });
 
       ClampEditorTheme(theme);
     }
 
-    // A changed token equal to its default is removed, so a user who went back to it keeps getting
-    // the current default. Returns whether any token changed.
-    bool SaveTheme(YAML::Node& root, const EditorTheme& theme, const EditorTheme& saved)
+    // Tokens are stored as overrides of the preset's theme: a changed token equal to the preset's value is
+    // removed, so a user who went back to it keeps getting the preset's current value. A new preset rewrites
+    // every token against it. Returns whether anything changed.
+    bool SaveTheme(YAML::Node& root, const EditorPreferenceValues& values, const EditorPreferenceValues& saved)
     {
-      const EditorTheme defaults;
-      bool changed = false;
+      const bool presetChanged = values.themePreset != saved.themePreset;
+      if (presetChanged)
+      {
+        const EditorThemePreset defaults;
+        auto storeKey = [&](const char* key, const char* value, bool isDefault)
+        {
+          if (!isDefault)
+            RequireMapEntry(root, "theme")[key] = value;
+          else if (IsMapEntry(root, "theme"))
+            root["theme"].remove(key);
+        };
+        storeKey("palette", GetEditorThemePaletteKey(values.themePreset.palette),
+          values.themePreset.palette == defaults.palette);
+        storeKey("mode", GetEditorThemeModeKey(values.themePreset.mode), values.themePreset.mode == defaults.mode);
+      }
+
+      const EditorTheme presetTheme = MakeEditorTheme(values.themePreset);
+      bool changed = presetChanged;
       VisitEditorThemeTokens([&](const char* key, auto member)
       {
-        if (theme.*member == saved.*member)
+        if (!presetChanged && values.theme.*member == saved.theme.*member)
           return;
 
         changed = true;
-        if (theme.*member != defaults.*member)
-          RequireMapEntry(root, "theme")[key] = MakeThemeTokenNode(theme.*member);
+        if (values.theme.*member != presetTheme.*member)
+          RequireMapEntry(root, "theme")[key] = MakeThemeTokenNode(values.theme.*member);
         else if (IsMapEntry(root, "theme"))
           root["theme"].remove(key);
       });
@@ -324,7 +357,7 @@ namespace YAEngine
         if (root.IsMap())
         {
           // 'layout' from older builds is left alone: the dock layout version now lives in each imgui.ini
-          LoadTheme(root["theme"], theme);
+          LoadTheme(root["theme"], themePreset, theme);
           LoadBoolMap(root["groups"], "groups", groupOpenStates);
           LoadBoolMap(root["panels"], "panels", panelVisibility);
           LoadViewport(root["viewport"], *this);
@@ -383,7 +416,7 @@ namespace YAEngine
         RequireMapEntry(root, "mcp")["enabled"] = mcpEnabled;
         changed = true;
       }
-      changed |= SaveTheme(root, theme, m_Saved.theme);
+      changed |= SaveTheme(root, *this, m_Saved);
       changed |= SaveBoolMap(root, "groups", groupOpenStates, m_Saved.groupOpenStates);
       changed |= SaveBoolMap(root, "panels", panelVisibility, m_Saved.panelVisibility);
       changed |= SaveViewport(root, *this, m_Saved);
