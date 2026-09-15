@@ -9,6 +9,7 @@
 #include "Render/PipelineCache.h"
 #include "GizmoPushConstants.h"
 #include "SpritePushConstants.h"
+#include "Editor/Utils/EditorIcons.h"
 
 namespace YAEngine
 {
@@ -18,11 +19,25 @@ namespace YAEngine
   // click hitbox never drifts from what's drawn.
   namespace EditorIcon
   {
+    // Decodes an icon macro's UTF-8 literal, so the sprites follow the generated header
+    constexpr uint32_t CodepointOf(const char* utf8)
+    {
+      const uint32_t b0 = uint8_t(utf8[0]);
+      if (b0 < 0x80)
+        return b0;
+      if ((b0 & 0xE0) == 0xC0)
+        return ((b0 & 0x1F) << 6) | (uint8_t(utf8[1]) & 0x3Fu);
+      if ((b0 & 0xF0) == 0xE0)
+        return ((b0 & 0x0F) << 12) | ((uint8_t(utf8[1]) & 0x3Fu) << 6) | (uint8_t(utf8[2]) & 0x3Fu);
+      return ((b0 & 0x07) << 18) | ((uint8_t(utf8[1]) & 0x3Fu) << 12)
+        | ((uint8_t(utf8[2]) & 0x3Fu) << 6) | (uint8_t(utf8[3]) & 0x3Fu);
+    }
+
     constexpr float WORLD_SIZE = 0.5f;
-    constexpr uint32_t LIGHT_BULB = 0xf0eb;
-    constexpr uint32_t SUN = 0xf185;
-    constexpr uint32_t PROBE = 0xf0ac;
-    constexpr uint32_t CAMERA = 0xf03d;
+    constexpr uint32_t LIGHT_BULB = CodepointOf(ICON_LC_LIGHTBULB);
+    constexpr uint32_t SUN = CodepointOf(ICON_LC_SUN);
+    constexpr uint32_t PROBE = CodepointOf(ICON_LC_GLOBE);
+    constexpr uint32_t CAMERA = CodepointOf(ICON_LC_VIDEO);
   }
 
   enum class GizmoShape : uint8_t
@@ -53,9 +68,6 @@ namespace YAEngine
     void Init(const RenderContext& ctx, PipelineCache& psoCache, VkRenderPass renderPass, VkDescriptorSetLayout frameLayout);
     void Destroy(const RenderContext& ctx);
 
-    void DrawWireSphere(const glm::vec3& center, float radius, const glm::vec4& color);
-    void DrawWireBox(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color);
-    void DrawWireBox(const glm::vec3& center, const glm::vec3& extents, const glm::quat& rotation, const glm::vec4& color);
     void DrawWireSphereDepthTested(const glm::vec3& center, float radius, const glm::vec4& color);
     void DrawWireBoxDepthTested(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color);
     void DrawWireBoxDepthTested(const glm::vec3& center, const glm::vec3& extents, const glm::quat& rotation, const glm::vec4& color);
@@ -69,7 +81,6 @@ namespace YAEngine
     // Depth-tested segment on the instanced path: a sampled spline is hundreds of them,
     // and one draw call per segment would not survive that.
     void DrawLine(const glm::vec3& a, const glm::vec3& b, const glm::vec4& color);
-    void DrawPolyline(const std::vector<glm::vec3>& points, const glm::vec4& color);
     void DrawWireCone(const glm::vec3& origin, const glm::vec3& direction, float height, float angle, const glm::vec4& color);
     void DrawArrow(const glm::vec3& origin, const glm::vec3& direction, float length, const glm::vec4& color);
 
@@ -81,6 +92,19 @@ namespace YAEngine
     // Width/height of the rasterized glyph, the same factor gizmo_sprite.vert applies to
     // the quad. Picking has to reproduce the billboard exactly, so it needs this too.
     float GetSpriteAspect(uint32_t codepoint) const;
+
+    // A billboard keeps its world size until its quad would be taller than this on screen, in
+    // pixels at a content scale of 1; up close it would otherwise cover the viewport.
+    static constexpr float SPRITE_MAX_PIXELS = 96.0f;
+
+    // Camera the next overlay flush sizes sprites for, with the height of the target in pixels
+    void SetSpriteView(const glm::mat4& view, const glm::mat4& proj, float viewportHeight);
+    void SetSpriteMaxPixels(float pixels) { m_SpriteMaxPixels = pixels; }
+    float GetSpriteMaxPixels() const { return m_SpriteMaxPixels; }
+    // World size a sprite of the given size is drawn at from this camera. Drawing and icon
+    // picking both size the quad with it.
+    static float ClampSpriteSize(float size, const glm::vec3& position, const glm::mat4& view,
+      const glm::mat4& proj, float viewportHeight, float maxPixels);
 
     void DrawTranslateGizmo(const glm::vec3& position, const glm::vec3& cameraPos);
     void DrawRotateGizmo(const glm::vec3& position, const glm::vec3& cameraPos);
@@ -172,6 +196,11 @@ namespace YAEngine
     std::vector<SpriteDrawRequest> m_SpriteRequests;
 
     std::unordered_map<uint32_t, SpriteEntry> m_SpriteEntries;
+
+    glm::mat4 m_SpriteView { 1.0f };
+    glm::mat4 m_SpriteProj { 1.0f };
+    float m_SpriteViewportHeight = 0.0f;
+    float m_SpriteMaxPixels = SPRITE_MAX_PIXELS;
 
     GizmoAxis m_HoveredAxis = GizmoAxis::None;
     GizmoAxis m_DraggedAxis = GizmoAxis::None;

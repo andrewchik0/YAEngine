@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Pch.h"
+#include "Editor/Utils/EditorTheme.h"
 
 namespace YAEngine
 {
@@ -11,15 +12,40 @@ namespace YAEngine
     std::optional<bool> mcpEnabled;
   };
 
-  // Per-user editor settings in %LOCALAPPDATA%\YAEngine\editor.yaml, shared by every checkout
-  // and build configuration on the machine.
-  struct EditorPreferences
+  // What editor.yaml holds
+  struct EditorPreferenceValues
   {
     bool mcpEnabled = true;
+    // Defaults plus the overrides from the file's theme section; saved back as overrides only
+    EditorTheme theme;
+    // Open state of collapsible property groups, keyed "<window>/<group>"; only groups toggled away
+    // from their default open state are stored
+    std::map<std::string, bool> groupOpenStates;
+    // Panels shown or hidden against their descriptor default, keyed by window name; panels at their
+    // default are not stored
+    std::map<std::string, bool> panelVisibility;
+    // Viewport toolbar Show menu flags set against their defaults, keyed by flag; flags at their
+    // default are not stored
+    std::map<std::string, bool> viewportShowFlags;
+    // Show menu Node Color key ("irradiance", "ringing"); empty keeps the default
+    std::string viewportNodeColor;
+    // Editor camera fly speed in meters per second; unset keeps the camera's default
+    std::optional<float> cameraSpeed;
+  };
 
+  // Per-user editor settings in %LOCALAPPDATA%\YAEngine\editor.yaml, shared by every checkout,
+  // build configuration and running editor on the machine.
+  struct EditorPreferences : EditorPreferenceValues
+  {
     // A missing or unreadable file leaves the defaults in place.
     void Load();
-    bool Save() const;
+    // Rereads the file and writes only the keys this session changed since it last loaded or saved,
+    // so what another editor wrote in the meantime survives. Keys this build does not know survive too.
+    bool Save();
+
+  private:
+    // The values as last loaded or saved
+    EditorPreferenceValues m_Saved;
   };
 
   // %LOCALAPPDATA%\YAEngine, or an empty path when the variable is not set.

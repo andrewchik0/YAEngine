@@ -98,18 +98,20 @@ namespace YAEngine
 
     if (velocity != glm::vec3(0.0f))
     {
-      velocity = glm::normalize(velocity) * (float)deltaTime * 2.0f * m_Speed;
+      velocity = glm::normalize(velocity) * (float)deltaTime * m_Speed;
       GetScene().GetTransform(m_Camera).position += velocity;
     }
 
     float scrollY = input.GetScrollDelta().y;
     if (scrollY != 0.0f)
-    {
-      if (scrollY > 0)
-        m_Speed *= 1.1f;
-      else
-        m_Speed *= 0.9f;
-      m_Speed = glm::clamp(m_Speed, 0.01f, 1000.0f);
-    }
+      SetSpeed(m_Speed * (scrollY > 0.0f ? 1.1f : 0.9f));
+  }
+
+  void EditorCameraLayer::SetSpeed(float metersPerSecond)
+  {
+    if (!std::isfinite(metersPerSecond))
+      return;
+
+    m_Speed = glm::clamp(metersPerSecond, MIN_SPEED, MAX_SPEED);
   }
 }

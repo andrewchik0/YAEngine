@@ -1,7 +1,5 @@
 #pragma once
 
-#include <imgui.h>
-
 #include "Editor/IEditorPanel.h"
 
 namespace YAEngine
@@ -9,23 +7,24 @@ namespace YAEngine
   class EditorBridge;
   struct EditorPreferences;
 
-  // A live listener in the panel, and connected clients in the main menu bar indicator
-  inline constexpr ImVec4 AGENT_ACTIVE_COLOR { 0.4f, 0.85f, 0.45f, 1.0f };
-
   class AgentPanel : public IEditorPanel
   {
   public:
-    AgentPanel(EditorBridge& bridge, EditorPreferences& preferences);
+    static constexpr EditorPanelDescriptor DESCRIPTOR { .name = "AI Agent", .category = EditorPanelCategory::Tools };
 
-    const char* GetName() const override { return "AI Agent"; }
+    // mcpOverride: --mcp or --no-mcp of this run, which won over the saved preference at startup
+    AgentPanel(EditorBridge& bridge, EditorPreferences& preferences, std::optional<bool> mcpOverride);
+
+    const EditorPanelDescriptor& GetDescriptor() const override { return DESCRIPTOR; }
     void OnRender(EditorContext& context) override;
 
   private:
-    void DrawStatus();
+    void DrawConnection();
     void DrawClients();
     void DrawActivity();
 
     EditorBridge& m_Bridge;
     EditorPreferences& m_Preferences;
+    std::optional<bool> m_McpOverride;
   };
 }

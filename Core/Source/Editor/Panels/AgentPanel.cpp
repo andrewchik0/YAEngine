@@ -4,13 +4,17 @@
 #include "Editor/Bridge/BridgeJson.h"
 #include "Editor/Bridge/EditorBridge.h"
 #include "Editor/EditorPreferences.h"
+#include "Editor/Utils/EditorFonts.h"
+#include "Editor/Utils/EditorIcons.h"
+#include "Editor/Utils/EditorStyle.h"
+#include "Editor/Utils/EditorWidgets.h"
 
 namespace YAEngine
 {
+  using namespace EditorWidgets;
+
   namespace
   {
-    constexpr ImVec4 ERROR_COLOR { 0.95f, 0.4f, 0.35f, 1.0f };
-
     // Forward slashes survive every shell and JSON consumer the copied text may end up in
     std::string GetMcpServerDirectory()
     {
@@ -35,79 +39,121 @@ namespace YAEngine
     }
   }
 
-  AgentPanel::AgentPanel(EditorBridge& bridge, EditorPreferences& preferences)
+  AgentPanel::AgentPanel(EditorBridge& bridge, EditorPreferences& preferences, std::optional<bool> mcpOverride)
     : m_Bridge(bridge),
-      m_Preferences(preferences)
+      m_Preferences(preferences),
+      m_McpOverride(mcpOverride)
   {
   }
 
   void AgentPanel::OnRender(EditorContext& context)
   {
-    if (!ImGui::Begin("AI Agent"))
+    if (!BeginPanel())
     {
       ImGui::End();
       return;
     }
 
+    DrawConnection();
+
+    if (BeginPropertyGroup("Setup", {
+      .icon = ICON_LC_PLUG,
+      .defaultOpen = false,
+      .tooltip = "Connects an MCP client such as Claude Code to this editor" }))
+    {
+      if (PropertyButton("Copy MCP Config", {
+        .icon = ICON_LC_COPY,
+        .tooltip = "Copies an mcpServers entry that starts the YAEngine MCP server through uv, for clients configured with JSON" }))
+      {
+        ImGui::SetClipboardText(BuildMcpConfig().c_str());
+      }
+      if (PropertyButton("Copy Claude Code Command", {
+        .icon = ICON_LC_TERMINAL,
+        .tooltip = "Copies the claude mcp add command that registers the YAEngine MCP server" }))
+      {
+        ImGui::SetClipboardText(BuildClaudeCodeCommand().c_str());
+      }
+      EndPropertyGroup();
+    }
+
+    DrawClients();
+    DrawActivity();
+
+    ImGui::End();
+  }
+
+  void AgentPanel::DrawConnection()
+  {
+    BeginPropertyScope();
+
     bool enabled = m_Bridge.IsEnabled();
-    if (ImGui::Checkbox("Allow agent connections", &enabled))
+    if (PropertyBool("Allow Agent Connections", enabled, {
+      .tooltip = "Runs the local bridge MCP clients connect to. The choice is saved for the next runs." }))
     {
       m_Bridge.SetEnabled(enabled);
       m_Preferences.mcpEnabled = enabled;
       m_Preferences.Save();
     }
 
-    DrawStatus();
-
-    if (ImGui::Button("Copy MCP config"))
-      ImGui::SetClipboardText(BuildMcpConfig().c_str());
-    ImGui::SameLine();
-    if (ImGui::Button("Copy Claude Code command"))
-      ImGui::SetClipboardText(BuildClaudeCodeCommand().c_str());
-    ImGui::SameLine();
-    ImGui::BeginDisabled(m_Bridge.GetClientCount() == 0);
-    if (ImGui::Button("Disconnect all"))
-      m_Bridge.DisconnectAll();
-    ImGui::EndDisabled();
-
-    ImGui::Separator();
-    DrawClients();
-    ImGui::Separator();
-    DrawActivity();
-
-    ImGui::End();
-  }
-
-  void AgentPanel::DrawStatus()
-  {
-    if (!m_Bridge.IsEnabled())
+    if (m_McpOverride.has_value())
     {
-      ImGui::TextDisabled("Disabled");
-      return;
+      PropertyStatus(nullptr, *m_McpOverride
+        ? "Started with --mcp, which overrides the saved preference for this run"
+        : "Started with --no-mcp, which overrides the saved preference for this run",
+        StatusKind::Info);
     }
 
     const std::string& error = m_Bridge.GetError();
-    if (!error.empty())
-      ImGui::TextColored(ERROR_COLOR, "Error: %s", error.c_str());
+    if (!m_Bridge.IsEnabled())
+    {
+      PropertyStatus("Status", "Disabled");
+    }
+    else if (!error.empty())
+    {
+      PropertyStatus("Status", error.c_str(), StatusKind::Error);
+    }
     else if (m_Bridge.IsListening())
-      ImGui::TextColored(AGENT_ACTIVE_COLOR, "Listening on 127.0.0.1:%u", static_cast<unsigned>(m_Bridge.GetPort()));
+    {
+      char text[64];
+      snprintf(text, sizeof(text), "Listening on 127.0.0.1:%u", uint32_t(m_Bridge.GetPort()));
+      PropertyStatus("Status", text, StatusKind::Success);
+    }
     else
-      ImGui::TextDisabled("Starting...");
+    {
+      PropertyStatus("Status", "Starting...");
+    }
+
+    if (PropertyButton("Disconnect All", {
+      .icon = ICON_LC_UNPLUG,
+      .tooltip = "Closes every open agent connection",
+      .disabledReason = m_Bridge.GetClientCount() == 0 ? "No agent is connected" : nullptr }))
+    {
+      m_Bridge.DisconnectAll();
+    }
+
+    EndPropertyScope();
   }
 
   void AgentPanel::DrawClients()
   {
     const std::vector<BridgeClientInfo>& clients = m_Bridge.GetClients();
-    ImGui::Text("Connected clients: %zu", clients.size());
+    char heading[48];
+    snprintf(heading, sizeof(heading), "Connected Clients (%zu)", clients.size());
+    PropertySubHeading(heading);
+
     if (clients.empty())
+    {
+      ImGui::TextDisabled("No agent is connected");
       return;
+    }
 
     if (ImGui::BeginTable("AgentClients", 2, ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg))
     {
       ImGui::TableSetupColumn("Client");
-      ImGui::TableSetupColumn("Connected at");
+      ImGui::TableSetupColumn("Connected At");
       ImGui::TableHeadersRow();
 
+      EditorFonts::Push(EditorFontRole::Mono);
       for (const BridgeClientInfo& client : clients)
       {
         ImGui::TableNextRow();
@@ -116,6 +162,7 @@ namespace YAEngine
         ImGui::TableNextColumn();
         ImGui::TextUnformatted(client.connectedAt.c_str());
       }
+      EditorFonts::Pop();
       ImGui::EndTable();
     }
   }
@@ -123,9 +170,15 @@ namespace YAEngine
   void AgentPanel::DrawActivity()
   {
     const std::deque<BridgeActivityRecord>& activity = m_Bridge.GetActivity();
-    ImGui::Text("Recent requests: %zu", activity.size());
+    char heading[48];
+    snprintf(heading, sizeof(heading), "Recent Requests (%zu)", activity.size());
+    PropertySubHeading(heading);
+
     if (activity.empty())
+    {
+      ImGui::TextDisabled("No requests yet");
       return;
+    }
 
     ImGuiTableFlags flags = ImGuiTableFlags_BordersInnerH | ImGuiTableFlags_RowBg
       | ImGuiTableFlags_ScrollY | ImGuiTableFlags_SizingFixedFit;
@@ -138,6 +191,9 @@ namespace YAEngine
       ImGui::TableSetupColumn("Result");
       ImGui::TableSetupColumn("ms");
       ImGui::TableHeadersRow();
+
+      const ImVec4 errorColor = ToImGuiColor(EditorStyle::GetTheme().error);
+      EditorFonts::Push(EditorFontRole::Mono);
 
       // Newest first
       ImGuiListClipper clipper;
@@ -158,11 +214,13 @@ namespace YAEngine
           if (record.result == "ok")
             ImGui::TextUnformatted("ok");
           else
-            ImGui::TextColored(ERROR_COLOR, "%s", record.result.c_str());
+            ImGui::TextColored(errorColor, "%s", record.result.c_str());
           ImGui::TableNextColumn();
           ImGui::Text("%.1f", record.durationMs);
         }
       }
+
+      EditorFonts::Pop();
       ImGui::EndTable();
     }
   }

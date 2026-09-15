@@ -173,13 +173,4 @@ namespace YAEngine
   // left empty when the string sets none, and targets default to final,resolved unless the
   // shot names a pass with after=.
   bool ParseFrameCaptureShot(const std::string& text, FrameCaptureShot& outShot, std::string& outError);
-
-  // Debug view id <-> name. The table mirrors the DEBUG_VIEW_* ids in
-  // Core/Shared/FrameUniforms.h and the labels in RenderSettingsPanel; it lives here
-  // because the panel is editor-only and both the parser and the manifest need it.
-  const char* GetDebugViewName(int view);
-  // Accepts a decimal id or a slug ("pt-max-contrib"). Returns -1 for anything else.
-  int ParseDebugView(std::string_view text);
-  int GetDebugViewCount();
-  const char* GetDebugViewSlug(int view);
 }

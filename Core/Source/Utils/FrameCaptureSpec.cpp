@@ -1,5 +1,6 @@
 #include "Utils/FrameCaptureSpec.h"
 
+#include "Utils/DebugViews.h"
 #include "Utils/FormatText.h"
 #include "Utils/Log.h"
 
@@ -10,52 +11,6 @@ namespace YAEngine
 {
   namespace
   {
-    struct DebugViewEntry
-    {
-      const char* slug;
-      const char* name;
-    };
-
-    // Index is the DEBUG_VIEW_* id. Order and length must match the debugViews[] labels in
-    // RenderSettingsPanel.cpp, which is the list the ids are positional against.
-    constexpr DebugViewEntry DEBUG_VIEWS[] = {
-      { "off",                  "Off" },
-      { "albedo",               "Albedo" },
-      { "metallic",             "Metallic" },
-      { "roughness",            "Roughness" },
-      { "normals",              "Normals" },
-      { "ao",                   "AO" },
-      { "ssr",                  "SSR" },
-      { "wireframe",            "Wireframe" },
-      { "taa-delta",            "TAA Delta" },
-      { "velocity",             "Velocity" },
-      { "ambient-only",         "Ambient Only" },
-      { "ambient-diffuse",      "Ambient Diffuse" },
-      { "ambient-specular",     "Ambient Specular" },
-      { "probe-index",          "Reflection Probe Index" },
-      { "probe-fallback",       "Reflection Probe Fallback" },
-      { "volume-coverage",      "Volume Coverage" },
-      { "ssgi-validity",        "SSGI Validity" },
-      { "ssgi-screen",          "SSGI Screen Part" },
-      { "ssgi-fallback",        "SSGI Fallback Weight" },
-      { "direct-only",          "Direct Only" },
-      { "ray-query",            "Ray Query" },
-      { "rt-pipeline",          "RT Pipeline" },
-      { "pt-noisy",             "PT Noisy" },
-      { "pt-reference",         "PT Reference" },
-      { "pt-guides",            "PT Guides" },
-      { "pt-max-contrib",       "PT Max Contribution" },
-      { "pt-nee",               "PT NEE" },
-      { "pt-environment",       "PT Environment" },
-      { "pt-nonfinite",         "PT Non-Finite" },
-      { "hdr-magnitude",        "HDR Magnitude" },
-      { "pt-specular-motion",   "PT Specular Motion" },
-      { "volume-level",         "Volume Level" },
-    };
-
-    static_assert(std::size(DEBUG_VIEWS) == DEBUG_VIEW_VOLUME_LEVEL + 1,
-      "Debug view table is out of sync with the DEBUG_VIEW_* ids in FrameUniforms.h");
-
     struct NamedMode
     {
       const char* key;
@@ -357,80 +312,6 @@ namespace YAEngine
       outHeight = static_cast<uint32_t>(height);
       return true;
     }
-
-    // Retired trigger, kept because it may still be set in a shell profile. Only consulted
-    // when argv armed nothing, so --capture always wins.
-#pragma warning(push)
-#pragma warning(disable : 4996) // getenv, which has no portable _s replacement worth the churn
-    void ApplyEnvironmentFallback(FrameCaptureSpec& spec)
-    {
-      const char* dir = std::getenv("YA_CAPTURE_DIR");
-      if (dir == nullptr || *dir == '\0')
-        return;
-
-      YA_LOG_WARN("Render", "Capture: armed by YA_CAPTURE_DIR, which is superseded by --capture <dir>");
-
-      spec.armed = true;
-      spec.outputDir = dir;
-      spec.commandLine = "YA_CAPTURE_DIR=" + spec.outputDir;
-
-      FrameCaptureShot shot;
-      shot.requestedBy = "YA_CAPTURE_DIR";
-
-      auto readCount = [](const char* name, int& target) {
-        const char* value = std::getenv(name);
-        if (value == nullptr)
-          return;
-
-        int parsed = 0;
-        if (ParseInt(value, parsed) && parsed > 0)
-          target = parsed;
-        else
-          YA_LOG_WARN("Render", "Capture: ignoring %s='%s', expected a positive integer", name, value);
-      };
-
-      readCount("YA_CAPTURE_WARMUP", shot.warmupFrames);
-      readCount("YA_CAPTURE_FRAMES", shot.frames);
-
-      spec.shots.push_back(shot);
-    }
-#pragma warning(pop)
-  }
-
-  const char* GetDebugViewName(int view)
-  {
-    if (view < 0 || view >= static_cast<int>(std::size(DEBUG_VIEWS)))
-      return "Unknown";
-
-    return DEBUG_VIEWS[view].name;
-  }
-
-  const char* GetDebugViewSlug(int view)
-  {
-    if (view < 0 || view >= static_cast<int>(std::size(DEBUG_VIEWS)))
-      return "unknown";
-
-    return DEBUG_VIEWS[view].slug;
-  }
-
-  int GetDebugViewCount()
-  {
-    return static_cast<int>(std::size(DEBUG_VIEWS));
-  }
-
-  int ParseDebugView(std::string_view text)
-  {
-    int id = 0;
-    if (ParseInt(text, id))
-      return (id >= 0 && id < GetDebugViewCount()) ? id : -1;
-
-    for (int i = 0; i < GetDebugViewCount(); i++)
-    {
-      if (text == DEBUG_VIEWS[i].slug)
-        return i;
-    }
-
-    return -1;
   }
 
   bool ParseFrameCaptureShot(const std::string& text, FrameCaptureShot& outShot, std::string& outError)
@@ -520,12 +401,9 @@ namespace YAEngine
     }
 
     if (!outSpec.armed)
-      ApplyEnvironmentFallback(outSpec);
-    else
-      outSpec.commandLine = commandLine;
-
-    if (!outSpec.armed)
       return true;
+
+    outSpec.commandLine = commandLine;
 
     // With --capture but no --shot, one shot of the current state is still the useful
     // default: the flag alone has to produce a capture.

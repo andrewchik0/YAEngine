@@ -1,6 +1,5 @@
 // Everything every ray tracing shader in the engine shares: the per-frame scene bindings,
-// the mesh streams an instance record points at, and the debug shading the Ray Query and
-// RT Pipeline views must agree on down to the last bit - they exist to be compared.
+// the mesh streams an instance record points at, and how a hit resolves into geometry.
 //
 // No version or extension directives here on purpose. Tools/CompileShaders pastes an include
 // into its consumer, then prepends its own version line after cutting the expanded text at the
@@ -10,8 +9,8 @@
 // a line inside a block comment is still misread, so prose keeps not spelling the directive
 // out. Extension directives are not scanned for at all: enabling them is the consumer's job.
 // Every consumer enables GL_EXT_buffer_reference, GL_EXT_buffer_reference2,
-// GL_EXT_shader_explicit_arithmetic_types_int64 and either GL_EXT_ray_query or
-// GL_EXT_ray_tracing itself, plus GL_EXT_nonuniform_qualifier when it defines RT_BINDLESS.
+// GL_EXT_shader_explicit_arithmetic_types_int64 and GL_EXT_ray_tracing itself, plus
+// GL_EXT_nonuniform_qualifier when it defines RT_BINDLESS.
 
 #include "common.glsl"
 #include "../Shared/RayTracingInstanceData.h"
@@ -30,14 +29,6 @@ layout(std430, set = 1, binding = 2) readonly buffer RayTracingMaterialSSBO
 {
   RayTracingMaterialRecord u_Materials[];
 };
-
-#ifdef RT_DEBUG_VIEW
-// Binding 3 belongs to the pass, and the two debug views are the pass that owns it here.
-// The path tracer forks the set layout from binding 3 up - it needs the G-buffer, the sky
-// and the lights there - so its shaders must not declare this, and neither may the hit and
-// miss shaders both pipelines share.
-layout(set = 1, binding = 3, rgba16f) uniform writeonly image2D outRayQuery;
-#endif
 
 #ifdef RT_BINDLESS
 // Set 2: the global bindless texture table. Never rebuilt between frames, so it is bound
@@ -59,28 +50,9 @@ layout(buffer_reference, std430, buffer_reference_align = 4) readonly buffer Ind
   uint data[];
 };
 
-// FrameUniforms carries no light, so the shading direction is fixed. These views answer
-// "is the geometry where the acceleration structure says it is", not "does it match the
-// lit image", and a fixed key light keeps that readable whatever the sun is doing.
-// Written out already normalized rather than through normalize(), which keeps the
-// initializer a plain constant expression.
-const vec3 RT_DEBUG_LIGHT_DIR = vec3(0.3990, 0.8479, 0.3491);
-const vec3 RT_DEBUG_MISS_COLOR = vec3(0.05, 0.07, 0.10);
-const float RT_DEBUG_TMIN = 0.01;
-const float RT_DEBUG_TMAX = 100000.0;
-
 // The cutout threshold the raster alpha-test path uses, so an any-hit shader keeps or
 // drops exactly the texels the G-buffer pass would have.
 const float RT_ALPHA_CUTOFF = 0.5;
-
-// Low saturation on purpose: the tint has to separate neighbouring instances without
-// swamping the N dot L term that shows whether the fetched triangle is the right one.
-vec3 instanceTint(uint index)
-{
-  uint h = index * 2654435761u;
-  vec3 rgb = vec3(float((h >> 16) & 0xFFu), float((h >> 8) & 0xFFu), float(h & 0xFFu)) / 255.0;
-  return mix(vec3(0.72), rgb, 0.35);
-}
 
 vec3 fetchPosition(VertexStream vertices, uint vertexIndex)
 {
@@ -114,9 +86,7 @@ vec2 interpolateTexCoord(VertexStream vertices, uint attributeOffset, uvec3 triI
 
 // The camera ray for one pixel, using the unprojection the sky path of
 // deferred_lighting.frag uses: under reversed-Z the near plane is NDC z = 1, and z = 0 is
-// infinity and unprojects to w = 0. The camera jitter baked into proj is left in - it moves
-// the ray by a fraction of a pixel and nothing downstream of these views integrates over
-// frames.
+// infinity and unprojects to w = 0. The camera jitter baked into proj is left in.
 void primaryRay(ivec2 pixel, out vec3 rayOrigin, out vec3 rayDirection)
 {
   vec2 uv = (vec2(pixel) + 0.5) / vec2(u_Frame.screenWidth, u_Frame.screenHeight);
@@ -130,7 +100,6 @@ void primaryRay(ivec2 pixel, out vec3 rayOrigin, out vec3 rayDirection)
 // What a hit or miss shader hands back to the ray generation shader. Deliberately thin and
 // deliberately unshaded: keeping the shading in the ray generation shader is what lets the
 // path tracer grow its bounce loop there without a hit shader having to learn about it.
-// Unused by the ray query path, which reads the same values straight off the query.
 struct RayTracingPayload
 {
   vec2 barycentrics;
@@ -226,41 +195,4 @@ vec2 hitTexCoord(RayHitGeometry hit, vec2 barycentrics)
 
   return interpolateTexCoord(VertexStream(hit.vertexAddress), hit.attributeOffset,
     hit.triIndices, barycentrics);
-}
-
-// The whole debug visualization of one triangle hit, shared by the ray query view and the
-// ray tracing pipeline view so the two cannot drift: any difference between their images is
-// a difference in how the hit was found, never in how it was shaded.
-//
-// In the bindless permutation this is material slot -> material record -> bindless slot ->
-// the same texel the raster path would sample; without it, a per-instance tint.
-vec3 shadeDebugHit(uint recordIndex, uint primitiveIndex, mat4x3 objectToWorld,
-  vec2 barycentrics, vec3 rayDirection)
-{
-  RayHitGeometry hit = resolveHitGeometry(recordIndex, primitiveIndex, objectToWorld,
-    barycentrics, rayDirection);
-
-  float ndotl = max(dot(hit.normal, RT_DEBUG_LIGHT_DIR), 0.0);
-
-#ifdef RT_BINDLESS
-  vec3 base = vec3(0.72);
-  if (hit.materialIndex < uint(u_Materials.length()))
-  {
-    RayTracingMaterialRecord material = u_Materials[hit.materialIndex];
-    base = material.albedo;
-
-    if ((material.textureMask & RT_MATERIAL_BASE_COLOR) != 0u && hit.attributeOffset != 0u)
-    {
-      vec2 texCoord = hitTexCoord(hit, barycentrics);
-
-      // Mip 0 explicitly: neither a compute invocation nor a ray tracing one has
-      // derivatives, so an implicit LOD would be undefined here.
-      base *= textureLod(u_BindlessTextures[nonuniformEXT(material.baseColorIndex)],
-        texCoord * material.uvScale, 0.0).rgb;
-    }
-  }
-  return base * (0.15 + 0.85 * ndotl);
-#else
-  return instanceTint(recordIndex) * (0.15 + 0.85 * ndotl);
-#endif
 }

@@ -6,10 +6,6 @@
 #include "ImGui/imgui_impl_vulkan.h"
 #include "Utils/Log.h"
 
-#ifdef YA_EDITOR
-#include "Editor/Utils/EditorIcons.h"
-#endif
-
 namespace YAEngine
 {
   static void CheckVkResult(VkResult err)
@@ -91,24 +87,14 @@ namespace YAEngine
 
     ImGui_ImplVulkan_Init(&init_info);
 
-    io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/Roboto-Regular.ttf", 16.0f);
-
-#ifdef YA_EDITOR
-    ImFontConfig iconConfig;
-    iconConfig.MergeMode = true;
-    iconConfig.GlyphMinAdvanceX = 15.0f;
-    iconConfig.PixelSnapH = true;
-    static const ImWchar iconRanges[] = { ICON_MIN_FA, ICON_MAX_FA, 0 };
-    io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/FontAwesome7.ttf", 16.0f, &iconConfig, iconRanges);
+#ifndef YA_EDITOR
+    // Editor builds load their font roles in EditorFonts
+    io.Fonts->AddFontFromFileTTF(WORKING_DIR "/Assets/Fonts/Inter-Regular.ttf", 16.0f);
 #endif
-
-    io.Fonts->Build();
-    ImGui::PushFont(io.Fonts->Fonts[0]);
   }
 
   void VulkanImGui::Destroy()
   {
-    ImGui::PopFont();
     if (ImGui::GetCurrentContext())
     {
       ImGui::UpdatePlatformWindows();

@@ -18,13 +18,11 @@ namespace YAEngine
   void RegisterRayTracingRequirements(VulkanRequirements& requirements)
   {
     // Dependency order is not cosmetic: acceleration structures may not be enabled without
-    // deferred host operations, and both ray tracing paths build on them.
+    // deferred host operations, and the ray tracing pipeline builds on them.
     requirements.AddDeviceExtension(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
     requirements.AddDeviceExtension(VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME,
       { VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME });
     requirements.AddDeviceExtension(VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME,
-      { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME });
-    requirements.AddDeviceExtension(VK_KHR_RAY_QUERY_EXTENSION_NAME,
       { VK_KHR_ACCELERATION_STRUCTURE_EXTENSION_NAME });
 
     // Value initialization, not a designated initializer list: the requirements merge
@@ -39,11 +37,6 @@ namespace YAEngine
     pipelineFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR;
     pipelineFeatures.rayTracingPipeline = VK_TRUE;
     requirements.AddDeviceFeatureStruct(pipelineFeatures, { VK_KHR_RAY_TRACING_PIPELINE_EXTENSION_NAME });
-
-    VkPhysicalDeviceRayQueryFeaturesKHR queryFeatures {};
-    queryFeatures.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR;
-    queryFeatures.rayQuery = VK_TRUE;
-    requirements.AddDeviceFeatureStruct(queryFeatures, { VK_KHR_RAY_QUERY_EXTENSION_NAME });
 
     VkPhysicalDeviceVulkan12Features features12 {};
     features12.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES;
@@ -71,21 +64,17 @@ namespace YAEngine
       requirements, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_ACCELERATION_STRUCTURE_FEATURES_KHR);
     const auto* pipelineFeatures = FindFeatures<VkPhysicalDeviceRayTracingPipelineFeaturesKHR>(
       requirements, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_TRACING_PIPELINE_FEATURES_KHR);
-    const auto* queryFeatures = FindFeatures<VkPhysicalDeviceRayQueryFeaturesKHR>(
-      requirements, VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_RAY_QUERY_FEATURES_KHR);
 
     const VkPhysicalDeviceVulkan12Features& features12 = requirements.GetVulkan12Features();
 
     const bool accelerationStructure = accelerationFeatures != nullptr
       && accelerationFeatures->accelerationStructure == VK_TRUE;
     const bool rayTracingPipeline = pipelineFeatures != nullptr && pipelineFeatures->rayTracingPipeline == VK_TRUE;
-    const bool rayQuery = queryFeatures != nullptr && queryFeatures->rayQuery == VK_TRUE;
     const bool deferredHostOperations =
       requirements.IsDeviceExtensionEnabled(VK_KHR_DEFERRED_HOST_OPERATIONS_EXTENSION_NAME);
 
     context.raytracingSupported = accelerationStructure && deferredHostOperations && rayTracingPipeline
       && features12.bufferDeviceAddress == VK_TRUE;
-    context.rayQuerySupported = context.raytracingSupported && rayQuery;
     context.bindlessSupported = features12.descriptorIndexing == VK_TRUE
       && features12.runtimeDescriptorArray == VK_TRUE
       && features12.shaderSampledImageArrayNonUniformIndexing == VK_TRUE
@@ -122,15 +111,12 @@ namespace YAEngine
       context.rayTracingPipelineProperties.pNext = nullptr;
     }
 
-    YA_LOG_INFO("Render", "Ray tracing support: hardware ray tracing=%d, ray query=%d, bindless descriptors=%d",
+    YA_LOG_INFO("Render", "Ray tracing support: hardware ray tracing=%d, bindless descriptors=%d",
       context.raytracingSupported ? 1 : 0,
-      context.rayQuerySupported ? 1 : 0,
       context.bindlessSupported ? 1 : 0);
 
     if (!context.raytracingSupported)
       YA_LOG_WARN("Render", "Hardware ray tracing is unavailable on this device");
-    else if (!context.rayQuerySupported)
-      YA_LOG_WARN("Render", "Ray queries are unavailable, only the ray tracing pipeline can trace here");
 
     if (!context.bindlessSupported)
       YA_LOG_WARN("Render", "Bindless descriptor indexing is unavailable on this device");

@@ -464,7 +464,7 @@ namespace YAEngine::ModelOverrides
       }
 
       if (patch["name"])
-        scene.GetName(entity) = patch["name"].as<std::string>();
+        scene.SetName(entity, patch["name"].as<std::string>());
 
       if (patch["parent"])
         parentRequests.push_back({ entity, patch["parent"].as<std::string>() });
@@ -639,7 +639,7 @@ namespace YAEngine::ModelOverrides
     transform.scale = templateNode->scale;
     scene.MarkDirty(entity);
 
-    scene.GetName(entity) = templateNode->name;
+    scene.SetName(entity, templateNode->name);
 
     for (auto& [name, entry] : registry.GetEntries())
     {

@@ -107,23 +107,10 @@ namespace YAEngine
     uint32_t GetIndexUsedBytes(VkIndexType indexType) const;
     VkDeviceSize GetPositionCapacityBytes() const { return m_Positions.GetSize(); }
     VkDeviceSize GetShadowPositionCapacityBytes() const { return m_ShadowPositions.GetSize(); }
-    uint32_t GetShadowPositionHighWaterBytes() const { return m_ShadowPositionHighWater; }
     size_t GetShadowPositionFreeBlockCount() const { return m_ShadowPositions.GetAllocatorFreeBlockCount(); }
-    // Worst position error any resident mesh pays for quantization, and the size of
-    // the mesh that pays it. The pair is what tells whether 16 bits still suffice.
-    // Both are in mesh local units: the grid is built from the mesh AABB and the
-    // instance scale is applied only later, so an instance scaled above 1 drifts
-    // proportionally further than this reports.
-    float GetMaxQuantizeError() const { return m_MaxQuantizeError; }
-    float GetMaxQuantizeErrorExtent() const { return m_MaxQuantizeErrorExtent; }
     VkDeviceSize GetIndexCapacityBytes(VkIndexType indexType) const { return IndexBuffer(indexType).GetSize(); }
     size_t GetPositionFreeBlockCount() const { return m_Positions.GetAllocatorFreeBlockCount(); }
     size_t GetIndexFreeBlockCount(VkIndexType indexType) const { return IndexBuffer(indexType).GetAllocatorFreeBlockCount(); }
-    uint32_t GetPositionHighWaterBytes() const { return m_PositionHighWater; }
-    uint32_t GetIndexHighWaterBytes(VkIndexType indexType) const
-    {
-      return indexType == VK_INDEX_TYPE_UINT16 ? m_IndexHighWater16 : m_IndexHighWater32;
-    }
     // What the narrow buffer saves against the single 32-bit buffer this arena used
     // to bind for every mesh, so the price of the split stays visible.
     uint64_t GetIndexSavedBytes() const { return m_WideIndexBytes - m_IndexBytes; }
@@ -230,6 +217,11 @@ namespace YAEngine
     // Index bytes currently held by shadow LOD levels alone, so the price of the
     // feature stays visible next to what it saves.
     uint64_t m_LodIndexBytes = 0;
+    // Worst position error any resident mesh pays for quantization, and the size of
+    // the mesh that pays it. The pair is what tells whether 16 bits still suffice.
+    // Both are in mesh local units: the grid is built from the mesh AABB and the
+    // instance scale is applied only later, so an instance scaled above 1 drifts
+    // proportionally further than this reports.
     float m_MaxQuantizeError = 0.0f;
     float m_MaxQuantizeErrorExtent = 0.0f;
     uint64_t m_ContentVersion = 0;

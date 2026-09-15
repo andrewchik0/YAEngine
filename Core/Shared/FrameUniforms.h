@@ -1,9 +1,9 @@
 #define TONEMAP_ACES 0
 #define TONEMAP_AGX  1
 
-// Debug view indices - must match the debugViews[] list in RenderSettingsPanel.cpp.
-// Only the views one of the shared macros below names need to be spelled out; the rest
-// stay positional.
+// Debug view ids. Utils/DebugViews.cpp is the table that names, groups and orders them for
+// the viewport toolbar, frame capture and the agent bridge. Only the views a shader or one of
+// the shared macros below names need to be spelled out; the rest stay positional.
 #define DEBUG_VIEW_AO                5
 #define DEBUG_VIEW_SSR               6
 #define DEBUG_VIEW_TAA_DELTA         8
@@ -17,53 +17,46 @@
 #define DEBUG_VIEW_SSGI_SCREEN      17
 #define DEBUG_VIEW_SSGI_FALLBACK    18
 #define DEBUG_VIEW_DIRECT_ONLY      19
-// Written by rt_debug.comp, not by any raster pass, and displayed straight - like TAA
-// Delta and Velocity it deliberately stays out of IS_INDIRECT_DEBUG_VIEW below.
-#define DEBUG_VIEW_RAY_QUERY        20
-// The same image traced through the ray tracing pipeline instead - pathtrace.rgen and its
-// hit group. The two are meant to be pixel-identical; a difference between them is a bug in
-// the shader binding table, not a difference in shading.
-#define DEBUG_VIEW_RT_PIPELINE      21
 // The path tracer's own two views, both written by pt_main.rgen. Noisy is this frame's
 // single sample; Reference is the running mean the same pass keeps while the camera and the
-// scene hold still. Unlike the two views above these carry HDR scene radiance, so the
-// tonemap pass runs them through the normal exposure and tone mapping operator.
-#define DEBUG_VIEW_PT_NOISY         22
-#define DEBUG_VIEW_PT_REFERENCE     23
+// scene hold still. Both carry HDR scene radiance, so the tonemap pass runs them through the
+// normal exposure and tone mapping operator.
+#define DEBUG_VIEW_PT_NOISY         20
+#define DEBUG_VIEW_PT_REFERENCE     21
 // The three guide buffers ray reconstruction consumes, in one 2x2 tiled image: the two
 // demodulation albedos on top, the world normal and the roughness underneath. Written by
 // pt_guides.comp, which only runs while the path tracing render path is effective.
-#define DEBUG_VIEW_PT_GUIDES        24
+#define DEBUG_VIEW_PT_GUIDES        22
 // Where the path tracer's energy comes from, on a log scale, written into PathTraceNoisy in
 // place of radiance while PathTraceConstants::debugMode is not zero. Three separate questions,
 // one per view: which bounce produced the largest single contribution and how large it was,
 // how much next event estimation added in total, and how much the environment added on a
 // bounce miss. Values are measured BEFORE the firefly clamp, which is the whole point - the
 // clamp is what hides the number that has to be read.
-#define DEBUG_VIEW_PT_MAX_CONTRIB   25
-#define DEBUG_VIEW_PT_NEE           26
-#define DEBUG_VIEW_PT_ENVIRONMENT   27
+#define DEBUG_VIEW_PT_MAX_CONTRIB   23
+#define DEBUG_VIEW_PT_NEE           24
+#define DEBUG_VIEW_PT_ENVIRONMENT   25
 // Where the first NaN or Inf entered the path, as a PT_NF_* code rather than a magnitude.
 // The three views above answer "how much"; this one answers "from which expression", which
 // is the question a value that has already become NaN can no longer be asked. It is the only
 // path tracing view whose image is NOT on the log ramp - see PT_NF_* below.
-#define DEBUG_VIEW_PT_NONFINITE     28
+#define DEBUG_VIEW_PT_NONFINITE     26
 
 // The magnitude of the final HDR colour, on the same logarithmic grey scale as the three views
 // above and sampled from the same resolved image the tone map consumes. It therefore works in
 // BOTH render paths, which is the entire point: switching Raster and Path Tracing on one
 // camera reads two numbers off one scale and answers how much energy each path puts on a
 // surface. Comparing a path traced diagnostic against a rasterized image by eye cannot.
-#define DEBUG_VIEW_HDR_MAGNITUDE    29
+#define DEBUG_VIEW_HDR_MAGNITUDE    27
 
 // The specular motion vectors pt_main.rgen writes for ray reconstruction, on the Velocity view's
 // scale. Like PT Guides it only exists while the path tracing render path is effective.
-#define DEBUG_VIEW_PT_SPECULAR_MOTION 30
+#define DEBUG_VIEW_PT_SPECULAR_MOTION 28
 
 // The spacing level of the brick the innermost contributing irradiance volume was sampled in,
 // finest red to coarsest blue as the placement brick gizmo, black = skybox. Written by deferred
 // lighting like Volume Coverage.
-#define DEBUG_VIEW_VOLUME_LEVEL     31
+#define DEBUG_VIEW_VOLUME_LEVEL     29
 
 // PathTraceConstants::debugMode, and the order the views above map onto it.
 #define PT_DEBUG_OFF          0
@@ -144,7 +137,7 @@
 // AO chain, the screen space effects, the temporal resolve and every deferred lighting
 // diagnostic. Selecting one while that path is effective would display a buffer nothing
 // wrote this frame, so Render falls the view back to the final image the same way it does
-// for a ray tracing view whose pass has not run yet.
+// for a path traced view whose pass has not run yet.
 #define IS_RASTER_ONLY_DEBUG_VIEW(view) ( \
      (view) == DEBUG_VIEW_AO \
   || (view) == DEBUG_VIEW_SSR \

@@ -4,6 +4,7 @@
 #include "Editor/Bridge/BridgeTypes.h"
 #include "Editor/EditorPreferences.h"
 #include "Render/Render.h"
+#include "Utils/DebugViews.h"
 #include "Utils/Log.h"
 #include "Utils/ServiceRegistry.h"
 

@@ -21,8 +21,7 @@ namespace YAEngine {
 
 // Everything a hit needs that the acceleration structure itself does not carry. One
 // record per TLAS instance, in TLAS instance order, addressed by the instance's
-// instanceCustomIndex (gl_InstanceCustomIndexEXT, or
-// rayQueryGetIntersectionInstanceCustomIndexEXT for a ray query).
+// instanceCustomIndex (gl_InstanceCustomIndexEXT).
 //
 // GEOMETRY LAYOUT the two addresses point at - C++ and GLSL must agree on this exactly.
 // Both name the mesh's INTERLEAVED stream, which is what its bottom level structure was

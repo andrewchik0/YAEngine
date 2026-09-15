@@ -49,8 +49,6 @@ namespace YAEngine
     // Acceleration structures, a ray tracing pipeline and the buffer device addresses both
     // are built from, all granted by the device.
     bool raytracingSupported {};
-    // Tracing from raster and compute shaders, a strict subset of the above.
-    bool rayQuerySupported {};
     // Update-after-bind descriptor arrays indexed non-uniformly, what a bindless resource
     // table needs. Independent of the ray tracing flags.
     bool bindlessSupported {};

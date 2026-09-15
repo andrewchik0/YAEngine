@@ -53,10 +53,37 @@ namespace YAEngine
     return glm::rotate(glm::mat4(1.0f), std::acos(d), axis);
   }
 
+  // Separable max filter: grows every stroke by radius pixels on each side
+  static void DilateCoverage(uint8_t* pixels, int width, int height, int radius)
+  {
+    std::vector<uint8_t> horizontal(size_t(width) * size_t(height));
+    for (int y = 0; y < height; y++)
+    {
+      for (int x = 0; x < width; x++)
+      {
+        uint8_t value = 0;
+        for (int sx = std::max(0, x - radius); sx <= std::min(width - 1, x + radius); sx++)
+          value = std::max(value, pixels[y * width + sx]);
+        horizontal[y * width + x] = value;
+      }
+    }
+
+    for (int y = 0; y < height; y++)
+    {
+      for (int x = 0; x < width; x++)
+      {
+        uint8_t value = 0;
+        for (int sy = std::max(0, y - radius); sy <= std::min(height - 1, y + radius); sy++)
+          value = std::max(value, horizontal[sy * width + x]);
+        pixels[y * width + x] = value;
+      }
+    }
+  }
+
   void GizmoRenderer::LoadGlyphSprite(const RenderContext& ctx, uint32_t codepoint, float pixelHeight)
   {
     GlyphRasterizer rasterizer;
-    if (!rasterizer.Init(WORKING_DIR "/Assets/Fonts/FontAwesome7.ttf"))
+    if (!rasterizer.Init(WORKING_DIR "/Assets/Fonts/" FONT_ICON_FILE_NAME_LC))
       return;
 
     auto glyph = rasterizer.RasterizeGlyph(codepoint, pixelHeight);
@@ -74,6 +101,10 @@ namespace YAEngine
     memset(padded.get(), 0, paddedW * paddedH);
     for (int y = 0; y < glyph.height; y++)
       memcpy(padded.get() + (y + pad) * paddedW + pad, glyph.pixels.get() + y * glyph.width, glyph.width);
+
+    // Lucide strokes are a twelfth of the icon, so a billboard across the room shrinks them to a
+    // pixel or two; thickening the coverage keeps the icon readable at that distance
+    DilateCoverage(padded.get(), paddedW, paddedH, std::max(1, int(pixelHeight / 64.0f)));
 
     SpriteEntry entry;
     entry.aspectRatio = float(paddedW) / float(paddedH);
@@ -248,28 +279,6 @@ namespace YAEngine
     m_AxisTransforms[2] = glm::mat4(1.0f);
   }
 
-  void GizmoRenderer::DrawWireSphere(const glm::vec3& center, float radius, const glm::vec4& color)
-  {
-    glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
-                         * glm::scale(glm::mat4(1.0f), glm::vec3(radius));
-    m_Requests.push_back({ GizmoShape::Sphere, GizmoRenderMode::Wire, transform, color });
-  }
-
-  void GizmoRenderer::DrawWireBox(const glm::vec3& center, const glm::vec3& extents, const glm::vec4& color)
-  {
-    glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
-                         * glm::scale(glm::mat4(1.0f), extents);
-    m_Requests.push_back({ GizmoShape::Box, GizmoRenderMode::Wire, transform, color });
-  }
-
-  void GizmoRenderer::DrawWireBox(const glm::vec3& center, const glm::vec3& extents, const glm::quat& rotation, const glm::vec4& color)
-  {
-    glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
-                         * glm::mat4_cast(rotation)
-                         * glm::scale(glm::mat4(1.0f), extents);
-    m_Requests.push_back({ GizmoShape::Box, GizmoRenderMode::Wire, transform, color });
-  }
-
   void GizmoRenderer::DrawWireSphereDepthTested(const glm::vec3& center, float radius, const glm::vec4& color)
   {
     glm::mat4 transform = glm::translate(glm::mat4(1.0f), center)
@@ -335,12 +344,6 @@ namespace YAEngine
     transform[0] = glm::vec4(b - a, 0.0f);
     transform[3] = glm::vec4(a, 1.0f);
     m_Requests.push_back({ GizmoShape::Line, GizmoRenderMode::WireDepthTested, transform, color });
-  }
-
-  void GizmoRenderer::DrawPolyline(const std::vector<glm::vec3>& points, const glm::vec4& color)
-  {
-    for (size_t i = 0; i + 1 < points.size(); i++)
-      DrawLine(points[i], points[i + 1], color);
   }
 
   void GizmoRenderer::DrawWireCone(const glm::vec3& origin, const glm::vec3& direction, float height, float angle, const glm::vec4& color)
@@ -411,6 +414,27 @@ namespace YAEngine
   {
     auto it = m_SpriteEntries.find(codepoint);
     return it != m_SpriteEntries.end() ? it->second.aspectRatio : 1.0f;
+  }
+
+  void GizmoRenderer::SetSpriteView(const glm::mat4& view, const glm::mat4& proj, float viewportHeight)
+  {
+    m_SpriteView = view;
+    m_SpriteProj = proj;
+    m_SpriteViewportHeight = viewportHeight;
+  }
+
+  float GizmoRenderer::ClampSpriteSize(float size, const glm::vec3& position, const glm::mat4& view,
+    const glm::mat4& proj, float viewportHeight, float maxPixels)
+  {
+    const float depth = -(view * glm::vec4(position, 1.0f)).z;
+    // Negative in the renderer's Y-flipped projection, positive in the one picking builds
+    const float focal = std::abs(proj[1][1]);
+    if (depth <= 1e-4f || focal <= 0.0f || viewportHeight <= 0.0f || maxPixels <= 0.0f)
+      return size;
+
+    // NDC spans two units over the viewport height
+    const float pixels = size * focal / depth * 0.5f * viewportHeight;
+    return pixels > maxPixels ? size * (maxPixels / pixels) : size;
   }
 
   void GizmoRenderer::DrawTranslateGizmo(const glm::vec3& position, const glm::vec3& cameraPos)
@@ -692,11 +716,13 @@ namespace YAEngine
         if (it == m_SpriteEntries.end()) continue;
 
         float ar = it->second.aspectRatio;
+        float size = ClampSpriteSize(req.size, req.position, m_SpriteView, m_SpriteProj,
+          m_SpriteViewportHeight, m_SpriteMaxPixels);
         pipeline.BindDescriptorSets(cmd, { it->second.descriptorSet.Get() }, 1);
 
         // Shadow pass
         SpritePushConstants shadowPc;
-        shadowPc.positionAndScale = glm::vec4(req.position, req.size);
+        shadowPc.positionAndScale = glm::vec4(req.position, size);
         shadowPc.color = req.color;
         shadowPc.shadow = glm::vec4(0.06f, ar, 0.7f, 1.0f);
         pipeline.PushConstants(cmd, &shadowPc);
@@ -704,7 +730,7 @@ namespace YAEngine
 
         // Main sprite
         SpritePushConstants pc;
-        pc.positionAndScale = glm::vec4(req.position, req.size);
+        pc.positionAndScale = glm::vec4(req.position, size);
         pc.color = req.color;
         pc.shadow = glm::vec4(0.0f, ar, 0.0f, 0.0f);
         pipeline.PushConstants(cmd, &pc);

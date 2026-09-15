@@ -67,11 +67,11 @@ async def test_ui_tree_lists_types_paths_values_and_flags(attached, fake_bridge)
     assert fake_bridge.requests[-1]["params"] == {"window": "Render Settings", "maxDepth": 2}
     assert lines == [
         '6 items in "Render Settings" (type path [= value] [flags])',
-        'header "Render Settings/ Display" [open]',
-        'input "Render Settings/Exposure" = "1.000"',
-        'combo "Render Settings/Debug View" = "Off"',
-        'checkbox "Render Settings/SSR" [checked]',
-        'input "Render Settings/AO Strength" = "1.000" [disabled]',
+        'header "Render Settings/Environment" [open]',
+        'input "Render Settings/Camera/Exposure" = "1.00"',
+        'combo "Render Settings/Camera/Tonemapper" = "AgX"',
+        'checkbox "Render Settings/Reflections/SSR" [checked]',
+        'input "Render Settings/Lighting & GI/SSGI Radius" = "3.00 m" [disabled]',
         'item (no path; label "a label cut short at thirty-one")',
     ]
 
@@ -87,12 +87,12 @@ async def test_ui_tree_of_an_unknown_window_is_a_tool_error(attached):
 
 
 async def test_ui_do_returns_the_detail_and_sends_value_only_when_given(attached, fake_bridge):
-    detail = texts(await attached.call_tool("ui_do", {"path": "Render Settings/SSR", "action": "uncheck"}))[0]
-    assert detail == "uncheck 'Render Settings/SSR'"
-    assert fake_bridge.requests[-1]["params"] == {"path": "Render Settings/SSR", "action": "uncheck"}
+    detail = texts(await attached.call_tool("ui_do", {"path": "Render Settings/Reflections/SSR", "action": "uncheck"}))[0]
+    assert detail == "uncheck 'Render Settings/Reflections/SSR'"
+    assert fake_bridge.requests[-1]["params"] == {"path": "Render Settings/Reflections/SSR", "action": "uncheck"}
 
-    await attached.call_tool("ui_do", {"path": "Render Settings/Exposure", "action": "set", "value": 1.5})
-    assert fake_bridge.requests[-1]["params"] == {"path": "Render Settings/Exposure", "action": "set", "value": 1.5}
+    await attached.call_tool("ui_do", {"path": "Render Settings/Camera/Exposure", "action": "set", "value": 1.5})
+    assert fake_bridge.requests[-1]["params"] == {"path": "Render Settings/Camera/Exposure", "action": "set", "value": 1.5}
 
     await attached.call_tool("ui_do", {"path": "Outliner/**/Ground", "action": "click", "value": "right"})
     assert fake_bridge.requests[-1]["params"]["value"] == "right"
@@ -101,7 +101,7 @@ async def test_ui_do_returns_the_detail_and_sends_value_only_when_given(attached
 @pytest.mark.parametrize(
     "arguments, message",
     [
-        ({"path": "Render Settings/ Load Skybox...", "action": "click"}, "did not complete: .*skybox.set"),
+        ({"path": "Render Settings/Environment/Load Skybox...", "action": "click"}, "did not complete: .*skybox.set"),
         ({"path": "Render Settings/Missing", "action": "click"}, "did not complete: no item at"),
     ],
 )
@@ -112,7 +112,7 @@ async def test_ui_do_that_did_not_complete_is_a_tool_error(attached, arguments, 
 
 async def test_ui_do_rejects_an_unknown_action(attached):
     with pytest.raises(ToolError):
-        await attached.call_tool("ui_do", {"path": "Render Settings/SSR", "action": "poke"})
+        await attached.call_tool("ui_do", {"path": "Render Settings/Reflections/SSR", "action": "poke"})
 
 
 async def test_ui_screenshot_returns_the_image_and_states_path_and_size(attached, fake_bridge):
@@ -181,7 +181,7 @@ async def test_ui_requests_use_the_ui_timeout(tmp_path, fake_bridge, make_manage
     server = create_server(manager)
     await server.call_tool("ui_windows", {})
     await server.call_tool("ui_tree", {"window": "Render Settings"})
-    await server.call_tool("ui_do", {"path": "Render Settings/SSR", "action": "check"})
+    await server.call_tool("ui_do", {"path": "Render Settings/Reflections/SSR", "action": "check"})
     await server.call_tool("ui_screenshot", {})
 
     assert seen == [("ui.windows", None), ("ui.tree", UI_TIMEOUT), ("ui.do", UI_TIMEOUT), ("ui.screenshot", UI_TIMEOUT)]

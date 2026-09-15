@@ -8,7 +8,9 @@ namespace YAEngine
   {
   public:
 
-    const char* GetName() const override { return "Render Settings"; }
+    static constexpr EditorPanelDescriptor DESCRIPTOR { .name = "Render Settings", .category = EditorPanelCategory::Rendering };
+
+    const EditorPanelDescriptor& GetDescriptor() const override { return DESCRIPTOR; }
     void OnRender(EditorContext& context) override;
   };
 }

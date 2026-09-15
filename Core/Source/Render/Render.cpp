@@ -199,8 +199,6 @@ namespace YAEngine
       set.Destroy();
     for (auto& set : m_LightCullInputDescriptorSets)
       set.Destroy();
-    for (auto& set : m_RTDebugDescriptorSets)
-      set.Destroy();
     for (auto& set : m_PathTraceDescriptorSets)
       set.Destroy();
     for (auto& set : m_PathTraceGuideDescriptorSets)
@@ -270,9 +268,7 @@ namespace YAEngine
     // Recreates managed resources and non-external framebuffers
     m_Graph.Resize(renderExtent, outputExtent);
 
-    // The ray query target is one of them, and nothing clears it.
-    b_RTDebugValid = false;
-    // The path tracer's two images went with it, the accumulated one included: the samples
+    // The path tracer's two images are among them, the accumulated one included: the samples
     // it held describe a different resolution, so the mean starts over.
     b_PathTraceOutputValid = false;
     b_PathTraceResetPending = true;
@@ -497,17 +493,10 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.gamma = m_Gamma;
     m_FrameUniformBuffer.uniforms.exposure = m_Exposure;
     m_FrameUniformBuffer.uniforms.currentTexture = m_CurrentTexture;
-    // Both ray tracing views display an image only their own tracing pass ever writes, and
-    // that pass runs later in this very frame. Until one has run once - no ray tracing on
-    // this device, ray tracing switched off, a scene with nothing traceable, or a resize
-    // that just reallocated the image - the view falls back to the final image instead of
-    // showing whatever the allocation happened to hold.
-    if ((m_CurrentTexture == DEBUG_VIEW_RAY_QUERY || m_CurrentTexture == DEBUG_VIEW_RT_PIPELINE)
-      && !b_RTDebugValid)
-    {
-      m_FrameUniformBuffer.uniforms.currentTexture = 0;
-    }
-    // Same rule for the path tracer's two images, which are equally uncleared.
+    // The path tracer's two views display images only its own pass ever writes, and that pass
+    // runs later in this very frame. Until it has run once - no ray tracing on this device, a
+    // scene with nothing traceable, or a resize that just reallocated the images - the view
+    // falls back to the final image instead of showing whatever the allocation happened to hold.
     if (IsPathTraceView() && !b_PathTraceOutputValid)
     {
       m_FrameUniformBuffer.uniforms.currentTexture = 0;
@@ -647,6 +636,9 @@ namespace YAEngine
 
 #ifdef YA_EDITOR
     m_GizmoRenderer.Clear();
+    // The gizmo passes draw at output resolution, with the projection gizmo_sprite.vert uses
+    m_GizmoRenderer.SetSpriteView(m_FrameUniformBuffer.uniforms.view, m_UnjitteredProj,
+      float(m_Graph.GetOutputExtent().height));
     m_VolumeNodeGizmosDrawn = 0;
     if (b_GizmosEnabled)
     {
@@ -761,7 +753,7 @@ namespace YAEngine
     // It also has to precede the graph because the compute passes that trace the
     // structure live inside it. The instance list comes from the snapshot rather than
     // from the collected draw commands, so it does not wait on them.
-    if (b_RayTracingEnabled && m_Backend.GetContext().raytracingSupported)
+    if (m_Backend.GetContext().raytracingSupported)
     {
       YA_PROFILE_CPU("BuildTlas");
 #ifdef YA_EDITOR

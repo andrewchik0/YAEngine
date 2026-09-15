@@ -1,6 +1,7 @@
 #include "Render.h"
 
 #include "DebugMarker.h"
+#include "Utils/DebugViews.h"
 #include "Utils/Log.h"
 
 // The vendored header stays byte-for-byte upstream, and its HDR writer uses sprintf, which
@@ -297,7 +298,7 @@ namespace YAEngine
     const char* ClassifyColorSpace(const std::string& graphName, VkFormat format)
     {
       static const std::set<std::string> RADIANCE = {
-        "litColor", "ssrColor", "taaHistory0", "taaHistory1", "dlssOutput", "rtDebug",
+        "litColor", "ssrColor", "taaHistory0", "taaHistory1", "dlssOutput",
         "pathTraceNoisy", "pathTraceAccum", "ssgiRadiance", "ssgiWorking", "ssgiFinal"
       };
 
@@ -486,7 +487,6 @@ namespace YAEngine
       bool ssr = false;
       bool gtao = false;
       bool ssgi = false;
-      bool rayTracingEnabled = false;
       int pathTraceMaxBounces = 0;
       float pathTraceFireflyClamp = 0.0f;
       int pathTraceSampleCount = 0;
@@ -576,7 +576,6 @@ namespace YAEngine
       out << "    \"ssr\": " << (mc.ssr ? "true" : "false") << ",\n";
       out << "    \"gtao\": " << (mc.gtao ? "true" : "false") << ",\n";
       out << "    \"ssgi\": " << (mc.ssgi ? "true" : "false") << ",\n";
-      out << "    \"rayTracingEnabled\": " << (mc.rayTracingEnabled ? "true" : "false") << ",\n";
       out << "    \"pathTracing\": {\n";
       out << "      \"maxBounces\": " << mc.pathTraceMaxBounces << ",\n";
       out << "      \"fireflyClamp\": " << JsonNumber(mc.pathTraceFireflyClamp) << ",\n";
@@ -1211,7 +1210,6 @@ namespace YAEngine
       .ssr = b_SSREnabled,
       .gtao = b_AOEnabled,
       .ssgi = b_SSGIEnabled,
-      .rayTracingEnabled = b_RayTracingEnabled,
       .pathTraceMaxBounces = m_PathTraceMaxBounces,
       .pathTraceFireflyClamp = m_PathTraceFireflyClamp,
       .pathTraceSampleCount = m_PathTraceSampleIndex,

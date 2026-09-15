@@ -47,23 +47,23 @@ namespace YAEngine
     Count
   };
 
-  inline const char* GetRayReconstructionPresetName(RayReconstructionPreset preset)
+  constexpr const char* GetRayReconstructionPresetName(RayReconstructionPreset preset)
   {
     switch (preset)
     {
-      case RayReconstructionPreset::Default: return "eDefault";
-      case RayReconstructionPreset::D: return "ePresetD (default transformer)";
-      case RayReconstructionPreset::E: return "ePresetE (latest transformer)";
-      case RayReconstructionPreset::F: return "ePresetF";
-      case RayReconstructionPreset::G: return "ePresetG";
-      case RayReconstructionPreset::H: return "ePresetH";
-      case RayReconstructionPreset::I: return "ePresetI";
-      case RayReconstructionPreset::J: return "ePresetJ";
-      case RayReconstructionPreset::K: return "ePresetK";
-      case RayReconstructionPreset::L: return "ePresetL";
-      case RayReconstructionPreset::M: return "ePresetM (not recommended)";
-      case RayReconstructionPreset::N: return "ePresetN (not recommended)";
-      case RayReconstructionPreset::O: return "ePresetO (not recommended)";
+      case RayReconstructionPreset::Default: return "Default (recommended)";
+      case RayReconstructionPreset::D: return "Preset D (default transformer)";
+      case RayReconstructionPreset::E: return "Preset E (latest transformer)";
+      case RayReconstructionPreset::F: return "Preset F";
+      case RayReconstructionPreset::G: return "Preset G";
+      case RayReconstructionPreset::H: return "Preset H";
+      case RayReconstructionPreset::I: return "Preset I";
+      case RayReconstructionPreset::J: return "Preset J";
+      case RayReconstructionPreset::K: return "Preset K";
+      case RayReconstructionPreset::L: return "Preset L";
+      case RayReconstructionPreset::M: return "Preset M (not recommended)";
+      case RayReconstructionPreset::N: return "Preset N (not recommended)";
+      case RayReconstructionPreset::O: return "Preset O (not recommended)";
       case RayReconstructionPreset::Count: break;
     }
 
@@ -81,7 +81,7 @@ namespace YAEngine
     Count
   };
 
-  inline const char* GetRayReconstructionSpecularGuideName(RayReconstructionSpecularGuide guide)
+  constexpr const char* GetRayReconstructionSpecularGuideName(RayReconstructionSpecularGuide guide)
   {
     switch (guide)
     {

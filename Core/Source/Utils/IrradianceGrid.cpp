@@ -57,6 +57,16 @@ namespace YAEngine
     return aabbHalf;
   }
 
+  bool MatchesBakedIrradianceBox(const glm::vec3& position, const glm::vec3& halfExtents,
+    const glm::vec3& bakedPosition, const glm::vec3& bakedHalfExtents)
+  {
+    constexpr float TOLERANCE_FRACTION = 0.01f;
+    const float tolerance = TOLERANCE_FRACTION * glm::max(glm::length(bakedHalfExtents), 1e-3f);
+    const bool moved = glm::length(position - bakedPosition) > tolerance;
+    const bool resized = glm::length(halfExtents - bakedHalfExtents) > tolerance;
+    return !moved && !resized;
+  }
+
   glm::ivec3 ComputeIrradianceSeedKey(const glm::vec3& worldPosition)
   {
     return glm::ivec3(glm::round(worldPosition / IRRADIANCE_SPACINGS[0]));

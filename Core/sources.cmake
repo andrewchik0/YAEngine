@@ -119,7 +119,10 @@ set(SOURCE_FILES
   Source/Utils/ServiceRegistry.h
   Source/Utils/FrameCaptureSpec.cpp
   Source/Utils/FrameCaptureSpec.h
+  Source/Utils/DebugViews.cpp
+  Source/Utils/DebugViews.h
   Source/Utils/FormatText.h
+  Source/Utils/StringSearch.h
   Source/Utils/CameraOrientation.h
   Source/LayerManager.h
   Source/Input/InputSystem.cpp
@@ -256,7 +259,14 @@ if(YA_EDITOR)
     Source/Editor/EditorContext.h
     Source/Editor/Utils/EditorStyle.cpp
     Source/Editor/Utils/EditorStyle.h
+    Source/Editor/Utils/EditorTheme.cpp
+    Source/Editor/Utils/EditorTheme.h
+    Source/Editor/Utils/EditorFonts.cpp
+    Source/Editor/Utils/EditorFonts.h
+    Source/Editor/Utils/EditorWidgets.cpp
+    Source/Editor/Utils/EditorWidgets.h
     Source/Editor/Panels/ViewportPanel.h
+    Source/Editor/Panels/ViewportPanel.cpp
     Source/Editor/Panels/PerformancePanel.h
     Source/Editor/Panels/PerformancePanel.cpp
     Source/Editor/Panels/RenderSettingsPanel.h
@@ -296,6 +306,8 @@ if(YA_EDITOR)
     Source/Editor/EditorPreferences.cpp
     Source/Editor/Panels/AgentPanel.h
     Source/Editor/Panels/AgentPanel.cpp
+    Source/Editor/Panels/DeveloperPanel.h
+    Source/Editor/Panels/DeveloperPanel.cpp
     Source/Editor/Bridge/BridgeTypes.h
     Source/Editor/Bridge/BridgeJson.h
     Source/Editor/Bridge/BridgeJson.cpp

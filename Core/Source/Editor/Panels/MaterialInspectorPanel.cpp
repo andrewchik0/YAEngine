@@ -2,71 +2,186 @@
 
 #include <imgui.h>
 
+#include "Assets/AssetManager.h"
+#include "Editor/EditorCommands.h"
 #include "Editor/EditorContext.h"
 #include "Editor/Utils/EditorIcons.h"
-#include "Assets/AssetManager.h"
-#include "Editor/Utils/EditorTextureCache.h"
-#include "Editor/Utils/FileDialog.h"
+#include "Editor/Utils/EditorWidgets.h"
+#include "Scene/Components.h"
 
 namespace YAEngine
 {
-  static const nfdu8filteritem_t s_ImageFilters[] = {
-    { "Image Files", "png,jpg,jpeg,tga,bmp,hdr" }
-  };
-
-  static bool DrawTextureSlot(const char* label, TextureHandle& handle, bool linear,
-                              EditorContext& context)
+  namespace
   {
-    bool changed = false;
+    using EditorWidgets::PropertyEdit;
 
-    ImGui::PushID(label);
-    ImGui::Text("%s", label);
+    constexpr EditorWidgets::EnumOption SHADING_MODELS[] = {
+      { .label = "Lit", .tooltip = "Lights, shadows and indirect lighting" },
+      { .label = "Unlit", .tooltip = "Albedo and textures only, without lighting" },
+    };
 
-    if (handle && context.textureCache)
+    PropertyEdit DrawSurfaceGroup(Material& mat)
     {
-      VkDescriptorSet ds = context.textureCache->GetOrRegister(handle);
-      if (ds != VK_NULL_HANDLE)
-        ImGui::Image((void*)ds, ImVec2(64, 64));
-      else
-        ImGui::Button("None", ImVec2(64, 64));
+      PropertyEdit edit;
+      if (!EditorWidgets::BeginPropertyGroup("Surface", { .icon = ICON_LC_LAYERS }))
+        return edit;
+
+      edit |= EditorWidgets::PropertyColor("Albedo", mat.albedo, {
+        .defaultValue = glm::vec3(1.0f),
+        .tooltip = "Base color, multiplied with the Base Color texture." });
+      edit |= EditorWidgets::PropertyFloat("Roughness", mat.roughness, {
+        .min = 0.0f, .max = 1.0f, .slider = true, .defaultValue = 0.5f,
+        .tooltip = "Normalized 0-1. Multiplies the red channel of the Roughness texture, or the green channel "
+                   "of the Metallic texture with Combined Textures." });
+      edit |= EditorWidgets::PropertyFloat("Roughness Factor", mat.roughnessFactor, {
+        .min = 0.0f, .max = 1.0f, .slider = true, .defaultValue = 1.0f,
+        .tooltip = "Roughness factor from the model file (normalized 0-1), saved with the material. "
+                   "Shading uses Roughness; the renderer does not read this value." });
+      edit |= EditorWidgets::PropertyFloat("Metallic", mat.metallic, {
+        .min = 0.0f, .max = 1.0f, .slider = true, .defaultValue = 0.0f,
+        .tooltip = "Normalized 0-1. Multiplies the blue channel of the Metallic texture." });
+      edit |= EditorWidgets::PropertyFloat("Metallic Factor", mat.metallicFactor, {
+        .min = 0.0f, .max = 1.0f, .slider = true, .defaultValue = 1.0f,
+        .tooltip = "Metallic factor from the model file (normalized 0-1), saved with the material. "
+                   "Shading uses Metallic; the renderer does not read this value." });
+      edit |= EditorWidgets::PropertyFloat("Specular", mat.specular, {
+        .min = 0.0f, .max = 1.0f, .slider = true, .defaultValue = 0.5f,
+        .tooltip = "Specular level from the model file (normalized 0-1), saved with the material. "
+                   "The renderer does not read it." });
+      EditorWidgets::PropertyReadOnly("Workflow", mat.sg ? "Specular / Glossiness" : "Metallic / Roughness", {
+        .tooltip = "Read from the model file on import. A specular/glossiness material without a roughness map "
+                   "uses its specular map as the Roughness texture." });
+      EditorWidgets::PropertyReadOnly("Texture Has Alpha", mat.hasAlpha ? "Yes" : "No", {
+        .tooltip = "Whether the Base Color texture has an alpha channel. Detected when the texture loads; "
+                   "Alpha Test defaults to it." });
+
+      EditorWidgets::EndPropertyGroup();
+      return edit;
     }
-    else
+
+    PropertyEdit DrawEmissionGroup(Material& mat)
     {
-      ImGui::Button("None", ImVec2(64, 64));
+      PropertyEdit edit;
+      if (!EditorWidgets::BeginPropertyGroup("Emission", { .icon = ICON_LC_SUN }))
+        return edit;
+
+      edit |= EditorWidgets::PropertyBool("Emissive", mat.emissive, {
+        .defaultValue = false,
+        .tooltip = "Texels whose emission is brighter than a small cutoff are shaded as pure emission "
+                   "instead of a PBR surface." });
+
+      EditorWidgets::PushDependency(mat.emissive, "Requires Emissive");
+      edit |= EditorWidgets::PropertyColor("Color", mat.emissivity, {
+        .hdr = true, .defaultValue = glm::vec3(0.0f),
+        .tooltip = "Emitted color (HDR), multiplied with the Emissive texture." });
+      edit |= EditorWidgets::PropertyFloat("Intensity", mat.emissiveIntensity, {
+        .min = 0.0f, .max = 1000.0f, .speed = 0.1f, .format = "%.2f", .defaultValue = 1.0f,
+        .tooltip = "Multiplier on Color (glTF emissive strength)." });
+      EditorWidgets::PopDependency();
+
+      EditorWidgets::EndPropertyGroup();
+      return edit;
     }
 
-    ImGui::SameLine();
-    ImGui::BeginGroup();
-
-    if (ImGui::Button(ICON_FA_FOLDER_OPEN " Load"))
+    PropertyEdit DrawOpacityGroup(Material& mat)
     {
-      std::string path = FileDialog::OpenFile(s_ImageFilters, 1);
-      if (!path.empty())
-      {
-        bool* alphaPtr = nullptr;
-        handle = context.assetManager->Textures().Load(path, alphaPtr, linear);
-        changed = true;
-      }
+      PropertyEdit edit;
+      if (!EditorWidgets::BeginPropertyGroup("Opacity", { .icon = ICON_LC_BLEND }))
+        return edit;
+
+      edit |= EditorWidgets::PropertyBool("Alpha Test", mat.alphaTest, {
+        .defaultValue = mat.hasAlpha,
+        .tooltip = "Cuts out texels whose Base Color texture alpha is below 0.5. Defaults to Texture Has Alpha." });
+      edit |= EditorWidgets::PropertyBool("Transparent", mat.transparent, {
+        .defaultValue = false,
+        .tooltip = "Draws in the forward transparent pass, blended by Opacity." });
+
+      EditorWidgets::PushDependency(mat.transparent, "Requires Transparent");
+      edit |= EditorWidgets::PropertyFloat("Opacity", mat.opacity, {
+        .min = 0.0f, .max = 1.0f, .slider = true, .defaultValue = 1.0f,
+        .tooltip = "Normalized 0-1. Multiplies the Base Color texture alpha." });
+      edit |= EditorWidgets::PropertyFloat("Fresnel Opacity", mat.fresnelOpacity, {
+        .min = 0.0f, .max = 1.0f, .slider = true, .defaultValue = 0.0f,
+        .tooltip = "Normalized 0-1. Raises opacity toward 1 at grazing angles." });
+      EditorWidgets::PopDependency();
+
+      EditorWidgets::EndPropertyGroup();
+      return edit;
     }
 
-    if (handle)
+    PropertyEdit DrawShadingGroup(Material& mat)
     {
-      ImGui::SameLine();
-      if (ImGui::Button(ICON_FA_TRASH_CAN))
-      {
-        handle = TextureHandle::Invalid();
-        changed = true;
-      }
+      PropertyEdit edit;
+      if (!EditorWidgets::BeginPropertyGroup("Shading", { .icon = ICON_LC_CONTRAST }))
+        return edit;
+
+      edit |= EditorWidgets::PropertyEnum("Shading Model", mat.shadingModel, SHADING_MODELS, {
+        .defaultValue = int32_t(ShadingModel::Lit),
+        .tooltip = "Lit shades the surface with lights and GI. Unlit shows albedo and textures without lighting." });
+      edit |= EditorWidgets::PropertyBool("Double Sided", mat.doubleSided, {
+        .defaultValue = false,
+        .tooltip = "Renders back faces instead of culling them." });
+
+      EditorWidgets::EndPropertyGroup();
+      return edit;
     }
 
-    ImGui::EndGroup();
-    ImGui::PopID();
-    return changed;
+    PropertyEdit DrawUvGroup(Material& mat)
+    {
+      PropertyEdit edit;
+      if (!EditorWidgets::BeginPropertyGroup("UV", { .icon = ICON_LC_GRID_3X3 }))
+        return edit;
+
+      // Floor above zero: a zero factor collapses the whole texture into one texel
+      edit |= EditorWidgets::PropertyVec2("UV Scale", mat.uvScale, {
+        .speed = 0.01f, .min = 0.001f, .max = 1000.0f, .componentLabels = { "U", "V", "" },
+        .defaultValue = glm::vec2(1.0f),
+        .tooltip = "Texture tiling: every texture fetch of this material multiplies the mesh UVs by it." });
+      edit |= EditorWidgets::PropertyBool("Combined Textures", mat.combinedTextures, {
+        .defaultValue = false,
+        .tooltip = "The Metallic texture carries roughness in its green channel (glTF packed "
+                   "metallic-roughness); the Roughness texture is ignored." });
+
+      EditorWidgets::EndPropertyGroup();
+      return edit;
+    }
+
+    PropertyEdit DrawTexturesGroup(Material& mat, EditorContext& context)
+    {
+      PropertyEdit edit;
+      if (!EditorWidgets::BeginPropertyGroup("Textures", { .icon = ICON_LC_IMAGE }))
+        return edit;
+
+      edit |= EditorWidgets::PropertyTexture("Base Color", mat.baseColorTexture, context, {
+        .linear = false, .outHasAlpha = &mat.hasAlpha,
+        .tooltip = "sRGB. RGB multiplies Albedo; alpha drives Alpha Test and Opacity." });
+      edit |= EditorWidgets::PropertyTexture("Metallic", mat.metallicTexture, context, {
+        .linear = true,
+        .tooltip = "Linear. Blue multiplies Metallic; green is roughness with Combined Textures." });
+      edit |= EditorWidgets::PropertyTexture("Roughness", mat.roughnessTexture, context, {
+        .linear = true,
+        .tooltip = "Linear. Red multiplies Roughness. Ignored with Combined Textures." });
+      edit |= EditorWidgets::PropertyTexture("Specular", mat.specularTexture, context, {
+        .linear = true,
+        .tooltip = "Linear. Saved and bound with the material; no shader samples it." });
+      edit |= EditorWidgets::PropertyTexture("Emissive", mat.emissiveTexture, context, {
+        .linear = false,
+        .tooltip = "sRGB. Multiplies the emission Color while Emissive is on." });
+      edit |= EditorWidgets::PropertyTexture("Normal", mat.normalTexture, context, {
+        .linear = true,
+        .tooltip = "Linear tangent-space normal map." });
+      edit |= EditorWidgets::PropertyTexture("Height", mat.heightTexture, context, {
+        .linear = true,
+        .tooltip = "Linear. Saved and bound with the material; no shader samples it." });
+
+      EditorWidgets::EndPropertyGroup();
+      return edit;
+    }
   }
 
   void MaterialInspectorPanel::OnRender(EditorContext& context)
   {
-    if (!ImGui::Begin("Material Inspector"))
+    if (!BeginPanel())
     {
       ImGui::End();
       return;
@@ -84,51 +199,27 @@ namespace YAEngine
 
     Material& mat = *matPtr;
 
-    bool changed = false;
+    EditorWidgets::BeginPropertyScope();
+    EditorWidgets::PropertyString("Name", mat.name, {
+      .hint = "Material name",
+      .tooltip = "Applied on Enter or when the field loses focus. An empty name is rejected." });
 
-    if (ImGui::CollapsingHeader(ICON_FA_SLIDERS " Properties", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-      char nameBuf[256] = {};
-      snprintf(nameBuf, sizeof(nameBuf), "%s", mat.name.c_str());
-      if (ImGui::InputText("Name", nameBuf, sizeof(nameBuf)))
-        mat.name = nameBuf;
+    const size_t users = context.scene != nullptr ? m_Users.Get(*context.scene, context.selectedMaterial, ImGui::GetTime()) : 0;
+    char usage[32];
+    std::snprintf(usage, sizeof(usage), "%zu %s", users, users == 1 ? "entity" : "entities");
+    EditorWidgets::PropertyReadOnly("Used By", usage, {
+      .tooltip = "Entities whose Material component uses this material. Edits here change all of them." });
+    EditorWidgets::EndPropertyScope();
 
-      changed |= ImGui::ColorEdit3("Albedo", &mat.albedo.x);
-      changed |= ImGui::SliderFloat("Roughness", &mat.roughness, 0.0f, 1.0f);
-      changed |= ImGui::SliderFloat("Metallic", &mat.metallic, 0.0f, 1.0f);
-      changed |= ImGui::SliderFloat("Specular", &mat.specular, 0.0f, 1.0f);
-      // HDR + Float: emissive colour is not confined to [0,1], and the default widget
-      // would clamp an authored value the moment anyone touched it.
-      changed |= ImGui::ColorEdit3("Emissivity", &mat.emissivity.x,
-        ImGuiColorEditFlags_HDR | ImGuiColorEditFlags_Float);
-      changed |= ImGui::DragFloat("Emissive Intensity", &mat.emissiveIntensity, 0.1f, 0.0f, 1000.0f);
-      changed |= ImGui::Checkbox("Emissive", &mat.emissive);
-      changed |= ImGui::Checkbox("Has Alpha", &mat.hasAlpha);
-      changed |= ImGui::Checkbox("Alpha Test", &mat.alphaTest);
-      changed |= ImGui::Checkbox("Transparent", &mat.transparent);
-      if (mat.transparent)
-      {
-        changed |= ImGui::SliderFloat("Opacity", &mat.opacity, 0.0f, 1.0f);
-        changed |= ImGui::SliderFloat("Fresnel Opacity", &mat.fresnelOpacity, 0.0f, 1.0f);
-      }
-      changed |= ImGui::Checkbox("Double Sided", &mat.doubleSided);
-      changed |= ImGui::Checkbox("Combined Textures", &mat.combinedTextures);
-      // Floor above zero: a zero factor collapses the whole texture into one texel
-      changed |= ImGui::DragFloat2("UV Scale", &mat.uvScale.x, 0.05f, 0.001f, 1000.0f);
-    }
+    PropertyEdit edit;
+    edit |= DrawSurfaceGroup(mat);
+    edit |= DrawEmissionGroup(mat);
+    edit |= DrawOpacityGroup(mat);
+    edit |= DrawShadingGroup(mat);
+    edit |= DrawUvGroup(mat);
+    edit |= DrawTexturesGroup(mat, context);
 
-    if (ImGui::CollapsingHeader(ICON_FA_IMAGE " Textures", ImGuiTreeNodeFlags_DefaultOpen))
-    {
-      changed |= DrawTextureSlot("Base Color",  mat.baseColorTexture,  false, context);
-      changed |= DrawTextureSlot("Metallic",    mat.metallicTexture,   true,  context);
-      changed |= DrawTextureSlot("Roughness",   mat.roughnessTexture,  true,  context);
-      changed |= DrawTextureSlot("Specular",    mat.specularTexture,   true,  context);
-      changed |= DrawTextureSlot("Emissive",    mat.emissiveTexture,   false, context);
-      changed |= DrawTextureSlot("Normal",      mat.normalTexture,     true,  context);
-      changed |= DrawTextureSlot("Height",      mat.heightTexture,     true,  context);
-    }
-
-    if (changed)
+    if (edit.changed)
       mat.MarkChanged();
 
     ImGui::End();

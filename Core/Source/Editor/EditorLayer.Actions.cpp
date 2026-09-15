@@ -11,6 +11,7 @@
 #include "Scene/ComponentRegistry.h"
 #include "Scene/Components.h"
 #include "Utils/CameraOrientation.h"
+#include "Utils/DebugViews.h"
 #include "Utils/FrameCaptureSpec.h"
 #include "Utils/Log.h"
 #include "Utils/ServiceRegistry.h"
@@ -431,9 +432,9 @@ namespace YAEngine
 
     actions.Register({
       .name = "view.setDebugView",
-      .description = "Switch the viewport debug view, as the Debug View combo in Render Settings does. A view the "
-        "device or the current render path cannot produce is refused with the reason the combo gives. Returns "
-        "{id, slug, name}.",
+      .description = "Switch the viewport debug view, as the View menu of the viewport toolbar does. A view the "
+        "device or the current render path cannot produce is refused with the reason the menu gives. Not saved "
+        "with the scene or the editor preferences. Returns {id, slug, name}.",
       .params = { RequiredParam("view", ParamType::String, "Slug such as off, albedo, normals or pt-noisy, or the "
         "numeric id as text; capture.targets lists them all.") },
       .refusedWhileCapturing = true,
@@ -467,8 +468,9 @@ namespace YAEngine
     actions.Register({
       .name = "view.setGizmos",
       .description = "Show or hide the editor gizmos drawn over the viewport (light, probe and camera icons, the "
-        "transform gizmo, volume bounds, camera tracks), as the Gizmos checkbox in Render Settings does. Capture shots "
-        "hide them by themselves while they run. Returns {enabled}.",
+        "transform gizmo, volume bounds, camera tracks), as the Gizmos entry of the viewport toolbar's Show menu does. "
+        "Unlike that entry it is not saved in the editor preferences. Capture shots hide them by themselves while "
+        "they run. Returns {enabled}.",
       .params = { RequiredParam("enabled", ParamType::Bool, "True shows the gizmos, false hides them.") },
       .refusedWhileCapturing = true,
       .handler = [this](const BridgeActionArgs& args, const BridgeReply& reply) {
@@ -619,7 +621,7 @@ namespace YAEngine
 
     actions.Register({
       .name = "skybox.clear",
-      .description = "Remove the scene skybox, as the Clear button next to it in Render Settings does.",
+      .description = "Remove the scene skybox, as Clear Skybox in Render Settings does.",
       .handler = [this](const BridgeActionArgs&, const BridgeReply& reply) {
         GetScene().SetSkybox({});
         reply.Ok();
@@ -738,7 +740,7 @@ namespace YAEngine
 
     actions.Register({
       .name = "bake.probe",
-      .description = "Bake one reflection probe, as the Bake button in its Details panel does." + bakeNote
+      .description = "Bake one reflection probe, as Bake Probe in its Details panel section does." + bakeNote
         + " Returns {entity, name, baked, atlasSlot, bakedPrefilter}.",
       .params = { RequiredParam("entity", ParamType::Entity, "Entity with a reflectionProbe component.") },
       .refusedWhileCapturing = true,
@@ -768,7 +770,7 @@ namespace YAEngine
 
     actions.Register({
       .name = "bake.volume",
-      .description = "Bake one irradiance volume, as the Bake button in its Details panel does." + volumeBakeNote
+      .description = "Bake one irradiance volume, as Bake Volume in its Details panel section does." + volumeBakeNote
         + bakeNote + " Returns {entity, name, baked, bakedVolume}.",
       .params = { RequiredParam("entity", ParamType::Entity, "Entity with an irradianceVolume component.") },
       .refusedWhileCapturing = true,
@@ -808,7 +810,8 @@ namespace YAEngine
       .name = "bake.previewVolumePlacement",
       .description = "Lay out the sparse adaptive bricks of one irradiance volume without baking, as Preview Placement "
         "in its Details panel does: bricks refine from maxSpacing down to minSpacing where ray traced geometry queries "
-        "find surfaces near. The preview is kept for that panel and the brick gizmo. The editor does nothing else "
+        "find surfaces near. The preview is kept for the Details summary line, the Developer panel's Irradiance Volume "
+        "Diagnostics group and the brick gizmo. The editor does nothing else "
         "until it is done; fails on a device without the ray traced baker. Returns {entity, name, error, minSpacing, "
         "maxSpacing, levels: [{spacing, bricks, uniqueNodes, stitchedNodes}] coarse to fine, totals: {bricks, "
         "uniqueNodes, stitchedNodes, bakedNodes, indirectionCells}, estimates: {runtimeVramBytes, diskBytes, "
@@ -906,9 +909,9 @@ namespace YAEngine
 
     actions.Register({
       .name = "shaders.recompileAll",
-      .description = "Recompile every shader and rebuild the pipelines that use them, as Recompile Shaders in Render "
-        "Settings does. Completes when the whole batch is done. When a shader does not compile the action fails and "
-        "the pipelines stay as they were; log.tail has the compiler output. Returns {shaderCount}.",
+      .description = "Recompile every shader and rebuild the pipelines that use them; shader hot reload does the same "
+        "for shader files that change on disk. Completes when the whole batch is done. When a shader does not compile "
+        "the action fails and the pipelines stay as they were; log.tail has the compiler output. Returns {shaderCount}.",
       .refusedWhileCapturing = true,
       .refusedWhileMinimized = true,
       .handler = [this](const BridgeActionArgs&, const BridgeReply& reply) {

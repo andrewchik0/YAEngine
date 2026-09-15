@@ -104,6 +104,25 @@ if(YA_EDITOR)
   target_include_directories(implot PUBLIC ${implot_SOURCE_DIR})
   target_link_libraries(implot PUBLIC imgui)
 
+  # FreeType rasterizes the editor fonts with hinting; non-editor builds keep ImGui's built-in
+  # stb_truetype loader. Optional codecs are off so no system libraries are required.
+  set(FT_DISABLE_ZLIB ON CACHE BOOL "" FORCE)
+  set(FT_DISABLE_BZIP2 ON CACHE BOOL "" FORCE)
+  set(FT_DISABLE_PNG ON CACHE BOOL "" FORCE)
+  set(FT_DISABLE_HARFBUZZ ON CACHE BOOL "" FORCE)
+  set(FT_DISABLE_BROTLI ON CACHE BOOL "" FORCE)
+  FetchContent_Declare(freetype
+    GIT_REPOSITORY https://github.com/freetype/freetype
+    GIT_TAG VER-2-14-3
+    GIT_SHALLOW ON
+    EXCLUDE_FROM_ALL
+    SYSTEM)
+  FetchContent_MakeAvailable(freetype)
+
+  target_sources(imgui PRIVATE ${imgui_SOURCE_DIR}/misc/freetype/imgui_freetype.cpp)
+  target_compile_definitions(imgui PUBLIC IMGUI_ENABLE_FREETYPE)
+  target_link_libraries(imgui PRIVATE freetype)
+
   # The agent bridge speaks JSON lines and only exists in editor builds.
   FetchContent_Declare(nlohmann_json
     GIT_REPOSITORY https://github.com/nlohmann/json

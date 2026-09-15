@@ -10,10 +10,11 @@ namespace YAEngine
   class PerformancePanel : public IEditorPanel
   {
   public:
+    static constexpr EditorPanelDescriptor DESCRIPTOR { .name = "Performance", .category = EditorPanelCategory::Rendering };
 
     ~PerformancePanel() override;
 
-    const char* GetName() const override { return "Performance"; }
+    const EditorPanelDescriptor& GetDescriptor() const override { return DESCRIPTOR; }
     void OnRender(EditorContext& context) override;
 
   private:
@@ -27,12 +28,6 @@ namespace YAEngine
       CPU = 0,
       GPU,
       Both
-    };
-
-    enum class BreakdownMode : uint8_t
-    {
-      Bars = 0,
-      Pie
     };
 
     struct DomainView
@@ -57,7 +52,6 @@ namespace YAEngine
     void DrawChart(ProfileDomain domain, float height);
     void DrawBreakdown(ProfileDomain domain);
     void DrawBreakdownRows(ProfileDomain domain);
-    void DrawBreakdownPie(ProfileDomain domain, float height);
 
     void Aggregate(ProfileDomain domain, bool refreshOrder);
     void RefreshStackOrder(ProfileDomain domain);
@@ -68,10 +62,6 @@ namespace YAEngine
     // Recomputes the percentile blocks from the profiler ring. Runs on the stats
     // interval - sorting a thousand samples every frame would be waste.
     void UpdatePercentiles();
-    // Recomputes the summary min/max/avg frame-time block. Runs on the
-    // aggregation cadence in every display mode - the CPU chart aggregation it
-    // used to live in is skipped entirely while the GPU mode is selected.
-    void UpdateFrameTimeStats();
 
     DomainView& GetView(ProfileDomain domain) { return m_Views[static_cast<size_t>(domain)]; }
     const DomainView& GetView(ProfileDomain domain) const { return m_Views[static_cast<size_t>(domain)]; }
@@ -82,7 +72,6 @@ namespace YAEngine
     ImPlotContext* m_ImPlot = nullptr;
 
     DisplayMode m_Mode = DisplayMode::GPU;
-    BreakdownMode m_Breakdown = BreakdownMode::Bars;
     int m_WindowIndex = 1;
     bool b_Smooth = true;
 
@@ -101,14 +90,8 @@ namespace YAEngine
     std::array<float, ProfilerStorage::MAX_ZONES> m_ZoneValues {};
 
     int32_t m_HoveredBucket = -1;
-    ProfileDomain m_BreakdownDomain = ProfileDomain::GPU;
 
     float m_DisplayFPS = 0.0f;
-    // Frame time statistics over the same seconds window the chart shows,
-    // refreshed by UpdateFrameTimeStats in every display mode.
-    float m_MinFrametime = 0.0f;
-    float m_MaxFrametime = 0.0f;
-    float m_AvgFrametime = 0.0f;
 
     // Sliding-window percentiles over CPU and GPU frame time.
     static constexpr uint32_t PERCENTILE_WINDOW = 1000;
@@ -116,7 +99,6 @@ namespace YAEngine
     {
       float p50 = 0.0f;
       float p99 = 0.0f;
-      float p999 = 0.0f;
       float max = 0.0f;
       uint32_t samples = 0;
     };

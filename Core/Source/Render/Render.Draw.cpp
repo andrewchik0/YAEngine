@@ -379,10 +379,10 @@ namespace YAEngine
     m_EffectiveRenderPath = m_RenderPath;
 
     // Everything the path needs that is not per-frame: the device, a pipeline the tracer
-    // actually built into, the master ray tracing toggle, and - since the resolve became
-    // ray reconstruction's job - the RR plugin itself. The per-frame half, a TLAS and a
-    // material table for THIS frame, cannot be tested here because the build has not been
-    // recorded yet; IsPathTracePassEnabled is what tests it.
+    // actually built into and - since the resolve became ray reconstruction's job - the RR
+    // plugin itself. The per-frame half, a TLAS and a material table for THIS frame, cannot
+    // be tested here because the build has not been recorded yet; IsPathTracePassEnabled is
+    // what tests it.
     //
     // The DLSS-family half of the condition is not tested: it is ENFORCED, a few lines
     // below, by promoting the effective mode to DLAA. A user flipping the render path
@@ -391,14 +391,13 @@ namespace YAEngine
     const bool rayReconstructionReady = b_PathTraceDevResolve || IsRayReconstructionAvailable();
     const bool usable = m_Backend.GetContext().raytracingSupported
       && IsPathTracerAvailable()
-      && b_RayTracingEnabled
       && rayReconstructionReady;
 
     if (m_EffectiveRenderPath == RenderPath::PathTracing && !usable)
     {
       // The selection stays as the user left it, exactly as for the anti-aliasing mode: a
-      // capable device, or the ray tracing toggle coming back on, should bring the path
-      // back without them having to pick it again.
+      // capable device, or the developer resolve being ticked, should bring the path back
+      // without them having to pick it again.
       m_EffectiveRenderPath = RenderPath::Raster;
 
       if (!b_PathTracingFallbackWarned)
@@ -408,8 +407,6 @@ namespace YAEngine
         const char* missing = "the path tracing pipeline";
         if (!m_Backend.GetContext().raytracingSupported)
           missing = "hardware ray tracing";
-        else if (IsPathTracerAvailable() && !b_RayTracingEnabled)
-          missing = "the ray tracing master toggle";
         else if (IsPathTracerAvailable())
           missing = "DLSS Ray Reconstruction";
 

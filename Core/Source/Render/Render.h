@@ -289,15 +289,13 @@ namespace YAEngine
       if (!IsPathTracerAvailable())
         return "The path tracing pipeline could not be built.\n"
           "It needs hardware ray tracing and bindless descriptors.";
-      if (!b_RayTracingEnabled)
-        return "Ray tracing is switched off by the master toggle.";
       // Ray reconstruction is the path's resolve: one sample per pixel is what the tracer
       // produces, and without a denoiser there is nothing to display. The developer
       // override below is the deliberate way past this, not a second supported mode.
       if (!b_PathTraceDevResolve && !IsRayReconstructionAvailable())
         return "DLSS Ray Reconstruction is unavailable, and it is what turns the tracer's\n"
-          "one sample per pixel into a frame. Tick the developer resolve to path trace\n"
-          "without a denoiser.";
+          "one sample per pixel into a frame. Tick Developer Resolve in the Developer\n"
+          "panel's Path Tracer group to path trace without a denoiser.";
 
       return nullptr;
     }
@@ -364,18 +362,9 @@ namespace YAEngine
     float& GetVolumeFireflyClamp() { return m_VolumeFireflyClamp; }
     bool& GetIrradianceVolumesEnabled() { return b_IrradianceVolumesEnabled; }
     float& GetIrradianceNormalBias() { return m_IrradianceNormalBias; }
-    // Master switch for everything ray traced, the per-frame TLAS build included. Has no
-    // effect on a device that granted no ray tracing, and is deliberately not serialized:
-    // it is a development toggle, not a scene setting.
-    bool& GetRayTracingEnabled() { return b_RayTracingEnabled; }
     bool IsRayTracingAvailable() const { return m_Backend.GetContext().raytracingSupported; }
-    // Tracing from a compute shader, which is what the Ray Query debug view needs.
-    bool IsRayQueryAvailable() const { return m_Backend.GetContext().rayQuerySupported; }
-    // The RT Pipeline debug view needs more than the device flag: the entry points, the
-    // bindless table and a pipeline that actually built. A valid handle means all three.
-    bool IsRayTracingPipelineAvailable() const { return static_cast<bool>(m_RTPipelineDebugPipeline); }
-    // The path tracer needs exactly what the RT Pipeline view needs, so a valid handle is
-    // the whole test here too.
+    // The path tracer needs more than the device flag: the entry points, the bindless table
+    // and a pipeline that actually built. A valid handle means all three.
     bool IsPathTracerAvailable() const { return static_cast<bool>(m_PathTracePipeline); }
     // True while any view served by the path tracing pass is selected - the two radiance
     // views and the three energy diagnostics, all of which come out of the one dispatch.
@@ -583,15 +572,9 @@ namespace YAEngine
     // it is looked up in a volume. First-line mitigation against light leaking
     // through walls thinner than the node spacing.
     float m_IrradianceNormalBias = 0.25f;
-    // On by default, and gated on ctx.raytracingSupported at every use, so a device that
-    // has the hardware traces without anything having to switch it on.
-    bool b_RayTracingEnabled = true;
-    // False until one of the two ray tracing debug passes has filled m_RTDebug at least
-    // once since the last graph resize. The image is never cleared, so the view has to fall
-    // back to the final image until then rather than display whatever the allocation
-    // happened to hold.
-    bool b_RTDebugValid = false;
-    // The same rule for the path tracer's two images, which are equally uncleared.
+    // False until the path tracing pass has filled its two images at least once since the last
+    // graph resize. They are never cleared by a pass, so the views have to fall back to the
+    // final image until then rather than display whatever the allocation happened to hold.
     bool b_PathTraceOutputValid = false;
     // Bounce budget of one path, counting the G-buffer vertex as bounce zero. Three is where
     // an interior stops changing visibly per extra bounce.
@@ -726,11 +709,8 @@ namespace YAEngine
     void CreateBloomResources();
     void DestroyBloomResources();
 
-    // Points set 1 at this frame's TLAS, instance records, material records and the shared
-    // RTDebug image. Called by both tracing passes, which write identical contents and are
-    // mutually exclusive, so one set per frame slot serves both.
-    void WriteRayTracingSceneDescriptors(uint32_t frameIndex);
-    // The same scene bindings 0-2 plus the path tracer's own 3-12, on the forked set layout.
+    // Points set 1 at this frame's TLAS, instance records and material records (bindings 0-2)
+    // plus the path tracer's own resources from binding 3 up.
     void WritePathTraceDescriptors(uint32_t frameIndex);
     // The guide pass's set 1: the G-buffer in, the three ray reconstruction guides out.
     void WritePathTraceGuideDescriptors(uint32_t frameIndex);
@@ -749,7 +729,6 @@ namespace YAEngine
     {
       return (IsPathTracingActive() || IsPathTraceView())
         && IsPathTracerAvailable()
-        && b_RayTracingEnabled
         && m_TlasBuilder.IsValid(m_Backend.GetCurrentFrameIndex())
         && m_MaterialTable.IsValid(m_Backend.GetCurrentFrameIndex());
     }
@@ -834,10 +813,6 @@ namespace YAEngine
     // read by everything the TAA history would otherwise feed. Persists across frames so
     // the SSGI prefilter can reproject the previous frame's stabilized image.
     RGHandle m_DLSSOutput {};
-    // RGBA16F, render resolution: one traced primary ray per pixel, already shaded into a
-    // display color. Written only while one of the two ray tracing debug views is on the
-    // screen, by whichever of them it is - they share the image and never both run.
-    RGHandle m_RTDebug {};
     // The path tracer's outputs, both at render resolution. Noisy is RGBA16F and holds this
     // frame's single sample - radiance in rgb, primary hit distance in alpha, which is what
     // stage 5 hands ray reconstruction. Accumulation is RGBA32F because a running mean over
@@ -975,8 +950,6 @@ namespace YAEngine
     uint32_t m_SSGIRadiancePrefilterPassIndex {};
     uint32_t m_GTAOPassIndex {};
     uint32_t m_HiZPassIndex {};
-    uint32_t m_RTDebugPassIndex {};
-    uint32_t m_RTPipelineDebugPassIndex {};
     uint32_t m_PathTracePassIndex {};
     uint32_t m_PathTraceGuidesPassIndex {};
     uint32_t m_GTAODenoisePassIndex {};
@@ -1043,15 +1016,9 @@ namespace YAEngine
     std::vector<VulkanDescriptorSet> m_GTAOPassDescriptorSets;
     std::vector<VulkanDescriptorSet> m_GTAODenoiseDescriptorSets;
     std::vector<VulkanDescriptorSet> m_LightCullInputDescriptorSets;
-    // Set 1 of every ray tracing pass, one per frame in flight. Shared by the Ray Query and
-    // RT Pipeline views: the bindings and their contents are identical and the two passes
-    // are mutually exclusive, so a second copy would only be a second thing to keep in
-    // step. Empty on a device without ray tracing, where neither pass exists.
-    std::vector<VulkanDescriptorSet> m_RTDebugDescriptorSets;
-    // Set 1 of the path tracing pass, one per frame in flight. A fork of the layout above:
-    // bindings 0-2 are the same scene, and from 3 up it carries the G-buffer, the sky, the
-    // lights and the two outputs instead of one storage image. Empty wherever the path
-    // tracer could not be built.
+    // Set 1 of the path tracing pass, one per frame in flight: bindings 0-2 are the ray tracing
+    // scene, and from 3 up it carries the G-buffer, the sky, the lights and the outputs. Empty
+    // wherever the path tracer could not be built.
     std::vector<VulkanDescriptorSet> m_PathTraceDescriptorSets;
     // Set 1 of the guide pass. Plain compute over the G-buffer, so it needs none of the
     // scene bindings above and exists on every device, ray tracing or not.
@@ -1087,9 +1054,6 @@ namespace YAEngine
     PipelineHandle m_SSGIRadiancePrefilterPipeline {};
     PipelineHandle m_GTAODenoisePipeline {};
     PipelineHandle m_HiZPipeline {};
-    PipelineHandle m_RTDebugPipeline {};
-    // Invalid on a device that cannot build it, which is what gates the RT Pipeline view.
-    PipelineHandle m_RTPipelineDebugPipeline {};
     // The path tracer proper: pt_main.rgen over the same hit group, with a second miss
     // shader for shadow rays. Invalid where the device cannot build it, which gates both
     // path traced views.
@@ -1406,6 +1370,18 @@ namespace YAEngine
     static glm::vec4 GetPlacementBrickColor(uint32_t spacingIndex);
     // See IrradianceVolumeStorage::GetGeneration.
     uint32_t GetIrradianceVolumeGeneration() const { return m_VolumeStorage.GetGeneration(); }
+    // Position and half extents of the box the volume in an uploaded slot was baked in, as its file
+    // stores them. False for a slot outside the uploaded set.
+    bool GetBakedIrradianceVolumeBox(uint32_t slot, glm::vec3& outPosition, glm::vec3& outHalfExtents) const
+    {
+      const IrradianceVolumeBuffer& buffer = m_VolumeStorage.GetBufferData();
+      if (slot >= uint32_t(buffer.volumeCount))
+        return false;
+      // The buffer holds the inverse of the baked position and rotation
+      outPosition = glm::vec3(glm::inverse(buffer.volumes[slot].worldToLocal)[3]);
+      outHalfExtents = glm::vec3(buffer.volumes[slot].halfExtentsFade);
+      return true;
+    }
 #endif
 
     ReflectionProbeAtlas& GetProbeAtlas() { return m_ProbeAtlas; }

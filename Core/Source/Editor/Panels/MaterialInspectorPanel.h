@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Editor/IEditorPanel.h"
+#include "Editor/EditorCommands.h"
 
 namespace YAEngine
 {
@@ -8,7 +9,12 @@ namespace YAEngine
   {
   public:
 
-    const char* GetName() const override { return "Material Inspector"; }
+    static constexpr EditorPanelDescriptor DESCRIPTOR { .name = "Material Inspector", .category = EditorPanelCategory::Assets };
+
+    const EditorPanelDescriptor& GetDescriptor() const override { return DESCRIPTOR; }
     void OnRender(EditorContext& context) override;
+
+  private:
+    EditorCommands::MaterialUserCount m_Users;
   };
 }

@@ -75,6 +75,17 @@ namespace YAEngine
       return {};
     }
 
+    // The path GetPath reports, without copying it; empty for a handle not loaded from a file
+    std::string_view FindPath(TextureHandle handle) const
+    {
+      for (auto& [key, cached] : m_Cache)
+      {
+        if (cached == handle)
+          return key.path;
+      }
+      return {};
+    }
+
   private:
 
     // Claims and writes the texture's slot in the global bindless table. Returns the

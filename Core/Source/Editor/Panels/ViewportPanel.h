@@ -1,96 +1,67 @@
 #pragma once
 
 #include "Editor/IEditorPanel.h"
-#include "Editor/EditorContext.h"
-#include "Editor/Utils/EditorIcons.h"
-#include "Render/Render.h"
-
-#include <imgui.h>
 
 namespace YAEngine
 {
+  class EditorCameraLayer;
+  class Render;
+  struct EditorPreferences;
+
+  // The scene image with a translucent toolbar over its top edge: gizmo mode, debug view, overlays
+  // and camera speed. Show flags and camera speed are saved in the editor preferences; the debug
+  // view is not.
   class ViewportPanel : public IEditorPanel
   {
   public:
 
-    const char* GetName() const override { return "Viewport"; }
+    static constexpr EditorPanelDescriptor DESCRIPTOR { .name = "Viewport", .category = EditorPanelCategory::Scene };
+    static constexpr size_t SHOW_FLAG_COUNT = 8;
 
-    void OnRender(EditorContext& context) override
-    {
-      ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-      if (ImGui::Begin("Viewport", nullptr, ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse))
-      {
-        context.viewportHovered = ImGui::IsWindowHovered(ImGuiHoveredFlags_AllowWhenBlockedByActiveItem);
-        auto size = ImGui::GetContentRegionAvail();
-        uint32_t w = static_cast<uint32_t>(size.x);
-        uint32_t h = static_cast<uint32_t>(size.y);
+    // camera may be null, which hides the speed control
+    ViewportPanel(EditorPreferences& preferences, EditorCameraLayer* camera);
 
-        if (w > 0 && h > 0 && context.render)
-        {
-          if (w != m_LastWidth || h != m_LastHeight)
-          {
-            m_LastWidth = w;
-            m_LastHeight = h;
-            context.viewportWidth = w;
-            context.viewportHeight = h;
-            context.render->RequestViewportResize(w, h);
-          }
+    const EditorPanelDescriptor& GetDescriptor() const override { return DESCRIPTOR; }
+    void OnRender(EditorContext& context) override;
+    // Applies the stored show flags and camera speed once Render exists
+    void OnSceneReady(EditorContext& context) override;
 
-          auto vpMin = ImGui::GetCursorScreenPos();
-          auto mouse = ImGui::GetMousePos();
-          glm::vec2 rel((mouse.x - vpMin.x) / size.x, (mouse.y - vpMin.y) / size.y);
-          context.mouseInViewportValid = context.viewportHovered
-            && rel.x >= 0.0f && rel.x <= 1.0f && rel.y >= 0.0f && rel.y <= 1.0f;
-          context.mouseInViewport = rel;
-
-          ImGui::Image(context.render->GetSceneTextureID(), size);
-
-          DrawPreviewOverlay(context, vpMin);
-        }
-      }
-      else
-      {
-        context.viewportHovered = false;
-      }
-      ImGui::End();
-      ImGui::PopStyleVar();
-    }
+    // Saves a camera speed change still waiting out its delay
+    void FlushPreferences();
 
   private:
-    // The viewport shows the scene camera exactly as the game would, with no editor
-    // camera cues left on screen, so the only sign that it is not the editor camera has
-    // to be drawn here.
-    static void DrawPreviewOverlay(EditorContext& context, const ImVec2& viewportOrigin)
-    {
-      if (!context.IsPreviewingCamera() || context.scene == nullptr)
-        return;
-      if (!context.scene->GetRegistry().valid(context.previewCamera))
-        return;
+    // Returns the height of the strip
+    float DrawToolbar(EditorContext& context, const ImVec2& origin, float width);
+    void DrawGizmoModeButtons(Render& render);
+    // Opens the popup on a press and places it under the button just submitted
+    void OpenToolbarPopupBelow(const char* popupId, bool pressed, bool wasOpen);
+    void DrawViewMenu(Render& render);
+    void DrawShowMenu(Render& render);
+    void DrawShowFlag(Render& render, size_t index, const char* disabledReason);
+    void DrawNodeColorMenu(Render& render, const char* disabledReason);
+    void DrawCameraSpeed(float rightEdge);
+    static void DrawPreviewOverlay(EditorContext& context, const ImVec2& origin);
 
-      constexpr float PADDING = 10.0f;
-      ImGui::SetCursorScreenPos(ImVec2(viewportOrigin.x + PADDING, viewportOrigin.y + PADDING));
+    void StoreShowFlag(size_t index, bool value);
+    // Wheel steps arrive every frame while scrolling, so a change is saved once it settles
+    // unless the edit just finished
+    void TrackCameraSpeed(bool saveNow);
 
-      ImGui::PushStyleColor(ImGuiCol_ChildBg, ImVec4(0.05f, 0.05f, 0.06f, 0.75f));
-      ImGui::BeginChild("PreviewOverlay", ImVec2(0, 0),
-        ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_Borders);
-
-      ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(1.0f, 0.75f, 0.25f, 1.0f));
-      ImGui::TextUnformatted(ICON_FA_VIDEO " Previewing:");
-      ImGui::PopStyleColor();
-      ImGui::SameLine();
-      ImGui::TextUnformatted(context.scene->GetName(context.previewCamera).c_str());
-      ImGui::SameLine();
-      if (ImGui::SmallButton("Exit Preview"))
-        context.StopCameraPreview();
-
-      // The click that leaves the preview must not also fire a viewport pick
-      if (ImGui::IsItemHovered())
-        context.mouseInViewportValid = false;
-
-      ImGui::EndChild();
-      ImGui::PopStyleColor();
-    }
-
+    EditorPreferences& m_Preferences;
+    EditorCameraLayer* m_Camera = nullptr;
+    // Render's values before the preferences were applied; only differences are stored
+    std::array<bool, SHOW_FLAG_COUNT> m_ShowFlagDefaults {};
+    uint8_t m_NodeColorDefault = 0;
+    bool b_PreferencesApplied = false;
+    float m_TrackedCameraSpeed = 0.0f;
+    // ImGui time the pending camera speed is saved at; negative when nothing is pending
+    double m_CameraSpeedSaveTime = -1.0;
+    // Screen y of the image's bottom edge; toolbar popups scroll rather than run past it
+    float m_ImageBottom = 0.0f;
+    // Widest View menu label, measured with m_ViewMenuWidthFont at m_ViewMenuWidthFontSize
+    float m_ViewMenuWidestName = 0.0f;
+    float m_ViewMenuWidthFontSize = 0.0f;
+    ImFont* m_ViewMenuWidthFont = nullptr;
     uint32_t m_LastWidth = 0;
     uint32_t m_LastHeight = 0;
   };

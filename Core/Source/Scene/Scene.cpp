@@ -14,11 +14,19 @@ namespace YAEngine
     m_Registry.emplace<HierarchyComponent>(e);
     m_Registry.emplace<RootTag>(e);
     m_Registry.emplace<Name>(e, name);
+    m_StructureGeneration++;
     return e;
+  }
+
+  void Scene::SetName(Entity e, std::string_view name)
+  {
+    m_Registry.emplace_or_replace<Name>(e, name);
+    m_StructureGeneration++;
   }
 
   void Scene::DestroyEntity(Entity e)
   {
+    m_StructureGeneration++;
     // Copy hierarchy data before destroying children - recursive DestroyEntity
     // calls may invalidate references via entt's swap-and-pop
     auto hc = m_Registry.get<HierarchyComponent>(e);
@@ -52,6 +60,7 @@ namespace YAEngine
   void Scene::SetParent(Entity child, Entity parent)
   {
     auto& childH = m_Registry.get<HierarchyComponent>(child);
+    m_StructureGeneration++;
 
     // Cycle detection: walk up from parent to root, reject if child is found
     if (parent != entt::null)

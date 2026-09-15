@@ -17,6 +17,11 @@ namespace YAEngine
   enum class GizmoMode : uint8_t;
   struct CameraTrackKey;
   class BridgeActions;
+  class ViewportPanel;
+  class OutlinerPanel;
+  class DetailsPanel;
+  class AgentPanel;
+  class DeveloperPanel;
 
   class EditorLayer : public Layer
   {
@@ -33,6 +38,14 @@ namespace YAEngine
   private:
 
     void BuildDefaultLayout(uint32_t dockspaceId);
+    // Appends a panel with the visibility stored in the preferences
+    template<typename TPanel, typename... TArgs>
+    TPanel& AddPanel(TArgs&&... args);
+    void DrawViewMenu();
+    // Shows or hides a panel and saves the choice in the preferences
+    void SetPanelVisible(IEditorPanel& panel, bool visible);
+    // Records the panel's current visibility in the preferences without saving them
+    void StorePanelVisibility(const IEditorPanel& panel);
     void NewScene();
     void SaveScene();
     void SaveSceneAs();
@@ -58,7 +71,7 @@ namespace YAEngine
 
     // Picking, most specific first: overlay icons, then the entity id the renderer
     // rasterized into the clicked pixel, then the ray test for what has no geometry.
-    Entity PickIconEntity(const Ray& ray, const glm::mat4& view);
+    Entity PickIconEntity(const Ray& ray, const glm::mat4& view, const glm::mat4& proj);
     Entity PickByRay(const Ray& ray);
     Entity FindSelectionRoot(Entity entity);
     void ApplyPickResult(const PickResult& result);
@@ -78,8 +91,16 @@ namespace YAEngine
     EditorPreferences m_Preferences;
     EditorBridge m_Bridge;
     std::vector<std::unique_ptr<IEditorPanel>> m_Panels;
+    // Typed access to the panels the layer drives directly; owned by m_Panels
+    ViewportPanel* m_ViewportPanel = nullptr;
+    OutlinerPanel* m_OutlinerPanel = nullptr;
+    DetailsPanel* m_DetailsPanel = nullptr;
+    AgentPanel* m_AgentPanel = nullptr;
+    DeveloperPanel* m_DeveloperPanel = nullptr;
     bool b_LayoutBuilt = false;
     bool b_ResetLayout = false;
+    // Window content scale the style was last applied at
+    float m_ContentScale = 1.0f;
     uint32_t m_LastViewportWidth = 0;
     uint32_t m_LastViewportHeight = 0;
 

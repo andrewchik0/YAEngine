@@ -1,102 +1,201 @@
 #include "EditorStyle.h"
 
-#include <imgui.h>
+#include <implot.h>
 
 namespace YAEngine
 {
-  void EditorStyle::Apply()
+  namespace
   {
-    ImGuiStyle& style = ImGui::GetStyle();
+    EditorTheme s_Theme;
+    float s_ContentScale = 1.0f;
 
-    style.WindowRounding    = 4.0f;
-    style.FrameRounding     = 2.0f;
-    style.GrabRounding      = 2.0f;
-    style.TabRounding       = 3.0f;
-    style.ScrollbarRounding = 3.0f;
-    style.ChildRounding     = 2.0f;
-    style.PopupRounding     = 3.0f;
+    constexpr ImVec4 INVISIBLE(0.0f, 0.0f, 0.0f, 0.0f);
 
-    style.WindowPadding  = ImVec2(8.0f, 8.0f);
-    style.FramePadding   = ImVec2(6.0f, 3.0f);
-    style.ItemSpacing    = ImVec2(8.0f, 4.0f);
-    style.ItemInnerSpacing = ImVec2(4.0f, 4.0f);
-    style.IndentSpacing  = 16.0f;
-    style.ScrollbarSize  = 14.0f;
-    style.GrabMinSize    = 10.0f;
+    ImVec4 WithAlpha(const glm::vec4& color, float alpha)
+    {
+      ImVec4 result = ToImGuiColor(color);
+      result.w = alpha;
+      return result;
+    }
 
-    style.WindowBorderSize = 1.0f;
-    style.FrameBorderSize  = 0.0f;
-    style.TabBorderSize    = 0.0f;
+    ImVec4 Mix(const glm::vec4& from, const glm::vec4& to, float t)
+    {
+      return ToImGuiColor(glm::mix(from, to, t));
+    }
 
-    ImVec4* colors = style.Colors;
+    ImVec2 Scaled(const ImVec2& value, float scale)
+    {
+      return ImVec2(value.x * scale, value.y * scale);
+    }
+  }
 
-    colors[ImGuiCol_WindowBg]             = ImVec4(0.09f, 0.09f, 0.08f, 1.00f);
-    colors[ImGuiCol_ChildBg]              = ImVec4(0.09f, 0.09f, 0.08f, 1.00f);
-    colors[ImGuiCol_PopupBg]              = ImVec4(0.07f, 0.07f, 0.06f, 0.95f);
-    colors[ImGuiCol_Border]               = ImVec4(0.22f, 0.22f, 0.21f, 0.50f);
+  const EditorTheme& EditorStyle::GetTheme()
+  {
+    return s_Theme;
+  }
 
-    colors[ImGuiCol_FrameBg]              = ImVec4(0.13f, 0.13f, 0.12f, 1.00f);
-    colors[ImGuiCol_FrameBgHovered]       = ImVec4(0.16f, 0.16f, 0.15f, 1.00f);
-    colors[ImGuiCol_FrameBgActive]        = ImVec4(0.20f, 0.20f, 0.19f, 1.00f);
+  float EditorStyle::GetContentScale()
+  {
+    return s_ContentScale;
+  }
 
-    colors[ImGuiCol_TitleBg]              = ImVec4(0.06f, 0.06f, 0.05f, 1.00f);
-    colors[ImGuiCol_TitleBgActive]        = ImVec4(0.07f, 0.07f, 0.06f, 1.00f);
-    colors[ImGuiCol_TitleBgCollapsed]     = ImVec4(0.06f, 0.06f, 0.05f, 0.75f);
+  void EditorStyle::Apply(const EditorTheme& theme, float contentScale)
+  {
+    s_Theme = theme;
+    s_ContentScale = contentScale > 0.0f ? contentScale : 1.0f;
+    const EditorTheme& t = s_Theme;
 
-    colors[ImGuiCol_MenuBarBg]            = ImVec4(0.07f, 0.07f, 0.06f, 1.00f);
+    // Built from scratch on every apply so repeated scale changes never compound
+    ImGuiStyle next;
+    ImGui::StyleColorsDark(&next);
 
-    colors[ImGuiCol_Tab]                  = ImVec4(0.09f, 0.09f, 0.08f, 1.00f);
-    colors[ImGuiCol_TabHovered]           = ImVec4(0.28f, 0.28f, 0.27f, 0.80f);
-    colors[ImGuiCol_TabSelected]          = ImVec4(0.20f, 0.20f, 0.19f, 1.00f);
-    colors[ImGuiCol_TabDimmed]            = ImVec4(0.06f, 0.06f, 0.05f, 1.00f);
-    colors[ImGuiCol_TabDimmedSelected]    = ImVec4(0.16f, 0.16f, 0.15f, 1.00f);
+    next.WindowPadding = ImVec2(8.0f, 8.0f);
+    next.FramePadding = ImVec2(t.framePadding.x, t.framePadding.y);
+    next.ItemSpacing = ImVec2(t.itemSpacing.x, t.itemSpacing.y);
+    next.ItemInnerSpacing = ImVec2(6.0f, 4.0f);
+    next.CellPadding = ImVec2(6.0f, 3.0f);
+    next.IndentSpacing = t.indent;
+    next.ScrollbarSize = t.scrollbarSize;
+    next.GrabMinSize = 10.0f;
 
-    colors[ImGuiCol_Header]              = ImVec4(0.15f, 0.15f, 0.14f, 1.00f);
-    colors[ImGuiCol_HeaderHovered]       = ImVec4(0.24f, 0.24f, 0.23f, 0.80f);
-    colors[ImGuiCol_HeaderActive]        = ImVec4(0.20f, 0.20f, 0.19f, 1.00f);
+    next.WindowRounding = t.radiusMedium;
+    next.PopupRounding = t.radiusMedium;
+    next.ScrollbarRounding = t.radiusMedium;
+    next.ChildRounding = t.radiusSmall;
+    next.FrameRounding = t.radiusSmall;
+    next.GrabRounding = t.radiusSmall;
+    next.TabRounding = t.radiusSmall;
 
-    colors[ImGuiCol_Button]              = ImVec4(0.15f, 0.15f, 0.14f, 1.00f);
-    colors[ImGuiCol_ButtonHovered]       = ImVec4(0.24f, 0.24f, 0.23f, 0.80f);
-    colors[ImGuiCol_ButtonActive]        = ImVec4(0.20f, 0.20f, 0.19f, 1.00f);
+    next.WindowBorderSize = 1.0f;
+    next.ChildBorderSize = 1.0f;
+    next.PopupBorderSize = 1.0f;
+    next.FrameBorderSize = 0.0f;
+    next.TabBorderSize = 0.0f;
+    next.TabBarBorderSize = 1.0f;
+    next.TabBarOverlineSize = 2.0f;
+    // Panels close from their own tabs; the node-wide button would close every tab in the node
+    next.DockingNodeHasCloseButton = false;
 
-    colors[ImGuiCol_SliderGrab]          = ImVec4(0.33f, 0.33f, 0.32f, 1.00f);
-    colors[ImGuiCol_SliderGrabActive]    = ImVec4(0.40f, 0.40f, 0.39f, 1.00f);
+    next.TreeLinesFlags = ImGuiTreeNodeFlags_DrawLinesToNodes;
+    next.TreeLinesSize = 1.0f;
 
-    colors[ImGuiCol_CheckMark]           = ImVec4(0.62f, 0.62f, 0.60f, 1.00f);
+    next.ScaleAllSizes(s_ContentScale);
 
-    colors[ImGuiCol_Separator]           = ImVec4(0.22f, 0.22f, 0.21f, 0.50f);
-    colors[ImGuiCol_SeparatorHovered]    = ImVec4(0.30f, 0.30f, 0.29f, 0.80f);
-    colors[ImGuiCol_SeparatorActive]     = ImVec4(0.38f, 0.38f, 0.37f, 1.00f);
+    // Fonts follow the content scale through FontScaleDpi rather than through their size
+    next.FontSizeBase = t.fontSizeBody;
+    next.FontScaleMain = ImGui::GetStyle().FontScaleMain;
+    next.FontScaleDpi = s_ContentScale;
 
-    colors[ImGuiCol_ResizeGrip]          = ImVec4(0.30f, 0.30f, 0.29f, 0.25f);
-    colors[ImGuiCol_ResizeGripHovered]   = ImVec4(0.30f, 0.30f, 0.29f, 0.67f);
-    colors[ImGuiCol_ResizeGripActive]    = ImVec4(0.38f, 0.38f, 0.37f, 0.95f);
+    ImVec4* c = next.Colors;
+    c[ImGuiCol_Text] = ToImGuiColor(t.textPrimary);
+    c[ImGuiCol_TextDisabled] = ToImGuiColor(t.textDisabled);
+    c[ImGuiCol_WindowBg] = ToImGuiColor(t.panel);
+    c[ImGuiCol_ChildBg] = INVISIBLE;
+    c[ImGuiCol_PopupBg] = ToImGuiColor(t.popup);
+    c[ImGuiCol_Border] = ToImGuiColor(t.borderSubtle);
+    c[ImGuiCol_BorderShadow] = INVISIBLE;
+    c[ImGuiCol_FrameBg] = ToImGuiColor(t.frame);
+    c[ImGuiCol_FrameBgHovered] = ToImGuiColor(t.frameHovered);
+    c[ImGuiCol_FrameBgActive] = ToImGuiColor(t.frameActive);
+    c[ImGuiCol_TitleBg] = ToImGuiColor(t.appBackground);
+    c[ImGuiCol_TitleBgActive] = ToImGuiColor(t.appBackground);
+    c[ImGuiCol_TitleBgCollapsed] = ToImGuiColor(t.appBackground);
+    c[ImGuiCol_MenuBarBg] = ToImGuiColor(t.appBackground);
+    c[ImGuiCol_ScrollbarBg] = INVISIBLE;
+    c[ImGuiCol_ScrollbarGrab] = ToImGuiColor(t.frameHovered);
+    c[ImGuiCol_ScrollbarGrabHovered] = ToImGuiColor(t.borderStrong);
+    c[ImGuiCol_ScrollbarGrabActive] = ToImGuiColor(t.textDisabled);
+    c[ImGuiCol_CheckMark] = ToImGuiColor(t.accent);
+    c[ImGuiCol_CheckboxSelectedBg] = ToImGuiColor(t.frame);
+    c[ImGuiCol_SliderGrab] = ToImGuiColor(t.accent);
+    c[ImGuiCol_SliderGrabActive] = ToImGuiColor(t.accentHovered);
+    c[ImGuiCol_Button] = ToImGuiColor(t.frame);
+    c[ImGuiCol_ButtonHovered] = ToImGuiColor(t.frameHovered);
+    c[ImGuiCol_ButtonActive] = ToImGuiColor(t.frameActive);
+    // Header colors double as the selection of selectables, tree nodes and menu items
+    c[ImGuiCol_Header] = ToImGuiColor(t.accentMuted);
+    c[ImGuiCol_HeaderHovered] = Mix(t.accentMuted, t.accent, 0.25f);
+    c[ImGuiCol_HeaderActive] = Mix(t.accentMuted, t.accent, 0.45f);
+    c[ImGuiCol_Separator] = ToImGuiColor(t.borderSubtle);
+    c[ImGuiCol_SeparatorHovered] = ToImGuiColor(t.accentHovered);
+    c[ImGuiCol_SeparatorActive] = ToImGuiColor(t.accent);
+    c[ImGuiCol_ResizeGrip] = INVISIBLE;
+    c[ImGuiCol_ResizeGripHovered] = ToImGuiColor(t.accentMuted);
+    c[ImGuiCol_ResizeGripActive] = ToImGuiColor(t.accent);
+    c[ImGuiCol_InputTextCursor] = ToImGuiColor(t.textPrimary);
+    c[ImGuiCol_TabHovered] = ToImGuiColor(t.frameHovered);
+    c[ImGuiCol_Tab] = ToImGuiColor(t.appBackground);
+    c[ImGuiCol_TabSelected] = ToImGuiColor(t.panel);
+    c[ImGuiCol_TabSelectedOverline] = ToImGuiColor(t.accent);
+    c[ImGuiCol_TabDimmed] = ToImGuiColor(t.appBackground);
+    c[ImGuiCol_TabDimmedSelected] = ToImGuiColor(t.panel);
+    c[ImGuiCol_TabDimmedSelectedOverline] = INVISIBLE;
+    c[ImGuiCol_DockingPreview] = WithAlpha(t.accent, 0.35f);
+    c[ImGuiCol_DockingEmptyBg] = ToImGuiColor(t.appBackground);
+    c[ImGuiCol_PlotLines] = ToImGuiColor(t.accent);
+    c[ImGuiCol_PlotLinesHovered] = ToImGuiColor(t.accentHovered);
+    c[ImGuiCol_PlotHistogram] = ToImGuiColor(t.accent);
+    c[ImGuiCol_PlotHistogramHovered] = ToImGuiColor(t.accentHovered);
+    c[ImGuiCol_TableHeaderBg] = ToImGuiColor(t.frame);
+    c[ImGuiCol_TableBorderStrong] = ToImGuiColor(t.borderSubtle);
+    c[ImGuiCol_TableBorderLight] = Mix(t.panel, t.borderSubtle, 0.6f);
+    c[ImGuiCol_TableRowBg] = INVISIBLE;
+    c[ImGuiCol_TableRowBgAlt] = WithAlpha(t.textPrimary, 0.03f);
+    c[ImGuiCol_TextLink] = ToImGuiColor(t.accentHovered);
+    c[ImGuiCol_TextSelectedBg] = WithAlpha(t.accent, 0.35f);
+    c[ImGuiCol_TreeLines] = ToImGuiColor(t.borderStrong);
+    c[ImGuiCol_DragDropTarget] = ToImGuiColor(t.accent);
+    c[ImGuiCol_DragDropTargetBg] = WithAlpha(t.accent, 0.15f);
+    c[ImGuiCol_UnsavedMarker] = ToImGuiColor(t.textPrimary);
+    c[ImGuiCol_NavCursor] = ToImGuiColor(t.accent);
+    c[ImGuiCol_NavWindowingHighlight] = WithAlpha(t.textPrimary, 0.7f);
+    c[ImGuiCol_NavWindowingDimBg] = WithAlpha(t.appBackground, 0.6f);
+    c[ImGuiCol_ModalWindowDimBg] = WithAlpha(t.appBackground, 0.6f);
 
-    colors[ImGuiCol_DockingPreview]      = ImVec4(0.33f, 0.33f, 0.32f, 0.70f);
-    colors[ImGuiCol_DockingEmptyBg]      = ImVec4(0.06f, 0.06f, 0.05f, 1.00f);
+    ImGui::GetStyle() = next;
+    ApplyPlotStyle();
+  }
 
-    colors[ImGuiCol_TextSelectedBg]      = ImVec4(0.25f, 0.25f, 0.24f, 0.35f);
+  void EditorStyle::ApplyPlotStyle()
+  {
+    if (ImPlot::GetCurrentContext() == nullptr)
+      return;
 
-    colors[ImGuiCol_ScrollbarBg]         = ImVec4(0.07f, 0.07f, 0.06f, 0.53f);
-    colors[ImGuiCol_ScrollbarGrab]       = ImVec4(0.21f, 0.21f, 0.20f, 1.00f);
-    colors[ImGuiCol_ScrollbarGrabHovered]= ImVec4(0.24f, 0.24f, 0.23f, 1.00f);
-    colors[ImGuiCol_ScrollbarGrabActive] = ImVec4(0.28f, 0.28f, 0.27f, 1.00f);
+    const EditorTheme& t = s_Theme;
+    const float scale = s_ContentScale;
+    const ImPlotStyle defaults;
+    ImPlotStyle& style = ImPlot::GetStyle();
 
-    colors[ImGuiCol_PlotLinesHovered]    = ImVec4(0.40f, 0.40f, 0.39f, 1.00f);
-    colors[ImGuiCol_PlotHistogramHovered]= ImVec4(0.40f, 0.40f, 0.39f, 1.00f);
+    style.PlotDefaultSize = Scaled(defaults.PlotDefaultSize, scale);
+    style.PlotMinSize = Scaled(defaults.PlotMinSize, scale);
+    style.MajorTickLen = Scaled(defaults.MajorTickLen, scale);
+    style.MinorTickLen = Scaled(defaults.MinorTickLen, scale);
+    style.PlotPadding = Scaled(defaults.PlotPadding, scale);
+    style.LabelPadding = Scaled(defaults.LabelPadding, scale);
+    style.LegendPadding = Scaled(defaults.LegendPadding, scale);
+    style.LegendInnerPadding = Scaled(defaults.LegendInnerPadding, scale);
+    style.LegendSpacing = Scaled(defaults.LegendSpacing, scale);
+    style.MousePosPadding = Scaled(defaults.MousePosPadding, scale);
+    style.AnnotationPadding = Scaled(defaults.AnnotationPadding, scale);
+    style.DigitalPadding = defaults.DigitalPadding * scale;
+    style.DigitalSpacing = defaults.DigitalSpacing * scale;
 
-    colors[ImGuiCol_TreeLines]            = ImVec4(0.55f, 0.55f, 0.53f, 0.60f);
-
-    colors[ImGuiCol_DragDropTarget]      = ImVec4(0.45f, 0.45f, 0.43f, 0.90f);
-    colors[ImGuiCol_DragDropTargetBg]    = ImVec4(0.22f, 0.22f, 0.21f, 0.90f);
-    colors[ImGuiCol_NavCursor]           = ImVec4(0.40f, 0.40f, 0.39f, 0.80f);
-    colors[ImGuiCol_NavWindowingHighlight]= ImVec4(0.55f, 0.55f, 0.53f, 0.70f);
-    colors[ImGuiCol_NavWindowingDimBg]   = ImVec4(0.15f, 0.15f, 0.14f, 0.73f);
-
-    colors[ImGuiCol_Text]                = ImVec4(0.91f, 0.91f, 0.89f, 1.00f);
-    colors[ImGuiCol_TextDisabled]        = ImVec4(0.48f, 0.48f, 0.46f, 1.00f);
-
-    style.TreeLinesFlags = ImGuiTreeNodeFlags_DrawLinesToNodes;
-    style.TreeLinesSize  = 1.0f;
+    ImVec4* c = style.Colors;
+    c[ImPlotCol_FrameBg] = INVISIBLE;
+    c[ImPlotCol_PlotBg] = ToImGuiColor(t.appBackground);
+    c[ImPlotCol_PlotBorder] = ToImGuiColor(t.borderSubtle);
+    c[ImPlotCol_LegendBg] = ToImGuiColor(t.popup);
+    c[ImPlotCol_LegendBorder] = ToImGuiColor(t.borderSubtle);
+    c[ImPlotCol_LegendText] = ToImGuiColor(t.textPrimary);
+    c[ImPlotCol_TitleText] = ToImGuiColor(t.textPrimary);
+    c[ImPlotCol_InlayText] = ToImGuiColor(t.textPrimary);
+    c[ImPlotCol_AxisText] = ToImGuiColor(t.textSecondary);
+    c[ImPlotCol_AxisGrid] = WithAlpha(t.borderSubtle, 0.6f);
+    c[ImPlotCol_AxisTick] = ToImGuiColor(t.borderStrong);
+    c[ImPlotCol_AxisBg] = INVISIBLE;
+    c[ImPlotCol_AxisBgHovered] = ToImGuiColor(t.frameHovered);
+    c[ImPlotCol_AxisBgActive] = ToImGuiColor(t.frameActive);
+    c[ImPlotCol_Selection] = ToImGuiColor(t.accent);
+    c[ImPlotCol_Crosshairs] = ToImGuiColor(t.textSecondary);
   }
 }

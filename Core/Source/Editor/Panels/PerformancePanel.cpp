@@ -4,9 +4,9 @@
 #include <implot.h>
 
 #include "Editor/EditorContext.h"
-#include "Render/GeometryArena.h"
+#include "Editor/Utils/EditorFonts.h"
+#include "Editor/Utils/EditorStyle.h"
 #include "Render/Render.h"
-#include "Utils/MeshSimplifier.h"
 #include "Utils/Timer.h"
 
 namespace YAEngine
@@ -24,7 +24,6 @@ namespace YAEngine
   // limit for this long. Without it the scale dithers between two steps at the edge.
   static constexpr float Y_SHRINK_FRACTION = 0.7f;
   static constexpr double Y_SHRINK_DELAY = 1.0;
-  static constexpr float PI = 3.14159265f;
 
   // Rounds up to a step proportional to the magnitude - 0.5 over the 1..10 ms range,
   // 0.05 over 0.1..1 - so the axis reads the same whether a whole frame or a single
@@ -41,13 +40,14 @@ namespace YAEngine
 
   // Golden-ratio hue rotation keeps neighbouring zones distinct at any zone count,
   // and the hue only depends on the zone slot, so colors never dance between frames.
+  // The HSV values are display colors, decoded for the sRGB swapchain like theme tokens.
   static ImVec4 ZoneColor(uint32_t zone)
   {
     float hue = std::fmod(static_cast<float>(zone) * 0.6180339887f, 1.0f);
     float value = (zone % 2 == 0) ? 0.95f : 0.70f;
-    ImVec4 color(0.0f, 0.0f, 0.0f, 1.0f);
-    ImGui::ColorConvertHSVtoRGB(hue, 0.62f, value, color.x, color.y, color.z);
-    return color;
+    glm::vec4 color(0.0f, 0.0f, 0.0f, 1.0f);
+    ImGui::ColorConvertHSVtoRGB(hue, 0.62f, value, color.r, color.g, color.b);
+    return ToImGuiColor(color);
   }
 
   static const char* DomainName(ProfileDomain domain)
@@ -69,16 +69,19 @@ namespace YAEngine
 
   void PerformancePanel::OnRender(EditorContext& context)
   {
-    if (!ImGui::Begin("Performance"))
+    if (!BeginPanel())
     {
       ImGui::End();
       return;
     }
 
-    // Created here rather than next to the ImGui context so implot.h stays inside
-    // this one translation unit. The panel is destroyed before ImGui shuts down.
+    // Created here rather than next to the ImGui context: only this panel plots.
+    // The panel is destroyed before ImGui shuts down.
     if (!m_ImPlot)
+    {
       m_ImPlot = ImPlot::CreateContext();
+      EditorStyle::ApplyPlotStyle();
+    }
 
     if (context.timer)
     {
@@ -107,7 +110,6 @@ namespace YAEngine
       m_LastAggregate = now;
       b_ForceAggregate = false;
 
-      UpdateFrameTimeStats();
       if (m_Mode != DisplayMode::GPU)
         Aggregate(ProfileDomain::CPU, refreshOrder);
       if (m_Mode != DisplayMode::CPU)
@@ -202,16 +204,30 @@ namespace YAEngine
     if (ImGui::Checkbox("Smooth", &b_Smooth))
       b_ForceAggregate = true;
 
-    ImGui::SameLine();
-    ImGui::TextDisabled("|");
-    ImGui::SameLine();
-
-    int breakdown = static_cast<int>(m_Breakdown);
-    ImGui::RadioButton("Bars", &breakdown, 0); ImGui::SameLine();
-    ImGui::RadioButton("Pie", &breakdown, 1);
-    m_Breakdown = static_cast<BreakdownMode>(breakdown);
-
     ImGui::Separator();
+  }
+
+  static void SummaryLabelCell(const char* label)
+  {
+    ImGui::TableNextColumn();
+    ImGui::PushStyleColor(ImGuiCol_Text, ToImGuiColor(EditorStyle::GetTheme().textSecondary));
+    ImGui::TextUnformatted(label);
+    ImGui::PopStyleColor();
+  }
+
+  // Right-aligned, so the digits of a column line up in the mono font
+  static void SummaryValueCell(const char* text, bool secondary = false)
+  {
+    ImGui::TableNextColumn();
+    float offset = ImGui::GetContentRegionAvail().x - ImGui::CalcTextSize(text).x;
+    if (offset > 0.0f)
+      ImGui::SetCursorPosX(ImGui::GetCursorPosX() + offset);
+
+    if (secondary)
+      ImGui::PushStyleColor(ImGuiCol_Text, ToImGuiColor(EditorStyle::GetTheme().textSecondary));
+    ImGui::TextUnformatted(text);
+    if (secondary)
+      ImGui::PopStyleColor();
   }
 
   void PerformancePanel::DrawSummary(EditorContext& context)
@@ -223,29 +239,52 @@ namespace YAEngine
     storage.CopyFrameTotals(ProfileDomain::CPU, 1, std::span<float>(&cpuTotal, 1));
     storage.CopyFrameTotals(ProfileDomain::GPU, 1, std::span<float>(&gpuTotal, 1));
 
-    ImGui::Text("FPS  %.1f", m_DisplayFPS);
-    ImGui::Text("CPU  %.2f ms", cpuTotal);
-    ImGui::Text("GPU  %.2f ms", gpuTotal);
+    const ImGuiTableFlags flags = ImGuiTableFlags_NoSavedSettings;
+    char text[32];
+    EditorFonts::Push(EditorFontRole::Mono);
+
+    if (ImGui::BeginTable("##fps", 2, flags))
+    {
+      ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed);
+      ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableNextRow();
+      SummaryLabelCell("FPS");
+      snprintf(text, sizeof(text), "%.1f", m_DisplayFPS);
+      SummaryValueCell(text);
+      ImGui::EndTable();
+    }
 
     ImGui::Spacing();
-    ImGui::TextDisabled("frame time, last %.0f s", WindowSeconds());
-    ImGui::Text("min  %.2f ms", m_MinFrametime);
-    ImGui::Text("max  %.2f ms", m_MaxFrametime);
-    ImGui::Text("avg  %.2f ms", m_AvgFrametime);
 
-    ImGui::Spacing();
-    ImGui::TextDisabled("CPU frame, last %u frames", m_CpuPercentiles.samples);
-    ImGui::Text("p50    %.2f ms", m_CpuPercentiles.p50);
-    ImGui::Text("p99    %.2f ms", m_CpuPercentiles.p99);
-    ImGui::Text("p99.9  %.2f ms", m_CpuPercentiles.p999);
-    ImGui::Text("max    %.2f ms", m_CpuPercentiles.max);
+    // With vsync on, the CPU frame is dominated by the WaitFrame zone; the GPU column stays
+    // meaningful either way
+    if (ImGui::BeginTable("##frameTimes", 3, flags))
+    {
+      ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed);
+      ImGui::TableSetupColumn("##cpu", ImGuiTableColumnFlags_WidthStretch);
+      ImGui::TableSetupColumn("##gpu", ImGuiTableColumnFlags_WidthStretch);
 
-    ImGui::Spacing();
-    ImGui::TextDisabled("GPU frame, last %u frames", m_GpuPercentiles.samples);
-    ImGui::Text("p50    %.2f ms", m_GpuPercentiles.p50);
-    ImGui::Text("p99    %.2f ms", m_GpuPercentiles.p99);
-    ImGui::Text("p99.9  %.2f ms", m_GpuPercentiles.p999);
-    ImGui::Text("max    %.2f ms", m_GpuPercentiles.max);
+      auto row = [&text](const char* label, float cpu, float gpu)
+      {
+        ImGui::TableNextRow();
+        SummaryLabelCell(label);
+        snprintf(text, sizeof(text), "%.2f", cpu);
+        SummaryValueCell(text);
+        snprintf(text, sizeof(text), "%.2f", gpu);
+        SummaryValueCell(text);
+      };
+
+      ImGui::TableNextRow();
+      SummaryLabelCell("ms");
+      SummaryValueCell("CPU", true);
+      SummaryValueCell("GPU", true);
+      row("Frame", cpuTotal, gpuTotal);
+      row("p50", m_CpuPercentiles.p50, m_GpuPercentiles.p50);
+      row("p99", m_CpuPercentiles.p99, m_GpuPercentiles.p99);
+      row("Max", m_CpuPercentiles.max, m_GpuPercentiles.max);
+      ImGui::EndTable();
+    }
+    ImGui::TextDisabled("p50-Max: %u frames", std::max(m_CpuPercentiles.samples, m_GpuPercentiles.samples));
 
     ImGui::Spacing();
     ImGui::Separator();
@@ -253,66 +292,24 @@ namespace YAEngine
 
     if (context.render)
     {
-      auto& stats = context.render->GetStats();
-      ImGui::Text("Draws  %u", stats.drawCalls);
-      ImGui::Text("Tris   %u", stats.triangles);
-      ImGui::Text("Verts  %u", stats.vertices);
-
-      if (const GeometryArena* arena = context.render->GetContext().geometryArena)
+      const auto& stats = context.render->GetStats();
+      if (ImGui::BeginTable("##drawStats", 2, flags))
       {
-        ImGui::Spacing();
-        ImGui::Text("Arena pos  %u / %llu KB",
-          arena->GetPositionUsedBytes() / 1024,
-          (unsigned long long)(arena->GetPositionCapacityBytes() / 1024));
-        ImGui::Text("Arena qpos %u / %llu KB",
-          arena->GetShadowPositionUsedBytes() / 1024,
-          (unsigned long long)(arena->GetShadowPositionCapacityBytes() / 1024));
-        if (ImGui::IsItemHovered())
-        {
-          ImGui::SetTooltip("Quantized positions for the indirect shadow path.\n"
-            "High water: %u KB, free blocks: %zu.\n"
-            "Worst quantization error: %.3f cm on a mesh %.1f units across.\n"
-            "Both are mesh local units: the stream is shared by every instance, so\n"
-            "instance scale is not folded in. World error is this times that scale.",
-            arena->GetShadowPositionHighWaterBytes() / 1024,
-            arena->GetShadowPositionFreeBlockCount(),
-            arena->GetMaxQuantizeError() * 100.0f,
-            arena->GetMaxQuantizeErrorExtent());
-        }
-        ImGui::Text("Arena i16  %u / %llu KB",
-          arena->GetIndexUsedBytes(VK_INDEX_TYPE_UINT16) / 1024,
-          (unsigned long long)(arena->GetIndexCapacityBytes(VK_INDEX_TYPE_UINT16) / 1024));
-        ImGui::Text("Arena i32  %u / %llu KB",
-          arena->GetIndexUsedBytes(VK_INDEX_TYPE_UINT32) / 1024,
-          (unsigned long long)(arena->GetIndexCapacityBytes(VK_INDEX_TYPE_UINT32) / 1024));
-        if (ImGui::IsItemHovered())
-        {
-          ImGui::SetTooltip("Shared position and index storage for every mesh.\n"
-            "High water: %u pos / %u i16 / %u i32 KB,\n"
-            "free blocks: %zu / %zu / %zu.\n"
-            "16-bit indices save %llu KB against 32-bit everywhere.\n"
-            "Usage that keeps climbing across regenerations is a leak.",
-            arena->GetPositionHighWaterBytes() / 1024,
-            arena->GetIndexHighWaterBytes(VK_INDEX_TYPE_UINT16) / 1024,
-            arena->GetIndexHighWaterBytes(VK_INDEX_TYPE_UINT32) / 1024,
-            arena->GetPositionFreeBlockCount(),
-            arena->GetIndexFreeBlockCount(VK_INDEX_TYPE_UINT16),
-            arena->GetIndexFreeBlockCount(VK_INDEX_TYPE_UINT32),
-            (unsigned long long)(arena->GetIndexSavedBytes() / 1024));
-        }
+        ImGui::TableSetupColumn("##label", ImGuiTableColumnFlags_WidthFixed);
+        ImGui::TableSetupColumn("##value", ImGuiTableColumnFlags_WidthStretch);
 
-        ImGui::Text("Shadow LOD err %.2f cm / %u dropped",
-          MeshSimplifier::GetMaxKeptError() * 100.0f,
-          MeshSimplifier::GetRejectedLevelCount());
-        if (ImGui::IsItemHovered())
+        auto row = [&text](const char* label, uint32_t value)
         {
-          ImGui::SetTooltip("Worst silhouette deformation any kept shadow LOD carries,\n"
-            "on a mesh %.1f units across, plus the number of levels the budget threw\n"
-            "away. Mesh local units, like the quantization error above.\n"
-            "This is the number that decides whether MeshSimplifier::LEVEL_MAX_ERROR\n"
-            "is safe: past roughly one cascade texel the shadow leaves its caster.",
-            MeshSimplifier::GetMaxKeptErrorExtent());
-        }
+          ImGui::TableNextRow();
+          SummaryLabelCell(label);
+          snprintf(text, sizeof(text), "%u", value);
+          SummaryValueCell(text);
+        };
+
+        row("Draws", stats.drawCalls);
+        row("Tris", stats.triangles);
+        row("Verts", stats.vertices);
+        ImGui::EndTable();
       }
     }
     else
@@ -320,9 +317,11 @@ namespace YAEngine
       ImGui::TextDisabled("No render stats");
     }
 
+    EditorFonts::Pop();
+
     ImGui::Spacing();
     if (storage.IsPaused())
-      ImGui::TextColored(ImVec4(1.0f, 0.75f, 0.2f, 1.0f), "PAUSED");
+      ImGui::TextColored(ToImGuiColor(EditorStyle::GetTheme().warning), "PAUSED");
     else if (storage.IsWarmingUp())
       ImGui::TextDisabled("warming up...");
   }
@@ -352,7 +351,6 @@ namespace YAEngine
       out.samples = uint32_t(m_PercentileScratch.size());
       out.p50 = Percentile(m_PercentileScratch, 0.5f);
       out.p99 = Percentile(m_PercentileScratch, 0.99f);
-      out.p999 = Percentile(m_PercentileScratch, 0.999f);
       out.max = m_PercentileScratch.empty() ? 0.0f : m_PercentileScratch.back();
     };
 
@@ -362,54 +360,11 @@ namespace YAEngine
       storage.CopyFrameTotals(ProfileDomain::CPU, cpuFrames, m_PercentileScratch);
     compute(m_CpuPercentiles);
 
-    // With vsync on the CPU totals are dominated by the WaitFrame zone, so the
-    // GPU frame total is the block that stays meaningful either way.
     uint32_t gpuFrames = std::min(storage.GetAvailableFrames(ProfileDomain::GPU), PERCENTILE_WINDOW);
     m_PercentileScratch.assign(gpuFrames, 0.0f);
     if (gpuFrames > 0)
       storage.CopyFrameTotals(ProfileDomain::GPU, gpuFrames, m_PercentileScratch);
     compute(m_GpuPercentiles);
-  }
-
-  void PerformancePanel::UpdateFrameTimeStats()
-  {
-    auto& storage = ProfilerStorage::Get();
-
-    uint32_t avail = storage.GetAvailableFrames(ProfileDomain::CPU);
-    if (avail < 2)
-      return;
-
-    m_FrameTimes.resize(avail);
-    storage.CopyFrameTimes(ProfileDomain::CPU, avail, m_FrameTimes);
-
-    // Same seconds window as the chart, so the numbers and the plot agree.
-    double start = m_FrameTimes[avail - 1] - static_cast<double>(WindowSeconds());
-    auto first = std::lower_bound(m_FrameTimes.begin(), m_FrameTimes.begin() + avail, start);
-    uint32_t tail = avail - static_cast<uint32_t>(first - m_FrameTimes.begin());
-    if (tail < 1)
-      return;
-
-    m_Values.resize(tail);
-    storage.CopyFrameTotals(ProfileDomain::CPU, tail, m_Values);
-
-    float minimum = FLT_MAX;
-    float maximum = 0.0f;
-    float sum = 0.0f;
-    uint32_t count = 0;
-    for (uint32_t i = 0; i < tail; i++)
-    {
-      float value = m_Values[i];
-      if (value <= 0.0f)
-        continue;
-      minimum = std::min(minimum, value);
-      maximum = std::max(maximum, value);
-      sum += value;
-      count++;
-    }
-
-    m_MinFrametime = count > 0 ? minimum : 0.0f;
-    m_MaxFrametime = maximum;
-    m_AvgFrametime = count > 0 ? sum / static_cast<float>(count) : 0.0f;
   }
 
   void PerformancePanel::Aggregate(ProfileDomain domain, bool refreshOrder)
@@ -664,7 +619,7 @@ namespace YAEngine
 
       double cursor = m_AxisX[m_HoveredBucket];
       ImPlotSpec cursorSpec;
-      cursorSpec.LineColor = ImVec4(1.0f, 1.0f, 1.0f, 0.55f);
+      cursorSpec.LineColor = ToImGuiColor(EditorStyle::GetTheme().textSecondary);
       cursorSpec.LineWeight = 1.0f;
       ImPlot::PlotInfLines("##cursor", &cursor, 1, cursorSpec);
     }
@@ -725,72 +680,7 @@ namespace YAEngine
     ImGui::TextDisabled("sum %.3f ms over %u zones", total, view.zoneCount);
     ImGui::Separator();
 
-    if (m_Breakdown == BreakdownMode::Pie)
-    {
-      float side = std::min(ImGui::GetContentRegionAvail().x, 170.0f);
-      DrawBreakdownPie(domain, side);
-      ImGui::Separator();
-    }
-
     DrawBreakdownRows(domain);
-  }
-
-  void PerformancePanel::DrawBreakdownPie(ProfileDomain domain, float height)
-  {
-    auto& view = GetView(domain);
-
-    float total = 0.0f;
-    for (uint32_t zone : view.stackOrder)
-    {
-      if (zone < view.zoneCount && !view.hidden[zone])
-        total += m_ZoneValues[zone];
-    }
-
-    float width = ImGui::GetContentRegionAvail().x;
-    if (total <= 0.0f || width <= 0.0f)
-    {
-      ImGui::Dummy(ImVec2(width, height));
-      return;
-    }
-
-    // Drawn by hand rather than with ImPlot::PlotPieChart: that one ignores the fill
-    // colors in the spec and takes each slice from the colormap instead, so the pie
-    // would not match the colors of the chart bands or of the rows below it.
-    ImVec2 origin = ImGui::GetCursorScreenPos();
-    ImVec2 center(origin.x + width * 0.5f, origin.y + height * 0.5f);
-    float radius = std::min(width, height) * 0.5f - 4.0f;
-
-    auto* drawList = ImGui::GetWindowDrawList();
-    float angle = -PI * 0.5f;
-
-    for (uint32_t zone : view.stackOrder)
-    {
-      if (zone >= view.zoneCount || view.hidden[zone])
-        continue;
-
-      float value = m_ZoneValues[zone];
-      if (value <= 0.0f)
-        continue;
-
-      float sweep = value / total * PI * 2.0f;
-      ImU32 color = ImGui::ColorConvertFloat4ToU32(ZoneColor(zone));
-
-      // PathFillConvex needs a convex shape, so a slice wider than a half turn has
-      // to be filled in two passes.
-      int32_t parts = sweep > PI ? 2 : 1;
-      for (int32_t part = 0; part < parts; part++)
-      {
-        float from = angle + sweep * static_cast<float>(part) / static_cast<float>(parts);
-        float to = angle + sweep * static_cast<float>(part + 1) / static_cast<float>(parts);
-        drawList->PathLineTo(center);
-        drawList->PathArcTo(center, radius, from, to, 32);
-        drawList->PathFillConvex(color);
-      }
-
-      angle += sweep;
-    }
-
-    ImGui::Dummy(ImVec2(width, height));
   }
 
   void PerformancePanel::DrawBreakdownRows(ProfileDomain domain)

@@ -155,16 +155,15 @@ namespace YAEngine
       // nothing callable, so the capability is withdrawn rather than crashed into.
       YA_LOG_WARN("Vulkan", "Ray tracing entry points could not be loaded, ray tracing is disabled");
       m_Context.raytracingSupported = false;
-      m_Context.rayQuerySupported = false;
     }
 
     // Separate from the acceleration structure group on purpose: a device could grant the
     // structures without the pipeline extension, and everything built on the structures
-    // alone - the TLAS, the ray query views - has to keep working there.
+    // alone - the TLAS - has to keep working there.
     if (m_Context.raytracingSupported && !m_Context.rayTracing.LoadPipeline(m_Context.device))
     {
       YA_LOG_WARN("Vulkan",
-        "Ray tracing pipeline entry points could not be loaded, only ray query tracing is available");
+        "Ray tracing pipeline entry points could not be loaded, the path tracer and the ray traced bakers are unavailable");
     }
 
     if (m_Context.raytracingSupported)

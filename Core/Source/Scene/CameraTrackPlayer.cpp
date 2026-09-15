@@ -9,19 +9,6 @@ namespace YAEngine
 {
   namespace
   {
-    Entity FindEntityByName(Scene& scene, const std::string& name)
-    {
-      if (name.empty())
-        return entt::null;
-
-      for (auto [entity, entityName] : scene.GetView<Name>().each())
-      {
-        if (entityName == name)
-          return entity;
-      }
-      return entt::null;
-    }
-
     // Camera basis: looking down -Z with world up, the same convention the editor camera
     // and the snapshot use.
     glm::quat LookAtRotation(const glm::vec3& from, const glm::vec3& target)
@@ -78,7 +65,8 @@ namespace YAEngine
 
     if (track.rotationMode == CameraTrackComponent::RotationMode::AimAt)
     {
-      Entity target = FindEntityByName(scene, track.aimTargetName);
+      Entity target = track.aimTargetName.empty() ? Entity(entt::null)
+        : FindEntityByName(scene.GetRegistry(), track.aimTargetName);
       if (target != entt::null && scene.HasComponent<WorldTransform>(target))
       {
         glm::vec3 targetPosition(scene.GetComponent<WorldTransform>(target).world[3]);

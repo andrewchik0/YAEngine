@@ -11,9 +11,8 @@ layout(location = 0) rayPayloadInEXT RayTracingPayload payload;
 // 1 - x - y, which interpolateTexCoord reconstructs.
 hitAttributeEXT vec2 hitBarycentrics;
 
-// Records what was hit and nothing more: the shading lives in pathtrace.rgen so the path
-// tracer's bounce loop can grow around it. gl_ObjectToWorldEXT is the same mat4x3 a ray
-// query returns from rayQueryGetIntersectionObjectToWorldEXT.
+// Records what was hit and nothing more: the shading lives in the ray generation shader so
+// the path tracer's bounce loop can grow around it.
 void main()
 {
   payload.barycentrics = hitBarycentrics;

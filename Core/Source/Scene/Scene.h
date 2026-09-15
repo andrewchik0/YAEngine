@@ -46,6 +46,12 @@ namespace YAEngine
     const HierarchyComponent& GetHierarchy(Entity e) const;
     Name& GetName(Entity e);
     const Name& GetName(Entity e) const;
+    // Renames the entity, or names one that has no Name yet, and bumps the structure generation
+    void SetName(Entity e, std::string_view name);
+
+    // Bumped when an entity is created, destroyed, renamed through SetName or reparented, so caches
+    // keyed on names or on the hierarchy know when to rebuild
+    uint64_t GetStructureGeneration() const { return m_StructureGeneration; }
 
     // For empty tag types (e.g. EditorOnlyTag) returns void; for data components returns T&
     template<typename T, typename... Args>
@@ -133,6 +139,7 @@ namespace YAEngine
     void ClearScene()
     {
       m_Registry.clear();
+      m_StructureGeneration++;
       m_ActiveCamera = entt::null;
       m_Skybox = {};
       m_ScenePath.clear();
@@ -153,6 +160,7 @@ namespace YAEngine
     Name MakeUniqueEntityName(const Name& base, std::unordered_set<Name>& taken);
 
     entt::registry m_Registry;
+    uint64_t m_StructureGeneration = 0;
 
     entt::entity m_ActiveCamera = entt::null;
     CubeMapHandle m_Skybox {};
@@ -160,5 +168,17 @@ namespace YAEngine
     EditorCameraState m_EditorCameraState;
 
   };
+
+  // The first entity with the name, in Name storage order. Scatter cluster sources and camera aim
+  // targets are stored by name and resolved through this.
+  inline Entity FindEntityByName(entt::registry& registry, std::string_view name)
+  {
+    for (auto entity : registry.view<Name>())
+    {
+      if (registry.get<Name>(entity) == name)
+        return entity;
+    }
+    return entt::null;
+  }
 
 }

@@ -26,6 +26,234 @@ namespace YAEngine
 
       return YAML::Load(file);
     }
+
+    // Through a const node, since operator[] on a non-const one adds the key. A missing key then yields an
+    // invalid node whose type queries throw, so IsDefined is asked first.
+    bool IsMapEntry(const YAML::Node& node, const char* key)
+    {
+      const YAML::Node value = node[key];
+      return value.IsDefined() && value.IsMap();
+    }
+
+    // The map at key, replacing whatever else is stored there
+    YAML::Node RequireMapEntry(YAML::Node& node, const char* key)
+    {
+      if (!IsMapEntry(node, key))
+        node[key] = YAML::Node(YAML::NodeType::Map);
+      return node[key];
+    }
+
+    void RemoveEntryIfEmpty(YAML::Node& node, const char* key)
+    {
+      if (IsMapEntry(node, key) && node[key].size() == 0)
+        node.remove(key);
+    }
+
+    bool ReadThemeToken(const YAML::Node& value, float& outValue)
+    {
+      float parsed = 0.0f;
+      if (!value.IsScalar() || !YAML::convert<float>::decode(value, parsed) || !std::isfinite(parsed))
+        return false;
+
+      outValue = parsed;
+      return true;
+    }
+
+    bool ReadThemeToken(const YAML::Node& value, glm::vec2& outValue)
+    {
+      glm::vec2 parsed(0.0f);
+      if (!value.IsSequence() || value.size() != 2
+        || !ReadThemeToken(value[0], parsed.x) || !ReadThemeToken(value[1], parsed.y))
+        return false;
+
+      outValue = parsed;
+      return true;
+    }
+
+    bool ReadThemeToken(const YAML::Node& value, glm::vec4& outValue)
+    {
+      return value.IsScalar() && ParseEditorThemeColor(value.Scalar(), outValue);
+    }
+
+    YAML::Node MakeThemeTokenNode(float value)
+    {
+      return YAML::Node(value);
+    }
+
+    YAML::Node MakeThemeTokenNode(const glm::vec2& value)
+    {
+      YAML::Node node(YAML::NodeType::Sequence);
+      node.push_back(value.x);
+      node.push_back(value.y);
+      node.SetStyle(YAML::EmitterStyle::Flow);
+      return node;
+    }
+
+    YAML::Node MakeThemeTokenNode(const glm::vec4& value)
+    {
+      return YAML::Node(FormatEditorThemeColor(value));
+    }
+
+    void LoadTheme(const YAML::Node& section, EditorTheme& theme)
+    {
+      if (!section.IsDefined() || section.IsNull())
+        return;
+
+      if (!section.IsMap())
+      {
+        YA_LOG_WARN("Editor", "Preferences: 'theme' is not a map, using the default theme");
+        return;
+      }
+
+      VisitEditorThemeTokens([&](const char* key, auto member)
+      {
+        const YAML::Node value = section[key];
+        if (value.IsDefined() && !ReadThemeToken(value, theme.*member))
+          YA_LOG_WARN("Editor", "Preferences: theme key '%s' is malformed, using its default", key);
+      });
+
+      ClampEditorTheme(theme);
+    }
+
+    // A changed token equal to its default is removed, so a user who went back to it keeps getting
+    // the current default. Returns whether any token changed.
+    bool SaveTheme(YAML::Node& root, const EditorTheme& theme, const EditorTheme& saved)
+    {
+      const EditorTheme defaults;
+      bool changed = false;
+      VisitEditorThemeTokens([&](const char* key, auto member)
+      {
+        if (theme.*member == saved.*member)
+          return;
+
+        changed = true;
+        if (theme.*member != defaults.*member)
+          RequireMapEntry(root, "theme")[key] = MakeThemeTokenNode(theme.*member);
+        else if (IsMapEntry(root, "theme"))
+          root["theme"].remove(key);
+      });
+
+      RemoveEntryIfEmpty(root, "theme");
+      return changed;
+    }
+
+    // Sections of name -> bool entries (group open states, panel visibility)
+    void LoadBoolMap(const YAML::Node& section, const char* sectionName, std::map<std::string, bool>& values)
+    {
+      if (!section.IsDefined() || section.IsNull())
+        return;
+
+      if (!section.IsMap())
+      {
+        YA_LOG_WARN("Editor", "Preferences: '%s' is not a map, its entries use their defaults", sectionName);
+        return;
+      }
+
+      for (const auto& entry : section)
+      {
+        bool value = false;
+        if (entry.first.IsScalar() && entry.second.IsScalar() && YAML::convert<bool>::decode(entry.second, value))
+          values[entry.first.Scalar()] = value;
+        else
+          YA_LOG_WARN("Editor", "Preferences: a malformed '%s' entry is ignored", sectionName);
+      }
+    }
+
+    // Writes the entries this session set or changed and removes the ones it removed. Returns whether
+    // any entry changed.
+    bool SaveBoolMap(YAML::Node& parent, const char* sectionName, const std::map<std::string, bool>& values,
+      const std::map<std::string, bool>& saved)
+    {
+      bool changed = false;
+      for (const auto& [key, value] : values)
+      {
+        auto previous = saved.find(key);
+        if (previous != saved.end() && previous->second == value)
+          continue;
+
+        RequireMapEntry(parent, sectionName)[key] = value;
+        changed = true;
+      }
+
+      for (const auto& [key, value] : saved)
+      {
+        if (values.contains(key))
+          continue;
+
+        if (IsMapEntry(parent, sectionName))
+          parent[sectionName].remove(key);
+        changed = true;
+      }
+
+      RemoveEntryIfEmpty(parent, sectionName);
+      return changed;
+    }
+
+    void LoadViewport(const YAML::Node& section, EditorPreferenceValues& values)
+    {
+      if (!section.IsDefined() || section.IsNull())
+        return;
+
+      if (!section.IsMap())
+      {
+        YA_LOG_WARN("Editor", "Preferences: 'viewport' is not a map, the viewport toolbar uses its defaults");
+        return;
+      }
+
+      LoadBoolMap(section["show"], "viewport.show", values.viewportShowFlags);
+
+      const YAML::Node nodeColor = section["node_color"];
+      if (nodeColor.IsDefined() && !nodeColor.IsNull())
+      {
+        if (nodeColor.IsScalar())
+          values.viewportNodeColor = nodeColor.Scalar();
+        else
+          YA_LOG_WARN("Editor", "Preferences: 'viewport.node_color' is malformed, using its default");
+      }
+
+      const YAML::Node speed = section["camera_speed"];
+      if (speed.IsDefined() && !speed.IsNull())
+      {
+        float parsed = 0.0f;
+        if (ReadThemeToken(speed, parsed) && parsed > 0.0f)
+          values.cameraSpeed = parsed;
+        else
+          YA_LOG_WARN("Editor", "Preferences: 'viewport.camera_speed' is malformed, using the default speed");
+      }
+    }
+
+    bool SaveViewport(YAML::Node& root, const EditorPreferenceValues& values, const EditorPreferenceValues& saved)
+    {
+      const bool showChanged = values.viewportShowFlags != saved.viewportShowFlags;
+      const bool nodeColorChanged = values.viewportNodeColor != saved.viewportNodeColor;
+      const bool speedChanged = values.cameraSpeed != saved.cameraSpeed;
+      if (!showChanged && !nodeColorChanged && !speedChanged)
+        return false;
+
+      YAML::Node section = RequireMapEntry(root, "viewport");
+
+      if (showChanged)
+        SaveBoolMap(section, "show", values.viewportShowFlags, saved.viewportShowFlags);
+
+      if (nodeColorChanged)
+      {
+        if (values.viewportNodeColor.empty())
+          section.remove("node_color");
+        else
+          section["node_color"] = values.viewportNodeColor;
+      }
+
+      if (speedChanged)
+      {
+        if (values.cameraSpeed)
+          section["camera_speed"] = *values.cameraSpeed;
+        else
+          section.remove("camera_speed");
+      }
+
+      RemoveEntryIfEmpty(root, "viewport");
+      return true;
+    }
   }
 
   std::filesystem::path GetEditorAppDataDirectory()
@@ -88,31 +316,39 @@ namespace YAEngine
   {
     std::filesystem::path path = GetPreferencesPath();
     std::error_code ec;
-    if (path.empty() || !std::filesystem::exists(path, ec))
-      return;
-
-    try
+    if (!path.empty() && std::filesystem::exists(path, ec))
     {
-      const YAML::Node root = ReadPreferencesFile(path);
-      if (!root.IsMap())
-        return;
+      try
+      {
+        const YAML::Node root = ReadPreferencesFile(path);
+        if (root.IsMap())
+        {
+          // 'layout' from older builds is left alone: the dock layout version now lives in each imgui.ini
+          LoadTheme(root["theme"], theme);
+          LoadBoolMap(root["groups"], "groups", groupOpenStates);
+          LoadBoolMap(root["panels"], "panels", panelVisibility);
+          LoadViewport(root["viewport"], *this);
 
-      const YAML::Node mcp = root["mcp"];
-      if (!mcp.IsDefined() || !mcp.IsMap())
-        return;
+          const YAML::Node mcp = root["mcp"];
+          if (mcp.IsDefined() && mcp.IsMap())
+          {
+            const YAML::Node enabled = mcp["enabled"];
+            if (enabled.IsDefined() && enabled.IsScalar())
+              mcpEnabled = enabled.as<bool>();
+          }
+        }
+      }
+      catch (const YAML::Exception& e)
+      {
+        YA_LOG_WARN("Editor", "Preferences: cannot read '%s', using defaults: %s",
+          PathToUtf8(path).c_str(), e.what());
+      }
+    }
 
-      const YAML::Node enabled = mcp["enabled"];
-      if (enabled.IsDefined() && enabled.IsScalar())
-        mcpEnabled = enabled.as<bool>();
-    }
-    catch (const YAML::Exception& e)
-    {
-      YA_LOG_WARN("Editor", "Preferences: cannot read '%s', using defaults: %s",
-        PathToUtf8(path).c_str(), e.what());
-    }
+    m_Saved = *this;
   }
 
-  bool EditorPreferences::Save() const
+  bool EditorPreferences::Save()
   {
     std::filesystem::path path = GetPreferencesPath();
     if (path.empty())
@@ -121,7 +357,7 @@ namespace YAEngine
       return false;
     }
 
-    // Starts from the file on disk so keys this build does not know about survive the save
+    // Starts from the file on disk, so keys this build does not know and keys another editor wrote survive
     YAML::Node root;
     try
     {
@@ -136,15 +372,35 @@ namespace YAEngine
 
     if (!root.IsMap())
       root = YAML::Node(YAML::NodeType::Map);
-    if (!root["mcp"].IsMap())
-      root["mcp"] = YAML::Node(YAML::NodeType::Map);
-    root["mcp"]["enabled"] = mcpEnabled;
 
-    YAML::Emitter out;
-    out << root;
+    // A hand-edited file can hold shapes the merge below trips over; that costs this save, not the editor
+    std::string content;
+    try
+    {
+      bool changed = false;
+      if (mcpEnabled != m_Saved.mcpEnabled)
+      {
+        RequireMapEntry(root, "mcp")["enabled"] = mcpEnabled;
+        changed = true;
+      }
+      changed |= SaveTheme(root, theme, m_Saved.theme);
+      changed |= SaveBoolMap(root, "groups", groupOpenStates, m_Saved.groupOpenStates);
+      changed |= SaveBoolMap(root, "panels", panelVisibility, m_Saved.panelVisibility);
+      changed |= SaveViewport(root, *this, m_Saved);
 
-    std::string content(out.c_str());
-    content.push_back('\n');
+      if (!changed)
+        return true;
+
+      YAML::Emitter out;
+      out << root;
+      content = out.c_str();
+      content.push_back('\n');
+    }
+    catch (const YAML::Exception& e)
+    {
+      YA_LOG_ERROR("Editor", "Preferences: cannot update '%s', nothing saved: %s", PathToUtf8(path).c_str(), e.what());
+      return false;
+    }
 
     std::string error;
     if (!WriteFileAtomically(path, content, error))
@@ -153,6 +409,7 @@ namespace YAEngine
       return false;
     }
 
+    m_Saved = *this;
     return true;
   }
 }

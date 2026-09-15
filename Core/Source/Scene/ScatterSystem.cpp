@@ -1056,17 +1056,6 @@ namespace YAEngine
     m_Assets.Meshes().SetInstanceData(stored.mesh, &stored.instanceMatrices, stored.instanceOffset);
   }
 
-  entt::entity ScatterSystem::FindEntityByName(entt::registry& registry, const std::string& name) const
-  {
-    auto view = registry.view<Name>();
-    for (auto entity : view)
-    {
-      if (registry.get<Name>(entity) == name)
-        return entity;
-    }
-    return entt::null;
-  }
-
   void ScatterSystem::GenerateSatelliteScatter(entt::registry& registry, entt::entity entity)
   {
     uint32_t entityId = static_cast<uint32_t>(entity);

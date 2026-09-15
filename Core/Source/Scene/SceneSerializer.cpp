@@ -12,6 +12,7 @@
 #include "ModelOverrides.h"
 #include "Render/Render.h"
 #include "Render/ReflectionProbeAtlas.h"
+#include "Utils/IrradianceGrid.h"
 #include "Utils/Log.h"
 #include "Utils/ThreadPool.h"
 
@@ -491,11 +492,7 @@ namespace YAEngine
       // asset transform is authoritative. A moved or resized entity keeps rendering
       // with the old box until it is rebaked - warn instead of silently drifting.
       auto& wt = scene.GetWorldTransform(entity);
-      glm::vec3 entityPos = glm::vec3(wt.world[3]);
-      float scale = glm::max(glm::length(data.halfExtents), 1e-3f);
-      bool positionMoved = glm::length(entityPos - data.position) > 0.01f * scale;
-      bool sizeChanged = glm::length(volume.halfExtents - data.halfExtents) > 0.01f * scale;
-      if (positionMoved || sizeChanged)
+      if (!MatchesBakedIrradianceBox(glm::vec3(wt.world[3]), volume.halfExtents, data.position, data.halfExtents))
       {
         YA_LOG_WARN("Scene", "Irradiance volume '%s' no longer matches its baked box - rebake it",
           scene.GetName(entity).c_str());

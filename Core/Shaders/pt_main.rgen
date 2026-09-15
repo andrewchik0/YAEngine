@@ -16,7 +16,7 @@
 // Primary Surface Replacement describes the surface seen through the mirror instead.
 //
 // Always bindless: every bounce resolves its material through the texture table, so there is
-// no non-bindless permutation to be, exactly as for pathtrace.rgen.
+// no non-bindless permutation to be.
 #define RT_BINDLESS
 #include "raytracing_common.glsl"
 #include "utils.glsl"
@@ -27,10 +27,8 @@
 #include "../Shared/PathTraceData.h"
 #include "specular_motion.glsl"
 
-// Set 1 bindings 3 and up are the pass's own, on a layout forked from the one the two ray
-// tracing debug views share: they hold a single storage image there, and this pass needs the
-// G-buffer, the sky, the lights and two outputs. Bindings 0-2 are still the scene, declared
-// once in raytracing_common.glsl, so the descriptor writes for those are the same code.
+// Set 1 bindings 3 and up are the pass's own: the G-buffer, the sky, the lights and the
+// outputs. Bindings 0-2 are the scene, declared once in raytracing_common.glsl.
 layout(set = 1, binding = 3) uniform sampler2D u_GBuffer0;
 layout(set = 1, binding = 4) uniform sampler2D u_GBuffer1;
 layout(set = 1, binding = 5) uniform sampler2D u_Depth;

@@ -469,12 +469,14 @@ class FakeBridge:
             return {"disabled": disabled, "checked": checked, "open": opened}
 
         await self._reply(writer, request_id, {"items": [
-            {"path": "Render Settings/ Display", "label": " Display", "type": "header", "flags": flags(opened=True)},
-            {"path": "Render Settings/Exposure", "label": "Exposure", "type": "input", "value": "1.000", "flags": flags()},
-            {"path": "Render Settings/Debug View", "label": "Debug View", "type": "combo", "value": "Off", "flags": flags()},
-            {"path": "Render Settings/SSR", "label": "SSR", "type": "checkbox", "value": True, "flags": flags(checked=True)},
-            {"path": "Render Settings/AO Strength", "label": "AO Strength", "type": "input", "value": "1.000",
-             "flags": flags(disabled=True)},
+            {"path": "Render Settings/Environment", "label": "Environment", "type": "header", "flags": flags(opened=True)},
+            {"path": "Render Settings/Camera/Exposure", "label": "Exposure", "type": "input", "value": "1.00", "flags": flags()},
+            {"path": "Render Settings/Camera/Tonemapper", "label": "Tonemapper", "type": "combo", "value": "AgX",
+             "flags": flags()},
+            {"path": "Render Settings/Reflections/SSR", "label": "SSR", "type": "checkbox", "value": True,
+             "flags": flags(checked=True)},
+            {"path": "Render Settings/Lighting & GI/SSGI Radius", "label": "SSGI Radius", "type": "input",
+             "value": "3.00 m", "flags": flags(disabled=True)},
             {"path": None, "label": "a label cut short at thirty-one", "type": "item", "flags": flags()},
         ]})
 

@@ -32,7 +32,7 @@ namespace YAEngine
     bool validationLayers = false;
     bool debugUtils = false;
     bool enableDLSS = true;
-    // Disarmed unless argv (or the retired YA_CAPTURE_DIR) asked for a capture. Registered
+    // Disarmed unless argv asked for a capture. Registered
     // in the service registry so FrameCaptureLayer can read it in OnAttach.
     FrameCaptureSpec captureSpec;
 #ifdef YA_EDITOR

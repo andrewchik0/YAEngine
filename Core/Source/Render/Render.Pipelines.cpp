@@ -483,17 +483,15 @@ namespace YAEngine
           // SSGI diagnostics: denoised screen GI and the reprojected radiance
           { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-          // Ray query diagnostic
-          { 8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           // Path tracer: this frame's single sample, and the accumulated reference
+          { 8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 9, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           // Ray reconstruction guides, shown together by the PT Guides view
+          { 10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 11, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 12, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           // PT Specular Motion view
-          { 14, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 13, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
@@ -1061,91 +1059,20 @@ namespace YAEngine
     // could be created.
     if (ctx.raytracingSupported)
     {
-      // One set layout for both tracing paths, so it names every stage either of them
-      // traces from. A wider stage mask costs nothing and is what lets the Ray Query and
-      // RT Pipeline passes share one set per frame slot rather than keep two identical
-      // ones in step. The ray tracing stage bits are legal because raytracingSupported is
-      // what enabled VK_KHR_ray_tracing_pipeline in the first place.
-      const VkShaderStageFlags rtSceneStages = VK_SHADER_STAGE_COMPUTE_BIT
-        | VK_SHADER_STAGE_RAYGEN_BIT_KHR
+      // The ray tracing stage bits are legal because raytracingSupported is what enabled
+      // VK_KHR_ray_tracing_pipeline in the first place.
+      const VkShaderStageFlags rtSceneStages = VK_SHADER_STAGE_RAYGEN_BIT_KHR
         | VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR
         | VK_SHADER_STAGE_ANY_HIT_BIT_KHR
         | VK_SHADER_STAGE_MISS_BIT_KHR;
 
-      // Set 1 is the per-frame ray tracing scene: bindings 0-2 are the structure, the
-      // instance records and the material table, in the order every ray tracing pass
-      // declares them, and the pass's own resources start at 3.
-      SetDescription rtSceneSetDesc = {
-        .set = 1,
-        .bindings = {
-          { 0, VK_DESCRIPTOR_TYPE_ACCELERATION_STRUCTURE_KHR, rtSceneStages },
-          { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, rtSceneStages },
-          { 2, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, rtSceneStages },
-          { 3, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages }
-        }
-      };
-
-      // Nothing is written here: every binding names a resource the frame owns, and the
-      // pass rewrites them at its own slot every frame.
-      m_RTDebugDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
-      for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
-        m_RTDebugDescriptorSets[i].Init(ctx, rtSceneSetDesc);
-
-      // Two modules, not one with a switched-off branch: the bindless one declares a
-      // runtime-sized sampler array and indexes it non-uniformly, neither of which a
-      // device without descriptor indexing can even load.
       const bool bindless = ctx.bindlessTextures != nullptr && ctx.bindlessTextures->IsValid();
 
-      // Ray query debug view. rt_debug.comp declares the RayQueryKHR capability, so its
-      // module cannot even be created on a device without ray queries.
-      if (ctx.rayQuerySupported)
-      {
-        std::vector<VkDescriptorSetLayout> sets {
-          m_FrameUniformBuffer.GetLayout(),
-          m_RTDebugDescriptorSets[0].GetLayout(),
-        };
-        if (bindless)
-          sets.push_back(ctx.bindlessTextures->GetLayout());
-
-        m_RTDebugPipeline = m_PSOCache.RegisterCompute(ctx.device,
-          bindless ? "rt_debug_bindless.comp" : "rt_debug.comp",
-          sets,
-          0,
-          pipelineCache);
-      }
-
-      // The same view through a shader binding table. No non-bindless permutation of it:
-      // the point of the view is to be compared against the ray query one pixel for pixel,
-      // and that comparison is only meaningful where the bindless path runs, so on a device
-      // without descriptor indexing the view simply stays unavailable.
-      if (ctx.rayTracing.IsPipelineLoaded() && bindless)
-      {
-        // One hit group for the whole scene: every TLAS instance is written with
-        // instanceShaderBindingTableRecordOffset 0, and what a hit needs to tell materials
-        // apart travels in the instance record, not in a per-instance table record.
-        RaytracingHitGroup hitGroup;
-        hitGroup.closestHitShaderFile = "pathtrace.rchit";
-        hitGroup.anyHitShaderFile = "pathtrace.rahit";
-
-        RaytracingPipelineCreateInfo rtInfo;
-        rtInfo.raygenShaderFile = "pathtrace.rgen";
-        rtInfo.missShaderFiles = { "pathtrace.rmiss" };
-        rtInfo.hitGroups = { hitGroup };
-        rtInfo.sets = {
-          m_FrameUniformBuffer.GetLayout(),
-          m_RTDebugDescriptorSets[0].GetLayout(),
-          ctx.bindlessTextures->GetLayout(),
-        };
-
-        m_RTPipelineDebugPipeline = m_PSOCache.RegisterRayTracing(ctx, rtInfo, pipelineCache);
-      }
-
-      // The path tracer. Same scene bindings 0-2 and the same hit group as the view above,
-      // but its own set layout from binding 3 up - it starts its first path vertex in the
+      // The path tracer. Set 1 is the per-frame ray tracing scene: bindings 0-2 are the
+      // structure, the instance records and the material table, in the order every ray tracing
+      // pass declares them, and from binding 3 up it starts its first path vertex in the
       // G-buffer, samples the sky on a miss and picks a light out of the same SSBO deferred
-      // lighting uses, none of which fits on a layout whose binding 3 is one storage image.
-      // Forking the layout is cheaper than widening the shared one: the two debug views
-      // would then have to write six descriptors they never read.
+      // lighting uses.
       if (ctx.rayTracing.IsPipelineLoaded() && bindless)
       {
         SetDescription ptSetDesc = {

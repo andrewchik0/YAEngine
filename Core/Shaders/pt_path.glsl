@@ -670,9 +670,8 @@ void tracePath(vec3 P, vec3 N, vec3 V, vec3 albedo, float metallic, float roughn
 
     payload.hit = 0u;
 
-    // No gl_RayFlagsOpaqueEXT, which is the one difference from the debug view's trace:
-    // the flag forces every candidate opaque, and dropping it is what finally lets
-    // pathtrace.rahit run and cut alpha-tested geometry out of the path.
+    // No gl_RayFlagsOpaqueEXT: the flag forces every candidate opaque, and leaving it out is
+    // what lets pathtrace.rahit run and cut alpha-tested geometry out of the path.
     traceRayEXT(u_Tlas, gl_RayFlagsNoneEXT, RT_MASK_OPAQUE,
       0u, // sbtRecordOffset: one hit group, and every instance names it
       0u, // sbtRecordStride: no per-geometry records to step over

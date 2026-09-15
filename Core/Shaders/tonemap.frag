@@ -15,19 +15,17 @@ layout(set = 1, binding = 5) uniform sampler2D preResolveTexture;
 // reprojected radiance whose alpha is the reprojection validity.
 layout(set = 1, binding = 6) uniform sampler2D ssgiTexture;
 layout(set = 1, binding = 7) uniform sampler2D ssgiRadianceTexture;
-// Ray query diagnostic, already display-ready when rt_debug.comp writes it.
-layout(set = 1, binding = 8) uniform sampler2D rayQueryTexture;
 // The path tracer's two outputs: this frame's single sample, and the running mean it keeps
-// while nothing moves. Both are HDR scene radiance, unlike the diagnostic above.
-layout(set = 1, binding = 9) uniform sampler2D pathTraceNoisyTexture;
-layout(set = 1, binding = 10) uniform sampler2D pathTraceAccumTexture;
+// while nothing moves. Both are HDR scene radiance.
+layout(set = 1, binding = 8) uniform sampler2D pathTraceNoisyTexture;
+layout(set = 1, binding = 9) uniform sampler2D pathTraceAccumTexture;
 // Ray reconstruction guides, written by pt_guides.comp while the path tracing render path
 // is effective. Only the combined PT Guides view reads them.
-layout(set = 1, binding = 11) uniform sampler2D ptDiffuseAlbedoTexture;
-layout(set = 1, binding = 12) uniform sampler2D ptSpecularAlbedoTexture;
-layout(set = 1, binding = 13) uniform sampler2D ptNormalRoughnessTexture;
+layout(set = 1, binding = 10) uniform sampler2D ptDiffuseAlbedoTexture;
+layout(set = 1, binding = 11) uniform sampler2D ptSpecularAlbedoTexture;
+layout(set = 1, binding = 12) uniform sampler2D ptNormalRoughnessTexture;
 // The tracer's specular motion vectors, read only by the PT Specular Motion view.
-layout(set = 1, binding = 14) uniform sampler2D ptSpecularMotionTexture;
+layout(set = 1, binding = 13) uniform sampler2D ptSpecularMotionTexture;
 
 layout(std430, set = 2, binding = 0) readonly buffer ExposureSSBO
 {
@@ -110,13 +108,6 @@ void main()
     return;
   case DEBUG_VIEW_SSGI_FALLBACK: // white = all volume fallback, black = all screen
     outColor = vec4(debugFallbackHeat(texture(ssgiTexture, uv).a), 1.0);
-    return;
-  case DEBUG_VIEW_RAY_QUERY:   // one inline ray query per pixel through the scene TLAS
-  case DEBUG_VIEW_RT_PIPELINE: // the same image traced through the shader binding table
-    // One image, written by whichever of the two tracing passes is enabled - they are
-    // mutually exclusive. Synthetic display-space color, and Render only lets either view
-    // through once that pass has actually filled it - no tone mapping, no gamma.
-    outColor = vec4(texture(rayQueryTexture, uv).rgb, 1.0);
     return;
   case DEBUG_VIEW_PT_NOISY:     // one path traced sample per pixel, this frame's
   case DEBUG_VIEW_PT_REFERENCE: // the running mean of every sample since the last reset

@@ -53,10 +53,6 @@ namespace YAEngine
     // Worst deformation any kept level ended up with, the extent of the mesh that
     // paid it, and how many levels were dropped over budget (mesh-local units,
     // like LEVEL_MAX_ERROR) - otherwise these numbers are unobservable.
-    static float GetMaxKeptError() { return s_MaxKeptError; }
-    static float GetMaxKeptErrorExtent() { return s_MaxKeptErrorExtent; }
-    static uint32_t GetRejectedLevelCount() { return s_RejectedLevels; }
-
     static void LogWorstError();
 
   private:

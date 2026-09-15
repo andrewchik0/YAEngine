@@ -861,6 +861,55 @@ namespace YAEngine
     job.result["items"] = BuildBridgeUiTreeItems(items, logged);
   }
 
+  namespace
+  {
+    bool IsInOpenPopup(const ImGuiContext& g, const ImGuiWindow* window)
+    {
+      if (window == nullptr)
+        return false;
+
+      for (const ImGuiPopupData& popup : g.OpenPopupStack)
+      {
+        if (popup.Window != nullptr && popup.Window->RootWindow == window->RootWindow)
+          return true;
+      }
+      return false;
+    }
+
+    // The window a ref path starts in: the one its first segment names, or the focused one for $FOCUSED
+    ImGuiWindow* FindRefPathWindow(const ImGuiContext& g, std::string_view path)
+    {
+      if (path.starts_with("//"))
+        path.remove_prefix(2);
+
+      std::string name;
+      for (size_t i = 0; i < path.size() && path[i] != '/'; i++)
+      {
+        if (path[i] == '\\' && i + 1 < path.size())
+          i++;
+        name += path[i];
+      }
+
+      if (name == "$FOCUSED")
+        return g.NavWindow;
+      return ImGui::FindWindowByName(name.c_str());
+    }
+
+    // An open popup blocks the mouse from everything outside it, and a user reaches such an item
+    // with a click outside that closes the popup first. The simulated mouse cannot hover a blocked
+    // item at all, and resolving a path may already click on the way (a collapsed group, a background
+    // tab), so the popups are closed before the path is resolved unless the path starts inside one.
+    void CloseBlockingPopups(ImGuiTestContext* ctx, std::string_view path)
+    {
+      const ImGuiContext& g = *ctx->UiContext;
+      if (g.OpenPopupStack.Size == 0 || IsInOpenPopup(g, FindRefPathWindow(g, path)))
+        return;
+
+      ctx->PopupCloseAll();
+      ctx->Yield();
+    }
+  }
+
   void BridgeUi::RunDo(ImGuiTestContext* ctx, Job& job) const
   {
     const std::string quoted = "'" + job.path + "'";
@@ -881,10 +930,11 @@ namespace YAEngine
       std::string entry;
       if (!SplitBridgeUiRefPath(job.path, comboPath, entry))
       {
-        job.result = DoOutcome(false, "'select' takes \"<combo path>/<entry label>\", e.g. \"Render Settings/Debug View/Normals\"");
+        job.result = DoOutcome(false, "'select' takes \"<combo path>/<entry label>\", e.g. \"Render Settings/Camera/Tonemapper/AgX\"");
         return;
       }
 
+      CloseBlockingPopups(ctx, comboPath);
       ImGuiTestItemInfo combo = ctx->ItemInfoOpenFullPath(comboPath.c_str(), ImGuiTestOpFlags_NoError);
       if (combo.ID == 0)
       {
@@ -930,6 +980,7 @@ namespace YAEngine
     }
 
     const char* path = job.path.c_str();
+    CloseBlockingPopups(ctx, job.path);
     ImGuiTestItemInfo item = ctx->ItemInfoOpenFullPath(path, ImGuiTestOpFlags_NoError);
     if (item.ID == 0)
     {

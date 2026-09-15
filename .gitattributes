@@ -1,3 +1,5 @@
 RacingDemo/Assets/** filter=lfs diff=lfs merge=lfs -text
 Core/Vendor/Streamline/**/*.dll filter=lfs diff=lfs merge=lfs -text
 Core/Vendor/Streamline/**/*.lib filter=lfs diff=lfs merge=lfs -text
+Core/Assets/Fonts/**/*.ttf filter=lfs diff=lfs merge=lfs -text
+Core/Assets/Fonts/**/*.otf filter=lfs diff=lfs merge=lfs -text

@@ -14,8 +14,10 @@ namespace YAEngine
     // How far past the previous match an item's text may appear. Plain text and separators
     // sit between items; anything further away most likely belongs to another window.
     constexpr size_t MAX_LINE_GAP = 40;
-    // Combos report no label, so their text is only looked for close to the previous item.
-    constexpr size_t MAX_UNLABELED_LINE_GAP = 2;
+    // Combos report no label, so their text is only looked for close to the previous item. A
+    // property sub-heading or status line between two rows adds lines of its own; the label hash
+    // check keeps a wider window from matching another item's text.
+    constexpr size_t MAX_UNLABELED_LINE_GAP = 8;
     // The log holds every window, so the items are aligned starting from each place the first
     // item's text occurs, and the start matching the most items wins.
     constexpr size_t MAX_ANCHORS = 8;

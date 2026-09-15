@@ -19,6 +19,12 @@ namespace YAEngine
   // World-space AABB half-extents of the rotated box; this is also what the editor checks for overlapping volumes.
   glm::vec3 ComputeRotatedBoxAabbHalfExtents(const glm::quat& rotation, const glm::vec3& halfExtents);
 
+  // Whether a volume at position with halfExtents still describes the box its data was baked in, within
+  // 1% of the baked box size. The baked data only lights that box, so a volume that moved or was resized
+  // needs a rebake. Rotation is not compared.
+  bool MatchesBakedIrradianceBox(const glm::vec3& position, const glm::vec3& halfExtents,
+    const glm::vec3& bakedPosition, const glm::vec3& bakedHalfExtents);
+
   // Bake seed key of a probe at a world position: its integer coordinate on the finest lattice.
   // Every spacing is a multiple of the finest one, so a world point bakes the same samples
   // whichever volume, spacing or brick it is baked for.
