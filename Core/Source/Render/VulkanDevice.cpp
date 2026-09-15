@@ -91,6 +91,11 @@ namespace YAEngine
     // commands in it, and each command picks its model matrix through firstInstance.
     deviceFeatures.multiDrawIndirect = VK_TRUE;
     deviceFeatures.drawIndirectFirstInstance = VK_TRUE;
+    // The ray tracing shaders declare the Int64 capability.
+    deviceFeatures.shaderInt64 = VK_TRUE;
+
+    // Shaders are compiled for Vulkan 1.3, where glslc turns discard into OpDemoteToHelperInvocation.
+    requirements.GetVulkan13Features().shaderDemoteToHelperInvocation = VK_TRUE;
 
     VkPhysicalDeviceVulkan13Features supported13 { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES };
     VkPhysicalDeviceVulkan12Features supported12 { .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES, .pNext = &supported13 };
@@ -118,6 +123,11 @@ namespace YAEngine
     {
       YA_LOG_WARN("Vulkan", "Device reports no drawIndirectFirstInstance support, indirect shadow batching stays disabled");
       deviceFeatures.drawIndirectFirstInstance = VK_FALSE;
+    }
+    if (supported.shaderInt64 == VK_FALSE)
+    {
+      YA_LOG_WARN("Vulkan", "Device reports no shaderInt64 support, ray tracing shaders will fail to load");
+      deviceFeatures.shaderInt64 = VK_FALSE;
     }
     // The quantized shadow position stream is fed as a vertex attribute, and only
     // the buffer features of the format say whether that is allowed at all.

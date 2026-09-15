@@ -70,6 +70,10 @@ add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   mesh.vert mesh_transparent_instanced.vert.spv -DINSTANCED -DTRANSPARENT)
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  mesh.vert mesh_notbn.vert.spv -DNO_TBN)
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
+  mesh.vert mesh_instanced_notbn.vert.spv -DINSTANCED -DNO_TBN)
+add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   gbuffer.frag gbuffer_alphatest.frag.spv -DALPHA_TEST)
 add_shader_permutation(Core ${CMAKE_CURRENT_SOURCE_DIR}/Shaders
   gtao.frag gtao_ssgi.frag.spv -DSSGI)

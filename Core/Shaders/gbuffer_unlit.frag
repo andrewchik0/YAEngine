@@ -1,7 +1,6 @@
 layout(location = 0) in vec2 inTexCoord;
 layout(location = 1) in vec3 inNormal;
 layout(location = 2) in vec3 inPosition;
-layout(location = 3) in mat3 inTBN;
 layout(location = 6) in vec4 inCurClipPos;
 layout(location = 7) in vec4 inPrevClipPos;
 

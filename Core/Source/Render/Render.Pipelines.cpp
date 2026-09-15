@@ -177,7 +177,7 @@ namespace YAEngine
         .pushConstantSize = sizeof(glm::mat4) + sizeof(int),
         .doubleSided = true,
         .colorAttachmentCount = 0,
-        .vertexInputFormat = "f3|f2f3f4",
+        .vertexInputFormat = "f3|f2-f3-f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
       };
       m_DepthPipelines[6] = m_PSOCache.Register(ctx.device, depthRP, depthAlphaInfo, pipelineCache);
@@ -229,7 +229,7 @@ namespace YAEngine
         .doubleSided = true,
         .colorAttachmentCount = 0,
         .compareOp = VK_COMPARE_OP_LESS,
-        .vertexInputFormat = "f3|f2f3f4",
+        .vertexInputFormat = "f3|f2-f3-f4",
         .sets = std::vector({ m_ShadowManager.GetShadowCascadeUBOLayout(), m_DefaultMaterial.GetLayout() })
       };
       shadowAlphaInfo.depthBiasEnable = true;
@@ -308,7 +308,9 @@ namespace YAEngine
       m_PrevWorldDescriptorSets[0].GetLayout() });
     forwardInfo.doubleSided = true;
     forwardInfo.fragmentShaderFile = "gbuffer_unlit.frag";
-    forwardInfo.vertexShaderFile = "mesh.vert";
+    // Unlit has no normal mapping, so it takes the permutation without the TBN.
+    forwardInfo.vertexShaderFile = "mesh_notbn.vert";
+    forwardInfo.vertexInputFormat = "f3|f2f3-f4";
     m_ForwardPipelines[4] = m_PSOCache.Register(ctx.device, mainRP, forwardInfo, pipelineCache);
 
     // [5] terrain (two-layer splatting)
@@ -362,18 +364,19 @@ namespace YAEngine
     }
 
     // Wireframe pipelines (debug view). Mirror forward pipelines in GBuffer pass but with
-    // polygonMode LINE; depth bias wins against filled depth-prepass surfaces.
+    // polygonMode LINE; depth bias wins against filled depth-prepass surfaces. The fragment
+    // shader reads no TBN, hence the NO_TBN permutations.
     {
       PipelineCreateInfo wfInfo = {
         .fragmentShaderFile = "gbuffer_wireframe.frag",
-        .vertexShaderFile = "mesh.vert",
+        .vertexShaderFile = "mesh_notbn.vert",
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
         .colorAttachmentCount = 3,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
-        .vertexInputFormat = "f3|f2f3f4",
+        .vertexInputFormat = "f3|f2f3-f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(),
           m_PrevWorldDescriptorSets[0].GetLayout() })
       };
@@ -386,7 +389,7 @@ namespace YAEngine
       // [2] instanced, [3] instanced+doubleSided
       wfInfo.sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(),
         m_InstanceDescriptorSet.GetLayout(), m_PrevWorldDescriptorSets[0].GetLayout() });
-      wfInfo.vertexShaderFile = "mesh_instanced.vert";
+      wfInfo.vertexShaderFile = "mesh_instanced_notbn.vert";
       wfInfo.doubleSided = false;
       m_WireframePipelines[2] = m_PSOCache.Register(ctx.device, mainRP, wfInfo, pipelineCache);
       wfInfo.doubleSided = true;
@@ -396,20 +399,20 @@ namespace YAEngine
       wfInfo.sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(),
         m_PrevWorldDescriptorSets[0].GetLayout() });
       wfInfo.doubleSided = true;
-      wfInfo.vertexShaderFile = "mesh.vert";
+      wfInfo.vertexShaderFile = "mesh_notbn.vert";
       m_WireframePipelines[4] = m_PSOCache.Register(ctx.device, mainRP, wfInfo, pipelineCache);
 
       // [5] terrain
       PipelineCreateInfo wfTerrainInfo = {
         .fragmentShaderFile = "gbuffer_wireframe.frag",
-        .vertexShaderFile = "mesh.vert",
+        .vertexShaderFile = "mesh_notbn.vert",
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
         .colorAttachmentCount = 3,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
-        .vertexInputFormat = "f3|f2f3f4",
+        .vertexInputFormat = "f3|f2f3-f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_TerrainMaterial.GetLayout(),
           m_PrevWorldDescriptorSets[0].GetLayout() })
       };
@@ -418,7 +421,7 @@ namespace YAEngine
       // [6] alpha-test non-instanced
       PipelineCreateInfo wfAlphaInfo = {
         .fragmentShaderFile = "gbuffer_wireframe.frag",
-        .vertexShaderFile = "mesh.vert",
+        .vertexShaderFile = "mesh_notbn.vert",
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
         .doubleSided = true,
@@ -426,14 +429,14 @@ namespace YAEngine
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
-        .vertexInputFormat = "f3|f2f3f4",
+        .vertexInputFormat = "f3|f2f3-f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(),
           m_PrevWorldDescriptorSets[0].GetLayout() })
       };
       m_WireframePipelines[6] = m_PSOCache.Register(ctx.device, mainRP, wfAlphaInfo, pipelineCache);
 
       // [7] alpha-test instanced
-      wfAlphaInfo.vertexShaderFile = "mesh_instanced.vert";
+      wfAlphaInfo.vertexShaderFile = "mesh_instanced_notbn.vert";
       wfAlphaInfo.sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(),
         m_InstanceDescriptorSet.GetLayout(), m_PrevWorldDescriptorSets[0].GetLayout() });
       m_WireframePipelines[7] = m_PSOCache.Register(ctx.device, mainRP, wfAlphaInfo, pipelineCache);
@@ -442,14 +445,14 @@ namespace YAEngine
       // to produce a single-pass wireframe image via gbuffer0.
       PipelineCreateInfo wfTrInfo = {
         .fragmentShaderFile = "gbuffer_wireframe.frag",
-        .vertexShaderFile = "mesh.vert",
+        .vertexShaderFile = "mesh_notbn.vert",
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
         .colorAttachmentCount = 3,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
-        .vertexInputFormat = "f3|f2f3f4",
+        .vertexInputFormat = "f3|f2f3-f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(),
           m_PrevWorldDescriptorSets[0].GetLayout() })
       };
@@ -458,7 +461,7 @@ namespace YAEngine
       m_WireframeTransparentPipelines[1] = m_PSOCache.Register(ctx.device, mainRP, wfTrInfo, pipelineCache);
 
       wfTrInfo.doubleSided = false;
-      wfTrInfo.vertexShaderFile = "mesh_instanced.vert";
+      wfTrInfo.vertexShaderFile = "mesh_instanced_notbn.vert";
       wfTrInfo.sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(),
         m_InstanceDescriptorSet.GetLayout(), m_PrevWorldDescriptorSets[0].GetLayout() });
       m_WireframeTransparentPipelines[2] = m_PSOCache.Register(ctx.device, mainRP, wfTrInfo, pipelineCache);
@@ -1337,7 +1340,7 @@ namespace YAEngine
         .depthWrite = false,
         .doubleSided = true,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
-        .vertexInputFormat = "f3|f2f3f4",
+        .vertexInputFormat = "f3|f2-f3-f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout() })
       };
       m_PickPipelines[4] = m_PSOCache.Register(ctx.device, pickRP, pickAlphaInfo, pipelineCache);

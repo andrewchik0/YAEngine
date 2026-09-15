@@ -29,13 +29,16 @@ namespace YAEngine
     bool depthClampEnable = false;
 
     // Compact vertex attribute format string: each pair is type + component count.
-    // Types: f = float, i = int, u = uint.
+    // Types: f = float, i = int, u = uint, n = normalized uint16 (n4 only).
     // "f2i3u4"
     //    |
     //    V
     // (layout = 0) vec2
     // (layout = 1) ivec3
     // (layout = 2) uvec4
+    // '|' starts the next binding, a leading '*' makes that binding per-instance.
+    // A '-' before a pair skips the attribute: it keeps its bytes and its location but is
+    // not declared, so "f3|f2-f3-f4" feeds a position + uv shader from the full mesh layout.
     std::string vertexInputFormat;
 
     std::vector<VkDescriptorSetLayout> sets;

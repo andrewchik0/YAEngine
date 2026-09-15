@@ -335,19 +335,36 @@ namespace YAEngine
       if (!segment.empty())
       {
         uint32_t offset = 0;
-        for (size_t i = 0; i + 1 < segment.size(); i += 2)
+        size_t i = 0;
+        while (i + 1 < segment.size())
         {
+          // A '-' prefix keeps the attribute's bytes and location but leaves it undeclared, so a
+          // shader reading only part of a shared vertex layout has no unconsumed attribute.
+          const bool skipped = segment[i] == '-';
+          if (skipped && i + 2 >= segment.size())
+          {
+            YA_LOG_ERROR("Render", "Failed to parse vertex input: '-' is not followed by an attribute");
+            throw std::runtime_error("failed to parse vertex input!");
+          }
+          if (skipped)
+            i++;
+
           VkFormat format = parseComponent(segment[i], segment[i + 1]);
           uint32_t size = getFormatSize(format);
+          i += 2;
 
-          VkVertexInputAttributeDescription attr {};
-          attr.binding = bindingIndex;
-          attr.location = location++;
-          attr.format = format;
-          attr.offset = offset;
+          if (!skipped)
+          {
+            VkVertexInputAttributeDescription attr {};
+            attr.binding = bindingIndex;
+            attr.location = location;
+            attr.format = format;
+            attr.offset = offset;
+            attributeDescriptions.push_back(attr);
+          }
+
+          location++;
           offset += size;
-
-          attributeDescriptions.push_back(attr);
         }
 
         VkVertexInputBindingDescription binding {};

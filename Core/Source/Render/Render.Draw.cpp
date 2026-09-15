@@ -171,7 +171,10 @@ namespace YAEngine
 
     bool wireframeMode = (m_CurrentTexture == DEBUG_VIEW_WIREFRAME);
     if (wireframeMode)
+    {
       vkCmdSetDepthBias(cmd, 1.0f, 0.0f, 1.0f);
+      vkCmdSetLineWidth(cmd, 1.0f);
+    }
 
     uint8_t lastSortKey = UINT8_MAX;
     lastMaterialIndex = UINT32_MAX;

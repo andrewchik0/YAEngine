@@ -13,11 +13,18 @@ layout(location = 1) flat out uint outPickId;
 
 #ifndef DEPTH_ONLY
 layout(location = 2) in vec3 inNormal;
+
+// NO_TBN serves fragment shaders without normal mapping: a TBN output nothing reads is a
+// validation warning, and the tangent is only read to build it.
+#ifndef NO_TBN
 layout(location = 3) in vec4 inTangent;
+#endif
 
 layout(location = 1) out vec3 outNormal;
 layout(location = 2) out vec3 outPosition;
+#ifndef NO_TBN
 layout(location = 3) out mat3 outTBN;
+#endif
 layout(location = 6) out vec4 outCurClipPos;
 layout(location = 7) out vec4 outPrevClipPos;
 #endif
@@ -101,12 +108,15 @@ void main() {
   mat3 normalMatrix = transpose(inverse(mat3(worldMatrix)));
 
   vec3 N = normalize(normalMatrix * inNormal);
+  outNormal = N;
+
+#ifndef NO_TBN
   vec3 T = normalize(normalMatrix * inTangent.xyz);
 
   T = normalize(T - N * dot(T, N));
   vec3 B = cross(N, T) * inTangent.w;
 
-  outNormal = N;
   outTBN = mat3(T, B, N);
+#endif
 #endif
 }
