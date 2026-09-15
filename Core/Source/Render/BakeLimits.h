@@ -53,11 +53,11 @@ namespace YAEngine
     constexpr float VOLUME_DEFAULT_EDGE_FADE = 1.0f;
 
     // Sparse brick layout of one volume; exceeding any of these fails the layout. A brick is 125
-    // texels of three RGBA16F coefficient textures and one R8 validity texture, 25 bytes a texel,
-    // so 262144 bricks bound the runtime pool at 262144 x 125 x 25 = 819 MB. Packed bricks share
-    // borders, 4^3 unique nodes each, so the node cap is exactly that pool packed: 8.6e9 primary
-    // samples at the default 512, about 90 s. Sized for one volume over a whole city block scene
-    // at 0.5 m (cafe.scene: about 100k bricks). Indirection cells are 4 bytes, 16 MB at the cap.
+    // texels of three RGBA16F coefficient textures, 24 bytes a texel, so 262144 bricks bound the
+    // runtime pool at 262144 x 125 x 24 = 786 MB. Packed bricks share borders, 4^3 unique nodes
+    // each, so the node cap is exactly that pool packed: 8.6e9 primary samples at the default 512,
+    // about 90 s. Sized for one volume over a whole city block scene at 0.5 m (cafe.scene: 79.8k
+    // bricks, 5.29M nodes). Indirection cells are 4 bytes, 16 MB at the cap.
     constexpr uint32_t VOLUME_MAX_BRICKS = 1u << 18;
     constexpr uint32_t VOLUME_MAX_UNIQUE_NODES = 1u << 24;
     constexpr uint32_t VOLUME_MAX_INDIRECTION_CELLS = 1u << 22;

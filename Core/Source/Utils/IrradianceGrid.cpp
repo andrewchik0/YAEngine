@@ -39,24 +39,6 @@ namespace YAEngine
     return glm::normalize(glm::quat_cast(basis));
   }
 
-  glm::vec3 ComputeRotatedBoxAabbHalfExtents(const glm::quat& rotation, const glm::vec3& halfExtents)
-  {
-    // The extent along world axis i is the sum of the box half-extents projected
-    // onto it, hence the absolute value of the rotation matrix.
-    glm::mat3 basis = glm::mat3_cast(glm::normalize(rotation));
-    glm::vec3 clamped = glm::max(halfExtents, glm::vec3(0.0f));
-
-    glm::vec3 aabbHalf(0.0f);
-    for (uint32_t axis = 0; axis < 3; axis++)
-    {
-      aabbHalf[axis] = std::abs(basis[0][axis]) * clamped.x
-        + std::abs(basis[1][axis]) * clamped.y
-        + std::abs(basis[2][axis]) * clamped.z;
-    }
-
-    return aabbHalf;
-  }
-
   bool MatchesBakedIrradianceBox(const glm::vec3& position, const glm::vec3& halfExtents,
     const glm::vec3& bakedPosition, const glm::vec3& bakedHalfExtents)
   {

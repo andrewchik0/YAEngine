@@ -50,12 +50,13 @@ namespace YAEngine
   using IrradianceBrickQuery = std::function<bool(std::span<const IrradianceBrickQueryPoint> points,
     std::vector<IrradianceBrickQueryResult>& outResults)>;
 
-  // Exceeding any limit fails the build instead of truncating it.
+  // Exceeding any limit fails the build instead of truncating it. Zero allows nothing, so a caller
+  // sets all three (Render takes BakeLimits::VOLUME_MAX_*).
   struct IrradianceBrickLayoutLimits
   {
-    uint32_t maxBricks = 1u << 17;
-    uint32_t maxUniqueNodes = 1u << 22;
-    uint32_t maxIndirectionCells = 1u << 22;
+    uint32_t maxBricks = 0;
+    uint32_t maxUniqueNodes = 0;
+    uint32_t maxIndirectionCells = 0;
   };
 
   struct IrradianceBrickLayoutDesc

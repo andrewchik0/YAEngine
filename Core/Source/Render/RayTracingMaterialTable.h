@@ -77,6 +77,8 @@ namespace YAEngine
     // Staging for one frame's records. The mapped buffer is write-combined, so the table is
     // assembled here and copied across in one go rather than field by field.
     std::vector<RayTracingMaterialRecord> m_Staging;
+    // One warning for the frame slots, which all ask for the same count every frame; a bake build
+    // warns on its own every time.
     bool b_CapacityWarned = false;
   };
 }

@@ -605,10 +605,8 @@ namespace YAEngine
   }
 
   bool RayTracedProbeBaker::Integrate(std::span<const ProbeBakePoint> probes, const LightBuffer& lights,
-    const ProbeIntegrateDesc& desc, std::vector<ProbeIntegrateResult>& outResults)
+    const ProbeIntegrateDesc& desc, const IntegrateCollector& collect)
   {
-    outResults.clear();
-
     if (!CheckReady("integration"))
       return false;
 
@@ -619,7 +617,6 @@ namespace YAEngine
       return false;
     }
 
-    outResults.resize(probes.size());
     if (probes.empty())
       return true;
 
@@ -645,7 +642,7 @@ namespace YAEngine
     // Merged and scattered by block as in GeometryQuery.
     const uint32_t lastPass = dispatch.passCount - 1;
     std::vector<IntegrateTotals> blockTotals;
-    Dispatch(probes, dispatch, [&blockTotals, &outResults, lastPass](uint32_t pass,
+    Dispatch(probes, dispatch, [&blockTotals, &collect, lastPass](uint32_t pass,
       std::span<const uint32_t> pointIndices, std::span<const ProbeBakeRecord> records)
     {
       if (pass == 0)
@@ -658,7 +655,7 @@ namespace YAEngine
         return;
 
       for (size_t i = 0; i < records.size(); i++)
-        outResults[pointIndices[i]] = FinalizeIntegration(blockTotals[i]);
+        collect(pointIndices[i], FinalizeIntegration(blockTotals[i]));
     });
 
     return true;

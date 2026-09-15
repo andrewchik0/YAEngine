@@ -226,12 +226,12 @@ namespace YAEngine
     std::string bakedPrefilterPath;
   };
 
-  // Grid of SH L1 nodes covering a box. Position and orientation come from the
+  // Sparse bricks of SH L1 nodes covering a box. Position and orientation come from the
   // entity WorldTransform (transform scale is ignored, halfExtents define the box).
   struct IrradianceVolumeComponent
   {
     glm::vec3 halfExtents { 5.0f };
-    // Brick node spacing range in meters: fine next to geometry, coarse in open air. Always values of IRRADIANCE_SPACINGS (Utils/IrradianceGrid.h) with min <= max; the box snaps to the world lattice, not vice versa. Floats for scene format stability - snapped on load, editor only offers valid values.
+    // Brick node spacing range in meters: fine next to geometry, coarse in open air. Always values of IRRADIANCE_SPACINGS (Utils/IrradianceGrid.h) with min <= max; nodes sit on the world lattice and bricks cover the box, which is never snapped. Floats for scene format stability - snapped on load, editor only offers valid values.
     float minSpacing = 0.5f;
     float maxSpacing = 4.0f;
     // Fraction of a node's probe rays that may hit the inside of single-sided geometry before the bake rejects it as buried; per-volume since a dense interior needs a different value than an open landscape. Must match BakeLimits::VOLUME_DEFAULT_BACKFACE_THRESHOLD, clamped on load.

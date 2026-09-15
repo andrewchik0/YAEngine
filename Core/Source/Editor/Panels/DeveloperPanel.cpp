@@ -511,8 +511,8 @@ namespace YAEngine
     char text[96];
     std::snprintf(text, sizeof(text), "~%.1f MB", double(layout.runtimeBytes) / BYTES_PER_MB);
     PropertyReadOnly("VRAM", text, { .mono = true,
-      .tooltip = "Estimated for the planned brick format: 25 bytes per brick texel (three RGBA16F coefficient textures, one "
-                 "R8 validity) plus 4 per indirection cell." });
+      .tooltip = "Estimated for the brick format: 24 bytes per brick texel (three RGBA16F coefficient textures) plus 4 "
+                 "per indirection cell." });
     std::snprintf(text, sizeof(text), "~%.1f MB", double(layout.diskBytes) / BYTES_PER_MB);
     PropertyReadOnly("Disk", text, { .mono = true,
       .tooltip = "25 bytes per unique node, the node indices of every brick and 4 per indirection cell." });

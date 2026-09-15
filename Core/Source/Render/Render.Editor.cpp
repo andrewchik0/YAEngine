@@ -448,6 +448,12 @@ namespace YAEngine
     // Reload every volume so the atlas layout and the slot assignment stay
     // consistent - slots are handed out in ascending box volume order.
     SceneSerializer::LoadIrradianceVolumes(scene, assets, *this);
+    if (!scene.GetComponent<IrradianceVolumeComponent>(entity).baked)
+    {
+      YA_LOG_ERROR("Render", "Volume '%s': saved, but the reload left it inactive (see the warnings above: no room next to the other volumes, or the file did not load) - the bake failed",
+        scene.GetName(entity).c_str());
+      return false;
+    }
     return true;
   }
 
@@ -498,10 +504,10 @@ namespace YAEngine
     const float virtualOffsetBias = std::clamp(volumeSettings.virtualOffsetBias,
       BakeLimits::VOLUME_MIN_VIRTUAL_OFFSET_BIAS, BakeLimits::VOLUME_MAX_VIRTUAL_OFFSET_BIAS);
 
-    // Allocated only once integration is done: at millions of nodes, holding them next to the
-    // points and the integration results is what set the peak memory of the bake.
-    std::vector<SHL1RGB> coefficients;
-    std::vector<uint8_t> validity;
+    // Integration writes straight into these, node indexed, so no per-node result array is ever held
+    // next to them: with the traced points and the layout they are what sets the bake's peak memory.
+    std::vector<SHL1RGB> coefficients(nodeCount);
+    std::vector<uint8_t> validity(nodeCount, 0);
     uint32_t buriedCount = 0;
     uint32_t tooCloseCount = 0;
     uint32_t enclosedCount = 0;
@@ -517,7 +523,9 @@ namespace YAEngine
 
       // Stitched nodes take their value from their coarser neighbour, so only the rest is traced.
       std::vector<ProbeBakePoint> points;
+      std::vector<uint32_t> pointNodes;
       points.reserve(integratedCount);
+      pointNodes.reserve(integratedCount);
       for (uint32_t n = 0; n < nodeCount; n++)
       {
         const IrradianceBrickNode& node = layout.nodes[n];
@@ -529,6 +537,7 @@ namespace YAEngine
           .closeHitDistance = BakeLimits::VOLUME_ENCLOSURE_DISTANCE_FRACTION * IRRADIANCE_SPACINGS[finestLevels[n]],
           .seedKey = node.key,
         });
+        pointNodes.push_back(n);
       }
 
       const ProbeIntegrateDesc integrateDesc {
@@ -542,30 +551,17 @@ namespace YAEngine
         entityName.c_str(), integratedCount, integrateDesc.samplesPerProbe, integrateDesc.maxBounces,
         integrateDesc.fireflyClamp);
 
-      std::vector<ProbeIntegrateResult> results;
-      const bool integrated = m_RayTracedProbeBaker.Integrate(points, lights, integrateDesc, results)
-        && results.size() == points.size();
-      std::vector<ProbeBakePoint>().swap(points);
-      if (!integrated)
-      {
-        YA_LOG_ERROR("Render", "Volume '%s': ray traced integration failed", entityName.c_str());
-        return false;
-      }
+      // Buried nodes to integrate again from their virtual offset, with their node. Results arrive in
+      // the scheduler's shuffled order, so these are put back into node order below.
+      std::vector<std::pair<uint32_t, ProbeBakePoint>> offsetCandidates;
 
-      // Offset positions and the node each belongs to, in the same order.
-      std::vector<ProbeBakePoint> offsetPoints;
-      std::vector<uint32_t> offsetNodes;
-
-      coefficients.resize(nodeCount);
-      validity.assign(nodeCount, 0);
-      size_t result = 0;
-      for (uint32_t n = 0; n < nodeCount; n++)
+      size_t collected = 0;
+      const bool integrated = m_RayTracedProbeBaker.Integrate(points, lights, integrateDesc,
+        [&](uint32_t probeIndex, const ProbeIntegrateResult& probe)
       {
+        collected++;
+        const uint32_t n = pointNodes[probeIndex];
         const IrradianceBrickNode& node = layout.nodes[n];
-        if (node.stitchIndex != IRRADIANCE_BRICK_INVALID)
-          continue;
-
-        const ProbeIntegrateResult& probe = results[result++];
         const float spacing = IRRADIANCE_SPACINGS[finestLevels[n]];
         coefficients[n] = probe.coefficients;
         const IntegratedNodeClass nodeClass = ClassifyIntegratedNode(probe, backfaceThreshold, spacing);
@@ -581,7 +577,7 @@ namespace YAEngine
         // integration to a shell around surfaces.
         if (!virtualOffset || nodeClass != IntegratedNodeClass::Buried
           || probe.nearestBackfaceDistance == RayTracedProbeBaker::NO_HIT || probe.nearestBackfaceDistance > spacing)
-          continue;
+          return;
 
         offsetCandidateCount++;
         // Past the face by the clearance the too close test demands, or the node would fail it against
@@ -592,17 +588,37 @@ namespace YAEngine
         if (offsetLength > spacing)
         {
           offsetBeyondSpacingCount++;
-          continue;
+          return;
         }
 
-        offsetPoints.push_back(ProbeBakePoint {
+        offsetCandidates.emplace_back(n, ProbeBakePoint {
           .position = node.worldPosition + probe.nearestBackfaceDirection * offsetLength,
           .closeHitDistance = BakeLimits::VOLUME_ENCLOSURE_DISTANCE_FRACTION * spacing,
           .seedKey = node.key ^ glm::ivec3(VIRTUAL_OFFSET_SEED_SALT),
         });
-        offsetNodes.push_back(n);
+      }) && collected == points.size();
+      std::vector<ProbeBakePoint>().swap(points);
+      std::vector<uint32_t>().swap(pointNodes);
+      if (!integrated)
+      {
+        YA_LOG_ERROR("Render", "Volume '%s': ray traced integration failed", entityName.c_str());
+        return false;
       }
-      std::vector<ProbeIntegrateResult>().swap(results);
+
+      std::sort(offsetCandidates.begin(), offsetCandidates.end(),
+        [](const auto& a, const auto& b) { return a.first < b.first; });
+
+      // Offset positions and the node each belongs to, in the same order.
+      std::vector<ProbeBakePoint> offsetPoints;
+      std::vector<uint32_t> offsetNodes;
+      offsetPoints.reserve(offsetCandidates.size());
+      offsetNodes.reserve(offsetCandidates.size());
+      for (const auto& [n, point] : offsetCandidates)
+      {
+        offsetNodes.push_back(n);
+        offsetPoints.push_back(point);
+      }
+      std::vector<std::pair<uint32_t, ProbeBakePoint>>().swap(offsetCandidates);
 
       if (!offsetPoints.empty())
       {
@@ -613,27 +629,26 @@ namespace YAEngine
           entityName.c_str(), offsetPoints.size(), double(BakeLimits::VOLUME_MIN_PROBE_CLEARANCE_FRACTION),
           double(virtualOffsetBias));
 
-        std::vector<ProbeIntegrateResult> offsetResults;
-        const bool offsetIntegrated = m_RayTracedProbeBaker.Integrate(offsetPoints, lights, integrateDesc, offsetResults)
-          && offsetResults.size() == offsetPoints.size();
+        size_t offsetCollected = 0;
+        const bool offsetIntegrated = m_RayTracedProbeBaker.Integrate(offsetPoints, lights, integrateDesc,
+          [&](uint32_t probeIndex, const ProbeIntegrateResult& probe)
+        {
+          offsetCollected++;
+          const uint32_t n = offsetNodes[probeIndex];
+          if (ClassifyIntegratedNode(probe, backfaceThreshold, IRRADIANCE_SPACINGS[finestLevels[n]])
+            != IntegratedNodeClass::Valid)
+            return;
+
+          coefficients[n] = probe.coefficients;
+          validity[n] = 1;
+          offsetAcceptedCount++;
+        }) && offsetCollected == offsetPoints.size();
         std::vector<ProbeBakePoint>().swap(offsetPoints);
         if (!offsetIntegrated)
         {
           YA_LOG_ERROR("Render", "Volume '%s': ray traced integration of the virtual offset nodes failed",
             entityName.c_str());
           return false;
-        }
-
-        for (size_t i = 0; i < offsetResults.size(); i++)
-        {
-          const uint32_t n = offsetNodes[i];
-          if (ClassifyIntegratedNode(offsetResults[i], backfaceThreshold, IRRADIANCE_SPACINGS[finestLevels[n]])
-            != IntegratedNodeClass::Valid)
-            continue;
-
-          coefficients[n] = offsetResults[i].coefficients;
-          validity[n] = 1;
-          offsetAcceptedCount++;
         }
 
         offsetTimer.Step();
@@ -703,6 +718,16 @@ namespace YAEngine
     for (uint32_t n = 0; n < nodeCount; n++)
       data.coefficients[n] = PackSHL1RGBHalf(coefficients[n]);
     std::vector<SHL1RGB>().swap(coefficients);
+
+    // Held to what the upload checks of a volume on its own, so a volume the GPU storage refuses
+    // whatever else is loaded never replaces an earlier file that loads.
+    std::string uploadFailure;
+    if (!IrradianceVolumeStorage::ValidateVolume(data, m_Backend.GetContext().maxImageDimension3D, uploadFailure))
+    {
+      YA_LOG_ERROR("Render", "Volume '%s': the baked volume cannot be uploaded (%s) - not saved, any earlier file is kept",
+        entityName.c_str(), uploadFailure.c_str());
+      return false;
+    }
 
     std::string probeDir = assets.GetBasePath() + "/Assets/Probes";
     std::filesystem::create_directories(probeDir);
@@ -827,6 +852,18 @@ namespace YAEngine
     // ascending box volume order.
     SceneSerializer::LoadIrradianceVolumes(scene, assets, *this);
 
+    // A volume saved above can still be left out of the upload for lack of room next to the others.
+    for (IrradianceVolumeBakeAllResult::Volume& outcome : result.volumes)
+    {
+      if (!outcome.rebaked || scene.GetComponent<IrradianceVolumeComponent>(outcome.entity).baked)
+        continue;
+
+      outcome.rebaked = false;
+      bakedCount--;
+      YA_LOG_ERROR("Render", "Volume '%s': saved, but the reload left it inactive (see the warnings above: no room next to the other volumes, or the file did not load) - the bake failed",
+        scene.GetName(outcome.entity).c_str());
+    }
+
     timer.Step();
     YA_LOG_INFO("Render", "Baking all irradiance volumes done: %u of %u volumes, %llu unique nodes, %llu integrated, %llu buried, %llu too close, %llu enclosed, virtual offset %llu candidates, %llu accepted, %llu rejected in %.2f s, %.2f s",
       bakedCount, volumeCount, (unsigned long long)totalNodes, (unsigned long long)totalIntegrated,
@@ -855,10 +892,9 @@ namespace YAEngine
   IrradianceVolumePlacementEstimate Render::EstimateIrradianceVolumePlacement(const IrradianceVolumePlacementPreview& preview,
     uint32_t samplesPerProbe)
   {
-    // At runtime a brick node is a texel of three RGBA16F coefficient textures and one R8 validity
-    // texture. On disk a unique node is 12 half floats and a validity byte, a brick its node
-    // indices as uint32 and a header.
-    constexpr uint64_t RUNTIME_TEXEL_BYTES = 3 * 4 * 2 + 1;
+    // At runtime a brick node is a texel of three RGBA16F coefficient textures. On disk a unique
+    // node is 12 half floats and a validity byte, a brick its node indices as uint32 and a header.
+    constexpr uint64_t RUNTIME_TEXEL_BYTES = 3 * 4 * 2;
     constexpr uint64_t DISK_NODE_BYTES = 12 * 2 + 1;
     constexpr uint64_t DISK_BRICK_HEADER_BYTES = 16;
     constexpr uint64_t DISK_BRICK_BYTES = uint64_t(IRRADIANCE_BRICK_NODE_COUNT) * 4 + DISK_BRICK_HEADER_BYTES;

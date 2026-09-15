@@ -87,8 +87,9 @@ namespace YAEngine
     struct Volume
     {
       entt::entity entity {};
-      // Baked and saved by this call. A volume that failed keeps its earlier file, which the
-      // reload at the end still loads and marks baked.
+      // Baked, saved and uploaded by this call. A volume that failed before saving keeps its
+      // earlier file, which the reload at the end still loads and marks baked; one saved but left
+      // out of that upload is not baked.
       bool rebaked = false;
     };
 
@@ -557,10 +558,12 @@ namespace YAEngine
     // lets probes pick up the light their neighbours captured in the previous one.
     int m_ProbeBounceCount = 1;
     // Path bounces, samples per probe and firefly clamp (0 = off) of the ray traced
-    // irradiance volume bake. The clamp defaults to 10, not 100: small, very bright emitters
-    // near a node (string light bulbs) otherwise bake a colored blob, and against the path
-    // traced reference 10 errs no more than 100, while 2 already biases dark.
-    int m_VolumeBounceCount = 3;
+    // irradiance volume bake. A bake path starts at the probe ray's hit, which is bounce one of
+    // a path tracer path - its bounce zero is the G-buffer vertex reading the probe - so 2 here
+    // matches m_PathTraceMaxBounces' default of 3. The clamp defaults to 10, not 100: small,
+    // very bright emitters near a node (string light bulbs) otherwise bake a colored blob, and
+    // against the path traced reference 10 errs no more than 100, while 2 already biases dark.
+    int m_VolumeBounceCount = 2;
     int m_VolumeSampleCount = int(BakeLimits::VOLUME_DEFAULT_SAMPLES_PER_PROBE);
     float m_VolumeFireflyClamp = 10.0f;
     bool b_IrradianceVolumesEnabled = true;
@@ -1328,7 +1331,8 @@ namespace YAEngine
       bool writeToDisk = true);
     void BakeAllProbes(class Scene& scene, class AssetManager& assets);
     // Ray traced, into a bake scene built for this call. Saves the .yaiv, then reloads every
-    // volume; on failure nothing is reloaded.
+    // volume; a failure before saving reloads nothing, and a volume the reload leaves out (no
+    // room next to the others) fails the bake too.
     bool BakeIrradianceVolume(entt::entity entity, class Scene& scene, class AssetManager& assets);
     // Builds one bake scene for every volume, bakes them all to disk, then reloads them.
     IrradianceVolumeBakeAllResult BakeAllIrradianceVolumes(class Scene& scene, class AssetManager& assets);

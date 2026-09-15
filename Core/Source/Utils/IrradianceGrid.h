@@ -16,9 +16,6 @@ namespace YAEngine
   // node count won't match the bake.
   glm::quat ExtractIrradianceBoxRotation(const glm::mat4& world);
 
-  // World-space AABB half-extents of the rotated box; this is also what the editor checks for overlapping volumes.
-  glm::vec3 ComputeRotatedBoxAabbHalfExtents(const glm::quat& rotation, const glm::vec3& halfExtents);
-
   // Whether a volume at position with halfExtents still describes the box its data was baked in, within
   // 1% of the baked box size. The baked data only lights that box, so a volume that moved or was resized
   // needs a rebake. Rotation is not compared.

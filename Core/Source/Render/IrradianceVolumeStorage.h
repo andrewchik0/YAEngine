@@ -12,9 +12,9 @@ namespace YAEngine
   // GPU side of the baked irradiance volumes.
   //
   // Every brick of every volume gets one 5x5x5 texel slot of a shared pool: three RGBA16F 3D
-  // textures, one per color channel with (L0, L1x, L1y, L1z) per texel, plus an R8 validity
-  // texture. SH coefficients are linear, so hardware trilinear filtering inside a slot
-  // interpolates them correctly. An R32UI indirection atlas maps each volume's cells to slots.
+  // textures, one per color channel with (L0, L1x, L1y, L1z) per texel. SH coefficients are
+  // linear, so hardware trilinear filtering inside a slot interpolates them correctly. An R32UI
+  // indirection atlas maps each volume's cells to slots.
   // See Core/Shared/IrradianceVolumeData.h for the addressing convention the shader has to match.
   class IrradianceVolumeStorage
   {
@@ -32,9 +32,17 @@ namespace YAEngine
     // bake's per volume cell cap (BakeLimits::VOLUME_MAX_INDIRECTION_CELLS), for that padding.
     static constexpr uint64_t MAX_INDIRECTION_ATLAS_TEXELS = uint64_t(1) << 26;
 
+    // What Upload checks of one volume on its own, before packing it next to others: the counts
+    // and indices of IrradianceVolumeFile::Validate, a finite box, brick origins matching their
+    // cells, and whether its cells and bricks alone fit maxImageDimension3D, the brick pool and
+    // MAX_INDIRECTION_ATLAS_TEXELS. A volume passing it can still be skipped for lack of room next
+    // to the smaller volumes. False with a readable description of the first failure.
+    static bool ValidateVolume(const IrradianceVolumeFileData& volume, uint32_t maxImageDimension3D,
+      std::string& outFailure);
+
     // Replaces everything uploaded before. outSlots gets one entry per input volume, in input
-    // order: its index into IrradianceVolumeBuffer::volumes, or INVALID_SLOT when it is
-    // inconsistent, does not fit the device's 3D texture limit or MAX_INDIRECTION_ATLAS_TEXELS
+    // order: its index into IrradianceVolumeBuffer::volumes, or INVALID_SLOT when it fails
+    // ValidateVolume, does not fit the device's 3D texture limit or MAX_INDIRECTION_ATLAS_TEXELS
     // next to the smaller volumes uploaded before it, or is beyond MAX_IRRADIANCE_VOLUMES.
     // Nothing is released before that is settled and the upload buffers are filled. A failed
     // allocation or submit logs an error and leaves Reset's dummies with every slot INVALID_SLOT.
@@ -53,8 +61,6 @@ namespace YAEngine
 
     VkImageView GetCoefficientView(uint32_t channel) const { return m_Coefficients[channel].GetView(); }
     VkSampler GetCoefficientSampler(uint32_t channel) const { return m_Coefficients[channel].GetSampler(); }
-    VkImageView GetValidityView() const { return m_Validity.GetView(); }
-    VkSampler GetValiditySampler() const { return m_Validity.GetSampler(); }
     VkImageView GetIndirectionView() const { return m_Indirection.GetView(); }
     VkSampler GetIndirectionSampler() const { return m_Indirection.GetSampler(); }
 
@@ -72,7 +78,6 @@ namespace YAEngine
     void DestroyImages(const RenderContext& ctx);
 
     std::array<VulkanImage, 3> m_Coefficients;
-    VulkanImage m_Validity;
     VulkanImage m_Indirection;
     glm::uvec3 m_PoolSize { 1 };
     glm::uvec3 m_IndirectionSize { 1 };

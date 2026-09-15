@@ -30,9 +30,9 @@ namespace YAEngine {
 // A volume is sparse bricks of 5x5x5 nodes (Utils/IrradianceBrickLayout.h) on the WORLD lattice,
 // so a point is looked up without ever entering volume local space.
 //
-// Pool: three RGBA16F 3D textures, one per color channel with (L0, L1x, L1y, L1z) per texel, and
-// one R8 validity texture, all a grid of slots of 5x5x5 texels shared by every volume. A brick's
-// nodes fill its slot x fastest, then y, then z. Slot s sits at slot coordinate
+// Pool: three RGBA16F 3D textures, one per color channel with (L0, L1x, L1y, L1z) per texel, all a
+// grid of slots of 5x5x5 texels shared by every volume. A brick's nodes fill its slot x fastest,
+// then y, then z. Slot s sits at slot coordinate
 //   slotCoord = (s % poolSlotsX, (s / poolSlotsX) % poolSlotsY, s / (poolSlotsX * poolSlotsY))
 //
 // Indirection: one R32UI 3D texture holding every volume's cell grid, one cell per brick of the

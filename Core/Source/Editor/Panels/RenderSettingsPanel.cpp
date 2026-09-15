@@ -465,8 +465,9 @@ namespace YAEngine
         .tooltip = "Passes over every probe in Bake All Reflection Probes. Each extra pass lets probes pick up the light "
                    "their neighbours captured in the previous one." });
       PropertyInt("Volume Bounces", render.GetVolumeBounceCount(), {
-        .min = Render::MIN_VOLUME_BOUNCES, .max = Render::MAX_VOLUME_BOUNCES, .speed = 0.05f, .defaultValue = 3,
-        .tooltip = "Path bounces per sample of the ray traced irradiance volume bake, as PT Bounces is for the path tracer. "
+        .min = Render::MIN_VOLUME_BOUNCES, .max = Render::MAX_VOLUME_BOUNCES, .speed = 0.05f, .defaultValue = 2,
+        .tooltip = "Path bounces per sample of the ray traced irradiance volume bake, counted from each probe ray's hit. "
+                   "PT Bounces also counts the surface that reads the probe, so a value here matches PT Bounces one higher. "
                    "Every bounce adds a trace and a shadow ray to each sample." });
       PropertyInt("Volume Samples", render.GetVolumeSampleCount(), {
         .min = Render::MIN_VOLUME_SAMPLES, .max = Render::MAX_VOLUME_SAMPLES, .speed = 4.0f,
@@ -483,8 +484,9 @@ namespace YAEngine
       {
         if (PropertyButton("Bake All Reflection Probes", {
           .icon = ICON_LC_CIRCLE_PLAY,
-          .tooltip = "Bakes every reflection probe of the scene, Reflection Probe Bounces passes over all of them. The "
-                     "editor stalls until the bake ends." }))
+          .tooltip = "Bakes every reflection probe of the scene, Reflection Probe Bounces passes over all of them. Probe "
+                     "captures are lit by the irradiance volumes, so bake those first. The editor stalls until the bake "
+                     "ends." }))
         {
           render.BakeAllProbes(*context.scene, *context.assetManager);
         }

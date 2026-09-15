@@ -76,14 +76,6 @@ namespace YAEngine
       capacity = target;
     }
 
-    if (required > capacity && !b_CapacityWarned)
-    {
-      b_CapacityWarned = true;
-      YA_LOG_WARN("Render",
-        "Ray tracing material table capped at %u records while %u was requested, the excess materials are dropped",
-        capacity, required);
-    }
-
     return capacity;
   }
 
@@ -109,6 +101,20 @@ namespace YAEngine
     uint32_t capacity = EnsureCapacity(ctx, slot, required);
     if (capacity == 0)
       return;
+
+#ifdef YA_EDITOR
+    const bool frameSlot = frameIndex != m_BakeSlot;
+#else
+    const bool frameSlot = true;
+#endif
+
+    if (required > capacity && (!frameSlot || !b_CapacityWarned))
+    {
+      b_CapacityWarned = b_CapacityWarned || frameSlot;
+      YA_LOG_WARN("Render",
+        "Ray tracing material table%s capped at %u records while %u was requested, the excess materials are dropped",
+        frameSlot ? "" : " bake slot", capacity, required);
+    }
 
     const uint32_t count = std::min(required, capacity);
 

@@ -25,7 +25,6 @@ namespace YAEngine
   namespace
   {
     constexpr VkFormat COEFFICIENT_FORMAT = VK_FORMAT_R16G16B16A16_SFLOAT;
-    constexpr VkFormat VALIDITY_FORMAT = VK_FORMAT_R8_UNORM;
     constexpr VkFormat INDIRECTION_FORMAT = VK_FORMAT_R32_UINT;
 
     constexpr uint32_t BRICK_TEXELS = IRRADIANCE_POOL_BRICK_TEXELS;
@@ -40,6 +39,15 @@ namespace YAEngine
       FormatText(outFailure, format, args);
       va_end(args);
       return false;
+    }
+
+    // Slots the brick pool can hold: their grid has to fit the device's 3D texture limit per axis,
+    // and a slot index the indirection entry's slot field.
+    uint64_t GetSlotCapacity(uint32_t maxDimension)
+    {
+      const uint64_t maxSlotsPerAxis = maxDimension / BRICK_TEXELS;
+      return std::min(maxSlotsPerAxis * maxSlotsPerAxis * maxSlotsPerAxis,
+        uint64_t(IRRADIANCE_POOL_SLOT_MASK) + 1);
     }
 
     // Smallest near-cubic grid holding slotCount slots. Each axis stays at or below the cube root
@@ -173,6 +181,35 @@ namespace YAEngine
     }
   }
 
+  bool IrradianceVolumeStorage::ValidateVolume(const IrradianceVolumeFileData& volume, uint32_t maxImageDimension3D,
+    std::string& outFailure)
+  {
+    // The blobs cannot be assumed to match their counts, and every later check indexes them by
+    // those counts. The geometry check relies on the bounds check before it.
+    if (!IrradianceVolumeFile::Validate(volume, outFailure)
+      || !ValidateBoxAndBounds(volume, maxImageDimension3D, outFailure)
+      || !ValidateIndirectionGeometry(volume, outFailure))
+    {
+      return false;
+    }
+
+    const uint64_t slotCapacity = GetSlotCapacity(maxImageDimension3D);
+    if (volume.bricks.size() > slotCapacity)
+    {
+      return Reject(outFailure, "%zu bricks exceed the %llu slots the brick pool holds on this device",
+        volume.bricks.size(), (unsigned long long)slotCapacity);
+    }
+
+    const glm::uvec3& dims = volume.indirectionDims;
+    if (uint64_t(dims.x) * dims.y * dims.z > MAX_INDIRECTION_ATLAS_TEXELS)
+    {
+      return Reject(outFailure, "%ux%ux%u indirection cells exceed the atlas budget of %llu texels",
+        dims.x, dims.y, dims.z, (unsigned long long)MAX_INDIRECTION_ATLAS_TEXELS);
+    }
+
+    return true;
+  }
+
   void IrradianceVolumeStorage::Init(const RenderContext& ctx)
   {
     m_UniformBuffers.resize(ctx.maxFramesInFlight);
@@ -221,23 +258,12 @@ namespace YAEngine
       m_Coefficients[channel].Init(ctx, desc, &linearSampler);
     }
 
-    // Not read by the shader - it exists for the editor and as the input a
-    // future manual 8-tap sampler would weight its taps by.
-    ImageDesc validityDesc {
-      .width = m_PoolSize.x,
-      .height = m_PoolSize.y,
-      .depth = m_PoolSize.z,
-      .format = VALIDITY_FORMAT,
-      .usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
-      .imageType = VK_IMAGE_TYPE_3D,
-      .viewType = VK_IMAGE_VIEW_TYPE_3D,
-    };
-    m_Validity.Init(ctx, validityDesc, &linearSampler);
-
-    // Read with texelFetch only; an unsigned integer format may not be linearly filtered.
+    // Read with texelFetch only. An unsigned integer format supports no linear filtering, and a
+    // sampler with a linear mipmap mode requires it even when nothing is filtered.
     SamplerDesc nearestSampler {
       .magFilter = VK_FILTER_NEAREST,
       .minFilter = VK_FILTER_NEAREST,
+      .mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST,
       .addressMode = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE,
       .maxLod = 0.0f,
     };
@@ -258,7 +284,6 @@ namespace YAEngine
   {
     for (auto& image : m_Coefficients)
       image.Destroy(ctx);
-    m_Validity.Destroy(ctx);
     m_Indirection.Destroy(ctx);
   }
 
@@ -287,7 +312,6 @@ namespace YAEngine
     VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
     for (auto& image : m_Coefficients)
       CopyToShaderReadImage(cmd, image, zeroStaging.Get(), glm::uvec3(1));
-    CopyToShaderReadImage(cmd, m_Validity, zeroStaging.Get(), glm::uvec3(1));
     CopyToShaderReadImage(cmd, m_Indirection, indirectionStaging.Get(), glm::uvec3(1));
     ctx.commandBuffer->EndSingleTimeCommands(cmd);
 
@@ -305,14 +329,11 @@ namespace YAEngine
     order.reserve(volumes.size());
     for (uint32_t index = 0; index < uint32_t(volumes.size()); index++)
     {
-      // Public API: the blobs cannot be assumed to match their counts, and the packing below
-      // indexes them by those counts. The geometry check relies on the bounds check before it.
+      // Public API: the packing below indexes the blobs by their counts, which this holds them to.
       std::string failure;
-      if (!IrradianceVolumeFile::Validate(volumes[index], failure)
-        || !ValidateBoxAndBounds(volumes[index], ctx.maxImageDimension3D, failure)
-        || !ValidateIndirectionGeometry(volumes[index], failure))
+      if (!ValidateVolume(volumes[index], ctx.maxImageDimension3D, failure))
       {
-        YA_LOG_WARN("Render", "Irradiance volume %u is inconsistent (%s) - skipped", index, failure.c_str());
+        YA_LOG_WARN("Render", "Irradiance volume %u cannot be uploaded (%s) - skipped", index, failure.c_str());
         continue;
       }
       order.push_back(index);
@@ -332,9 +353,7 @@ namespace YAEngine
     // allocation in the middle of a scene load. A skipped volume takes no MAX_IRRADIANCE_VOLUMES
     // place, so the next one can still have it.
     const uint32_t maxDimension = ctx.maxImageDimension3D;
-    const uint64_t maxSlotsPerAxis = maxDimension / BRICK_TEXELS;
-    const uint64_t slotCapacity = std::min(maxSlotsPerAxis * maxSlotsPerAxis * maxSlotsPerAxis,
-      uint64_t(IRRADIANCE_POOL_SLOT_MASK) + 1);
+    const uint64_t slotCapacity = GetSlotCapacity(maxDimension);
 
     // Every packing axis is followed at once and the atlas takes the one needing the fewest texels
     // among those every packed volume fits, so volumes flat along the same axis stack without
@@ -436,7 +455,7 @@ namespace YAEngine
     struct UploadBuffers
     {
       const RenderContext& ctx;
-      std::array<VulkanBuffer, 5> buffers {};
+      std::array<VulkanBuffer, 4> buffers {};
       ~UploadBuffers()
       {
         for (VulkanBuffer& buffer : buffers)
@@ -448,8 +467,7 @@ namespace YAEngine
     {
       for (uint32_t channel = 0; channel < 3; channel++)
         upload.buffers[channel] = VulkanBuffer::CreateMapped(ctx, poolTexels * COEFFICIENT_TEXEL_SIZE, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-      upload.buffers[3] = VulkanBuffer::CreateMapped(ctx, poolTexels, VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
-      upload.buffers[4] = VulkanBuffer::CreateMapped(ctx, atlasTexels * sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
+      upload.buffers[3] = VulkanBuffer::CreateMapped(ctx, atlasTexels * sizeof(uint32_t), VK_BUFFER_USAGE_TRANSFER_SRC_BIT);
     }
     catch (const std::exception& e)
     {
@@ -464,8 +482,7 @@ namespace YAEngine
     std::array<uint16_t*, 3> coefficientTexels {};
     for (uint32_t channel = 0; channel < 3; channel++)
       coefficientTexels[channel] = static_cast<uint16_t*>(upload.buffers[channel].GetMapped());
-    uint8_t* validityTexels = static_cast<uint8_t*>(upload.buffers[3].GetMapped());
-    uint32_t* indirectionTexels = static_cast<uint32_t*>(upload.buffers[4].GetMapped());
+    uint32_t* indirectionTexels = static_cast<uint32_t*>(upload.buffers[3].GetMapped());
 
     const auto getSlotTexelOrigin = [&slotGrid](uint64_t slot)
     {
@@ -474,13 +491,12 @@ namespace YAEngine
     };
 
     const auto writeSlotTexel = [&](const glm::uvec3& texelOrigin, uint32_t x, uint32_t y, uint32_t z,
-      const uint16_t* halves, uint8_t valid)
+      const uint16_t* halves)
     {
       const size_t texel = size_t(texelOrigin.x + x) + size_t(texelOrigin.y + y) * poolRow
         + size_t(texelOrigin.z + z) * poolPlane;
       for (uint32_t channel = 0; channel < 3; channel++)
         std::copy_n(halves + channel * 4, 4, coefficientTexels[channel] + texel * 4);
-      validityTexels[texel] = valid;
     };
 
     // Unused slots and cells are filled too, so a readback never shows garbage. Bricks write every
@@ -493,7 +509,7 @@ namespace YAEngine
       for (uint32_t z = 0; z < BRICK_TEXELS; z++)
         for (uint32_t y = 0; y < BRICK_TEXELS; y++)
           for (uint32_t x = 0; x < BRICK_TEXELS; x++)
-            writeSlotTexel(texelOrigin, x, y, z, zeroHalves.halves.data(), 0);
+            writeSlotTexel(texelOrigin, x, y, z, zeroHalves.halves.data());
     }
     std::fill_n(indirectionTexels, atlasTexels, IRRADIANCE_INDIRECTION_INVALID);
 
@@ -514,7 +530,7 @@ namespace YAEngine
             for (uint32_t x = 0; x < BRICK_TEXELS; x++)
             {
               const uint32_t node = volume.brickNodeIndices[brickOffset + x + BRICK_TEXELS * (y + BRICK_TEXELS * z)];
-              writeSlotTexel(texelOrigin, x, y, z, volume.coefficients[node].halves.data(), volume.validity[node] ? 255 : 0);
+              writeSlotTexel(texelOrigin, x, y, z, volume.coefficients[node].halves.data());
             }
           }
         }
@@ -569,8 +585,7 @@ namespace YAEngine
       VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
       for (uint32_t channel = 0; channel < 3; channel++)
         CopyToShaderReadImage(cmd, m_Coefficients[channel], upload.buffers[channel].Get(), poolSize);
-      CopyToShaderReadImage(cmd, m_Validity, upload.buffers[3].Get(), poolSize);
-      CopyToShaderReadImage(cmd, m_Indirection, upload.buffers[4].Get(), indirectionSize);
+      CopyToShaderReadImage(cmd, m_Indirection, upload.buffers[3].Get(), indirectionSize);
       ctx.commandBuffer->EndSingleTimeCommands(cmd);
     }
     catch (const std::exception& e)

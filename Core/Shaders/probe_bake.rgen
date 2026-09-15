@@ -8,8 +8,8 @@
 // every point traces a spherical Fibonacci set of directions from its exact position - a probe
 // floats in space, so there is no surface normal to offset along - recording what the rays hit.
 // In integrate mode it also gathers the radiance each ray brings back and projects it onto L1 SH.
-// Everything past the first hit is pt_path.glsl, so a baked probe converges on what the path
-// tracer sees from the same point.
+// Everything past the first hit is pt_path.glsl, so with the firefly clamp off a baked probe
+// converges on what the path tracer gathers at the same point; main explains how a clamp darkens it.
 //
 // Always bindless, for the reason pt_main.rgen gives.
 #define RT_BINDLESS

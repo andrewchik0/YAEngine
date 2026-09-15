@@ -14,8 +14,6 @@ namespace YAEngine
           m_VolumeStorage.GetCoefficientView(channel),
           m_VolumeStorage.GetCoefficientSampler(channel));
       }
-      m_IBLDescriptorSets[i].WriteCombinedImageSampler(8,
-        m_VolumeStorage.GetValidityView(), m_VolumeStorage.GetValiditySampler());
       m_IBLDescriptorSets[i].WriteUniformBuffer(9,
         m_VolumeStorage.GetBuffer(uint32_t(i)), sizeof(IrradianceVolumeBuffer));
       m_IBLDescriptorSets[i].WriteCombinedImageSampler(10,
@@ -883,7 +881,7 @@ namespace YAEngine
     }
 
     // IBL descriptor set (irradiance array, prefilter array, BRDF LUT, skybox cubemap,
-    // probe SSBO, three SH brick pool textures, brick validity, volume UBO, brick indirection)
+    // probe SSBO, three SH brick pool textures, volume UBO, brick indirection)
     SetDescription iblDesc = {
       .set = 3,
       .bindings = {
@@ -896,7 +894,7 @@ namespace YAEngine
           { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 7, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
-          { 8, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          // 8 stays free so the bindings after it keep their numbers
           { 9, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT },
           // Brick indirection (usampler3D)
           { 10, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },

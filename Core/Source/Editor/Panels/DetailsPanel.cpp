@@ -261,7 +261,9 @@ namespace YAEngine
         : stale
           ? "The volume changed since the preview: its transform, half extents, spacings or backface threshold. "
             "Preview again. Developer > Irradiance Volume Diagnostics has the full report."
-          : "Per-level counts, disk estimate, validation and timings are in Developer > Irradiance Volume Diagnostics.";
+          : "Only this volume's own parameters mark a preview stale. Scene geometry, bake overrides, hidden entities and "
+            "model reloads do not - preview again after changing those. Per-level counts, disk estimate, validation and "
+            "timings are in Developer > Irradiance Volume Diagnostics.";
       PropertyStatus(nullptr, summary, kind, tooltip);
     }
 
@@ -1331,7 +1333,7 @@ namespace YAEngine
       if (PropertyEnum("Min Spacing", minSpacingIndex, SPACING_OPTIONS, {
         .defaultValue = FindSpacingIndex(0.5f),
         .tooltip = "Finest node spacing, reached next to geometry. Nodes sit on one world lattice shared by every volume, "
-                   "so the box is snapped to the lattice instead; overlapping volumes then agree." }).changed)
+                   "so overlapping volumes agree; the box itself is never snapped, bricks on the lattice cover it." }).changed)
       {
         volume.minSpacing = IRRADIANCE_SPACINGS[size_t(minSpacingIndex)];
         volume.maxSpacing = std::max(volume.maxSpacing, volume.minSpacing);
@@ -1348,9 +1350,9 @@ namespace YAEngine
         .min = BakeLimits::VOLUME_MIN_BACKFACE_THRESHOLD, .max = BakeLimits::VOLUME_MAX_BACKFACE_THRESHOLD,
         .speed = 0.01f, .format = "%.2f", .defaultValue = BakeLimits::VOLUME_DEFAULT_BACKFACE_THRESHOLD,
         .tooltip = "Normalized 0-1. Fraction of a node's probe rays that may hit the inside of single-sided geometry before "
-                   "the bake rejects the node as buried behind a wall or under the ground. Rejected nodes take the average "
-                   "of their nearest valid neighbours. Lower catches more leaks, higher keeps more nodes; 1.00 keeps every "
-                   "node." });
+                   "the bake rejects the node as buried behind a wall or under the ground. Rejected nodes are filled from "
+                   "their nearest valid neighbours along the lattice axes, inverse distance weighted, in waves outward. "
+                   "Lower catches more leaks, higher keeps more nodes; 1.00 keeps every node." });
 
       PropertyBool("Virtual Offset", volume.virtualOffset, {
         .defaultValue = true,
@@ -1382,6 +1384,13 @@ namespace YAEngine
       DrawPlacementSummary(scene, render, entity);
 
       PropertySubHeading("Bake");
+      PropertyFloat("Edge Fade", volume.edgeFade, {
+        .min = BakeLimits::VOLUME_MIN_EDGE_FADE, .max = BakeLimits::VOLUME_MAX_EDGE_FADE,
+        .speed = 0.01f, .format = "%.2f", .unit = "m", .defaultValue = BakeLimits::VOLUME_DEFAULT_EDGE_FADE,
+        .tooltip = "Width over which the volume blends into the volume enclosing it, or into the sky, at its box faces. "
+                   "Wide suits faces in open air and seams between nested volumes; narrow keeps the outside from reaching "
+                   "into a box fitted to walls. Stored in the baked file: a change applies on the next bake." });
+
       if (PropertyButton("Bake Volume", {
         .icon = ICON_LC_CIRCLE_PLAY,
         .tooltip = "Bakes this volume by ray tracing now; the editor stalls until the bake ends. Bake time scales with "
@@ -1411,14 +1420,6 @@ namespace YAEngine
           baked.baked && !baked.bakedVolumePath.empty() ? baked.bakedVolumePath.c_str()
             : "No baked volume yet: Bake Volume creates one.");
       }
-
-      PropertySubHeading("Runtime");
-      PropertyFloat("Edge Fade", baked.edgeFade, {
-        .min = BakeLimits::VOLUME_MIN_EDGE_FADE, .max = BakeLimits::VOLUME_MAX_EDGE_FADE,
-        .speed = 0.01f, .format = "%.2f", .unit = "m", .defaultValue = BakeLimits::VOLUME_DEFAULT_EDGE_FADE,
-        .tooltip = "Width over which the volume blends into the volume enclosing it, or into the sky, at its box faces. "
-                   "Wide suits faces in open air and seams between nested volumes; narrow keeps the outside from reaching "
-                   "into a box fitted to walls. Stored in the baked file: a change applies on the next bake." });
 
       EndPropertyGroup();
     }

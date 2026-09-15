@@ -6,6 +6,10 @@
         <option value="$PROJECT_DIR$/Tools/McpServer/src" />
         <option value="$PROJECT_DIR$/Tools/McpServer/.venv/Lib/site-packages/mcp" />
         <option value="$PROJECT_DIR$/Tools/McpServer/.venv/Lib/site-packages" />
+        <option value="$PROJECT_DIR$/.claude/worktrees/wizardly-yonath-514268/Tools/McpServer/.venv/Lib/site-packages/mcp" />
+        <option value="$PROJECT_DIR$/.claude/worktrees/wizardly-leakey-ed21a4/Tools/McpServer/.venv/Lib/site-packages" />
+        <option value="$PROJECT_DIR$/Core/Source/Utils/IrradianceBrickBake.h" />
+        <option value="$PROJECT_DIR$/Core/Source/Utils/IrradianceBrickBake.cpp" />
       </set>
     </option>
   </component>

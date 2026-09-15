@@ -608,6 +608,10 @@ namespace YAEngine
       // earlier brick already created the node and which leaf a new node is stitched from.
       const uint32_t brickCount = uint32_t(layout.bricks.size());
       layout.brickNodeIndices.resize(size_t(brickCount) * IRRADIANCE_BRICK_NODE_COUNT);
+      // Reserved to a bound instead of grown node by node: a reallocation near the node limit would
+      // hold the old and the new array at once.
+      layout.nodes.reserve(size_t(std::min<uint64_t>(uint64_t(brickCount) * IRRADIANCE_BRICK_NODE_COUNT,
+        limits.maxUniqueNodes)));
 
       for (uint32_t b = 0; b < brickCount; b++)
       {

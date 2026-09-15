@@ -204,8 +204,6 @@ set(SOURCE_FILES
   Source/Utils/IrradianceGrid.cpp
   Source/Utils/IrradianceBrickLayout.h
   Source/Utils/IrradianceBrickLayout.cpp
-  Source/Utils/IrradianceBrickBake.h
-  Source/Utils/IrradianceBrickBake.cpp
   Source/Utils/SplinePath3D.h
   Source/Utils/RoadMeshGenerator.h
   Source/Utils/RoadMeshGenerator.cpp
@@ -250,6 +248,8 @@ if(YA_EDITOR)
     Source/Render/RayTracedProbeBaker.cpp
     Source/Scene/BakeExclusion.h
     Source/Scene/BakeExclusion.cpp
+    Source/Utils/IrradianceBrickBake.h
+    Source/Utils/IrradianceBrickBake.cpp
     Source/Editor/EditorLayer.cpp
     Source/Editor/EditorLayer.Actions.cpp
     Source/Editor/EditorLayer.h

@@ -660,7 +660,8 @@ namespace YAEngine
     actions.Register({
       .name = "bake.allProbes",
       .description = "Bake every reflection probe of the scene, as Bake All Reflection Probes in Render Settings "
-        "does, with the configured bounce count." + bakeNote + " Returns {probes: [{entity, name, baked, atlasSlot, "
+        "does, with the configured bounce count. Probe captures are lit by the irradiance volumes, so bake those first "
+        "(bake.allVolumes)." + bakeNote + " Returns {probes: [{entity, name, baked, atlasSlot, "
         "bakedPrefilter}]}.",
       .refusedWhileCapturing = true,
       .handler = [this, probeResult](const BridgeActionArgs&, const BridgeReply& reply) {
@@ -689,10 +690,12 @@ namespace YAEngine
       .description = "Bake every irradiance volume of the scene, as Bake All Volumes in Render Settings does."
         + volumeBakeNote + bakeNote + " Fails, with nothing baked, when the ray traced bake scene cannot be built. "
         "Returns {volumes: [{entity, name, baked, bakedVolume, rebaked}], allRebaked}. rebaked is whether this call "
-        "baked and saved the volume; one that failed (invalid volume description, InvalidDesc: e.g. min spacing above "
-        "max spacing; brick layout limit or validation; integration; every integrated node buried with no virtual "
-        "offset accepted, too close to geometry or enclosed by it, nothing saved; or file write, see log.tail) keeps "
-        "its earlier file, which baked and bakedVolume then describe.",
+        "baked, saved and uploaded the volume; one that failed before saving (invalid volume description, InvalidDesc: "
+        "e.g. min spacing above max spacing; brick layout limit or validation; integration; every integrated node buried "
+        "with no virtual offset accepted, too close to geometry or enclosed by it, nothing saved; a baked volume the GPU "
+        "volume storage refuses on its own - device 3D texture limit, brick pool or indirection atlas - nothing saved; "
+        "or file write, see log.tail) keeps its earlier file, which baked and bakedVolume then describe. One saved but "
+        "left out of the reload for lack of room next to the other volumes has rebaked and baked false.",
       .refusedWhileCapturing = true,
       .handler = [this, volumeResult, volumeBakeUnavailable](const BridgeActionArgs&, const BridgeReply& reply) {
         Scene& scene = GetScene();
@@ -796,9 +799,10 @@ namespace YAEngine
             "scene could not be built (nothing traceable in the scene), the volume description is invalid (InvalidDesc: "
             "e.g. min spacing above max spacing), the brick layout exceeded a limit or failed validation, the "
             "integration failed, every integrated node was buried with no virtual offset accepted, too close to geometry or "
-            "enclosed by it (nothing saved), or the "
-            "file could not be written (a complete bake that could not replace the old file is kept as <file>.tmp); "
-            "see log.tail");
+            "enclosed by it (nothing saved), the GPU volume storage would refuse the baked volume on its own - device 3D "
+            "texture limit, brick pool or indirection atlas (nothing saved), the "
+            "file could not be written (a complete bake that could not replace the old file is kept as <file>.tmp), or the "
+            "saved volume was left out of the reload for lack of room next to the other volumes; see log.tail");
           return;
         }
 

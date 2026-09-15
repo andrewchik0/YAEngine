@@ -280,13 +280,10 @@ namespace YAEngine
       slot.sizedForCount = capacity;
     }
 
-    // Both barriers below have to reach every consumer of the structure and the records:
-    // an inline ray query runs in a compute shader, and a shader binding table pipeline
-    // runs in the ray tracing stages instead. The ray tracing stage bit is legal here
-    // because raytracingSupported is exactly what enabled VK_KHR_ray_tracing_pipeline, and
-    // naming it costs nothing on a frame where only the ray query path traces.
-    const VkPipelineStageFlags traceStages = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT
-      | VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
+    // Both barriers below have to reach every consumer of the structure and the records, and
+    // every one is a shader binding table pipeline in the ray tracing stages. The stage bit is
+    // legal here because raytracingSupported is exactly what enabled VK_KHR_ray_tracing_pipeline.
+    const VkPipelineStageFlags traceStages = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR;
 
     // The instance array and the records were just written through a host mapping.
     // vkQueueSubmit makes host writes visible on its own, but the two are read at

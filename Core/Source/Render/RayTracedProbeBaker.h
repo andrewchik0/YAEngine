@@ -61,8 +61,10 @@ namespace YAEngine
   };
 
   // Irradiance probes baked by ray tracing, and the geometry queries that decide where a probe may
-  // stand. The radiance past every first hit is pt_path.glsl's estimator, so a baked probe
-  // converges on what the path tracer sees; the runtime keeps reading baked L1 SH and never traces.
+  // stand. The radiance past every first hit is pt_path.glsl's estimator, so with the firefly clamp
+  // off a baked probe converges on the irradiance the path tracer gathers at that point; a clamp
+  // darkens the bake where it bites, see probe_bake.rgen. The runtime keeps reading baked L1 SH and
+  // never traces.
   //
   // Points come in as ProbeBakePoint, a world position and an integer seed key. The seed key, the
   // pass index and the sample index are all a sample depends on, and every point's passes are
@@ -80,6 +82,10 @@ namespace YAEngine
 
     static constexpr float NO_HIT = std::numeric_limits<float>::infinity();
 
+    // Receives one probe's finished result with its index into the request. Every probe arrives
+    // exactly once, block by block, in no particular order within a block.
+    using IntegrateCollector = std::function<void(uint32_t probeIndex, const ProbeIntegrateResult& result)>;
+
     void Init(Render& render);
     void Destroy();
 
@@ -95,9 +101,10 @@ namespace YAEngine
 
     // Integrates the radiance arriving at every probe into L1 SH. A lattice probe's seed key is its
     // integer lattice coordinate. lights is the LightBuffer BuildBakeSceneSnapshot filled together
-    // with the snapshot the bake slot was built from.
+    // with the snapshot the bake slot was built from. Results go to collect as each block finishes
+    // rather than into an array, so a caller baking millions of probes keeps only what it needs.
     bool Integrate(std::span<const ProbeBakePoint> probes, const LightBuffer& lights,
-      const ProbeIntegrateDesc& desc, std::vector<ProbeIntegrateResult>& outResults);
+      const ProbeIntegrateDesc& desc, const IntegrateCollector& collect);
 
   private:
 

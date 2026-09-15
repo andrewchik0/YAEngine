@@ -217,7 +217,7 @@ namespace YAEngine
       std::string failure;
       if (!IrradianceVolumeFile::Validate(outData, failure))
       {
-        YA_LOG_ERROR("Assets", "Irradiance volume is inconsistent (%s): %s", failure.c_str(), path.c_str());
+        YA_LOG_ERROR("Assets", "Irradiance volume is inconsistent (%s) - rebake it: %s", failure.c_str(), path.c_str());
         return false;
       }
 
@@ -276,14 +276,22 @@ namespace YAEngine
 
   SHL1RGBHalf PackSHL1RGBHalf(const SHL1RGB& sh)
   {
+    // A finite value past the largest half would be stored as infinity, which the shader turns into
+    // NaN. A non-finite value is packed as it is, so Validate refuses it.
+    const auto pack = [](float value)
+    {
+      constexpr float MAX_HALF = 65504.0f;
+      return glm::packHalf1x16(std::isfinite(value) ? std::clamp(value, -MAX_HALF, MAX_HALF) : value);
+    };
+
     SHL1RGBHalf packed;
     const SHL1Channel* channels[3] = { &sh.r, &sh.g, &sh.b };
     for (size_t c = 0; c < 3; c++)
     {
-      packed.halves[c * 4] = glm::packHalf1x16(channels[c]->l0);
-      packed.halves[c * 4 + 1] = glm::packHalf1x16(channels[c]->l1x);
-      packed.halves[c * 4 + 2] = glm::packHalf1x16(channels[c]->l1y);
-      packed.halves[c * 4 + 3] = glm::packHalf1x16(channels[c]->l1z);
+      packed.halves[c * 4] = pack(channels[c]->l0);
+      packed.halves[c * 4 + 1] = pack(channels[c]->l1x);
+      packed.halves[c * 4 + 2] = pack(channels[c]->l1y);
+      packed.halves[c * 4 + 3] = pack(channels[c]->l1z);
     }
     return packed;
   }
@@ -366,6 +374,16 @@ namespace YAEngine
       const uint32_t brick = data.indirection[c];
       if (brick != IRRADIANCE_BRICK_INVALID && brick >= brickCount)
         return Reject(outFailure, "indirection cell %zu names brick %u of %llu", c, brick, (unsigned long long)brickCount);
+    }
+
+    // A half with every exponent bit set is infinity or NaN, which the shader spreads over the brick.
+    for (size_t n = 0; n < data.coefficients.size(); n++)
+    {
+      for (uint16_t half : data.coefficients[n].halves)
+      {
+        if ((half & 0x7C00u) == 0x7C00u)
+          return Reject(outFailure, "node %zu has a non-finite coefficient", n);
+      }
     }
 
     return true;

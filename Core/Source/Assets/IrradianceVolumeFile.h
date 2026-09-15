@@ -95,9 +95,9 @@ namespace YAEngine
     // A failed load leaves outData as it was.
     static bool Load(const std::string& path, IrradianceVolumeFileData& outData);
 
-    // Every count and index the loader checks: non-zero counts, spacing indices, a finite positive
-    // edge fade, blob sizes against the counts, brick node indices and indirection cells in range.
-    // False with a readable description of the first failure.
+    // Everything the loader checks: non-zero counts, spacing indices, a finite positive edge fade,
+    // blob sizes against the counts, brick node indices and indirection cells in range, and finite
+    // coefficients. False with a readable description of the first failure.
     static bool Validate(const IrradianceVolumeFileData& data, std::string& outFailure);
   };
 }

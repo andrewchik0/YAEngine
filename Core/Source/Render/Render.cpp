@@ -127,11 +127,6 @@ namespace YAEngine
   {
     m_VolumeStorage.Upload(m_Backend.GetContext(), volumes, outSlots);
     WriteIrradianceVolumeDescriptors();
-
-    // Frame 0 is what OffscreenRenderer binds, and it is only refreshed by Draw
-    // for the frame currently in flight - prime it so a bake right after a scene
-    // load does not read a stale description.
-    m_VolumeStorage.SetUp(0, m_VolumeStorage.GetBufferData());
     m_VolumeUploadDirty = uint32_t(m_Backend.GetContext().maxFramesInFlight);
   }
 
@@ -909,14 +904,13 @@ namespace YAEngine
     }
     m_ProbeBuffer.SetUp(0, bakeProbes);
 
-    // Irradiance volumes are switched off for the capture: they're fed by the very probes
-    // being rebaked, so leaving them on would close a feedback loop and drift brighter each
-    // bake. Frame 0 is the slot OffscreenRenderer binds.
+    // Frame 0 is the slot OffscreenRenderer binds, and the frame loop rewrites the volume
+    // description only when it changes, so the capture is handed the current one here.
     {
-      IrradianceVolumeBuffer noVolumes {};
-      noVolumes.poolInvSize = m_VolumeStorage.GetBufferData().poolInvSize;
-      noVolumes.volumeCount = 0;
-      m_VolumeStorage.SetUp(0, noVolumes);
+      IrradianceVolumeBuffer volumeData = m_VolumeStorage.GetBufferData();
+      if (!b_IrradianceVolumesEnabled)
+        volumeData.volumeCount = 0;
+      m_VolumeStorage.SetUp(0, volumeData);
     }
 
     // One shadow atlas render per probe: the cascades are fitted around the probe
@@ -940,16 +934,12 @@ namespace YAEngine
     if (writeToDisk)
       lp.bakedPrefilterPath = assets.MakeRelative(pfPath);
 
-    // Restore the real volume description for the next frame
-    m_VolumeStorage.SetUp(0, m_VolumeStorage.GetBufferData());
-
     YA_LOG_INFO("Render", "Probe '%s' baked -> slot %u", entityName.c_str(), atlasSlot);
   }
 
   void Render::BakeAllProbes(Scene& scene, AssetManager& assets)
   {
-    // Snapshot the entity list first - BuildBakeSceneSnapshot inside BakeProbe can add
-    // components and invalidate a live view
+    // Copied to be sorted by capture resolution below.
     std::vector<entt::entity> probes;
     {
       auto probeView = scene.GetView<ReflectionProbeComponent>();

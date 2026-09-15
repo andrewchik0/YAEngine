@@ -156,6 +156,10 @@ namespace YAEngine
   {
     m_DeveloperPanel->ApplyPendingTheme();
 
+    // The node overlay runs from the gizmo callback, which the renderer skips while gizmos are off.
+    if (!m_VolumeNodeCachePath.empty() && m_Context.render && !m_Context.render->GetGizmosEnabled())
+      ReleaseVolumeNodeCache();
+
     // Moving the window to a monitor with another scale factor rescales the whole UI
     float contentScale = QueryWindowContentScale(GetWindow().Get());
     if (contentScale != m_ContentScale)
@@ -872,23 +876,37 @@ namespace YAEngine
     }
   }
 
+  void EditorLayer::ReleaseVolumeNodeCache()
+  {
+    m_VolumeNodeCachePath.clear();
+    b_VolumeNodeCacheValid = false;
+    m_VolumeNodeCache = {};
+    std::vector<glm::vec4>().swap(m_VolumeNodeGizmos);
+    m_VolumeNodePeakL0 = 0.0f;
+  }
+
   void EditorLayer::DebugDrawIrradianceVolumeNodes()
   {
+    // A whole scene volume and its node gizmos take hundreds of megabytes, so the cache is only
+    // held while the overlay shows the selected volume.
     auto* render = m_Context.render;
     if (!render || !render->GetVolumeNodesVisible())
+    {
+      ReleaseVolumeNodeCache();
       return;
+    }
 
     Entity selected = m_Context.selectedEntity;
     if (selected == entt::null || !GetScene().HasComponent<IrradianceVolumeComponent>(selected))
+    {
+      ReleaseVolumeNodeCache();
       return;
+    }
 
     auto& volume = GetScene().GetComponent<IrradianceVolumeComponent>(selected);
     if (volume.bakedVolumePath.empty())
     {
-      m_VolumeNodeCachePath.clear();
-      b_VolumeNodeCacheValid = false;
-      m_VolumeNodeGizmos.clear();
-      m_VolumeNodePeakL0 = 0.0f;
+      ReleaseVolumeNodeCache();
       return;
     }
 
@@ -897,6 +915,8 @@ namespace YAEngine
     const uint32_t generation = render->GetIrradianceVolumeGeneration();
     if (m_VolumeNodeCachePath != volume.bakedVolumePath || m_VolumeNodeCacheGeneration != generation)
     {
+      // First, so the old volume and the new one are never held at once.
+      ReleaseVolumeNodeCache();
       m_VolumeNodeCachePath = volume.bakedVolumePath;
       m_VolumeNodeCacheGeneration = generation;
       std::string resolved = m_Context.assetManager->ResolvePath(volume.bakedVolumePath);

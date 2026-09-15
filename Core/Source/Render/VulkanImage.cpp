@@ -74,7 +74,7 @@ namespace YAEngine
       samplerInfo.unnormalizedCoordinates = VK_FALSE;
       samplerInfo.compareEnable = samplerDesc->compareEnable ? VK_TRUE : VK_FALSE;
       samplerInfo.compareOp = samplerDesc->compareOp;
-      samplerInfo.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+      samplerInfo.mipmapMode = samplerDesc->mipmapMode;
       samplerInfo.mipLodBias = 0.0f;
       samplerInfo.minLod = samplerDesc->minLod;
       samplerInfo.maxLod = samplerDesc->maxLod;

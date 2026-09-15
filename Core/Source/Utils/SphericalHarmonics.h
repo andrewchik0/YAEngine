@@ -45,8 +45,8 @@ namespace YAEngine
   // on strongly directional environments and negative light is never wanted.
   glm::vec3 EvaluateSHL1(const SHL1RGB& sh, const glm::vec3& normal);
 
-  // SH coefficients are linear, so these are used by the flood fill and by
-  // any weighted blending of neighbouring nodes.
+  // SH coefficients are linear, so these serve any weighted blending of
+  // neighbouring nodes, the brick bake's dilation and stitching included.
   SHL1RGB operator+(const SHL1RGB& a, const SHL1RGB& b);
   SHL1RGB operator*(const SHL1RGB& a, float scalar);
 }

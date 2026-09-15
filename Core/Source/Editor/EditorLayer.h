@@ -56,6 +56,7 @@ namespace YAEngine
     void EnsureBasePath(const std::string& scenePath);
     void SyncEditorCameraState();
     void DebugDrawIrradianceVolumeNodes();
+    void ReleaseVolumeNodeCache();
     void DebugDrawIrradianceVolumeBricks();
     void DebugDrawSceneCameras();
     void DebugDrawCameraTrack();

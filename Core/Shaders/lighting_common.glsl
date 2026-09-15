@@ -35,14 +35,11 @@ layout(std430, set = 3, binding = 4) readonly buffer ReflectionProbeSSBO
   ReflectionProbeBuffer u_Probes;
 };
 
-// Irradiance volumes (set 3, bindings 5-10). The brick pool is one 3D texture per color
-// channel, each texel holding (L0, L1x, L1y, L1z) of that channel.
+// Irradiance volumes (set 3, bindings 5-7, 9 and 10; 8 is unused). The brick pool is one 3D
+// texture per color channel, each texel holding (L0, L1x, L1y, L1z) of that channel.
 layout(set = 3, binding = 5) uniform sampler3D irradianceVolumeR;
 layout(set = 3, binding = 6) uniform sampler3D irradianceVolumeG;
 layout(set = 3, binding = 7) uniform sampler3D irradianceVolumeB;
-// Kept for documentation and for the validity debug work; the binding itself is
-// created by Render.Pipelines.cpp, not by this declaration, deliberately unread in v1 - see computeDiffuseIBL
-layout(set = 3, binding = 8) uniform sampler3D irradianceVolumeValidity;
 
 #include "../Shared/IrradianceVolumeData.h"
 layout(std140, set = 3, binding = 9) uniform IrradianceVolumeUBO
