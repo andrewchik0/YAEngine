@@ -117,6 +117,11 @@ namespace YAEngine
       .transparent = material.transparent,
       .opacity = material.opacity,
       .fresnelOpacity = material.fresnelOpacity,
+      .transmissionMode = material.transmissionMode,
+      .ior = material.ior,
+      .transmittanceColor = material.transmittanceColor,
+      .transmittanceDistance = material.transmittanceDistance,
+      .mediumPriority = material.mediumPriority,
       .shadingModel = material.shadingModel,
       .uvScale = material.uvScale,
       .baseColorTexture = material.baseColorTexture,
@@ -149,6 +154,11 @@ namespace YAEngine
     material.transparent = snapshot.transparent;
     material.opacity = snapshot.opacity;
     material.fresnelOpacity = snapshot.fresnelOpacity;
+    material.transmissionMode = snapshot.transmissionMode;
+    material.ior = snapshot.ior;
+    material.transmittanceColor = snapshot.transmittanceColor;
+    material.transmittanceDistance = snapshot.transmittanceDistance;
+    material.mediumPriority = snapshot.mediumPriority;
     material.shadingModel = snapshot.shadingModel;
     material.uvScale = snapshot.uvScale;
     material.baseColorTexture = snapshot.baseColorTexture;

@@ -5,8 +5,10 @@
 namespace YAEngine {
 #endif
 
-// EmissiveLightRecord::flags. The instance sits in RT_MASK_TRANSPARENT, which no path ray traces, so
-// a BSDF sample can never reach it and next event estimation is its only strategy: MIS weight one.
+// EmissiveLightRecord::flags. The instance is transparent but not glass to the path tracer - no
+// transmission mode, or the PT Glass switch off - and sits in RT_MASK_RASTER_ONLY, which no ray traces,
+// so a BSDF sample can never reach it and next event estimation is its only strategy: MIS weight one.
+// Glass a bounce ray would cross straight is the same case, decided per vertex in estimateDirectLight.
 #define EMISSIVE_LIGHT_NEE_ONLY 0x01u
 
 // The emissive light table next event estimation samples emitting geometry from. TlasBuilder rebuilds

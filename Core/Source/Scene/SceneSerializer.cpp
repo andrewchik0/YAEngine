@@ -170,6 +170,18 @@ namespace YAEngine
     settings["antialiasing"] = static_cast<uint32_t>(render.GetAntialiasingMode());
     settings["renderPath"] = static_cast<uint32_t>(render.GetRenderPath());
     settings["ptBounces"] = render.GetPathTraceMaxBounces();
+    settings["ptGlass"] = render.GetPathTraceGlass();
+    settings["ptTransmissionDepth"] = std::clamp(render.GetPathTraceMaxTransmissionDepth(),
+      PT_MIN_TRANSMISSION_DEPTH, PT_MAX_TRANSMISSION_DEPTH);
+    // The glass enums are stored as their numbers, like renderPath, and clamped both ways.
+    settings["ptGlassOverflow"] = std::clamp(int(render.GetPathTraceGlassOverflow()),
+      PT_GLASS_OVERFLOW_TERMINATE, PT_GLASS_OVERFLOW_STRAIGHT);
+    settings["ptSecondaryGlass"] = std::clamp(int(render.GetPathTraceSecondaryGlass()),
+      PT_GLASS_REFRACT, PT_GLASS_STRAIGHT);
+    settings["ptGlassReflectionBounces"] = std::clamp(render.GetPathTraceGlassReflectionBounces(),
+      PT_MIN_GLASS_REFLECTION_BOUNCES, PT_MAX_BOUNCES);
+    settings["ptGlassReflectionGlass"] = std::clamp(int(render.GetPathTraceGlassReflectionGlass()),
+      PT_GLASS_REFRACT, PT_GLASS_STRAIGHT);
     // Clamped on the way out as well as on the way in, so what the file says is what the
     // next load will actually apply.
     settings["ptFireflyClamp"] = std::clamp(render.GetPathTraceFireflyClamp(),
@@ -325,6 +337,33 @@ namespace YAEngine
     {
       render.GetPathTraceMaxBounces() = std::clamp(settings["ptBounces"].as<int>(),
         PT_MIN_BOUNCES, PT_MAX_BOUNCES);
+    }
+    // Absent in scenes saved before the switch existed, which then load with path traced glass off.
+    if (settings["ptGlass"]) render.GetPathTraceGlass() = settings["ptGlass"].as<bool>();
+    if (settings["ptTransmissionDepth"])
+    {
+      render.GetPathTraceMaxTransmissionDepth() = std::clamp(settings["ptTransmissionDepth"].as<int>(),
+        PT_MIN_TRANSMISSION_DEPTH, PT_MAX_TRANSMISSION_DEPTH);
+    }
+    if (settings["ptGlassOverflow"])
+    {
+      render.GetPathTraceGlassOverflow() = PathTraceGlassOverflow(std::clamp(settings["ptGlassOverflow"].as<int>(),
+        PT_GLASS_OVERFLOW_TERMINATE, PT_GLASS_OVERFLOW_STRAIGHT));
+    }
+    if (settings["ptSecondaryGlass"])
+    {
+      render.GetPathTraceSecondaryGlass() = PathTraceGlassHandling(std::clamp(settings["ptSecondaryGlass"].as<int>(),
+        PT_GLASS_REFRACT, PT_GLASS_STRAIGHT));
+    }
+    if (settings["ptGlassReflectionBounces"])
+    {
+      render.GetPathTraceGlassReflectionBounces() = std::clamp(settings["ptGlassReflectionBounces"].as<int>(),
+        PT_MIN_GLASS_REFLECTION_BOUNCES, PT_MAX_BOUNCES);
+    }
+    if (settings["ptGlassReflectionGlass"])
+    {
+      render.GetPathTraceGlassReflectionGlass() = PathTraceGlassHandling(std::clamp(
+        settings["ptGlassReflectionGlass"].as<int>(), PT_GLASS_REFRACT, PT_GLASS_STRAIGHT));
     }
     if (settings["ptFireflyClamp"])
     {

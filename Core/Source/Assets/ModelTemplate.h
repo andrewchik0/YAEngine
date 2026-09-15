@@ -52,6 +52,11 @@ namespace YAEngine
     bool transparent = false;
     float opacity = 1.0f;
     float fresnelOpacity = 0.0f;
+    TransmissionMode transmissionMode = TransmissionMode::None;
+    float ior = 1.5f;
+    glm::vec3 transmittanceColor { 1.0f };
+    float transmittanceDistance = 1.0f;
+    int32_t mediumPriority = 0;
     ShadingModel shadingModel = ShadingModel::Lit;
     glm::vec2 uvScale { 1.0f, 1.0f };
 

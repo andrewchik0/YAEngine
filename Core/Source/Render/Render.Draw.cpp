@@ -669,6 +669,9 @@ namespace YAEngine
     // computed by pt_main.rgen and also follow a moving reflector and reflected object.
     desc.specularHitDistance = DescribeStreamlineImage(m_PTHitDistance, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
     desc.specularMotionVectors = DescribeStreamlineImage(m_PTSpecularMotion, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+    // The noisy sample carries the forward transparent layer, laid in by the tracer; the same sample
+    // from before that lets RR tell the transparency from the surfaces behind it.
+    desc.colorBeforeTransparency = DescribeStreamlineImage(m_PTColorBeforeTransparency, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
     if (m_Backend.GetStreamline().EvaluateRayReconstruction(desc))
       b_ResetDLSSPending = false;
@@ -676,9 +679,9 @@ namespace YAEngine
 
   void Render::RunRayReconstructionLayerEvaluate(VkCommandBuffer cmd, FrameContext& frame)
   {
-    // PROTOTYPE (dielectric reflection layer spike): the second RR instance (viewport 1) over the
-    // mirror path of smooth dielectric pixels. Its pass is declared ahead of the base instance's,
-    // so it still sees this frame's reset flag - the base evaluate is what clears it.
+    // The second RR instance (viewport 1) over the mirror path of smooth dielectric and glass
+    // first vertices. Its pass is declared ahead of the base instance's, so it still sees this
+    // frame's reset flag - the base evaluate is what clears it.
     StreamlineFrameToken token = m_Backend.GetStreamline().GetFrameToken(
       static_cast<uint32_t>(m_GlobalFrameIndex));
     if (token == nullptr)
@@ -1077,8 +1080,10 @@ namespace YAEngine
     // The path tracer traces a shadow ray per light sample, so the atlas is dead weight
     // while it owns the frame: this takes the exact branch b_ShadowsEnabled = false takes,
     // invalidation of the cached atlas content included. Bakes are the exception - they
-    // render through the raster offscreen path and still need the atlas.
-    bool shadowsWanted = b_ShadowsEnabled && (isBake || !IsPathTracingActive());
+    // render through the raster offscreen path and still need the atlas - and so is a traced
+    // frame whose forward transparent layer draws, which shades with it.
+    bool shadowsWanted = b_ShadowsEnabled
+      && (isBake || !IsPathTracingActive() || b_PathTraceTransparencyActive);
 
     bool hasDirectionalShadow = shadowsWanted && frame.snapshot.directionalShadow.castShadow;
     bool hasSpotShadows = shadowsWanted && !frame.snapshot.spotShadowRequests.empty();
@@ -2193,7 +2198,27 @@ namespace YAEngine
     m_PendingParticleBatches.push_back({ firstInstance, count, texture });
   }
 
-  void Render::DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame)
+  bool Render::HasPathTraceRasterTransparency(FrameContext& frame) const
+  {
+    if (!m_PendingParticleBatches.empty())
+      return true;
+
+    // The objects DrawMeshes routes to the transparent list, less what the TLAS builds as glass.
+    auto& materials = frame.assets.Materials();
+    for (uint32_t i = 0; i < frame.snapshot.visibleCount; i++)
+    {
+      const RenderObject& object = frame.snapshot.objects[i];
+      if (!object.isTransparent || !materials.Has(object.material))
+        continue;
+
+      if (!b_PathTraceGlass || materials.Get(object.material).transmissionMode == TransmissionMode::None)
+        return true;
+    }
+
+    return false;
+  }
+
+  void Render::DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame, bool pathTraceLayer)
   {
     // Wireframe debug draws transparent geometry inside GBuffer pass instead
     if (m_CurrentTexture == DEBUG_VIEW_WIREFRAME)
@@ -2220,12 +2245,21 @@ namespace YAEngine
         return a.cameraDistanceSq > b.cameraDistanceSq;
       });
 
+    // The path traced frame's layer leaves out what the tracer meets as glass, by TlasBuilder's rule.
+    auto tracedAsGlass = [&](const DrawCommand& dc)
+    {
+      return pathTraceLayer && b_PathTraceGlass
+        && materialManager.Get(MaterialHandle { dc.materialIndex, dc.materialGeneration }).transmissionMode
+          != TransmissionMode::None;
+    };
+
     // Pre-bind all transparent materials (texture upload + descriptor write)
     uint32_t preLastMaterialIndex = UINT32_MAX;
     uint32_t preLastMaterialGen = UINT32_MAX;
     for (auto& dc : m_TransparentDrawCommands)
     {
       if (dc.materialIndex == preLastMaterialIndex && dc.materialGeneration == preLastMaterialGen) continue;
+      if (tracedAsGlass(dc)) continue;
       preLastMaterialIndex = dc.materialIndex;
       preLastMaterialGen = dc.materialGeneration;
 
@@ -2242,13 +2276,18 @@ namespace YAEngine
 
     for (auto& dc : m_TransparentDrawCommands)
     {
+      if (tracedAsGlass(dc))
+        continue;
+
       MaterialHandle matHandle { dc.materialIndex, dc.materialGeneration };
       MeshHandle meshHandle { dc.meshIndex, dc.meshGeneration };
 
       uint32_t pipelineIdx = (dc.instanced ? 2u : 0u) + (dc.doubleSided ? 1u : 0u);
       if (pipelineIdx != lastPipelineIdx)
       {
-        currentPipeline = &GetForwardTransparentPipeline(dc);
+        currentPipeline = pathTraceLayer
+          ? &m_PSOCache.Get(m_PathTraceTransparentPipelines[pipelineIdx])
+          : &GetForwardTransparentPipeline(dc);
         currentPipeline->Bind(cmd);
         currentPipeline->BindDescriptorSets(cmd, {frameUBO}, 0);
         currentPipeline->BindDescriptorSets(cmd, {m_DeferredLightingLightDescriptorSets[currentFrame].Get()}, 2);
@@ -2310,7 +2349,7 @@ namespace YAEngine
         m_ParticleStage.data(),
         uint32_t(m_ParticleStage.size() * sizeof(ParticleInstance)));
 
-      auto& particlePipeline = m_PSOCache.Get(m_ParticlePipeline);
+      auto& particlePipeline = m_PSOCache.Get(pathTraceLayer ? m_PathTraceParticlePipeline : m_ParticlePipeline);
       particlePipeline.Bind(cmd);
       particlePipeline.BindDescriptorSets(cmd, { frameUBO }, 0);
 

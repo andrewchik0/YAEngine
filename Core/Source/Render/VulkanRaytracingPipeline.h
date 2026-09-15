@@ -7,9 +7,10 @@ namespace YAEngine
 {
   struct RenderContext;
 
-  // One triangles hit group. The closest hit shader is what fills the payload; the any hit
-  // shader is optional and only ever runs for instances the TLAS left non-opaque, which is
-  // exactly the alpha-tested ones.
+  // One triangles hit group. The closest hit shader is what fills the payload, and may be left
+  // empty for rays that skip it; the any hit shader is optional. It runs for instances the TLAS
+  // left non-opaque (alpha-tested ones, and glass under Glass Traversal Legacy), and for every
+  // instance a trace with gl_RayFlagsNoOpaqueEXT reaches, FORCE_OPAQUE glass included.
   struct RaytracingHitGroup
   {
     std::string closestHitShaderFile;

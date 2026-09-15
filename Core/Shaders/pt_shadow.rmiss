@@ -11,9 +11,10 @@
 layout(location = 1) rayPayloadInEXT ShadowRayPayload payload;
 
 // Reaching this shader IS the answer. The ray was traced with TerminateOnFirstHit and
-// SkipClosestHitShader, so no other shader of the pipeline can run for it except the
-// alpha-test any-hit, which only ever rejects candidates. Nothing accepted means the light
-// is visible.
+// SkipClosestHitShader, so no other shader of the pipeline can run for it except
+// pt_shadow.rahit, which only ever rejects candidates - the texels the alpha cutout removes, and
+// every dielectric once its transmittance is in the payload. Nothing accepted means the light is
+// visible, as much of it as the transmittance says.
 void main()
 {
   payload.visible = 1u;

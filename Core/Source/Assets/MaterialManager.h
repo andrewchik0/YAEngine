@@ -5,6 +5,7 @@
 #include "CubeMapManager.h"
 
 #include "TextureManager.h"
+#include "TransmissionMode.h"
 #include "Render/VulkanMaterial.h"
 
 namespace YAEngine
@@ -43,6 +44,18 @@ namespace YAEngine
     bool transparent{false};
     float opacity{1.0f};
     float fresnelOpacity{0.0f};
+    // Path tracing only, and only while transparent is set - see IsPathTraceTransmissive. The
+    // surface is then a perfectly smooth dielectric, and albedo, metallic and roughness are
+    // raster tuning the path tracer ignores.
+    TransmissionMode transmissionMode{TransmissionMode::None};
+    float ior{1.5f};
+    // Solid and ThinWalled: what is left of white light after transmittanceDistance world units
+    // inside. Sheet: the tint of one crossing, the distance unused.
+    glm::vec3 transmittanceColor{1.0f, 1.0f, 1.0f};
+    float transmittanceDistance{1.0f};
+    // Where Solid media overlap - a liquid modelled into its glass wall - the higher priority
+    // owns the overlap.
+    int32_t mediumPriority{0};
     ShadingModel shadingModel{ShadingModel::Lit};
 
     // Tiling factor folded into the mesh UVs before every material texture fetch, the
@@ -67,6 +80,22 @@ namespace YAEngine
 
     friend class MaterialManager;
   };
+
+  // `transparent` stays the single routing flag: a transparent material without a transmission
+  // mode is raster-only, exactly as before transmission existed.
+  inline bool IsPathTraceTransmissive(const Material& material)
+  {
+    return material.transparent && material.transmissionMode != TransmissionMode::None;
+  }
+
+  // Loaded values into the range the inspector offers and the path tracer can use.
+  inline void ClampTransmission(Material& material)
+  {
+    material.ior = std::clamp(material.ior, MIN_TRANSMISSION_IOR, MAX_TRANSMISSION_IOR);
+    material.transmittanceColor = glm::clamp(material.transmittanceColor, glm::vec3(0.0f), glm::vec3(1.0f));
+    material.transmittanceDistance = std::max(material.transmittanceDistance, MIN_TRANSMITTANCE_DISTANCE);
+    material.mediumPriority = std::clamp(material.mediumPriority, 0, MAX_MEDIUM_PRIORITY);
+  }
 
   class MaterialManager : public AssetManagerBase<Material, MaterialTag>, public IAssetManager
   {

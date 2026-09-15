@@ -310,7 +310,7 @@ namespace YAEngine
     m_MaterialTable.Update(ctx, materialSlot, assets.Materials(), assets.Textures());
 
     VkCommandBuffer cmd = m_Backend.GetCommandBuffer().BeginSingleTimeCommands();
-    m_TlasBuilder.Build(ctx, cmd, tlasSlot, snapshot, assets.Meshes(), assets.Materials());
+    m_TlasBuilder.Build(ctx, cmd, tlasSlot, snapshot, assets.Meshes(), assets.Materials(), b_PathTraceGlass);
     m_Backend.GetCommandBuffer().EndSingleTimeCommands(cmd);
 
     const bool valid = m_TlasBuilder.IsValid(tlasSlot) && m_MaterialTable.IsValid(materialSlot);
@@ -545,6 +545,11 @@ namespace YAEngine
         .samplesPerPass = BakeLimits::RT_PROBE_DEFAULT_SAMPLES_PER_PASS,
         .maxBounces = std::clamp(m_VolumeBounceCount, MIN_VOLUME_BOUNCES, MAX_VOLUME_BOUNCES),
         .fireflyClamp = std::clamp(m_VolumeFireflyClamp, PT_MIN_FIREFLY_CLAMP, PT_MAX_FIREFLY_CLAMP),
+        .glass = b_PathTraceGlass,
+        .maxTransmissionDepth = std::clamp(m_PathTraceMaxTransmissionDepth, PT_MIN_TRANSMISSION_DEPTH,
+          PT_MAX_TRANSMISSION_DEPTH),
+        .glassOverflow = int32_t(m_PathTraceGlassOverflow),
+        .secondaryGlass = int32_t(m_PathTraceSecondaryGlass),
       };
 
       YA_LOG_INFO("Render", "Volume '%s': integrating %u nodes x %u samples, %d bounces, firefly clamp %.1f",

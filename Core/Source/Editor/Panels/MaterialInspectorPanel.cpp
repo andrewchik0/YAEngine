@@ -7,6 +7,7 @@
 #include "Editor/EditorContext.h"
 #include "Editor/Utils/EditorIcons.h"
 #include "Editor/Utils/EditorWidgets.h"
+#include "Render/Render.h"
 #include "Scene/Components.h"
 
 namespace YAEngine
@@ -18,6 +19,16 @@ namespace YAEngine
     constexpr EditorWidgets::EnumOption SHADING_MODELS[] = {
       { .label = "Lit", .tooltip = "Lights, shadows and indirect lighting" },
       { .label = "Unlit", .tooltip = "Albedo and textures only, without lighting" },
+    };
+
+    constexpr EditorWidgets::EnumOption TRANSMISSION_MODES[] = {
+      { .label = "None", .tooltip = "Absent from the path tracer, like any transparent material without transmission" },
+      { .label = "Sheet", .tooltip = "Single-layer geometry, one surface a whole pane crossed without bending: windows, bottles "
+                                     "modeled as one sheet. Cheap: one query covers any number of them" },
+      { .label = "ThinWalled", .tooltip = "Closed thin walls, each surface one interface crossed without bending: glasses and cups, "
+                                          "no lens effect. Cheap: one query covers any number of them" },
+      { .label = "Solid", .tooltip = "A closed volume light refracts into and out of: liquids, ice, thick glass - real refraction, "
+                                     "one traced ray per interface, as Render Settings > PT Glass allows" },
     };
 
     PropertyEdit DrawSurfaceGroup(Material& mat)
@@ -103,6 +114,53 @@ namespace YAEngine
       edit |= EditorWidgets::PropertyFloat("Fresnel Opacity", mat.fresnelOpacity, {
         .min = 0.0f, .max = 1.0f, .slider = true, .defaultValue = 0.0f,
         .tooltip = "Normalized 0-1. Raises opacity toward 1 at grazing angles." });
+      EditorWidgets::PopDependency();
+
+      EditorWidgets::EndPropertyGroup();
+      return edit;
+    }
+
+    PropertyEdit DrawTransmissionGroup(Material& mat, Render* render)
+    {
+      PropertyEdit edit;
+      if (!EditorWidgets::BeginPropertyGroup("Transmission (Path Tracing)", { .icon = ICON_LC_GLASS_WATER }))
+        return edit;
+
+      // Still editable: the mode is authored for when the switch is on.
+      if (render != nullptr && !render->GetPathTraceGlass())
+      {
+        EditorWidgets::PropertyStatus(nullptr, "No effect while PT Glass is off", EditorWidgets::StatusKind::Info,
+          "Render Settings > Render Path > PT Glass > Glass. Off, the path tracer ignores the Mode and the raster "
+          "forward pass draws this transparent material over the traced image.");
+      }
+
+      EditorWidgets::PushDependency(mat.transparent, "Requires Transparent");
+      edit |= EditorWidgets::PropertyEnum("Mode", mat.transmissionMode, TRANSMISSION_MODES, {
+        .defaultValue = int32_t(TransmissionMode::None),
+        .tooltip = "How the path tracer sees this surface: a perfectly smooth dielectric that ignores Albedo, Metallic, "
+                   "Roughness and the Opacity group. Raster ignores it." });
+
+      EditorWidgets::PushDependency(mat.transmissionMode != TransmissionMode::None, "Requires a Mode");
+      edit |= EditorWidgets::PropertyFloat("IOR", mat.ior, {
+        .min = MIN_TRANSMISSION_IOR, .max = MAX_TRANSMISSION_IOR, .slider = true, .defaultValue = 1.5f,
+        .tooltip = "Index of refraction, 1.33 for water and 1.5 for glass. Sets how much the surface reflects and, for "
+                   "Solid, how much it bends light." });
+      edit |= EditorWidgets::PropertyColor("Transmittance Color", mat.transmittanceColor, {
+        .defaultValue = glm::vec3(1.0f),
+        .tooltip = "Solid and ThinWalled: the color white light keeps after Transmittance Distance inside the volume or the "
+                   "wall, so thicker parts get deeper. Sheet: the tint of one pass through the sheet. White absorbs nothing." });
+      edit |= EditorWidgets::PropertyFloat("Transmittance Distance", mat.transmittanceDistance, {
+        .min = MIN_TRANSMITTANCE_DISTANCE, .max = 1000.0f, .speed = 0.001f, .unit = "m", .defaultValue = 1.0f,
+        .tooltip = "Solid and ThinWalled: world units inside after which Transmittance Color is left. A Sheet does not use "
+                   "it: its color is the tint of one crossing." });
+
+      EditorWidgets::PushDependency(mat.transmissionMode == TransmissionMode::Solid, "Requires Mode Solid");
+      edit |= EditorWidgets::PropertyInt("Medium Priority", mat.mediumPriority, {
+        .min = 0, .max = MAX_MEDIUM_PRIORITY, .speed = 0.05f, .defaultValue = 0,
+        .tooltip = "Where Solid volumes overlap, the higher priority owns the overlap and the other's surfaces inside it "
+                   "are ignored. Give a liquid a higher priority than the glass wall it is modeled into." });
+      EditorWidgets::PopDependency();
+      EditorWidgets::PopDependency();
       EditorWidgets::PopDependency();
 
       EditorWidgets::EndPropertyGroup();
@@ -215,6 +273,7 @@ namespace YAEngine
     edit |= DrawSurfaceGroup(mat);
     edit |= DrawEmissionGroup(mat);
     edit |= DrawOpacityGroup(mat);
+    edit |= DrawTransmissionGroup(mat, context.render);
     edit |= DrawShadingGroup(mat);
     edit |= DrawUvGroup(mat);
     edit |= DrawTexturesGroup(mat, context);

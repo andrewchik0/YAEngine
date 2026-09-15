@@ -40,6 +40,13 @@ const float GUIDE_SKY_DEPTH = 0.0;
 // denoiser a divisor it can multiply back.
 const vec3 GUIDE_SKY_SPECULAR_ALBEDO = vec3(0.5);
 
+// Floor on the throughput both albedo guides are scaled by, for the same reason: a dark tint behind
+// glass or a mirror drives the throughput towards 1e-4, and a divisor that small is nearly as unstable
+// as zero. The radiance is multiplied back by the same guide, so the floor changes how evenly the
+// demodulated signal is filtered and nothing about the energy. 0.02 is where biasFade below starts to
+// drop a response too.
+const float GUIDE_MIN_THROUGHPUT = 0.02;
+
 void main()
 {
   ivec2 pixel = ivec2(gl_GlobalInvocationID.xy);
@@ -48,6 +55,7 @@ void main()
 
   float depth = texelFetch(depthTexture, pixel, 0).r;
   vec4 throughput = texelFetch(primaryThroughputTexture, pixel, 0);
+  vec3 guideThroughput = max(throughput.rgb, vec3(GUIDE_MIN_THROUGHPUT));
 
   // A pixel with no PBR response to demodulate: the sky, an unlit texel whose albedo IS
   // its final colour, and an emissive one that gave up its response in the G-buffer pass.
@@ -65,7 +73,7 @@ void main()
   if (depth <= GUIDE_SKY_DEPTH)
   {
     imageStore(outDiffuseAlbedo, pixel, vec4(0.0));
-    imageStore(outSpecularAlbedo, pixel, vec4(GUIDE_SKY_SPECULAR_ALBEDO * throughput.rgb, 1.0));
+    imageStore(outSpecularAlbedo, pixel, vec4(GUIDE_SKY_SPECULAR_ALBEDO * guideThroughput, 1.0));
     // No surface, so no lobe for the kernels to shape: a flat normal at full roughness is
     // the widest, least confident filter, which is what a sky pixel should get.
     imageStore(outNormalRoughness, pixel, vec4(0.0, 0.0, 0.0, 1.0));
@@ -78,7 +86,7 @@ void main()
   if (throughput.a < 0.5)
   {
     imageStore(outDiffuseAlbedo, pixel, vec4(0.0));
-    imageStore(outSpecularAlbedo, pixel, vec4(GUIDE_SKY_SPECULAR_ALBEDO * throughput.rgb, 1.0));
+    imageStore(outSpecularAlbedo, pixel, vec4(GUIDE_SKY_SPECULAR_ALBEDO * guideThroughput, 1.0));
     imageStore(outNormalRoughness, pixel, vec4(normal, 1.0));
     return;
   }
@@ -137,7 +145,7 @@ void main()
   float biasFade = clamp(f0.g * 50.0, 0.0, 1.0);
   vec3 specularAlbedo = f0 * envBrdf.x + vec3(envBrdf.y * biasFade);
 
-  imageStore(outDiffuseAlbedo, pixel, vec4(diffuseAlbedo * throughput.rgb, 1.0));
-  imageStore(outSpecularAlbedo, pixel, vec4(specularAlbedo * throughput.rgb, 1.0));
+  imageStore(outDiffuseAlbedo, pixel, vec4(diffuseAlbedo * guideThroughput, 1.0));
+  imageStore(outSpecularAlbedo, pixel, vec4(specularAlbedo * guideThroughput, 1.0));
   imageStore(outNormalRoughness, pixel, vec4(normal, roughness));
 }

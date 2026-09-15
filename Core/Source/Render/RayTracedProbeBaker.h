@@ -3,6 +3,7 @@
 #include "Pch.h"
 #include "FrameUniformBuffer.h"
 #include "LightData.h"
+#include "PathTraceData.h"
 #include "PipelineCache.h"
 #include "ProbeBakeData.h"
 #include "VulkanBuffer.h"
@@ -14,7 +15,7 @@ namespace YAEngine
   class Render;
   struct RenderContext;
 
-  static_assert(sizeof(ProbeBakeConstants) == 32,
+  static_assert(sizeof(ProbeBakeConstants) == 48,
     "ProbeBakeConstants no longer matches its push constant layout");
   static_assert(sizeof(ProbeBakePoint) == 32 && offsetof(ProbeBakePoint, closeHitDistance) == 12
     && offsetof(ProbeBakePoint, seedKey) == 16,
@@ -45,6 +46,12 @@ namespace YAEngine
     int32_t maxBounces = 3;
     // 0 = off, as for the path tracer.
     float fireflyClamp = 10.0f;
+    // The PT Glass switch, then the refractive events a path may take and how glass is met, as for the
+    // path tracer: PT_GLASS_OVERFLOW_*, and PT_GLASS_* for every ray of a baked path.
+    bool glass = false;
+    int32_t maxTransmissionDepth = PT_DEFAULT_TRANSMISSION_DEPTH;
+    int32_t glassOverflow = PT_GLASS_OVERFLOW_STRAIGHT;
+    int32_t secondaryGlass = PT_GLASS_STRAIGHT;
   };
 
   struct ProbeIntegrateResult
@@ -61,7 +68,8 @@ namespace YAEngine
   };
 
   // Irradiance probes baked by ray tracing, and the geometry queries that decide where a probe may
-  // stand. The radiance past every first hit is pt_path.glsl's estimator, so with the firefly clamp
+  // stand. The radiance past every first hit - with PT Glass on, along the probe ray itself - is
+  // pt_path.glsl's estimator, so with the firefly clamp
   // off a baked probe converges on the irradiance the path tracer gathers at that point; a clamp
   // darkens the bake where it bites, see probe_bake.rgen. The runtime keeps reading baked L1 SH and
   // never traces.
@@ -135,6 +143,10 @@ namespace YAEngine
       uint32_t workPerSample = 1;
       int32_t maxBounces = 0;
       float fireflyClamp = 0.0f;
+      bool glass = false;
+      int32_t maxTransmissionDepth = 1;
+      int32_t glassOverflow = PT_GLASS_OVERFLOW_STRAIGHT;
+      int32_t secondaryGlass = PT_GLASS_STRAIGHT;
       const char* label = "";
     };
 

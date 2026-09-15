@@ -1,18 +1,16 @@
 layout(local_size_x = 8, local_size_y = 8) in;
 
-// PROTOTYPE (dielectric reflection layer spike). Adds the second ray reconstruction instance's
-// output - the mirror path of smooth dielectric pixels - onto the base instance's DLSSOutput, in
-// place, at output resolution and before anything downstream reads it.
-//
-// PT_LAYER_F_IN_COMPOSITE selects where the Fresnel weight lives:
-//  1 (a): the layer radiance is unweighted and F rides the colour alpha through RR's alpha
-//         upscaling, applied here;
-//  0 (b): F is already folded into the layer radiance and its guides, the alpha is unused.
+// Adds the second ray reconstruction instance's output - the mirror path of smooth dielectric and
+// glass first vertices - onto the base instance's DLSSOutput, in place, at output resolution and
+// before anything downstream reads it. The layer radiance is unweighted and its Fresnel weight rides
+// the colour alpha through RR's alpha upscaling, so it is applied here.
 #include "common.glsl"
-#include "../Shared/PathTraceData.h"
 
 layout(set = 1, binding = 0, rgba16f) uniform image2D resolvedImage;
 layout(set = 1, binding = 1) uniform sampler2D layerTexture;
+// The forward transparent layer the base instance's input carried, premultiplied at render resolution.
+// The reflection lies behind it, so it is dimmed by its coverage.
+layout(set = 1, binding = 2) uniform sampler2D transparentLayerTexture;
 
 void main()
 {
@@ -24,14 +22,14 @@ void main()
   vec4 base = imageLoad(resolvedImage, pixel);
   vec4 layer = texelFetch(layerTexture, pixel, 0);
 
-#if PT_LAYER_F_IN_COMPOSITE
   vec3 reflection = layer.rgb * clamp(layer.a, 0.0, 1.0);
-#else
-  vec3 reflection = layer.rgb;
-#endif
 
   if (any(isnan(reflection)) || any(isinf(reflection)))
     reflection = vec3(0.0);
 
-  imageStore(resolvedImage, pixel, vec4(base.rgb + max(reflection, vec3(0.0)), base.a));
+  vec2 uv = (vec2(pixel) + 0.5) / vec2(size);
+  float coverage = textureLod(transparentLayerTexture, uv, 0.0).a;
+  coverage = isnan(coverage) ? 0.0 : clamp(coverage, 0.0, 1.0);
+
+  imageStore(resolvedImage, pixel, vec4(base.rgb + max(reflection, vec3(0.0)) * (1.0 - coverage), base.a));
 }

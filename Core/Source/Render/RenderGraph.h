@@ -54,6 +54,8 @@ namespace YAEngine
     std::vector<RGHandle> storageOutputs;
     RGHandle depthOutput = RG_INVALID_HANDLE;
     bool clearColor = true;
+    // What every colour output of a clearColor pass is cleared to.
+    VkClearColorValue clearColorValue = {{ 0.0f, 0.0f, 0.0f, 1.0f }};
     bool clearDepth = true;
     bool depthOnly = false;
     bool isCompute = false;

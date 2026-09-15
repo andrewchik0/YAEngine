@@ -645,7 +645,7 @@ namespace YAEngine
 
     sl::DLSSDOptions options {};
     options.mode = ToStreamlineMode(desc.quality);
-    // PROTOTYPE: the reflection layer instance carries its Fresnel weight in the colour alpha.
+    // The reflection layer instance carries its Fresnel weight in the colour alpha.
     options.alphaUpscalingEnabled = desc.alphaUpscaling ? sl::Boolean::eTrue : sl::Boolean::eFalse;
     options.outputWidth = desc.colorOut.width;
     options.outputHeight = desc.colorOut.height;
@@ -715,6 +715,7 @@ namespace YAEngine
     sl::Resource normalRoughness = ToStreamlineResource(desc.normalRoughness);
     sl::Resource specularHitDistance = ToStreamlineResource(desc.specularHitDistance);
     sl::Resource specularMotionVectors = ToStreamlineResource(desc.specularMotionVectors);
+    sl::Resource colorBeforeTransparency = ToStreamlineResource(desc.colorBeforeTransparency);
 
     sl::SubresourceRange colorInRange = ToStreamlineSubresource(desc.colorIn);
     sl::SubresourceRange colorOutRange = ToStreamlineSubresource(desc.colorOut);
@@ -725,6 +726,7 @@ namespace YAEngine
     sl::SubresourceRange normalRoughnessRange = ToStreamlineSubresource(desc.normalRoughness);
     sl::SubresourceRange specularHitDistanceRange = ToStreamlineSubresource(desc.specularHitDistance);
     sl::SubresourceRange specularMotionVectorsRange = ToStreamlineSubresource(desc.specularMotionVectors);
+    sl::SubresourceRange colorBeforeTransparencyRange = ToStreamlineSubresource(desc.colorBeforeTransparency);
 
     colorIn.next = &colorInRange;
     colorOut.next = &colorOutRange;
@@ -735,6 +737,7 @@ namespace YAEngine
     normalRoughness.next = &normalRoughnessRange;
     specularHitDistance.next = &specularHitDistanceRange;
     specularMotionVectors.next = &specularMotionVectorsRange;
+    colorBeforeTransparency.next = &colorBeforeTransparencyRange;
 
     // eValidUntilEvaluate for every one of them, exactly as the super resolution path
     // does: the graph owns these images and reuses them later in the frame, but nothing
@@ -742,7 +745,7 @@ namespace YAEngine
     constexpr sl::ResourceLifecycle kLifecycle = sl::ResourceLifecycle::eValidUntilEvaluate;
 
     std::vector<sl::ResourceTag> tags;
-    tags.reserve(8);
+    tags.reserve(9);
     tags.emplace_back(&colorIn, sl::kBufferTypeScalingInputColor, kLifecycle, &renderExtent);
     tags.emplace_back(&colorOut, sl::kBufferTypeScalingOutputColor, kLifecycle, &outputExtent);
     tags.emplace_back(&depth, sl::kBufferTypeDepth, kLifecycle, &renderExtent);
@@ -760,6 +763,8 @@ namespace YAEngine
     else if (specularGuide == RayReconstructionSpecularGuide::HitDistance
       && desc.specularHitDistance.image != VK_NULL_HANDLE)
       tags.emplace_back(&specularHitDistance, sl::kBufferTypeSpecularHitDistance, kLifecycle, &renderExtent);
+    if (desc.colorBeforeTransparency.image != VK_NULL_HANDLE)
+      tags.emplace_back(&colorBeforeTransparency, sl::kBufferTypeColorBeforeTransparency, kLifecycle, &renderExtent);
 
     uint32_t tagCount = static_cast<uint32_t>(tags.size());
     sl::Result tagResult = slSetTagForFrame(frame, viewport, tags.data(), tagCount, desc.cmd);
@@ -796,7 +801,7 @@ namespace YAEngine
       b_RREvaluateLogged = true;
       if (desc.viewport != 0)
         b_RRLayerEvaluateLogged = true;
-      // PROTOTYPE: SL's estimate is global rather than per viewport (see sl.dlss_d getData), so
+      // SL's estimate is global rather than per viewport (see sl.dlss_d getData), so
       // the second instance's cost is the difference against a single-viewport run.
       sl::DLSSDState state {};
       uint64_t vramBytes = slDLSSDGetState(viewport, state) == sl::Result::eOk
@@ -838,7 +843,7 @@ namespace YAEngine
     if (!IsRayReconstructionAvailable())
       return;
 
-    // PROTOTYPE: viewport 1 is the dielectric reflection layer instance.
+    // Viewport 1 is the reflection layer instance.
     for (uint32_t viewportId : { kStreamlineViewport, kStreamlineViewport + 1 })
     {
       sl::Result result = slFreeResources(sl::kFeatureDLSS_RR, sl::ViewportHandle(viewportId));

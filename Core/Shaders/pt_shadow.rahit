@@ -1,0 +1,68 @@
+#extension GL_EXT_ray_tracing : require
+#extension GL_EXT_buffer_reference : require
+#extension GL_EXT_buffer_reference2 : require
+#extension GL_EXT_shader_explicit_arithmetic_types_int64 : require
+#extension GL_EXT_nonuniform_qualifier : require
+
+#define RT_BINDLESS
+#include "raytracing_common.glsl"
+#include "dielectric.glsl"
+
+// Location 1, the path tracer's shadow payload - see pt_shadow.rmiss.
+layout(location = 1) rayPayloadInEXT ShadowRayPayload payload;
+
+hitAttributeEXT vec2 hitBarycentrics;
+
+// The any-hit of the shadow hit group, PT_SHADOW_HIT_GROUP, which two kinds of trace run through. A
+// shadow ray is traced with TerminateOnFirstHit and SkipClosestHitShader, so an accepted candidate
+// ends it in shadow and an ignored one lets traversal go on. A glass transmittance query
+// (traceStraightTransmittance in pt_path.glsl) traces the glass masks alone, whose instances the TLAS
+// leaves non-opaque, so it reaches here for every interface on its span. The alpha cutout ignores the
+// texels it removes, and a dielectric is always ignored
+// once it has attenuated the ray: nothing depends on the order candidates arrive in, and
+// NO_DUPLICATE_ANY_HIT_INVOCATION on the bottom levels reports each triangle once.
+//
+// Every class is crossed straight here: a Sheet as a slab, a ThinWalled wall and a Solid boundary as
+// one interface. For a Solid that is a deliberate approximation - the ray is not refracted, so solid
+// glass casts a lighter, straight shadow and no caustic. Each interface lets 1 - F through, F taken as
+// seen from outside the medium at the ray's own angle. On parallel faces the refracted ray would meet
+// the inner interface at the outer one's refracted angle, where F is the same; the inside eta at the
+// unrefracted angle would instead invent total internal reflection past the critical angle.
+// Absorption assumes closed meshes and ray ends outside every medium.
+void main()
+{
+  RayTracingInstanceRecord instance = u_Instances[gl_InstanceCustomIndexEXT];
+
+  if ((instance.flags & RT_INSTANCE_ALPHA_TEST) != 0u
+    && isAlphaCutout(instance, uint(gl_PrimitiveID), hitBarycentrics))
+    ignoreIntersectionEXT;
+
+  // Everything else that is not a dielectric blocks the light, and accepting it ends the ray.
+  if ((instance.flags & RT_INSTANCE_DIELECTRIC) == 0u
+    || instance.materialIndex >= uint(u_Materials.length()))
+    return;
+
+  RayTracingMaterialRecord material = u_Materials[instance.materialIndex];
+  vec3 normal = hitVertexNormal(uint(gl_InstanceCustomIndexEXT), uint(gl_PrimitiveID),
+    transpose(mat3(gl_WorldToObjectEXT)), hitBarycentrics);
+  float cosIncident = clamp(abs(dot(normal, normalize(gl_WorldRayDirectionEXT))), 0.0, 1.0);
+  float eta = 1.0 / material.ior;
+
+  if ((instance.flags & RT_INSTANCE_SHEET_DIELECTRIC) != 0u)
+  {
+    payload.transmittance *= (1.0 - thinSlabReflectance(cosIncident, eta)) * material.transmittanceTint;
+  }
+  else
+  {
+    float cosTransmitted;
+    payload.transmittance *= 1.0 - fresnelDielectric(cosIncident, eta, cosTransmitted);
+
+    // Facing by object space winding, the convention the path's medium tracking follows too.
+    float side = gl_HitKindEXT == gl_HitKindFrontFacingTriangleEXT ? -1.0 : 1.0;
+    payload.opticalDepth += side * material.absorption * gl_HitTEXT;
+    if ((instance.flags & RT_INSTANCE_SOLID_DIELECTRIC) != 0u)
+      payload.crossedSolid = 1u;
+  }
+
+  ignoreIntersectionEXT;
+}

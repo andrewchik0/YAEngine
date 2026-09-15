@@ -547,8 +547,7 @@ namespace YAEngine
 
   void RenderGraph::InsertBarriers(VkCommandBuffer cmd, uint32_t passIndex)
   {
-    // PROTOTYPE (dielectric reflection layer spike): the path tracing pass declares 15 storage
-    // outputs plus its inputs, past the former 16.
+    // The path tracing pass declares 15 storage outputs plus its inputs, past the former 16.
     static constexpr uint32_t MAX_BARRIERS = 32;
 
     auto& pass = m_Passes[passIndex];
@@ -768,11 +767,11 @@ namespace YAEngine
         static constexpr uint32_t MAX_CLEAR_VALUES = 8;
         assert(attachmentCount <= MAX_CLEAR_VALUES);
         std::array<VkClearValue, MAX_CLEAR_VALUES> clearValues{};
-        clearValues[0].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+        clearValues[0].color = pass.info.clearColorValue;
         clearValues[1].depthStencil = {0.0f, 0};
         for (uint32_t i = 2; i < attachmentCount; i++)
         {
-          clearValues[i].color = {{0.0f, 0.0f, 0.0f, 1.0f}};
+          clearValues[i].color = pass.info.clearColorValue;
         }
 
         VkRenderPassBeginInfo rpInfo{};

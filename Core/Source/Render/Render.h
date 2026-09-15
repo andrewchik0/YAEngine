@@ -24,6 +24,7 @@
 #include "BakeLimits.h"
 #include "GTAOConstants.h"
 #include "PathTraceData.h"
+#include "PathTraceGlass.h"
 #include "Assets/Handle.h"
 #include "ParticleInstance.h"
 #include "Utils/FrameCaptureSpec.h"
@@ -395,6 +396,12 @@ namespace YAEngine
     // user selects: they change what the frame looks like, not just what a diagnostic does.
     int& GetPathTraceMaxBounces() { return m_PathTraceMaxBounces; }
     float& GetPathTraceFireflyClamp() { return m_PathTraceFireflyClamp; }
+    bool& GetPathTraceGlass() { return b_PathTraceGlass; }
+    int& GetPathTraceMaxTransmissionDepth() { return m_PathTraceMaxTransmissionDepth; }
+    PathTraceGlassOverflow& GetPathTraceGlassOverflow() { return m_PathTraceGlassOverflow; }
+    PathTraceGlassHandling& GetPathTraceSecondaryGlass() { return m_PathTraceSecondaryGlass; }
+    int& GetPathTraceGlassReflectionBounces() { return m_PathTraceGlassReflectionBounces; }
+    PathTraceGlassHandling& GetPathTraceGlassReflectionGlass() { return m_PathTraceGlassReflectionGlass; }
     // How many samples the PT Reference image has averaged since its last reset. Zero means
     // the next frame rewrites it.
     int GetPathTraceSampleCount() const { return m_PathTraceSampleIndex; }
@@ -585,6 +592,17 @@ namespace YAEngine
     // Ceiling on what one bounce may add to the pixel, 0 = off. The only bias in the tracer,
     // and the reason a converged image is a reference rather than a ground truth.
     float m_PathTraceFireflyClamp = 10.0f;
+    // A demonstration switch, too expensive for real use. Off, no material is glass to the path
+    // tracer - every transparent surface is raster-only in the TLAS, the shaders take no glass
+    // branch - and the forward transparent layer draws them over the traced image instead.
+    bool b_PathTraceGlass = false;
+    // Refractive events one path may take on top of its bounces, and the rest of the glass cost and
+    // quality knobs - see PT_GLASS_* in PathTraceData.h.
+    int m_PathTraceMaxTransmissionDepth = PT_DEFAULT_TRANSMISSION_DEPTH;
+    PathTraceGlassOverflow m_PathTraceGlassOverflow = PathTraceGlassOverflow::Straight;
+    PathTraceGlassHandling m_PathTraceSecondaryGlass = PathTraceGlassHandling::Straight;
+    int m_PathTraceGlassReflectionBounces = PT_DEFAULT_GLASS_REFLECTION_BOUNCES;
+    PathTraceGlassHandling m_PathTraceGlassReflectionGlass = PathTraceGlassHandling::Straight;
     // Index of the sample the next PT frame contributes to the running mean. Zero rewrites
     // the accumulation image, which is how a reset is expressed - nothing clears it.
     int m_PathTraceSampleIndex = 0;
@@ -599,7 +617,9 @@ namespace YAEngine
     uint64_t m_PathTraceCachedTransformDigest = 0;
     uint64_t m_PathTraceCachedLightDigest = 0;
     uint64_t m_PathTraceCachedLightBufferDigest = 0;
-    uint64_t m_PathTraceCachedEmissionDigest = 0;
+    uint64_t m_PathTraceCachedMaterialDigest = 0;
+    uint64_t m_PathTraceCachedGlassKey = 0;
+    bool b_PathTraceCachedTransparentLayer = false;
     float m_LastFrameTime = 0.0f;
     float m_DeltaTime = 0.0f;
 
@@ -613,6 +633,28 @@ namespace YAEngine
     void RenderShadowMaps(FrameContext& frame, VkCommandBuffer cmd,
       uint32_t frameIndex, const glm::vec3* probeCenter = nullptr);
     void SetUpCamera(FrameContext& frame);
+    // Every glass setting the path traced image depends on, packed so one compare spots a change.
+    uint64_t GetPathTraceGlassKey() const
+    {
+      return uint64_t(uint32_t(m_PathTraceMaxTransmissionDepth))
+        | (uint64_t(m_PathTraceGlassOverflow) << 32)
+        | (uint64_t(m_PathTraceSecondaryGlass) << 36)
+        | (uint64_t(m_PathTraceGlassReflectionGlass) << 40)
+        | (uint64_t(b_PathTraceGlass) << 47)
+        | (uint64_t(uint16_t(m_PathTraceGlassReflectionBounces)) << 48);
+    }
+    // Decided once per frame at the top of Draw: the path tracing render path has transparent
+    // surfaces the tracer does not trace, or particles. The forward transparent layer draws them, and
+    // the light culling and shadow atlas it shades with run, exactly then.
+    bool b_PathTraceTransparencyActive = false;
+    bool HasPathTraceRasterTransparency(FrameContext& frame) const;
+    // The frames the forward transparent layer is drawn on, and the tracer lays it into its sample: every
+    // frame ray reconstruction resolves, whose input carries it whether anything draws or not, and the
+    // developer resolve's while anything does.
+    bool IsPathTraceTransparentLayerDrawn() const
+    {
+      return b_PathTraceTransparencyActive || IsRayReconstructionResolve();
+    }
     // Turns the selected mode into the one this frame can really run.
     void ResolveAntialiasingMode();
     // The same for the render path, and the last word on the effective anti-aliasing mode:
@@ -645,7 +687,7 @@ namespace YAEngine
     // The path tracer's resolve: the noisy sample plus the four guides through ray
     // reconstruction, into the same DLSSOutput super resolution writes.
     void RunRayReconstructionEvaluate(VkCommandBuffer cmd, FrameContext& frame);
-    // PROTOTYPE (dielectric reflection layer spike): the second RR instance (viewport 1).
+    // The reflection layer's RR instance (viewport 1).
     void RunRayReconstructionLayerEvaluate(VkCommandBuffer cmd, FrameContext& frame);
     // Everything both evaluates describe identically - the camera, the frame, the depth and
     // velocity tags and the reset flag - so the two conventions-heavy halves are written
@@ -688,7 +730,7 @@ namespace YAEngine
     RGHandle GetPreviousResolvedColorHandle() const
     {
       if (m_EffectiveRenderPath == RenderPath::PathTracing)
-        return IsRayReconstructionResolve() ? m_DLSSOutput : m_PathTraceAccum;
+        return IsRayReconstructionResolve() || b_PathTraceTransparencyActive ? m_DLSSOutput : m_PathTraceAccum;
 
       if (IsDLSSMode(m_EffectiveAntialiasingMode))
         return m_DLSSOutput;
@@ -719,7 +761,7 @@ namespace YAEngine
     void WritePathTraceDescriptors(uint32_t frameIndex);
     // The guide pass's set 1: the G-buffer in, the three ray reconstruction guides out.
     void WritePathTraceGuideDescriptors(uint32_t frameIndex);
-    // PROTOTYPE (dielectric reflection layer spike).
+    // The reflection layer's guide and composite sets.
     void WritePathTraceLayerGuideDescriptors(uint32_t frameIndex);
     void WriteRRLayerCompositeDescriptors(uint32_t frameIndex);
     // Decides whether this frame extends the reference image or starts it over, and advances
@@ -858,11 +900,11 @@ namespace YAEngine
     RGHandle m_PTPrimaryThroughput {};
     RGHandle m_PTDepth {};
     RGHandle m_PTMotion {};
-    // PROTOTYPE (dielectric reflection layer spike): on smooth dielectric pixels the first
-    // vertex is split into a base path (m_PathTraceNoisy) and a mirror path whose radiance goes
-    // to m_PTLayerRadiance and is denoised by a second RR instance (viewport 1). The layer
-    // first-vertex images describe the reflected surface the way PSR does for metal mirrors;
-    // everywhere else they copy the primary ones. m_DLSSLayerOutput is that instance's output.
+    // The reflection layer: on smooth dielectric and glass pixels the first vertex is split into a
+    // base path (m_PathTraceNoisy) and a mirror path whose radiance goes to m_PTLayerRadiance and
+    // is denoised by a second RR instance (viewport 1). The layer first-vertex images describe the
+    // reflected surface the way PSR does for metal mirrors; everywhere else they copy the primary
+    // ones. m_DLSSLayerOutput is that instance's output.
     RGHandle m_PTLayerRadiance {};
     RGHandle m_PTLayerAlbedo {};
     RGHandle m_PTLayerNormal {};
@@ -873,6 +915,14 @@ namespace YAEngine
     RGHandle m_PTLayerSpecularAlbedo {};
     RGHandle m_PTLayerNormalRoughness {};
     RGHandle m_DLSSLayerOutput {};
+    // RGBA16F, render resolution: what the path tracing render path does not trace - transparent
+    // surfaces that are not glass to it, and particles - shaded by the forward transparent pass,
+    // premultiplied over a clear of zero, and laid by the tracer into its sample - see
+    // IsPathTraceTransparentLayerDrawn.
+    RGHandle m_PTTransparentLayer {};
+    // RGBA16F, render resolution: PathTraceNoisy as it was before the layer went in, which ray
+    // reconstruction takes as kBufferTypeColorBeforeTransparency.
+    RGHandle m_PTColorBeforeTransparency {};
 
 #ifdef YA_EDITOR
     RGHandle m_SceneColor {};
@@ -965,10 +1015,11 @@ namespace YAEngine
     uint32_t m_TAAPassIndex {};
     uint32_t m_DLSSEvaluatePassIndex {};
     uint32_t m_DLSSRayReconstructionPassIndex {};
-    // PROTOTYPE (dielectric reflection layer spike).
+    // The reflection layer's passes.
     uint32_t m_PathTraceLayerGuidesPassIndex {};
     uint32_t m_DLSSRayReconstructionLayerPassIndex {};
     uint32_t m_RRLayerCompositePassIndex {};
+    uint32_t m_PathTraceTransparentPassIndex {};
     uint32_t m_ForwardTransparentPassIndex {};
     uint32_t m_HistogramPassIndex {};
     uint32_t m_ExposureAdaptPassIndex {};
@@ -1028,8 +1079,8 @@ namespace YAEngine
     // Set 1 of the guide pass. Plain compute over the G-buffer, so it needs none of the
     // scene bindings above and exists on every device, ray tracing or not.
     std::vector<VulkanDescriptorSet> m_PathTraceGuideDescriptorSets;
-    // PROTOTYPE (dielectric reflection layer spike): the same guide layout over the layer
-    // first-vertex images, and the composite's own set.
+    // The same guide layout over the reflection layer's first-vertex images, and the
+    // composite's own set.
     std::vector<VulkanDescriptorSet> m_PathTraceLayerGuideDescriptorSets;
     std::vector<VulkanDescriptorSet> m_RRLayerCompositeDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingDescriptorSets;
@@ -1066,8 +1117,12 @@ namespace YAEngine
     // The guide buffer pass. A plain compute shader over the G-buffer, so unlike the tracer
     // it builds everywhere and needs no availability test.
     PipelineHandle m_PathTraceGuidesPipeline {};
-    // PROTOTYPE (dielectric reflection layer spike): base + layer composite into DLSSOutput.
+    // Base + reflection layer composite into DLSSOutput.
     PipelineHandle m_RRLayerCompositePipeline {};
+    // The forward transparent layer of a path traced frame: the four forward transparent variants
+    // and the particles over the layer's render pass.
+    PipelineHandle m_PathTraceTransparentPipelines[4] {};
+    PipelineHandle m_PathTraceParticlePipeline {};
     PipelineHandle m_LightCullPipeline {};
     PipelineHandle m_DeferredLightingPipeline {};
     PipelineHandle m_BloomDownsamplePipeline {};
@@ -1274,7 +1329,9 @@ namespace YAEngine
     VulkanPipeline& GetPickPipeline(const DrawCommand& dc);
 #endif
 
-    void DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame);
+    // pathTraceLayer draws the path tracing render path's layer: only what the tracer does not trace,
+    // through the layer's pipelines.
+    void DrawTransparent(VkCommandBuffer cmd, uint32_t frameIndex, FrameContext& frame, bool pathTraceLayer);
 
   public:
     const RenderContext& GetContext() const { return m_Backend.GetContext(); }

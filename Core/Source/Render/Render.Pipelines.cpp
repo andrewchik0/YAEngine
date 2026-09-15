@@ -702,9 +702,9 @@ namespace YAEngine
       0,
       pipelineCache);
 
-    // PROTOTYPE (dielectric reflection layer spike): the same guide pipeline runs a second time
-    // over the layer first-vertex images, so only the sets are new; the composite adds the
-    // denoised layer onto DLSSOutput in place.
+    // The reflection layer: the same guide pipeline runs a second time over the layer
+    // first-vertex images, so only the sets are new; the composite adds the denoised layer onto
+    // DLSSOutput in place.
     m_PathTraceLayerGuideDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
     m_RRLayerCompositeDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
     for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
@@ -734,6 +734,8 @@ namespace YAEngine
             { 0, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_COMPUTE_BIT },
             // The layer instance's output, rgb = denoised reflection, a = upscaled Fresnel
             { 1, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
+            // The forward transparent layer ray reconstruction laid over the base, for its coverage
+            { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_COMPUTE_BIT },
           }
         }
       };
@@ -1012,6 +1014,20 @@ namespace YAEngine
       m_ForwardTransparentPipelines[2] = m_PSOCache.Register(ctx.device, transparentRP, trInfo, pipelineCache);
       trInfo.doubleSided = true;
       m_ForwardTransparentPipelines[3] = m_PSOCache.Register(ctx.device, transparentRP, trInfo, pipelineCache);
+
+      // The same four over the path traced frame's layer, whose render pass has the same attachments.
+      VkRenderPass layerRP = m_Graph.GetPassRenderPass(m_PathTraceTransparentPassIndex);
+      trInfo.doubleSided = false;
+      m_PathTraceTransparentPipelines[2] = m_PSOCache.Register(ctx.device, layerRP, trInfo, pipelineCache);
+      trInfo.doubleSided = true;
+      m_PathTraceTransparentPipelines[3] = m_PSOCache.Register(ctx.device, layerRP, trInfo, pipelineCache);
+
+      trInfo.doubleSided = false;
+      trInfo.vertexShaderFile = "mesh_transparent.vert";
+      trInfo.sets.pop_back();
+      m_PathTraceTransparentPipelines[0] = m_PSOCache.Register(ctx.device, layerRP, trInfo, pipelineCache);
+      trInfo.doubleSided = true;
+      m_PathTraceTransparentPipelines[1] = m_PSOCache.Register(ctx.device, layerRP, trInfo, pipelineCache);
     }
 
     m_LightCullInputDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
@@ -1106,8 +1122,8 @@ namespace YAEngine
             { 15, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
             { 16, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
             { 17, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
-            // PROTOTYPE (dielectric reflection layer spike): layer radiance, then the layer
-            // first-vertex images - albedo, normal, throughput, depth, motion
+            // The reflection layer: layer radiance, then the layer first-vertex images -
+            // albedo, normal, throughput, depth, motion
             { 18, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
             { 19, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
             { 20, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
@@ -1116,6 +1132,9 @@ namespace YAEngine
             { 23, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, rtSceneStages },
             // The emissive light table, built with the instance records
             { 24, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, rtSceneStages },
+            // The forward transparent layer laid into the sample, and the sample from before it
+            { 25, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            { 26, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_RAYGEN_BIT_KHR },
           }
         };
 
@@ -1123,18 +1142,20 @@ namespace YAEngine
         for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
           m_PathTraceDescriptorSets[i].Init(ctx, ptSetDesc);
 
-        // Two miss shaders now, in the order PathTraceData.h names: index 0 is the surface
-        // miss the bounce ray uses, index 1 the shadow one. The hit group is unchanged -
-        // pt_main.rgen simply stops passing gl_RayFlagsOpaqueEXT, which is what finally lets
-        // the alpha cutout in pathtrace.rahit run.
-        RaytracingHitGroup ptHitGroup;
-        ptHitGroup.closestHitShaderFile = "pathtrace.rchit";
-        ptHitGroup.anyHitShaderFile = "pathtrace.rahit";
-
+        // Two miss shaders and two hit groups, each placed at the index PathTraceData.h names so
+        // the lists cannot drift from the numbers the shaders trace with: the surface miss and
+        // hit group every surface ray uses, then the shadow ones. The shadow group has no
+        // closest hit shader, shadow rays skip it; its any-hit runs the alpha cutout and
+        // attenuates the ray through dielectrics.
         RaytracingPipelineCreateInfo ptInfo;
         ptInfo.raygenShaderFile = "pt_main.rgen";
-        ptInfo.missShaderFiles = { "pathtrace.rmiss", "pt_shadow.rmiss" };
-        ptInfo.hitGroups = { ptHitGroup };
+        ptInfo.missShaderFiles.resize(2);
+        ptInfo.missShaderFiles[PT_PRIMARY_MISS_INDEX] = "pathtrace.rmiss";
+        ptInfo.missShaderFiles[PT_SHADOW_MISS_INDEX] = "pt_shadow.rmiss";
+        ptInfo.hitGroups.resize(2);
+        ptInfo.hitGroups[PT_PATH_HIT_GROUP] = RaytracingHitGroup {
+          .closestHitShaderFile = "pathtrace.rchit", .anyHitShaderFile = "pathtrace.rahit" };
+        ptInfo.hitGroups[PT_SHADOW_HIT_GROUP] = RaytracingHitGroup { .anyHitShaderFile = "pt_shadow.rahit" };
         ptInfo.sets = {
           m_FrameUniformBuffer.GetLayout(),
           m_PathTraceDescriptorSets[0].GetLayout(),
@@ -1300,6 +1321,12 @@ namespace YAEngine
         })
       };
       m_ParticlePipeline = m_PSOCache.Register(ctx.device, transparentRP, particlePipelineInfo, pipelineCache);
+
+      // Over the path traced frame's layer particles add light and leave its coverage as it is, or the
+      // traced image behind them would be dimmed where the layer is laid over it.
+      particlePipelineInfo.writeAlpha = false;
+      m_PathTraceParticlePipeline = m_PSOCache.Register(ctx.device,
+        m_Graph.GetPassRenderPass(m_PathTraceTransparentPassIndex), particlePipelineInfo, pipelineCache);
 
       m_ParticleStage.reserve(MAX_PARTICLES_PER_FRAME);
       m_PendingParticleBatches.reserve(MAX_PARTICLE_BATCHES_PER_FRAME);

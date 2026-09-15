@@ -391,6 +391,19 @@ namespace YAEngine
       EndPropertyGroup();
     }
 
+    constexpr EnumOption GLASS_OVERFLOW_MODES[] = {
+      { .label = "Terminate", .tooltip = "The path ends there: Solid glass stacked past the depth renders black. Costs nothing more" },
+      { .label = "Straight", .tooltip = "Further Solid glass is crossed unbent with its reflection loss and absorption, so stacks never "
+                                        "go black. At most three traces per segment that meets glass" },
+    };
+
+    constexpr EnumOption GLASS_HANDLING_MODES[] = {
+      { .label = "Refract", .tooltip = "Bent by Snell's law: true refraction, one traced ray and one Transmission Depth event per "
+                                       "interface" },
+      { .label = "Straight", .tooltip = "Crossed unbent with its reflection loss and absorption: no refraction, at most three traces per "
+                                        "segment that meets glass, however much glass it crosses" },
+    };
+
     void DrawRenderPathGroup(Render& render)
     {
       if (!BeginPropertyGroup("Render Path", {
@@ -439,6 +452,45 @@ namespace YAEngine
         .min = PT_MIN_FIREFLY_CLAMP, .max = PT_MAX_FIREFLY_CLAMP, .speed = 0.1f, .format = "%.1f", .defaultValue = 10.0f,
         .tooltip = "Ceiling on the radiance one bounce may add. 0 switches it off, which is the unbiased setting - and the "
                    "one to compare against when a converged image looks too dark." });
+
+      PropertySubHeading("PT Glass");
+      PropertyBool("Glass", render.GetPathTraceGlass(), {
+        .defaultValue = false,
+        .tooltip = "Demonstration feature, too expensive for real use: traces transparent materials with a Transmission "
+                   "mode as smooth glass that refracts, reflects and absorbs. It costs a glass trace on every pixel, up to "
+                   "three traces per path segment that meets glass and a glass query per shadow ray through it - on the cafe "
+                   "bar with its glassware, PathTrace took 37 ms against 7.5 ms without. Off, the path tracer ignores "
+                   "Transmission modes and the raster forward pass draws every transparent surface over the traced image." });
+      PushDependency(render.GetPathTraceGlass(), "Requires Glass");
+      PropertyInt("Transmission Depth", render.GetPathTraceMaxTransmissionDepth(), {
+        .min = PT_MIN_TRANSMISSION_DEPTH, .max = PT_MAX_TRANSMISSION_DEPTH, .speed = 0.05f,
+        .defaultValue = PT_DEFAULT_TRANSMISSION_DEPTH,
+        .tooltip = "Refractions one path may take at Solid glass: every reflection off, pass through or overlap of a Solid it "
+                   "refracts at costs a traced ray and one of these, and none uses up PT Bounces. Sheet and ThinWalled glass "
+                   "never count. A drink seen through takes two per liquid surface; Overflow decides what comes after." });
+      PropertyEnum("Overflow", render.GetPathTraceGlassOverflow(), GLASS_OVERFLOW_MODES, {
+        .defaultValue = int32_t(PathTraceGlassOverflow::Straight),
+        .tooltip = "What a path does once Transmission Depth is used up. Terminate is the hard cut: deep glass stacks go "
+                   "black and cost nothing more. Straight keeps them lit, unbent past the limit, for a glass query per "
+                   "segment." });
+      PropertyEnum("Secondary Glass", render.GetPathTraceSecondaryGlass(), GLASS_HANDLING_MODES, {
+        .defaultValue = int32_t(PathTraceGlassHandling::Straight),
+        .tooltip = "How Solid glass is met by every ray after the first surface that is not a mirror: the bounce light of the "
+                   "whole image, and baked volumes. Refract bends indirect light through liquids and thick glass at a traced "
+                   "ray per interface and can run out of Transmission Depth; Straight costs at most three traces per glass "
+                   "crossing and lets indirect light through Solid glass as through a window, with no refraction or focusing." });
+      PropertyInt("Reflection Bounces", render.GetPathTraceGlassReflectionBounces(), {
+        .min = PT_MIN_GLASS_REFLECTION_BOUNCES, .max = PT_MAX_BOUNCES, .speed = 0.05f,
+        .defaultValue = PT_DEFAULT_GLASS_REFLECTION_BOUNCES,
+        .tooltip = "Bounces of the reflection seen on the front-most glass. 0 shows reflected surfaces lit by direct light "
+                   "only, the cheapest; every bounce adds a trace and a shadow ray per glass pixel and brings indirect light "
+                   "into reflections on glass." });
+      PropertyEnum("Reflection Glass", render.GetPathTraceGlassReflectionGlass(), GLASS_HANDLING_MODES, {
+        .defaultValue = int32_t(PathTraceGlassHandling::Straight),
+        .tooltip = "How Solid glass seen in a reflection on glass is met until the reflection reaches a surface that is not "
+                   "a mirror. Refract bends liquids and thick glass inside the reflection at a traced ray per interface; "
+                   "Straight shows them unbent for at most three traces." });
+      PopDependency();
       PopDependency();
 
       if (!render.IsRayReconstructionAvailable())

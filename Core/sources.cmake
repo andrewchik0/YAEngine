@@ -26,6 +26,7 @@ set(SOURCE_FILES
   Source/Render/VulkanDebugExtension.h
   Source/Render/AntialiasingMode.h
   Source/Render/RenderPath.h
+  Source/Render/PathTraceGlass.h
   Source/Render/RenderSpecs.h
   Source/Render/VulkanPhysicalDevice.cpp
   Source/Render/VulkanPhysicalDevice.h
@@ -100,6 +101,7 @@ set(SOURCE_FILES
   Source/Assets/TextureManager.h
   Source/Assets/MaterialManager.cpp
   Source/Assets/MaterialManager.h
+  Source/Assets/TransmissionMode.h
   Source/Scene/Components.h
   Source/Utils/Timer.h
   Source/Assets/CpuResourceData.h

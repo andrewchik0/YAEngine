@@ -188,6 +188,35 @@ namespace YAEngine
       matDesc.transparent = (std::string(alphaMode.C_Str()) == "BLEND");
     }
 
+    // KHR_materials_transmission, _ior and _volume, only ever reported by the glTF importer. A
+    // transmissive material without volume thickness is a Sheet; with it, it bounds a Solid medium.
+    // transparent is left as the file set it, so raster looks the same as before, and the path
+    // tracer only uses this once the material is made Transparent.
+    float transmission = 0.0f;
+    if (material->Get(AI_MATKEY_TRANSMISSION_FACTOR, transmission) == AI_SUCCESS && transmission > 0.0f)
+    {
+      float thickness = 0.0f;
+      material->Get(AI_MATKEY_VOLUME_THICKNESS_FACTOR, thickness);
+      matDesc.transmissionMode = thickness > 0.0f ? TransmissionMode::Solid : TransmissionMode::Sheet;
+
+      float ior = 1.5f;
+      if (material->Get(AI_MATKEY_REFRACTI, ior) == AI_SUCCESS)
+        matDesc.ior = std::clamp(ior, MIN_TRANSMISSION_IOR, MAX_TRANSMISSION_IOR);
+
+      // glTF's default attenuation distance is infinite, which absorbs nothing whatever the colour.
+      aiColor3D attenuationColor(1.0f, 1.0f, 1.0f);
+      float attenuationDistance = 0.0f;
+      material->Get(AI_MATKEY_VOLUME_ATTENUATION_COLOR, attenuationColor);
+      if (matDesc.transmissionMode == TransmissionMode::Solid
+        && material->Get(AI_MATKEY_VOLUME_ATTENUATION_DISTANCE, attenuationDistance) == AI_SUCCESS
+        && std::isfinite(attenuationDistance) && attenuationDistance > 0.0f)
+      {
+        matDesc.transmittanceColor = glm::clamp(glm::vec3(attenuationColor.r, attenuationColor.g, attenuationColor.b),
+          glm::vec3(0.0f), glm::vec3(1.0f));
+        matDesc.transmittanceDistance = std::max(attenuationDistance, MIN_TRANSMITTANCE_DISTANCE);
+      }
+    }
+
     std::string baseColorTexture = ResolveTexturePath(desc, scene, material, aiTextureType_DIFFUSE);
     std::string metallicTexture = ResolveTexturePath(desc, scene, material, aiTextureType_METALNESS);
     std::string roughnessTexture = ResolveTexturePath(desc, scene, material, aiTextureType_DIFFUSE_ROUGHNESS);

@@ -8,6 +8,30 @@ namespace YAEngine {
 #define PT_MIN_BOUNCES 1
 #define PT_MAX_BOUNCES 8
 
+// Budget of refractive events along one path - every reflection off, transmission through or
+// ignored overlap at a Solid surface the path refracts at - which do not consume the bounce budget.
+// Sheet and ThinWalled glass and Solid glass crossed straight never spend it. A liquid seen through
+// its glass is two events per liquid surface, hence a separate, larger budget.
+#define PT_MIN_TRANSMISSION_DEPTH 1
+#define PT_MAX_TRANSMISSION_DEPTH 16
+#define PT_DEFAULT_TRANSMISSION_DEPTH 8
+
+// PathTraceConstants::secondaryGlass and ::glassReflectionGlass: how Solid glass is met on those
+// rays. Refract follows it through Snell's law at one traced event per interface; Straight crosses it
+// unbent, taking its Fresnel transmittance and absorption from one query per segment.
+#define PT_GLASS_REFRACT  0
+#define PT_GLASS_STRAIGHT 1
+
+// PathTraceConstants::glassOverflow: what a path does once its refractive events are spent - end,
+// or cross every further Solid straight.
+#define PT_GLASS_OVERFLOW_TERMINATE 0
+#define PT_GLASS_OVERFLOW_STRAIGHT  1
+
+// Bounces of the reflection layer's path off a glass first vertex, up to PT_MAX_BOUNCES. Zero is
+// what the reflected hit emits or the sky, plus next event estimation there.
+#define PT_MIN_GLASS_REFLECTION_BOUNCES 0
+#define PT_DEFAULT_GLASS_REFLECTION_BOUNCES 1
+
 // Range of the firefly clamp, shared by the editor slider, the scene save and the scene load.
 // One definition because there used to be three disagreeing ones: the slider dragged to 100
 // but let Ctrl+Click type past it, the save wrote whatever the field held, and the load clamped
@@ -40,6 +64,16 @@ namespace YAEngine {
 // of the shader binding table agree in one place instead of two.
 #define PT_PRIMARY_MISS_INDEX 0
 #define PT_SHADOW_MISS_INDEX  1
+
+// The hit groups of the same pipelines, in the same spirit. Every TLAS instance names record 0,
+// so the sbtRecordOffset a trace passes is the group: surface rays record the hit, shadow rays and
+// glass transmittance queries accumulate the transmittance of the dielectrics they pass through.
+#define PT_PATH_HIT_GROUP   0
+#define PT_SHADOW_HIT_GROUP 1
+
+// Solid media a path can be inside at once, see the medium stack in pt_path.glsl. A glass, the
+// liquid overlapping its wall and an ice cube in the liquid is three.
+#define PT_MEDIUM_STACK_SIZE 4
 
 // Written into the alpha of the noisy output where the primary "ray" left the scene.
 // Negative on purpose: a consumer that averages hit distances has to be able to reject the
@@ -97,11 +131,6 @@ namespace YAEngine {
 // by the bounce budget, beyond which the estimator never reaches the surface behind.
 #define PT_PSR_MAX_CHAIN_DEPTH 3
 
-// PROTOTYPE (dielectric reflection layer spike), dev-only A/B, not a setting: where the Fresnel
-// weight of the smooth dielectric reflection layer is applied. 1 = composite (layer radiance
-// unweighted, F carried in the RR colour alpha), 0 = folded into the layer radiance and guides.
-#define PT_LAYER_F_IN_COMPOSITE 1
-
 struct PathTraceConstants
 {
   int maxBounces;
@@ -117,6 +146,22 @@ struct PathTraceConstants
   // diagnostic blended into the running mean would be meaningless. Measured before the
   // firefly clamp on purpose: the clamp is exactly what hides the value worth reading.
   int debugMode;
+  // PT_MIN_TRANSMISSION_DEPTH..PT_MAX_TRANSMISSION_DEPTH.
+  int maxTransmissionDepth;
+  // PT_GLASS_OVERFLOW_*.
+  int glassOverflow;
+  // PT_GLASS_*: Solid glass on every ray after a vertex that is not a pure delta.
+  int secondaryGlass;
+  // PT_MIN_GLASS_REFLECTION_BOUNCES..PT_MAX_BOUNCES.
+  int glassReflectionBounces;
+  // PT_GLASS_*: Solid glass on the reflection layer's path until it reaches such a vertex.
+  int glassReflectionGlass;
+  // The PT Glass switch. Zero: TlasBuilder builds no instance as glass and the shaders trace nothing
+  // for it - no camera glass trace, no glass query.
+  int glassEnabled;
+  // Nonzero: the forward transparent layer was drawn this frame and is laid over the sample, the one
+  // ray reconstruction denoises and the one the running mean takes in.
+  int transparentLayer;
 };
 
 #ifdef __cplusplus

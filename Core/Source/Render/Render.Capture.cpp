@@ -489,6 +489,12 @@ namespace YAEngine
       bool ssgi = false;
       int pathTraceMaxBounces = 0;
       float pathTraceFireflyClamp = 0.0f;
+      bool pathTraceGlass = false;
+      int pathTraceMaxTransmissionDepth = 0;
+      PathTraceGlassOverflow pathTraceGlassOverflow = PathTraceGlassOverflow::Straight;
+      PathTraceGlassHandling pathTraceSecondaryGlass = PathTraceGlassHandling::Straight;
+      int pathTraceGlassReflectionBounces = 0;
+      PathTraceGlassHandling pathTraceGlassReflectionGlass = PathTraceGlassHandling::Straight;
       int pathTraceSampleCount = 0;
       int pathTraceDebugMode = 0;
       // Null unless the targets were copied right after this pass instead of at the frame end.
@@ -579,6 +585,15 @@ namespace YAEngine
       out << "    \"pathTracing\": {\n";
       out << "      \"maxBounces\": " << mc.pathTraceMaxBounces << ",\n";
       out << "      \"fireflyClamp\": " << JsonNumber(mc.pathTraceFireflyClamp) << ",\n";
+      out << "      \"glass\": " << (mc.pathTraceGlass ? "true" : "false") << ",\n";
+      out << "      \"maxTransmissionDepth\": " << mc.pathTraceMaxTransmissionDepth << ",\n";
+      out << "      \"glassOverflow\": \""
+          << (mc.pathTraceGlassOverflow == PathTraceGlassOverflow::Straight ? "straight" : "terminate") << "\",\n";
+      out << "      \"secondaryGlass\": \""
+          << (mc.pathTraceSecondaryGlass == PathTraceGlassHandling::Straight ? "straight" : "refract") << "\",\n";
+      out << "      \"glassReflectionBounces\": " << mc.pathTraceGlassReflectionBounces << ",\n";
+      out << "      \"glassReflectionGlass\": \""
+          << (mc.pathTraceGlassReflectionGlass == PathTraceGlassHandling::Straight ? "straight" : "refract") << "\",\n";
       out << "      \"sampleCount\": " << mc.pathTraceSampleCount << ",\n";
       out << "      \"requestedSampleCount\": " << request.accumSamples << ",\n";
       out << "      \"debugMode\": { \"value\": " << mc.pathTraceDebugMode
@@ -1212,6 +1227,12 @@ namespace YAEngine
       .ssgi = b_SSGIEnabled,
       .pathTraceMaxBounces = m_PathTraceMaxBounces,
       .pathTraceFireflyClamp = m_PathTraceFireflyClamp,
+      .pathTraceGlass = b_PathTraceGlass,
+      .pathTraceMaxTransmissionDepth = m_PathTraceMaxTransmissionDepth,
+      .pathTraceGlassOverflow = m_PathTraceGlassOverflow,
+      .pathTraceSecondaryGlass = m_PathTraceSecondaryGlass,
+      .pathTraceGlassReflectionBounces = m_PathTraceGlassReflectionBounces,
+      .pathTraceGlassReflectionGlass = m_PathTraceGlassReflectionGlass,
       .pathTraceSampleCount = m_PathTraceSampleIndex,
       .pathTraceDebugMode = GetPathTraceDebugMode(),
       // As requested, which may be the alt name

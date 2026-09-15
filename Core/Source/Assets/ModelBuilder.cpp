@@ -99,6 +99,10 @@ namespace YAEngine
     mat.combinedTextures = matDesc.combinedTextures;
     mat.doubleSided = matDesc.doubleSided;
     mat.transparent = matDesc.transparent;
+    mat.transmissionMode = matDesc.transmissionMode;
+    mat.ior = matDesc.ior;
+    mat.transmittanceColor = matDesc.transmittanceColor;
+    mat.transmittanceDistance = matDesc.transmittanceDistance;
 
     auto loadTexture = [&](const std::string& path, bool linear, bool* hasAlpha)
     {

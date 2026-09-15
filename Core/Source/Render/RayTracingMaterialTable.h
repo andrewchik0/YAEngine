@@ -3,6 +3,7 @@
 #include "Pch.h"
 #include "RayTracingMaterialData.h"
 #include "VulkanBuffer.h"
+#include "Assets/TransmissionMode.h"
 
 namespace YAEngine
 {
@@ -10,7 +11,7 @@ namespace YAEngine
   class MaterialManager;
   class TextureManager;
 
-  static_assert(sizeof(RayTracingMaterialRecord) == 80,
+  static_assert(sizeof(RayTracingMaterialRecord) == 112,
     "RayTracingMaterialRecord no longer matches its std430 layout");
 
   // The scene's materials as one SSBO a hit can index with the material slot the instance
@@ -46,10 +47,11 @@ namespace YAEngine
     // Records actually written this frame. The buffer beyond it is zeroed padding.
     uint32_t GetRecordCount(uint32_t frameIndex) const;
 
-    // A fold of every record field the path tracer's emission reads - the emissive shading and
-    // map bits, emissivity, the map slot and uvScale - over the records that emit, as of the
-    // slot's last Update. The path tracer restarts its accumulation when it changes.
-    uint64_t GetEmissionDigest(uint32_t frameIndex) const;
+    // A fold of the record fields the path tracer reads that no other digest covers, as of the
+    // slot's last Update: over the records that emit, the emissive shading and map bits,
+    // emissivity, the map slot and uvScale; over the transmissive ones, the transmission mode and
+    // every transmission parameter. The path tracer restarts its accumulation when it changes.
+    uint64_t GetPathTraceDigest(uint32_t frameIndex) const;
 
 #ifdef YA_EDITOR
     // Past every frame index, so the frame loop never updates it.
@@ -58,18 +60,18 @@ namespace YAEngine
 
   private:
 
-    // 20 KB per frame slot, which covers every scene the engine ships with. Growth doubles
+    // 28 KB per frame slot, which covers every scene the engine ships with. Growth doubles
     // from here.
     static constexpr uint32_t INITIAL_CAPACITY = 256;
     // Materials cannot multiply the way scatter instancing multiplies objects, so this is
-    // a guard against a runaway import rather than a budget. 5 MB per frame slot.
+    // a guard against a runaway import rather than a budget. 7 MB per frame slot.
     static constexpr uint32_t MAX_CAPACITY = 64 * 1024;
 
     struct FrameSlot
     {
       VulkanBuffer records;
       uint32_t recordCount = 0;
-      uint64_t emissionDigest = 0;
+      uint64_t pathTraceDigest = 0;
     };
 
     // Grows the slot's buffer to hold `required` records, doubling up to the cap. Returns
@@ -83,6 +85,9 @@ namespace YAEngine
     // Staging for one frame's records. The mapped buffer is write-combined, so the table is
     // assembled here and copied across in one go rather than field by field.
     std::vector<RayTracingMaterialRecord> m_Staging;
+    // The effective transmission of each staged record, for the digest: None unless the material
+    // is transparent as well.
+    std::vector<TransmissionMode> m_StagingTransmission;
     // One warning for the frame slots, which all ask for the same count every frame; a bake build
     // warns on its own every time.
     bool b_CapacityWarned = false;

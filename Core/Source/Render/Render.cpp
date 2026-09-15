@@ -356,17 +356,22 @@ namespace YAEngine
     // The shadow atlas cache's digests cover which casters exist and where they are, and the
     // acceleration structure is rebuilt from the same snapshot. Its light digest leaves out all
     // a shadow cannot see - intensity, colour, the sun direction, lights without shadows, emitter
-    // size - so the whole light buffer and the emission this frame's material table holds are
-    // compared on top.
-    const uint64_t emissionDigest = m_MaterialTable.GetEmissionDigest(m_Backend.GetCurrentFrameIndex());
+    // size - so the whole light buffer and the emission and transmission this frame's material
+    // table holds are compared on top.
+    const uint64_t materialDigest = m_MaterialTable.GetPathTraceDigest(m_Backend.GetCurrentFrameIndex());
     const bool sceneChanged =
       frame.snapshot.casterIdentityDigest != m_PathTraceCachedIdentityDigest
       || frame.snapshot.casterTransformDigest != m_PathTraceCachedTransformDigest
       || frame.snapshot.lightDigest != m_PathTraceCachedLightDigest
       || frame.snapshot.pathTraceLightDigest != m_PathTraceCachedLightBufferDigest
-      || emissionDigest != m_PathTraceCachedEmissionDigest;
+      || materialDigest != m_PathTraceCachedMaterialDigest;
+    const uint64_t glassKey = GetPathTraceGlassKey();
+    // The tracer lays the forward transparent layer into its sample on the frames it is drawn, so samples
+    // taken with and without it belong to different images.
+    const bool transparentLayer = IsPathTraceTransparentLayerDrawn();
 
-    if (b_PathTraceResetPending || cameraMoved || sceneChanged)
+    if (b_PathTraceResetPending || cameraMoved || sceneChanged || glassKey != m_PathTraceCachedGlassKey
+      || transparentLayer != b_PathTraceCachedTransparentLayer)
     {
       // Zero is the reset: the shader rewrites the image at that index rather than blending
       // into it, so nothing has to be cleared and no extra pass exists to clear it.
@@ -384,7 +389,9 @@ namespace YAEngine
     m_PathTraceCachedTransformDigest = frame.snapshot.casterTransformDigest;
     m_PathTraceCachedLightDigest = frame.snapshot.lightDigest;
     m_PathTraceCachedLightBufferDigest = frame.snapshot.pathTraceLightDigest;
-    m_PathTraceCachedEmissionDigest = emissionDigest;
+    m_PathTraceCachedMaterialDigest = materialDigest;
+    m_PathTraceCachedGlassKey = glassKey;
+    b_PathTraceCachedTransparentLayer = transparentLayer;
   }
 
   void Render::Draw(FrameContext& frame)
@@ -393,6 +400,10 @@ namespace YAEngine
     // the path resolve reads the mode one - see ResolveRenderPath.
     ResolveAntialiasingMode();
     ResolveRenderPath();
+
+    // Ahead of everything that binds the resolved image or renders the shadow atlas, which both
+    // depend on it.
+    b_PathTraceTransparencyActive = IsPathTracingActive() && HasPathTraceRasterTransparency(frame);
 
 #ifdef YA_EDITOR
     // Handle deferred viewport resize BEFORE acquiring the frame -
@@ -770,7 +781,7 @@ namespace YAEngine
         frame.assets.Materials(), frame.assets.Textures());
 
       m_TlasBuilder.Build(m_Backend.GetContext(), cmd, currentFrame, frame.snapshot,
-        frame.assets.Meshes(), frame.assets.Materials());
+        frame.assets.Meshes(), frame.assets.Materials(), b_PathTraceGlass);
     }
 
     // Decides what the path tracing pass pushes as its sample index, so it has to precede
@@ -788,11 +799,9 @@ namespace YAEngine
     RecordSwapchainReadback(cmd, *imageIndex);
 #endif
 
-    // Particles are drawn by the forward transparent pass, which the path tracing render
-    // path switches off - transparency as a whole is stage 6's problem. Dropping this
-    // frame's submissions here is what keeps them from being carried into the next one:
-    // DrawTransparent is the only other place that empties the staging buffers, and it
-    // did not run.
+    // Particles are drawn by DrawTransparent, which empties the staging buffers. A frame
+    // where neither transparent pass ran drops its submissions here, so they are not carried
+    // into the next one.
     m_ParticleStage.clear();
     m_PendingParticleBatches.clear();
 

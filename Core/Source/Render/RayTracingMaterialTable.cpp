@@ -39,6 +39,15 @@ namespace YAEngine
       digest = (digest ^ word) * 1099511628211ull;
       return digest ^ (digest >> 29);
     }
+
+    uint64_t FloatPair(float low, float high)
+    {
+      return uint64_t(glm::floatBitsToUint(low)) | (uint64_t(glm::floatBitsToUint(high)) << 32);
+    }
+
+    // A black transmittance channel absorbs as much as a float can carry, rather than taking the
+    // logarithm of zero.
+    constexpr float MIN_TRANSMITTANCE = 1e-4f;
   }
 
   void RayTracingMaterialTable::Init(const RenderContext& ctx)
@@ -97,7 +106,7 @@ namespace YAEngine
 
     FrameSlot& slot = m_Slots[frameIndex];
     slot.recordCount = 0;
-    slot.emissionDigest = 0;
+    slot.pathTraceDigest = 0;
 
     // The table is addressed by slot index, not by a compacted material order, so its
     // length is the highest live slot plus one and not the live material count.
@@ -136,6 +145,7 @@ namespace YAEngine
     // build setting, and the staging vector is reused across frames either way.
     m_Staging.resize(count);
     std::memset(m_Staging.data(), 0, size_t(count) * sizeof(RayTracingMaterialRecord));
+    m_StagingTransmission.assign(count, TransmissionMode::None);
 
     materials.ForEachWithHandle([&](MaterialHandle handle, Material& material) {
       if (handle.index >= count)
@@ -176,32 +186,51 @@ namespace YAEngine
       record.opacity = material.opacity;
       record.uvScale = material.uvScale;
       record.textureMask = textureMask;
+
+      // Written for every material and read only on the instances TlasBuilder flags as
+      // dielectrics, which is decided on the same transparent-and-mode rule.
+      record.mediumPriority = material.mediumPriority;
+      record.transmittanceTint = glm::clamp(material.transmittanceColor, glm::vec3(0.0f), glm::vec3(1.0f));
+      record.ior = std::clamp(material.ior, MIN_TRANSMISSION_IOR, MAX_TRANSMISSION_IOR);
+      record.absorption = -glm::log(glm::max(record.transmittanceTint, glm::vec3(MIN_TRANSMITTANCE)))
+        / std::max(material.transmittanceDistance, MIN_TRANSMITTANCE_DISTANCE);
+
+      if (IsPathTraceTransmissive(material))
+        m_StagingTransmission[handle.index] = material.transmissionMode;
     });
 
     std::memcpy(slot.records.GetMapped(), m_Staging.data(),
       size_t(count) * sizeof(RayTracingMaterialRecord));
     slot.recordCount = count;
 
-    // A record without emissive shading emits nothing, so it folds nothing and an edit to any
-    // other material never restarts the path tracer's accumulation.
-    uint64_t emissionDigest = 0;
+    // Only emitting and transmissive records fold anything, so an edit to any other material
+    // never restarts the path tracer's accumulation.
+    uint64_t digest = 0;
     for (uint32_t i = 0; i < count; i++)
     {
       const RayTracingMaterialRecord& record = m_Staging[i];
       const uint32_t emissionMask =
         record.textureMask & (RT_MATERIAL_EMISSIVE_SHADING | RT_MATERIAL_EMISSIVE_MAP);
-      if ((emissionMask & RT_MATERIAL_EMISSIVE_SHADING) == 0)
-        continue;
+      if ((emissionMask & RT_MATERIAL_EMISSIVE_SHADING) != 0)
+      {
+        digest = FoldWord(digest, uint64_t(i) | (uint64_t(emissionMask) << 32));
+        digest = FoldWord(digest, FloatPair(record.emissivity.x, record.emissivity.y));
+        digest = FoldWord(digest, uint64_t(glm::floatBitsToUint(record.emissivity.z))
+          | (uint64_t(record.emissiveIndex) << 32));
+        digest = FoldWord(digest, FloatPair(record.uvScale.x, record.uvScale.y));
+      }
 
-      emissionDigest = FoldWord(emissionDigest, uint64_t(i) | (uint64_t(emissionMask) << 32));
-      emissionDigest = FoldWord(emissionDigest, uint64_t(glm::floatBitsToUint(record.emissivity.x))
-        | (uint64_t(glm::floatBitsToUint(record.emissivity.y)) << 32));
-      emissionDigest = FoldWord(emissionDigest, uint64_t(glm::floatBitsToUint(record.emissivity.z))
-        | (uint64_t(record.emissiveIndex) << 32));
-      emissionDigest = FoldWord(emissionDigest, uint64_t(glm::floatBitsToUint(record.uvScale.x))
-        | (uint64_t(glm::floatBitsToUint(record.uvScale.y)) << 32));
+      if (m_StagingTransmission[i] != TransmissionMode::None)
+      {
+        digest = FoldWord(digest, uint64_t(i) | (uint64_t(m_StagingTransmission[i]) << 32)
+          | (uint64_t(uint32_t(record.mediumPriority)) << 40));
+        digest = FoldWord(digest, FloatPair(record.transmittanceTint.x, record.transmittanceTint.y));
+        digest = FoldWord(digest, FloatPair(record.transmittanceTint.z, record.ior));
+        digest = FoldWord(digest, FloatPair(record.absorption.x, record.absorption.y));
+        digest = FoldWord(digest, uint64_t(glm::floatBitsToUint(record.absorption.z)));
+      }
     }
-    slot.emissionDigest = emissionDigest;
+    slot.pathTraceDigest = digest;
   }
 
   bool RayTracingMaterialTable::IsValid(uint32_t frameIndex) const
@@ -224,8 +253,8 @@ namespace YAEngine
     return frameIndex < m_Slots.size() ? m_Slots[frameIndex].recordCount : 0;
   }
 
-  uint64_t RayTracingMaterialTable::GetEmissionDigest(uint32_t frameIndex) const
+  uint64_t RayTracingMaterialTable::GetPathTraceDigest(uint32_t frameIndex) const
   {
-    return frameIndex < m_Slots.size() ? m_Slots[frameIndex].emissionDigest : 0;
+    return frameIndex < m_Slots.size() ? m_Slots[frameIndex].pathTraceDigest : 0;
   }
 }

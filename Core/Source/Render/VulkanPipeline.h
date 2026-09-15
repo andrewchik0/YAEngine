@@ -18,6 +18,8 @@ namespace YAEngine
     bool blending = false;
     bool additiveBlend = false;
     bool premultipliedAlpha = false;
+    // False keeps the attachment's alpha: additive light over a premultiplied layer covers nothing.
+    bool writeAlpha = true;
     bool doubleSided = false;
     uint32_t colorAttachmentCount = 1;
     VkCompareOp compareOp = VK_COMPARE_OP_GREATER;

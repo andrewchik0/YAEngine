@@ -112,11 +112,12 @@ namespace YAEngine
           .indexData = { .deviceAddress = geometry.indexAddress },
         },
       },
-      // Deliberately not VK_GEOMETRY_OPAQUE_BIT_KHR. Whether a surface is alpha tested is
-      // a property of the material an instance carries, so it belongs to the TLAS instance
-      // flags; marking the geometry opaque here would skip the any-hit shader for every
-      // cutout built from the same mesh.
-      .flags = 0,
+      // Deliberately not VK_GEOMETRY_OPAQUE_BIT_KHR. Whether a surface is alpha tested or a
+      // dielectric is a property of the material an instance carries, so it belongs to the TLAS
+      // instance flags; marking the geometry opaque here would skip the any-hit shader for every
+      // instance built from the same mesh. No duplicate any-hit calls: the shadow any-hit
+      // multiplies a transmittance in per call, and a triangle reported twice would count twice.
+      .flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR,
     };
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo {

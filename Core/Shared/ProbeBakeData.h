@@ -27,6 +27,14 @@ struct ProbeBakeConstants
   int maxBounces;
   // 0 = off, see clampContribution in pt_path.glsl.
   float fireflyClamp;
+  // PT_MIN_TRANSMISSION_DEPTH..PT_MAX_TRANSMISSION_DEPTH, as for the path tracer.
+  int maxTransmissionDepth;
+  // PT_GLASS_OVERFLOW_* and PT_GLASS_*, the path tracer's own settings. A probe ray is a bounce, so
+  // secondaryGlass governs every ray of a baked path.
+  int glassOverflow;
+  int secondaryGlass;
+  // The PT Glass switch; zero bakes as if no material had a transmission mode.
+  int glassEnabled;
   uint _pad0;
 };
 

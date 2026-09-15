@@ -6,10 +6,20 @@ namespace YAEngine {
 #endif
 
 // Ray mask bits. An instance is added to exactly one of them, and a trace only sees the
-// instances whose mask it shares a bit with. v1 rays trace RT_MASK_OPAQUE; transparent
-// surfaces are kept addressable so a later pass can opt into them without a second TLAS.
-#define RT_MASK_OPAQUE      0x01u
-#define RT_MASK_TRANSPARENT 0x02u
+// instances whose mask it shares a bit with. The two glass bits hold only the transparent surfaces
+// whose material is PT-transmissive, split by what the path tracer may do with them: Sheet and
+// ThinWalled never bend and sit in RT_MASK_GLASS_STRAIGHT, Solid can refract and sits in
+// RT_MASK_GLASS_REFRACTIVE, so one trace can leave out exactly the classes a segment crosses
+// straight. A transparent material without transmission is raster-only and sits in
+// RT_MASK_RASTER_ONLY, which no ray traces - it is kept in the TLAS so its instance record still
+// serves the emissive light table.
+#define RT_MASK_OPAQUE           0x01u
+#define RT_MASK_GLASS_STRAIGHT   0x02u
+#define RT_MASK_RASTER_ONLY      0x04u
+#define RT_MASK_GLASS_REFRACTIVE 0x08u
+#define RT_MASK_GLASS (RT_MASK_GLASS_STRAIGHT | RT_MASK_GLASS_REFRACTIVE)
+// What path and shadow rays trace.
+#define RT_MASK_PATH (RT_MASK_OPAQUE | RT_MASK_GLASS)
 
 // RayTracingInstanceRecord::flags. These mirror the RenderObject booleans a raster draw
 // resolves into pipeline state - a hit has no pipeline to read them from.
@@ -18,6 +28,14 @@ namespace YAEngine {
 #define RT_INSTANCE_TERRAIN      0x04u
 #define RT_INSTANCE_UNLIT        0x08u
 #define RT_INSTANCE_DOUBLE_SIDED 0x10u
+// A PT-transmissive surface, met by the path tracer as a perfectly smooth dielectric - see
+// TransmissionMode: a sheet crossed as a slab, one wall of a closed thin vessel, or the boundary of
+// a refracting medium. The first two are the straight classes.
+#define RT_INSTANCE_SHEET_DIELECTRIC       0x20u
+#define RT_INSTANCE_SOLID_DIELECTRIC       0x40u
+#define RT_INSTANCE_THIN_WALLED_DIELECTRIC 0x80u
+#define RT_INSTANCE_STRAIGHT_DIELECTRIC (RT_INSTANCE_SHEET_DIELECTRIC | RT_INSTANCE_THIN_WALLED_DIELECTRIC)
+#define RT_INSTANCE_DIELECTRIC (RT_INSTANCE_STRAIGHT_DIELECTRIC | RT_INSTANCE_SOLID_DIELECTRIC)
 
 // RayTracingInstanceRecord::emissiveIndex of an instance the emissive light table does not hold.
 #define RT_INSTANCE_NOT_EMISSIVE 0xFFFFFFFFu

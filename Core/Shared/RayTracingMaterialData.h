@@ -31,8 +31,9 @@ namespace YAEngine {
 // than an unwritten descriptor. Sample one only after its textureMask bit says it is
 // there - PARTIALLY_BOUND makes an unwritten slot safe only while nothing reads it.
 //
-// std430: vec3 aligns to 16 and vec2 to 8, which is what puts uvScale at offset 40 and
-// keeps the whole record at 80 bytes on both sides.
+// std430: vec3 aligns to 16 and vec2 to 8, which is what puts uvScale at offset 40,
+// transmittanceTint at 80 and absorption at 96, and keeps the whole record at 112 bytes on
+// both sides.
 struct RayTracingMaterialRecord
 {
   vec3 albedo;
@@ -49,7 +50,16 @@ struct RayTracingMaterialRecord
   uint specularIndex;
   uint emissiveIndex;
   uint normalIndex;
-  uint _pad0;           // keeps the struct at 80 bytes, its std430 stride
+  // The path tracer's transmission, read only on instances flagged RT_INSTANCE_*_DIELECTRIC.
+  // Where two solid media overlap, the higher priority owns the overlap.
+  int mediumPriority;
+  // Sheet: the tint of one crossing.
+  vec3 transmittanceTint;
+  float ior;
+  // ThinWalled and Solid: the Beer-Lambert coefficient per world unit, -ln(colour) / distance per
+  // channel.
+  vec3 absorption;
+  uint _pad0;           // keeps the struct at 112 bytes, its std430 stride
 };
 
 #ifdef __cplusplus

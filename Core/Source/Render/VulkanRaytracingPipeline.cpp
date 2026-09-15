@@ -83,10 +83,13 @@ namespace YAEngine
 
     for (const RaytracingHitGroup& hitGroup : info.hitGroups)
     {
-      const uint32_t closestHit = addStage(hitGroup.closestHitShaderFile,
-        VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
+      // A group without a closest hit shader serves rays that skip it anyway, shadow rays.
+      const uint32_t closestHit = hitGroup.closestHitShaderFile.empty()
+        ? VK_SHADER_UNUSED_KHR
+        : addStage(hitGroup.closestHitShaderFile, VK_SHADER_STAGE_CLOSEST_HIT_BIT_KHR);
       // A group without an any-hit shader is the normal case: the TLAS marks everything but
-      // an alpha-tested instance FORCE_OPAQUE, so traversal would never call one.
+      // alpha-tested instances, and glass under Glass Traversal Legacy, FORCE_OPAQUE, and only
+      // a NoOpaque trace reaches an any-hit on the rest.
       const uint32_t anyHit = hitGroup.anyHitShaderFile.empty()
         ? VK_SHADER_UNUSED_KHR
         : addStage(hitGroup.anyHitShaderFile, VK_SHADER_STAGE_ANY_HIT_BIT_KHR);

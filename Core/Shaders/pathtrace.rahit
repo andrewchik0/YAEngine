@@ -9,15 +9,19 @@
 
 hitAttributeEXT vec2 hitBarycentrics;
 
-// The alpha cutout a raster draw resolves into pipeline state. Only reached for instances
-// the TLAS left non-opaque - the alpha-tested ones - and only when the ray was not traced
-// with gl_RayFlagsOpaqueEXT, which forces every candidate opaque and skips this entirely.
+// The alpha cutout a raster draw resolves into pipeline state, for every surface ray. Reached for
+// the instances the TLAS left non-opaque - the alpha-tested ones and the dielectrics - and only when
+// the ray was not traced with gl_RayFlagsOpaqueEXT, which
+// forces every candidate opaque and skips this entirely. A dielectric is a surface like any other to
+// a surface ray and is accepted as it is: what it transmits is the ray generation shader's business.
 //
 // No payload is declared: an any-hit shader that only accepts or rejects a candidate never
 // touches one, and leaving it out keeps this callable from any trace whatever its payload
 // looks like.
 void main()
 {
-  if (isAlphaCutout(u_Instances[gl_InstanceCustomIndexEXT], uint(gl_PrimitiveID), hitBarycentrics))
+  RayTracingInstanceRecord instance = u_Instances[gl_InstanceCustomIndexEXT];
+  if ((instance.flags & RT_INSTANCE_ALPHA_TEST) != 0u
+    && isAlphaCutout(instance, uint(gl_PrimitiveID), hitBarycentrics))
     ignoreIntersectionEXT;
 }

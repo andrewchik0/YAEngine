@@ -69,6 +69,27 @@ vec2 fetchTexCoord(VertexStream vertices, uint attributeOffset, uint vertexIndex
   return vec2(vertices.data[base], vertices.data[base + 1u]);
 }
 
+vec3 fetchNormal(VertexStream vertices, uint attributeOffset, uint vertexIndex)
+{
+  uint base = attributeOffset / 4u + vertexIndex * 9u;
+  return vec3(vertices.data[base + 2u], vertices.data[base + 3u], vertices.data[base + 4u]);
+}
+
+vec4 fetchTangent(VertexStream vertices, uint attributeOffset, uint vertexIndex)
+{
+  uint base = attributeOffset / 4u + vertexIndex * 9u;
+  return vec4(vertices.data[base + 5u], vertices.data[base + 6u], vertices.data[base + 7u],
+    vertices.data[base + 8u]);
+}
+
+// Zero for a vector with no usable length - zero, infinite or NaN - rather than the NaN normalize
+// would make of it.
+vec3 normalizeOrZero(vec3 v)
+{
+  float length2 = dot(v, v);
+  return length2 > 0.0 && !isinf(length2) ? v * inversesqrt(length2) : vec3(0.0);
+}
+
 // Indices are always 32-bit and a triangle is always three consecutive ones.
 uvec3 fetchTriangle(IndexStream indices, uint primitiveIndex)
 {
@@ -122,15 +143,24 @@ struct RayTracingPayload
 };
 
 // The second payload the path tracer traces with, at its own location, because a shadow ray
-// carries nothing but "did I reach the light". It is traced with TerminateOnFirstHit and
-// SkipClosestHitShader, so the only shader that can ever write this is the shadow miss one -
-// which is exactly what makes the answer one bit. The any-hit is deliberately NOT skipped:
-// it is the alpha cutout, and without it every foliage card would cast a solid shadow.
+// carries nothing but how much of the light it reached - and a glass transmittance query nothing but
+// how much of a segment gets through. Both skip the closest hit shader, so the only shaders that can
+// ever write this are the shadow miss one, which says the far end was reached at all, and
+// pt_shadow.rahit, which is deliberately NOT skipped: it is the alpha cutout - without it every
+// foliage card would cast a solid shadow - and it attenuates the ray through every dielectric it
+// crosses. The ray generation shader resets every field before each trace.
 struct ShadowRayPayload
 {
-  // Zero unless the shadow miss shader ran, so the ray generation shader clears it before
-  // every trace and reads it as the visibility term afterwards.
+  // Zero unless the shadow miss shader ran.
   uint visible;
+  // Nonzero once the ray crossed the boundary of a solid medium.
+  uint crossedSolid;
+  // What the dielectrics crossed let through at their interfaces.
+  vec3 transmittance;
+  // Absorption through solid media, order independent: a crossing into a medium subtracts
+  // absorption * t and one out of it adds the same, so any traversal order sums to the absorption
+  // over the length travelled inside.
+  vec3 opticalDepth;
 };
 
 // Everything a hit turns into before anything shades it. The lazy part is deliberate: the
@@ -140,10 +170,17 @@ struct ShadowRayPayload
 struct RayHitGeometry
 {
   vec3 position;
-  // Geometric, and already flipped to face the incoming ray. A shading normal from the
-  // attribute block would be a second field here, not a replacement for this one: the ray
-  // offset and the shadow ray both need the geometric one whatever shading uses.
+  // Geometric, and already flipped to face the incoming ray. Ray offsets, facing and the test
+  // for a direction below the surface use this one whatever shading uses.
   vec3 normal;
+  // The attribute block's normal and tangent frame, interpolated - see interpolateShadingFrame -
+  // and not flipped: what the material's normal map is decoded in. vertexNormal is the geometric
+  // normal, and the tangent frame zero, where the mesh has no attribute block.
+  vec3 vertexNormal;
+  vec3 tangent;
+  vec3 bitangent;
+  // vertexNormal on the side of normal: the shading normal of a surface without a normal map.
+  vec3 shadingNormal;
   uvec3 triIndices;
   uint64_t vertexAddress;
   uint attributeOffset;
@@ -187,6 +224,77 @@ vec3 transformPointByRows(vec4 rows[3], vec3 point)
   return vec3(dot(rows[0], homogeneous), dot(rows[1], homogeneous), dot(rows[2], homogeneous));
 }
 
+// transpose(inverse(m)) scaled by |det m|: the cofactor matrix with the determinant's sign. Every
+// normal carried through it is normalized afterwards, so the scale is free and nothing is divided.
+mat3 normalMatrixOf(mat3 m)
+{
+  mat3 cofactor = mat3(cross(m[1], m[2]), cross(m[2], m[0]), cross(m[0], m[1]));
+  return dot(m[0], cofactor[0]) < 0.0 ? -cofactor : cofactor;
+}
+
+// The attribute block's vertex normals through normalMatrix, each normalized, then interpolated -
+// the normal half of interpolateShadingFrame. Not normalized.
+vec3 interpolateVertexNormal(VertexStream vertices, uint attributeOffset, uvec3 triIndices,
+  vec3 weights, mat3 normalMatrix)
+{
+  vec3 normal = vec3(0.0);
+  for (int i = 0; i < 3; i++)
+    normal += weights[i] * normalizeOrZero(normalMatrix * fetchNormal(vertices, attributeOffset, triIndices[i]));
+  return normal;
+}
+
+// A hit's normal and tangent frame, built the way mesh.vert builds them for the G-buffer: each
+// vertex's normal and tangent through the normal matrix, the tangent made orthogonal to the normal,
+// the bitangent from their cross product and the tangent's handedness - and then interpolated. The
+// G-buffer decodes the normal map in this frame, so a traced surface bends its normal as the
+// rasterized one does. None of the three is normalized.
+void interpolateShadingFrame(VertexStream vertices, uint attributeOffset, uvec3 triIndices,
+  vec3 weights, mat3 normalMatrix, out vec3 normal, out vec3 tangent, out vec3 bitangent)
+{
+  normal = vec3(0.0);
+  tangent = vec3(0.0);
+  bitangent = vec3(0.0);
+
+  for (int i = 0; i < 3; i++)
+  {
+    vec3 vertexNormal = normalizeOrZero(normalMatrix * fetchNormal(vertices, attributeOffset, triIndices[i]));
+    vec4 vertexTangent = fetchTangent(vertices, attributeOffset, triIndices[i]);
+    vec3 worldTangent = normalizeOrZero(normalMatrix * vertexTangent.xyz);
+    worldTangent = normalizeOrZero(worldTangent - vertexNormal * dot(worldTangent, vertexNormal));
+
+    normal += weights[i] * vertexNormal;
+    tangent += weights[i] * worldTangent;
+    bitangent += weights[i] * cross(vertexNormal, worldTangent) * vertexTangent.w;
+  }
+}
+
+// A hit's interpolated vertex normal in world space, unflipped, or its geometric normal where the
+// mesh has no attribute block: the part of resolveHitGeometry an any-hit shader needs for an angle.
+// normalMatrix is any multiple of the instance's inverse transpose - an any-hit shader has
+// transpose(mat3(gl_WorldToObjectEXT)) without inverting anything. The geometric normal is crossed
+// in object space and carried through it, so no position is transformed; its sign may flip with the
+// multiple, which an angle does not see.
+vec3 hitVertexNormal(uint recordIndex, uint primitiveIndex, mat3 normalMatrix, vec2 barycentrics)
+{
+  RayTracingInstanceRecord instance = u_Instances[recordIndex];
+  VertexStream vertices = VertexStream(instance.vertexAddress);
+  uvec3 triIndices = fetchTriangle(IndexStream(instance.indexAddress), primitiveIndex);
+
+  if (instance.attributeOffset != 0u)
+  {
+    vec3 weights = vec3(1.0 - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y);
+    vec3 normal = normalizeOrZero(interpolateVertexNormal(vertices, instance.attributeOffset, triIndices,
+      weights, normalMatrix));
+    if (dot(normal, normal) > 0.0)
+      return normal;
+  }
+
+  vec3 p0 = fetchPosition(vertices, triIndices.x);
+  vec3 p1 = fetchPosition(vertices, triIndices.y);
+  vec3 p2 = fetchPosition(vertices, triIndices.z);
+  return normalizeOrZero(normalMatrix * cross(p1 - p0, p2 - p0));
+}
+
 // Resolves one committed triangle hit into world space from the instance record alone. The
 // barycentrics are the fixed-function ones, so the interpolated position is the exact point
 // traversal reported rather than origin + t * direction, which drifts with t.
@@ -216,6 +324,34 @@ RayHitGeometry resolveHitGeometry(uint recordIndex, uint primitiveIndex, mat4x3 
   RayHitGeometry hit;
   hit.position = weights.x * p0 + weights.y * p1 + weights.z * p2;
   hit.normal = normal;
+  hit.vertexNormal = normal;
+  hit.tangent = vec3(0.0);
+  hit.bitangent = vec3(0.0);
+  hit.shadingNormal = normal;
+
+  if (instance.attributeOffset != 0u)
+  {
+    mat3 normalMatrix = normalMatrixOf(mat3(objectToWorld));
+    // The tangent frame exists to decode a normal map, so a material without one never builds it.
+    bool normalMapped = instance.materialIndex < uint(u_Materials.length())
+      && (u_Materials[instance.materialIndex].textureMask & RT_MATERIAL_NORMAL) != 0u;
+
+    vec3 vertexNormal;
+    if (normalMapped)
+      interpolateShadingFrame(vertices, instance.attributeOffset, triIndices, weights, normalMatrix,
+        vertexNormal, hit.tangent, hit.bitangent);
+    else
+      vertexNormal = interpolateVertexNormal(vertices, instance.attributeOffset, triIndices, weights,
+        normalMatrix);
+    vertexNormal = normalizeOrZero(vertexNormal);
+
+    // An unset attribute normal, or a singular transform, keeps the geometric one.
+    if (dot(vertexNormal, vertexNormal) > 0.0)
+    {
+      hit.vertexNormal = vertexNormal;
+      hit.shadingNormal = dot(vertexNormal, normal) < 0.0 ? -vertexNormal : vertexNormal;
+    }
+  }
   hit.triIndices = triIndices;
   hit.vertexAddress = instance.vertexAddress;
   hit.attributeOffset = instance.attributeOffset;

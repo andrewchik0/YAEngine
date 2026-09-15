@@ -106,7 +106,7 @@ namespace YAEngine
         VK_COLOR_COMPONENT_R_BIT |
         VK_COLOR_COMPONENT_G_BIT |
         VK_COLOR_COMPONENT_B_BIT |
-        VK_COLOR_COMPONENT_A_BIT;
+        (info.writeAlpha ? VK_COLOR_COMPONENT_A_BIT : 0);
 
     std::vector<VkPipelineColorBlendAttachmentState> attachments(info.colorAttachmentCount, blendTemplate);
 

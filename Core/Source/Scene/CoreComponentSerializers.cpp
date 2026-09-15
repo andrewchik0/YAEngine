@@ -278,6 +278,16 @@ namespace YAEngine
           n["opacity"] = mat.opacity;
         if (mat.fresnelOpacity != 0.0f)
           n["fresnelOpacity"] = mat.fresnelOpacity;
+        if (mat.transmissionMode != TransmissionMode::None)
+          n["transmission"] = GetTransmissionModeKey(mat.transmissionMode);
+        if (mat.ior != 1.5f)
+          n["ior"] = mat.ior;
+        if (mat.transmittanceColor != glm::vec3(1.0f))
+          n["transmittanceColor"] = SerializeVec3(mat.transmittanceColor);
+        if (mat.transmittanceDistance != 1.0f)
+          n["transmittanceDistance"] = mat.transmittanceDistance;
+        if (mat.mediumPriority != 0)
+          n["mediumPriority"] = mat.mediumPriority;
         if (mat.uvScale != glm::vec2(1.0f))
           n["uvScale"] = SerializeVec2(mat.uvScale);
 
@@ -312,6 +322,12 @@ namespace YAEngine
         if (n["transparent"]) mat.transparent = n["transparent"].as<bool>();
         if (n["opacity"]) mat.opacity = n["opacity"].as<float>();
         if (n["fresnelOpacity"]) mat.fresnelOpacity = n["fresnelOpacity"].as<float>();
+        if (n["transmission"]) mat.transmissionMode = ParseTransmissionMode(n["transmission"].as<std::string>());
+        if (n["ior"]) mat.ior = n["ior"].as<float>();
+        if (n["transmittanceColor"]) mat.transmittanceColor = DeserializeVec3(n["transmittanceColor"]);
+        if (n["transmittanceDistance"]) mat.transmittanceDistance = n["transmittanceDistance"].as<float>();
+        if (n["mediumPriority"]) mat.mediumPriority = n["mediumPriority"].as<int32_t>();
+        ClampTransmission(mat);
         if (n["uvScale"]) mat.uvScale = DeserializeVec2(n["uvScale"]);
         if (n["shadingModel"])
         {

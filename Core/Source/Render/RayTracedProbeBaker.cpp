@@ -174,24 +174,37 @@ namespace YAEngine
       return std::min({ requested, totalSamples, BakeLimits::RT_PROBE_MAX_SAMPLES_PER_PASS, byRays });
     }
 
-    // The primary ray, a shadow ray at every path vertex and a continuation at every bounce.
-    uint32_t IntegrateRaysPerSample(int32_t maxBounces)
+    // Traces a path segment takes where it meets glass crossed straight: the closest hit, the trace
+    // past the glass and the transmittance query, see traceSegment in pt_path.glsl.
+    constexpr uint32_t GLASS_SEGMENT_TRACES = 3;
+
+    // Worst case per sample. Without glass: the primary ray, a shadow ray at every path vertex and a
+    // continuation at every bounce. With glass the probe ray is followed once more as a path segment,
+    // every segment may meet glass, and a path that refracts at Solid glass traces one more segment per
+    // refractive event it may spend.
+    uint32_t IntegrateRaysPerSample(int32_t maxBounces, bool glass, int32_t maxTransmissionDepth,
+      int32_t secondaryGlass)
     {
-      return uint32_t(2 * maxBounces + 2);
+      if (!glass)
+        return uint32_t(2 * maxBounces + 2);
+
+      const uint32_t vertices = uint32_t(maxBounces + 1);
+      const uint32_t refractions = secondaryGlass == PT_GLASS_REFRACT ? uint32_t(maxTransmissionDepth) : 0;
+      const uint32_t segments = 1 + uint32_t(maxBounces) + refractions;
+      return 1 + GLASS_SEGMENT_TRACES * segments + vertices;
     }
 
     // Worst case in the rays the submit caps count. selectLight walks every candidate twice at each
     // of a sample's maxBounces + 1 path vertices, the directional slot included whether lit or not,
     // and each vertex draws PT_EMISSIVE_CANDIDATES emissive candidates on top, counted one evaluation
     // apiece whether the table holds anything or not.
-    uint32_t IntegrateWorkPerSample(int32_t maxBounces, const LightBuffer& lights)
+    uint32_t IntegrateWorkPerSample(uint32_t raysPerSample, int32_t maxBounces, const LightBuffer& lights)
     {
       const uint32_t candidates = 1
         + uint32_t(std::clamp(lights.pointLightCount, 0, MAX_POINT_LIGHTS))
         + uint32_t(std::clamp(lights.spotLightCount, 0, MAX_SPOT_LIGHTS));
       const uint32_t evaluations = uint32_t(maxBounces + 1) * (2 * candidates + PT_EMISSIVE_CANDIDATES);
-      return IntegrateRaysPerSample(maxBounces)
-        + (evaluations + LIGHT_EVALUATIONS_PER_RAY - 1) / LIGHT_EVALUATIONS_PER_RAY;
+      return raysPerSample + (evaluations + LIGHT_EVALUATIONS_PER_RAY - 1) / LIGHT_EVALUATIONS_PER_RAY;
     }
 
     // Fisher-Yates driven by splitmix64 from a fixed seed, so a request is always traced in the
@@ -274,9 +287,10 @@ namespace YAEngine
     info.missShaderFiles.resize(2);
     info.missShaderFiles[PT_PRIMARY_MISS_INDEX] = "pathtrace.rmiss";
     info.missShaderFiles[PT_SHADOW_MISS_INDEX] = "pt_shadow.rmiss";
-    info.hitGroups = {
-      RaytracingHitGroup { .closestHitShaderFile = "pathtrace.rchit", .anyHitShaderFile = "pathtrace.rahit" },
-    };
+    info.hitGroups.resize(2);
+    info.hitGroups[PT_PATH_HIT_GROUP] = RaytracingHitGroup {
+      .closestHitShaderFile = "pathtrace.rchit", .anyHitShaderFile = "pathtrace.rahit" };
+    info.hitGroups[PT_SHADOW_HIT_GROUP] = RaytracingHitGroup { .anyHitShaderFile = "pt_shadow.rahit" };
     info.sets = {
       m_FrameUBO.GetLayout(),
       m_DescriptorSet.GetLayout(),
@@ -473,6 +487,10 @@ namespace YAEngine
             .samplesPerPass = passSamples,
             .maxBounces = desc.maxBounces,
             .fireflyClamp = desc.fireflyClamp,
+            .maxTransmissionDepth = desc.maxTransmissionDepth,
+            .glassOverflow = desc.glassOverflow,
+            .secondaryGlass = desc.secondaryGlass,
+            .glassEnabled = desc.glass ? 1 : 0,
           };
 
           const double submitStart = glfwGetTime();
@@ -630,21 +648,28 @@ namespace YAEngine
     const uint32_t samplesPerProbe = ClampToLimit(desc.samplesPerProbe, BakeLimits::RT_PROBE_MAX_SAMPLES_PER_PROBE,
       "samples per probe");
     const int32_t maxBounces = std::clamp(desc.maxBounces, PT_MIN_BOUNCES, PT_MAX_BOUNCES);
-    const uint32_t raysPerSample = IntegrateRaysPerSample(maxBounces);
-    const uint32_t samplesPerPass = SamplesPerPass(desc.samplesPerPass, samplesPerProbe, raysPerSample);
 
     std::memcpy(m_LightBuffer.GetMapped(), &lights, sizeof(LightBuffer));
 
-    const DispatchDesc dispatch {
+    DispatchDesc dispatch {
       .mode = PROBE_BAKE_MODE_INTEGRATE,
-      .samplesPerPass = samplesPerPass,
       .totalSamples = samplesPerProbe,
-      .passCount = (samplesPerProbe - 1) / samplesPerPass + 1,
-      .workPerSample = IntegrateWorkPerSample(maxBounces, lights),
       .maxBounces = maxBounces,
       .fireflyClamp = std::clamp(desc.fireflyClamp, PT_MIN_FIREFLY_CLAMP, PT_MAX_FIREFLY_CLAMP),
+      .glass = desc.glass,
+      .maxTransmissionDepth = std::clamp(desc.maxTransmissionDepth, PT_MIN_TRANSMISSION_DEPTH,
+        PT_MAX_TRANSMISSION_DEPTH),
+      .glassOverflow = std::clamp(desc.glassOverflow, PT_GLASS_OVERFLOW_TERMINATE, PT_GLASS_OVERFLOW_STRAIGHT),
+      .secondaryGlass = std::clamp(desc.secondaryGlass, PT_GLASS_REFRACT, PT_GLASS_STRAIGHT),
       .label = "Probe integration",
     };
+    // Sized from the clamped glass settings above, so a bake with glass takes fewer samples per pass and
+    // smaller chunks.
+    const uint32_t raysPerSample = IntegrateRaysPerSample(dispatch.maxBounces, dispatch.glass,
+      dispatch.maxTransmissionDepth, dispatch.secondaryGlass);
+    dispatch.samplesPerPass = SamplesPerPass(desc.samplesPerPass, samplesPerProbe, raysPerSample);
+    dispatch.passCount = (samplesPerProbe - 1) / dispatch.samplesPerPass + 1;
+    dispatch.workPerSample = IntegrateWorkPerSample(raysPerSample, dispatch.maxBounces, lights);
 
     // Merged and scattered by block as in GeometryQuery.
     const uint32_t lastPass = dispatch.passCount - 1;

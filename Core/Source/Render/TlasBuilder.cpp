@@ -262,7 +262,8 @@ namespace YAEngine
   }
 
   void TlasBuilder::Build(const RenderContext& ctx, VkCommandBuffer cmd, uint32_t frameIndex,
-    const SceneSnapshot& snapshot, MeshManager& meshes, MaterialManager& materials)
+    const SceneSnapshot& snapshot, MeshManager& meshes, MaterialManager& materials,
+    bool glassEnabled)
   {
     if (frameIndex >= m_Slots.size() || !ctx.rayTracing.IsLoaded())
       return;
@@ -331,13 +332,21 @@ namespace YAEngine
       if (cursor + count > capacity)
         break;
 
+      // A transparent surface is a dielectric for the path tracer when PT Glass is on and its material
+      // has a transmission mode, and raster-only otherwise - the rule IsPathTraceTransmissive states, on
+      // the snapshot's transparency.
+      const Material& material = materials.Get(object.material);
+      const bool dielectric = glassEnabled && object.isTransparent
+        && material.transmissionMode != TransmissionMode::None;
+
       VkGeometryInstanceFlagsKHR instanceFlags = 0;
       if (object.doubleSided)
         instanceFlags |= VK_GEOMETRY_INSTANCE_TRIANGLE_FACING_CULL_DISABLE_BIT_KHR;
-      // Alpha-test surfaces are deliberately left non-opaque so a future any-hit shader
-      // gets to run the cutout. The bottom level geometry carries no opaque flag for the
-      // same reason, which is what leaves the decision to the instance.
-      if (!object.isAlphaTest)
+      // Alpha-test surfaces are left non-opaque so the any-hit shaders run the cutout. So is glass: a
+      // shadow ray or a glass transmittance query reads it through pt_shadow.rahit on its way. The
+      // bottom level geometry carries no opaque flag, which is what leaves the decision to the
+      // instance.
+      if (!object.isAlphaTest && !dielectric)
         instanceFlags |= VK_GEOMETRY_INSTANCE_FORCE_OPAQUE_BIT_KHR;
 
       uint32_t recordFlags = 0;
@@ -346,6 +355,15 @@ namespace YAEngine
       if (object.isTerrain)     recordFlags |= RT_INSTANCE_TERRAIN;
       if (object.noShading)     recordFlags |= RT_INSTANCE_UNLIT;
       if (object.doubleSided)   recordFlags |= RT_INSTANCE_DOUBLE_SIDED;
+      if (dielectric)
+      {
+        switch (material.transmissionMode)
+        {
+          case TransmissionMode::Sheet: recordFlags |= RT_INSTANCE_SHEET_DIELECTRIC; break;
+          case TransmissionMode::ThinWalled: recordFlags |= RT_INSTANCE_THIN_WALLED_DIELECTRIC; break;
+          default: recordFlags |= RT_INSTANCE_SOLID_DIELECTRIC; break;
+        }
+      }
 
       // Every instance of one object shares its geometry and its material, so the record
       // is built once and only the custom index it is stored at moves.
@@ -362,7 +380,13 @@ namespace YAEngine
       WriteWorldToPrevWorld(object, record.worldToPrevWorld);
 
       const VkDeviceAddress bottomLevel = vertexBuffer->GetBottomLevel().GetDeviceAddress();
-      const uint32_t mask = object.isTransparent ? RT_MASK_TRANSPARENT : RT_MASK_OPAQUE;
+      // A raster-only transparent surface stays in the structure for its record, which the
+      // emissive light table below may name, under a mask no ray traces. Glass that can refract is
+      // kept apart from glass that never does, so a trace can leave out either.
+      const uint32_t mask = !object.isTransparent ? RT_MASK_OPAQUE
+        : !dielectric ? RT_MASK_RASTER_ONLY
+        : material.transmissionMode == TransmissionMode::Solid ? RT_MASK_GLASS_REFRACTIVE
+        : RT_MASK_GLASS_STRAIGHT;
 
       // Whether the object's instances enter the emissive light table is the material's call, so
       // it is made once; only the transform the selection weight scales with differs per instance.
@@ -373,7 +397,6 @@ namespace YAEngine
       // resolveEmissiveTexel's rule on the constant emission, which an emissive map in [0, 1] only
       // scales down. Imported materials routinely carry emission at or below the cutoff that no
       // shader ever shows, and an entry for one would only waste candidates.
-      const Material& material = materials.Get(object.material);
       const float emissiveLuminance = Luminance(material.emissivity * material.emissiveIntensity);
       const uint32_t triangleCount = uint32_t(vertexBuffer->GetIndexCount() / 3);
       const bool emissive = material.emissive && emissiveLuminance > EMISSIVE_SHADING_CUTOFF
@@ -430,8 +453,8 @@ namespace YAEngine
             EmissiveLightRecord light {
               .instanceIndex = cursor,
               .triangleCount = triangleCount,
-              // Transparent instances sit in RT_MASK_TRANSPARENT, which no path ray traces.
-              .flags = object.isTransparent ? EMISSIVE_LIGHT_NEE_ONLY : 0u,
+              // Raster-only transparent instances sit in RT_MASK_RASTER_ONLY, which no ray traces.
+              .flags = object.isTransparent && !dielectric ? EMISSIVE_LIGHT_NEE_ONLY : 0u,
               .pmf = 0.0f,
               .aliasThreshold = 0.0f,
               .aliasIndex = 0,

@@ -49,8 +49,11 @@ namespace YAEngine
     //  - outside any render pass instance, which a build may not be recorded inside;
     //  - only once nothing that read this slot is still in flight - for a frame slot, after
     //    its frame fence - because the buffers it overwrites may be replaced outright.
+    // glassEnabled is the PT Glass switch: off, no transparent surface is glass, whatever its
+    // transmission mode.
     void Build(const RenderContext& ctx, VkCommandBuffer cmd, uint32_t frameIndex,
-      const SceneSnapshot& snapshot, MeshManager& meshes, MaterialManager& materials);
+      const SceneSnapshot& snapshot, MeshManager& meshes, MaterialManager& materials,
+      bool glassEnabled);
 
     // False when this slot holds nothing traceable for the frame just recorded: no ray
     // tracing on this device, a scene with no ray traceable geometry, or a build that

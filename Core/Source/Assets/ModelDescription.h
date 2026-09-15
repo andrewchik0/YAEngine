@@ -7,6 +7,7 @@
 
 #include "Render/VulkanVertexBuffer.h"
 #include "CpuResourceData.h"
+#include "TransmissionMode.h"
 
 namespace YAEngine
 {
@@ -34,6 +35,11 @@ namespace YAEngine
     bool combinedTextures = false;
     bool doubleSided = false;
     bool transparent = false;
+    // glTF KHR_materials_transmission, _ior and _volume, see ModelImporter::ProcessMaterial.
+    TransmissionMode transmissionMode = TransmissionMode::None;
+    float ior = 1.5f;
+    glm::vec3 transmittanceColor { 1.0f };
+    float transmittanceDistance = 1.0f;
 
     std::string baseColorTexture;
     std::string metallicTexture;

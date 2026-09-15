@@ -153,6 +153,14 @@ namespace YAEngine::ModelOverrides
     if (material.transparent != pristine.transparent) n["transparent"] = material.transparent;
     if (material.opacity != pristine.opacity) n["opacity"] = material.opacity;
     if (material.fresnelOpacity != pristine.fresnelOpacity) n["fresnelOpacity"] = material.fresnelOpacity;
+    if (material.transmissionMode != pristine.transmissionMode)
+      n["transmission"] = GetTransmissionModeKey(material.transmissionMode);
+    if (material.ior != pristine.ior) n["ior"] = material.ior;
+    if (material.transmittanceColor != pristine.transmittanceColor)
+      n["transmittanceColor"] = SerializeVec3(material.transmittanceColor);
+    if (material.transmittanceDistance != pristine.transmittanceDistance)
+      n["transmittanceDistance"] = material.transmittanceDistance;
+    if (material.mediumPriority != pristine.mediumPriority) n["mediumPriority"] = material.mediumPriority;
     if (material.uvScale != pristine.uvScale) n["uvScale"] = SerializeVec2(material.uvScale);
     if (material.shadingModel != pristine.shadingModel)
       n["shadingModel"] = (material.shadingModel == ShadingModel::Unlit) ? "unlit" : "lit";
@@ -212,6 +220,12 @@ namespace YAEngine::ModelOverrides
     if (n["transparent"]) material.transparent = n["transparent"].as<bool>();
     if (n["opacity"]) material.opacity = n["opacity"].as<float>();
     if (n["fresnelOpacity"]) material.fresnelOpacity = n["fresnelOpacity"].as<float>();
+    if (n["transmission"]) material.transmissionMode = ParseTransmissionMode(n["transmission"].as<std::string>());
+    if (n["ior"]) material.ior = n["ior"].as<float>();
+    if (n["transmittanceColor"]) material.transmittanceColor = DeserializeVec3(n["transmittanceColor"]);
+    if (n["transmittanceDistance"]) material.transmittanceDistance = n["transmittanceDistance"].as<float>();
+    if (n["mediumPriority"]) material.mediumPriority = n["mediumPriority"].as<int32_t>();
+    ClampTransmission(material);
     if (n["uvScale"]) material.uvScale = DeserializeVec2(n["uvScale"]);
     if (n["shadingModel"])
     {

@@ -36,6 +36,11 @@ namespace YAEngine
     dst.transparent = src.transparent;
     dst.opacity = src.opacity;
     dst.fresnelOpacity = src.fresnelOpacity;
+    dst.transmissionMode = src.transmissionMode;
+    dst.ior = src.ior;
+    dst.transmittanceColor = src.transmittanceColor;
+    dst.transmittanceDistance = src.transmittanceDistance;
+    dst.mediumPriority = src.mediumPriority;
     dst.shadingModel = src.shadingModel;
     dst.uvScale = src.uvScale;
     dst.baseColorTexture = src.baseColorTexture;

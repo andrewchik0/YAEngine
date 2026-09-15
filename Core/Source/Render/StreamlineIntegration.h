@@ -155,13 +155,15 @@ namespace YAEngine
 
     // Ray reconstruction only. All render-res; EvaluateRayReconstruction tags whichever
     // of them carries a live VkImage and treats an empty one as "not provided", which is
-    // legal for the two optional specular guides and nothing else. Of those two only the
-    // one rrSettings.specularGuide names is tagged.
+    // legal for the three optional ones and nothing else. Of the two specular guides only
+    // the one rrSettings.specularGuide names is tagged.
     DLSSImage diffuseAlbedo;          // demodulation guide
     DLSSImage specularAlbedo;         // demodulation guide
     DLSSImage normalRoughness;        // world normal xyz + roughness w, one image
     DLSSImage specularHitDistance;    // optional
     DLSSImage specularMotionVectors;  // optional, MainVelocity's convention and mvecScale
+    // Optional: colorIn before transparency was composited into it, in colorIn's format.
+    DLSSImage colorBeforeTransparency;
 
     glm::mat4 view { 1.0f };
     glm::mat4 proj { 1.0f };
@@ -189,8 +191,8 @@ namespace YAEngine
 
     // Read only by EvaluateRayReconstruction.
     RayReconstructionSettings rrSettings;
-    // PROTOTYPE (dielectric reflection layer spike): which RR instance evaluates, and whether it
-    // carries the colour input's alpha through to the output.
+    // Which RR instance evaluates - viewport 1 is the reflection layer - and whether it carries
+    // the colour input's alpha through to the output.
     uint32_t viewport = 0;
     bool alphaUpscaling = false;
   };
@@ -280,7 +282,7 @@ namespace YAEngine
     uint32_t m_RROptionsWidth = 0;
     uint32_t m_RROptionsHeight = 0;
     bool b_RREvaluateLogged = false;
-    // PROTOTYPE: first evaluate of the reflection layer instance (viewport 1) logged.
+    // First evaluate of the reflection layer instance (viewport 1) logged.
     bool b_RRLayerEvaluateLogged = false;
   };
 }

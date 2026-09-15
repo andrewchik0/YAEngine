@@ -58,7 +58,7 @@ namespace YAEngine
       .WriteStorageImage(15, primaryThroughput.GetView())
       .WriteStorageImage(16, ptDepth.GetView())
       .WriteStorageImage(17, ptMotion.GetView())
-      // PROTOTYPE (dielectric reflection layer spike)
+      // The reflection layer: its radiance, then its first-vertex images
       .WriteStorageImage(18, m_Graph.GetResource(m_PTLayerRadiance).GetView())
       .WriteStorageImage(19, m_Graph.GetResource(m_PTLayerAlbedo).GetView())
       .WriteStorageImage(20, m_Graph.GetResource(m_PTLayerNormal).GetView())
@@ -67,6 +67,9 @@ namespace YAEngine
       .WriteStorageImage(23, m_Graph.GetResource(m_PTLayerMotion).GetView())
       .WriteStorageBuffer(24, m_TlasBuilder.GetEmissiveBuffer(frameIndex),
         m_TlasBuilder.GetEmissiveBufferSize(frameIndex))
+      .WriteCombinedImageSampler(25, m_Graph.GetResource(m_PTTransparentLayer).GetView(),
+        m_Graph.GetResource(m_PTTransparentLayer).GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteStorageImage(26, m_Graph.GetResource(m_PTColorBeforeTransparency).GetView())
       .Flush();
   }
 
@@ -104,7 +107,7 @@ namespace YAEngine
       .Flush();
   }
 
-  // PROTOTYPE (dielectric reflection layer spike): pt_guides.comp over the layer first vertex.
+  // pt_guides.comp over the reflection layer's first vertex.
   void Render::WritePathTraceLayerGuideDescriptors(uint32_t frameIndex)
   {
     auto& albedo = m_Graph.GetResource(m_PTLayerAlbedo);
@@ -129,14 +132,18 @@ namespace YAEngine
       .Flush();
   }
 
-  // PROTOTYPE (dielectric reflection layer spike)
+  // rr_layer_composite.comp: DLSSOutput in place, the reflection layer instance's output, and the
+  // forward transparent layer the base instance laid over it.
   void Render::WriteRRLayerCompositeDescriptors(uint32_t frameIndex)
   {
     auto& layer = m_Graph.GetResource(m_DLSSLayerOutput);
+    auto& transparent = m_Graph.GetResource(m_PTTransparentLayer);
 
     m_RRLayerCompositeDescriptorSets[frameIndex].Writer()
       .WriteStorageImage(0, m_Graph.GetResource(m_DLSSOutput).GetView())
       .WriteCombinedImageSampler(1, layer.GetView(), layer.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+      .WriteCombinedImageSampler(2, transparent.GetView(), transparent.GetSampler(),
         VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
       .Flush();
   }
@@ -243,8 +250,7 @@ namespace YAEngine
         | VK_IMAGE_USAGE_TRANSFER_DST_BIT,
       .resolution = RGResolution::Output
     });
-    // PROTOTYPE (dielectric reflection layer spike): the second RR instance's output, same
-    // usage as DLSSOutput for the same reasons.
+    // The reflection layer RR instance's output, same usage as DLSSOutput for the same reasons.
     m_DLSSLayerOutput = m_Graph.CreateResource({
       .name = "dlssLayerOutput",
       .format = VK_FORMAT_R16G16B16A16_SFLOAT,
@@ -368,7 +374,7 @@ namespace YAEngine
       .filter = VK_FILTER_NEAREST
     });
 
-    // PROTOTYPE (dielectric reflection layer spike) - see Render.h. Formats mirror the primary
+    // The reflection layer - see Render.h. Formats mirror the primary
     // counterparts; the layer radiance carries the Fresnel weight in alpha.
     m_PTLayerRadiance = m_Graph.CreateResource({
       .name = "ptLayerRadiance",
@@ -421,6 +427,18 @@ namespace YAEngine
       .format = VK_FORMAT_R16G16B16A16_SFLOAT,
       .filter = VK_FILTER_NEAREST
     });
+    // The forward transparent layer and the traced sample from before it - see Render.h. The layer is
+    // linearly filtered: RRLayerComposite resamples its coverage to output resolution.
+    m_PTTransparentLayer = m_Graph.CreateResource({
+      .name = "ptTransparentLayer",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT
+    });
+    m_PTColorBeforeTransparency = m_Graph.CreateResource({
+      .name = "ptColorBeforeTransparency",
+      .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+      .additionalUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT,
+      .filter = VK_FILTER_NEAREST
+    });
 
     uint32_t hizMipCount = static_cast<uint32_t>(
       std::floor(std::log2(std::max(renderExtent.width, renderExtent.height)))) + 1;
@@ -456,6 +474,68 @@ namespace YAEngine
       }
     });
 
+    // Declared ahead of the forward transparent layer below, which shades with the tile lists: with no
+    // graph output of its own, only this order puts it first among the G-buffer's readers.
+    m_LightCullPassIndex = m_Graph.AddPass({
+      .name = "LightCull",
+      .inputs = {m_MainDepth},
+      .isCompute = true,
+      // The tile list only ever feeds the deferred and forward transparent passes. The path
+      // tracer picks its light per path vertex out of the full LightBuffer instead, so a traced
+      // frame needs the list only while its forward transparent layer draws.
+      .isEnabled = [this]() { return !IsPathTracingActive() || b_PathTraceTransparencyActive; },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto currentFrame = m_Backend.GetCurrentFrameIndex();
+        auto& mainDepth = m_Graph.GetResource(m_MainDepth);
+
+        m_LightCullInputDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
+          mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+
+        auto& pipeline = m_PSOCache.GetCompute(m_LightCullPipeline);
+        pipeline.Bind(ctx.cmd);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_LightCullInputDescriptorSets[currentFrame].Get()}, 1);
+        pipeline.BindDescriptorSets(ctx.cmd, {m_TileLightBuffer.GetDescriptorSet(currentFrame)}, 2);
+
+        pipeline.Dispatch(ctx.cmd,
+          m_TileLightBuffer.GetTileCountX(),
+          m_TileLightBuffer.GetTileCountY(), 1);
+
+        VkBufferMemoryBarrier bufferBarrier {};
+        bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
+        bufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        bufferBarrier.buffer = m_TileLightBuffer.GetBuffer(currentFrame);
+        bufferBarrier.offset = 0;
+        bufferBarrier.size = VK_WHOLE_SIZE;
+        vkCmdPipelineBarrier(ctx.cmd,
+          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
+          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
+          0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+      }
+    });
+
+    // What a path traced frame does not trace - transparent surfaces that are not glass to it, and
+    // particles - through the raster forward transparent shading, with the jittered camera the traced
+    // sample has. At render resolution, which the tile light lists and every fragCoord lookup are sized
+    // for, into a premultiplied layer cleared to zero. MainDepth holds the opaque G-buffer depth there:
+    // tested, never written. The tracer below lays it into its sample.
+    m_PathTraceTransparentPassIndex = m_Graph.AddPass({
+      .name = "PathTraceTransparent",
+      .colorOutputs = {m_PTTransparentLayer},
+      .depthOutput = m_MainDepth,
+      .clearColor = true,
+      .clearColorValue = {{ 0.0f, 0.0f, 0.0f, 0.0f }},
+      .clearDepth = false,
+      .isEnabled = [this]() { return IsPathTraceTransparentLayerDrawn(); },
+      .execute = [this](const RGExecuteContext& ctx) {
+        auto* frame = static_cast<FrameContext*>(ctx.userData);
+        DrawTransparent(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame, true);
+      }
+    });
+
     // 2b. The path tracer. One sample per pixel per frame, feeding the two path traced debug
     // views: PT Noisy shows the sample, PT Reference the running mean the same dispatch
     // keeps. One pass serves both - which of the two images the tonemap pass then displays
@@ -466,12 +546,12 @@ namespace YAEngine
     // pass declares those as inputs: that ORDERS it after the G-buffer pass.
     m_PathTracePassIndex = m_Graph.AddPass({
       .name = "PathTrace",
-      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_MainVelocity},
+      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_MainVelocity, m_PTTransparentLayer},
       .storageOutputs = {m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance, m_PTSpecularMotion,
         m_PTPrimaryAlbedo, m_PTPrimaryNormal, m_PTPrimaryThroughput, m_PTDepth, m_PTMotion,
-        // PROTOTYPE (dielectric reflection layer spike)
+        // The reflection layer
         m_PTLayerRadiance, m_PTLayerAlbedo, m_PTLayerNormal, m_PTLayerThroughput, m_PTLayerDepth,
-        m_PTLayerMotion},
+        m_PTLayerMotion, m_PTColorBeforeTransparency},
       .isCompute = true,
       .shaderStage = VK_PIPELINE_STAGE_RAY_TRACING_SHADER_BIT_KHR,
       .isEnabled = [this]() { return IsPathTracePassEnabled(); },
@@ -520,6 +600,15 @@ namespace YAEngine
         pc.sampleIndex = IsPathTraceAccumulating() ? m_PathTraceSampleIndex : -1;
         pc.fireflyClamp = m_PathTraceFireflyClamp;
         pc.debugMode = GetPathTraceDebugMode();
+        pc.maxTransmissionDepth = std::clamp(m_PathTraceMaxTransmissionDepth,
+          PT_MIN_TRANSMISSION_DEPTH, PT_MAX_TRANSMISSION_DEPTH);
+        pc.glassOverflow = int(m_PathTraceGlassOverflow);
+        pc.secondaryGlass = int(m_PathTraceSecondaryGlass);
+        pc.glassReflectionBounces = std::clamp(m_PathTraceGlassReflectionBounces,
+          PT_MIN_GLASS_REFLECTION_BOUNCES, PT_MAX_BOUNCES);
+        pc.glassReflectionGlass = int(m_PathTraceGlassReflectionGlass);
+        pc.glassEnabled = b_PathTraceGlass ? 1 : 0;
+        pc.transparentLayer = IsPathTraceTransparentLayerDrawn() ? 1 : 0;
         pipeline.PushConstants(ctx.cmd, &pc);
 
         // One invocation per pixel exactly, not a rounded-up tile count: a trace launch is
@@ -571,8 +660,8 @@ namespace YAEngine
       }
     });
 
-    // PROTOTYPE (dielectric reflection layer spike): the same guide derivation over the layer
-    // first vertex, for the second RR instance.
+    // The same guide derivation over the reflection layer's first vertex, for the second RR
+    // instance.
     m_PathTraceLayerGuidesPassIndex = m_Graph.AddPass({
       .name = "PathTraceLayerGuides",
       .inputs = {m_PTLayerAlbedo, m_PTLayerNormal, m_PTLayerThroughput, m_PTLayerDepth},
@@ -757,47 +846,6 @@ namespace YAEngine
       }
     });
 
-    m_LightCullPassIndex = m_Graph.AddPass({
-      .name = "LightCull",
-      .inputs = {m_MainDepth},
-      .isCompute = true,
-      // The tile list only ever feeds the deferred and forward transparent passes, and
-      // both are off while the path tracer owns the frame - it picks its light per path
-      // vertex out of the full LightBuffer instead.
-      .isEnabled = [this]() { return !IsPathTracingActive(); },
-      .execute = [this](const RGExecuteContext& ctx) {
-        auto currentFrame = m_Backend.GetCurrentFrameIndex();
-        auto& mainDepth = m_Graph.GetResource(m_MainDepth);
-
-        m_LightCullInputDescriptorSets[currentFrame].WriteCombinedImageSampler(1,
-          mainDepth.GetView(), mainDepth.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
-
-        auto& pipeline = m_PSOCache.GetCompute(m_LightCullPipeline);
-        pipeline.Bind(ctx.cmd);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_LightCullInputDescriptorSets[currentFrame].Get()}, 1);
-        pipeline.BindDescriptorSets(ctx.cmd, {m_TileLightBuffer.GetDescriptorSet(currentFrame)}, 2);
-
-        pipeline.Dispatch(ctx.cmd,
-          m_TileLightBuffer.GetTileCountX(),
-          m_TileLightBuffer.GetTileCountY(), 1);
-
-        VkBufferMemoryBarrier bufferBarrier {};
-        bufferBarrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-        bufferBarrier.srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT;
-        bufferBarrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
-        bufferBarrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        bufferBarrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        bufferBarrier.buffer = m_TileLightBuffer.GetBuffer(currentFrame);
-        bufferBarrier.offset = 0;
-        bufferBarrier.size = VK_WHOLE_SIZE;
-        vkCmdPipelineBarrier(ctx.cmd,
-          VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
-          VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-          0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
-      }
-    });
-
     // 6. Deferred Lighting - fullscreen IBL + analytical lights from G-buffer
     m_DeferredLightingPassIndex = m_Graph.AddPass({
       .name = "DeferredLighting",
@@ -946,14 +994,12 @@ namespace YAEngine
       .depthOutput = m_MainDepth,
       .clearColor = false,
       .clearDepth = false,
-      // Transparent geometry is simply absent from a path traced frame in v1: it draws
-      // into SSRColor, which nothing resolves any more, and the TLAS carries it under mask
-      // 0x02 which the tracer never traces against. Stage 6 is what composites it - either
-      // by tracing that mask or by drawing this pass over the resolved image.
+      // A path traced frame resolves nothing out of SSRColor: it draws what it does not trace
+      // into a layer of its own, PathTraceTransparent below.
       .isEnabled = [this]() { return !IsPathTracingActive(); },
       .execute = [this](const RGExecuteContext& ctx) {
         auto* frame = static_cast<FrameContext*>(ctx.userData);
-        DrawTransparent(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame);
+        DrawTransparent(ctx.cmd, m_Backend.GetCurrentFrameIndex(), *frame, false);
       }
     });
 
@@ -1021,9 +1067,8 @@ namespace YAEngine
     // tagged inputs are different: the noisy sample and the four guides instead of the
     // rasterized SSRColor, and declaring those in the raster pass would only make the graph
     // order and barrier frames that never touch them.
-    // PROTOTYPE (dielectric reflection layer spike): the second RR instance, over the mirror path
-    // of smooth dielectric pixels. It has to evaluate before the base instance, which clears the
-    // reset flag both read.
+    // The second RR instance, over the mirror path of smooth dielectric and glass first vertices.
+    // It has to evaluate before the base instance, which clears the reset flag both read.
     m_DLSSRayReconstructionLayerPassIndex = m_Graph.AddPass({
       .name = "DLSSRayReconstructionLayer",
       .inputs = {m_PTLayerRadiance, m_PTLayerDepth, m_PTLayerMotion, m_PTLayerDiffuseAlbedo,
@@ -1040,8 +1085,8 @@ namespace YAEngine
     m_DLSSRayReconstructionPassIndex = m_Graph.AddPass({
       .name = "DLSSRayReconstruction",
       .inputs = {m_PathTraceNoisy, m_PTDepth, m_PTMotion, m_PTDiffuseAlbedo,
-        m_PTSpecularAlbedo, m_PTNormalRoughness, m_PTHitDistance, m_PTSpecularMotion,
-        // PROTOTYPE: not read here - declared only so the graph orders the layer instance first.
+        m_PTSpecularAlbedo, m_PTNormalRoughness, m_PTHitDistance, m_PTSpecularMotion, m_PTColorBeforeTransparency,
+        // Not read here - declared only so the graph orders the layer instance first.
         m_DLSSLayerOutput},
       .storageOutputs = {m_DLSSOutput},
       .isCompute = true,
@@ -1052,11 +1097,13 @@ namespace YAEngine
       }
     });
 
-    // PROTOTYPE (dielectric reflection layer spike): base + layer into DLSSOutput in place, after
-    // both instances and before every reader of DLSSOutput (the write chain orders it here).
+    // Base + reflection layer into DLSSOutput in place, after
+    // both instances and before every reader of DLSSOutput (the write chain orders it here). The
+    // reflection belongs behind the transparency the base instance laid over, so it is dimmed by the
+    // layer's coverage.
     m_RRLayerCompositePassIndex = m_Graph.AddPass({
       .name = "RRLayerComposite",
-      .inputs = {m_DLSSLayerOutput},
+      .inputs = {m_DLSSLayerOutput, m_PTTransparentLayer},
       .storageOutputs = {m_DLSSOutput},
       .isCompute = true,
       .isEnabled = [this]() { return IsRayReconstructionResolve(); },
@@ -1690,9 +1737,9 @@ namespace YAEngine
 
     for (RGHandle handle : { m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance, m_PTSpecularMotion,
       m_PTPrimaryAlbedo, m_PTPrimaryNormal, m_PTPrimaryThroughput, m_PTDepth, m_PTMotion,
-      // PROTOTYPE (dielectric reflection layer spike)
+      // The reflection layer
       m_PTLayerRadiance, m_PTLayerAlbedo, m_PTLayerNormal, m_PTLayerThroughput, m_PTLayerDepth,
-      m_PTLayerMotion })
+      m_PTLayerMotion, m_PTColorBeforeTransparency })
     {
       auto& image = m_Graph.GetResource(handle);
 
