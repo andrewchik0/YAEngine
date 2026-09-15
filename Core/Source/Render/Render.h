@@ -343,6 +343,8 @@ namespace YAEngine
     bool& GetShadowLodEnabled() { return b_ShadowLodEnabled; }
     int* GetShadowCascadeLods() { return m_ShadowCascadeLods; }
     int& GetTonemapMode() { return m_TonemapMode; }
+    float& GetTonemapPower() { return m_TonemapPower; }
+    float& GetTonemapSaturation() { return m_TonemapSaturation; }
     bool& GetAutoExposureEnabled() { return b_AutoExposureEnabled; }
     float& GetAdaptSpeedUp() { return m_AdaptSpeedUp; }
     float& GetAdaptSpeedDown() { return m_AdaptSpeedDown; }
@@ -441,7 +443,9 @@ namespace YAEngine
 
   private:
 
-    float m_Gamma = 2.2f;
+    // A grade on top of the sRGB encode the output format already applies, not the encode
+    // itself - see the sceneColor comment in Render.Setup.cpp. 1.0 is the neutral value.
+    float m_Gamma = 1.0f;
     float m_Exposure = 1.0f;
     int m_CurrentTexture = 0;
     bool b_AOEnabled = true;
@@ -546,6 +550,9 @@ namespace YAEngine
     uint32_t m_ShadowCachedSpotCount = 0;
     uint32_t m_ShadowCachedPointCount = 0;
     int m_TonemapMode = TONEMAP_AGX;
+    // Grade on top of the tone mapping curve; 1.0 each leaves the curve alone.
+    float m_TonemapPower = 1.0f;
+    float m_TonemapSaturation = 1.0f;
     bool b_AutoExposureEnabled = true;
     float m_AdaptSpeedUp = 2.0f;
     float m_AdaptSpeedDown = 1.0f;

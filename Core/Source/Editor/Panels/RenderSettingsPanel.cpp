@@ -27,9 +27,43 @@ namespace YAEngine
 
     // Indices match TONEMAP_ACES and TONEMAP_AGX
     constexpr EnumOption TONEMAPPERS[] = {
-      { .label = "ACES", .tooltip = "Filmic curve with strong contrast; saturated highlights shift in hue" },
+      { .label = "ACES", .tooltip = "Filmic curve with strong contrast, evaluated in ACEScg" },
       { .label = "AgX", .tooltip = "Softer highlight roll-off; bright colors desaturate toward white" },
     };
+
+    struct TonemapLook
+    {
+      float power;
+      float saturation;
+    };
+
+    // Grade presets offered next to the curve. The trailing Custom row of TONEMAP_LOOK_OPTIONS
+    // has no entry here: it is what the combo shows once the two values are edited by hand.
+    constexpr TonemapLook TONEMAP_LOOKS[] = {
+      { .power = 1.0f,  .saturation = 1.0f },
+      { .power = 1.15f, .saturation = 1.2f },
+      { .power = 1.35f, .saturation = 1.4f },
+    };
+
+    constexpr EnumOption TONEMAP_LOOK_OPTIONS[] = {
+      { .label = "Neutral", .tooltip = "The curve on its own, no grade" },
+      { .label = "Soft", .tooltip = "Mild contrast and saturation lift" },
+      { .label = "Punchy", .tooltip = "Strong contrast and saturation - the reference AgX look" },
+      { .label = "Custom", .tooltip = "Contrast and saturation set by hand on the rows below" },
+    };
+
+    int32_t FindTonemapLook(float power, float saturation)
+    {
+      for (size_t i = 0; i < std::size(TONEMAP_LOOKS); i++)
+      {
+        if (std::abs(TONEMAP_LOOKS[i].power - power) < 1e-4f
+          && std::abs(TONEMAP_LOOKS[i].saturation - saturation) < 1e-4f)
+        {
+          return int32_t(i);
+        }
+      }
+      return int32_t(std::size(TONEMAP_LOOKS));
+    }
 
     constexpr int32_t DEFAULT_CASCADE_LODS[CSM_CASCADE_COUNT] = { 0, 1, 1, 2 };
 
@@ -284,11 +318,30 @@ namespace YAEngine
       PropertyEnum("Tonemapper", render.GetTonemapMode(), TONEMAPPERS, {
         .defaultValue = TONEMAP_AGX,
         .tooltip = "Curve that maps HDR radiance into the display range" });
+
+      float& lookPower = render.GetTonemapPower();
+      float& lookSaturation = render.GetTonemapSaturation();
+      int32_t lookIndex = FindTonemapLook(lookPower, lookSaturation);
+      if (PropertyEnum("Look", lookIndex, TONEMAP_LOOK_OPTIONS, {
+            .defaultValue = 0,
+            .tooltip = "Contrast and saturation applied on top of the curve. Both curves are meant to be graded: "
+                       "AgX is deliberately flat on its own." }).changed
+        && lookIndex < int32_t(std::size(TONEMAP_LOOKS)))
+      {
+        lookPower = TONEMAP_LOOKS[lookIndex].power;
+        lookSaturation = TONEMAP_LOOKS[lookIndex].saturation;
+      }
+      PropertyFloat("Look Contrast", lookPower, {
+        .min = 0.5f, .max = 2.0f, .speed = 0.01f, .format = "%.2f", .defaultValue = 1.0f,
+        .tooltip = "Power applied to the tone mapped image. Above 1 deepens the shadows, below 1 lifts them." });
+      PropertyFloat("Look Saturation", lookSaturation, {
+        .min = 0.0f, .max = 2.0f, .speed = 0.01f, .format = "%.2f", .defaultValue = 1.0f,
+        .tooltip = "Pulls each channel away from the pixel's luma. 0 is greyscale, 1 leaves the curve alone." });
+
       PropertyFloat("Gamma", render.GetGamma(), {
-        .min = 0.5f, .max = 3.0f, .speed = 0.01f, .format = "%.2f", .defaultValue = 2.2f,
-        .tooltip = "Display gamma the final image is encoded with. It also decodes albedo: base colors and textures are "
-                   "raised to this power in the G-buffer, so changing it changes how materials look, not only the display "
-                   "response." });
+        .min = 0.5f, .max = 3.0f, .speed = 0.01f, .format = "%.2f", .defaultValue = 1.0f,
+        .tooltip = "Viewer side gamma adjustment. The sRGB encode itself is done by the output format, so 1.0 is the "
+                   "neutral value and this only nudges it the way a game's gamma slider does." });
 
       EndPropertyGroup();
     }

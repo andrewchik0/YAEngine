@@ -12,8 +12,6 @@ layout(location = 0) out vec4 outColor;
 
 void main()
 {
-  float gamma = u_Frame.gamma;
-
   vec2 uv = materialUV(inTexCoord);
 
   float hasAlbedoTexture = float(u_Material.textureMask & 1);
@@ -26,7 +24,6 @@ void main()
   if (max(baseAlpha, u_Material.fresnelOpacity) <= 0.001)
     discard;
 
-  albedo.rgb = pow(albedo.rgb, vec3(gamma));
 
   float hasNormalMap = float((u_Material.textureMask >> 5) & 1);
   vec3 n_ts = sampleMaterialNormal(uv);

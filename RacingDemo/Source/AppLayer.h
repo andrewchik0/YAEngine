@@ -23,8 +23,8 @@
 #endif
 
 // #define TEST
-// #define BISTRO_RACING
-#define BISTRO_INTERIOR
+#define BISTRO_RACING
+// #define BISTRO_INTERIOR
 
 class AppLayer : public YAEngine::Layer
 {
@@ -74,7 +74,7 @@ public:
 
 #elif defined(BISTRO_RACING)
     YAEngine::SceneSerializer::Load(
-      APP_WORKING_DIR "/Assets/Scenes/cafe.scene",
+      APP_WORKING_DIR "/Assets/Scenes/cafe_merged.scene",
       GetScene(), GetAssets(), registry, GetRender(),
       APP_WORKING_DIR, &threadPool);
 

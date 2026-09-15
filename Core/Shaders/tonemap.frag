@@ -4,6 +4,7 @@ layout(location = 0) out vec4 outColor;
 #include "common.glsl"
 #include "octahedron.glsl"
 #include "debug_ramps.glsl"
+#include "noise.glsl"
 
 layout(set = 1, binding = 0) uniform sampler2D frame;
 layout(set = 1, binding = 1) uniform sampler2D aoTexture;
@@ -35,6 +36,15 @@ layout(std430, set = 2, binding = 0) readonly buffer ExposureSSBO
 layout(set = 3, binding = 0) uniform sampler2D bloomTexture;
 
 #include "tonemap.glsl"
+
+// Uniform noise reshaped into a triangular distribution over [-1, 1]. Only that shape makes
+// the quantization error white and independent of the value being quantized; a flat uniform
+// dither leaves the error correlated with the signal, which is the banding it is meant to hide.
+float triangularDither(vec2 fragCoord)
+{
+  float u = interleavedGradientNoise(fragCoord) * 2.0 - 1.0;
+  return sign(u) * (1.0 - sqrt(max(1.0 - abs(u), 0.0)));
+}
 
 void main()
 {
@@ -211,6 +221,15 @@ void main()
   color = color * finalExposure;
   color = applyTonemap(color);
   color = pow(color, vec3(1.0 / u_Frame.gamma));
+
+  // The attachment is sRGB, so the hardware encodes this value before quantizing it: a flat
+  // 1/255 of dither here would be an enormous step in the shadows and invisible in the
+  // highlights. The amplitude is one encoded 8-bit step converted back into linear units,
+  // d(linear)/d(encoded) of the sRGB curve. Below linear 0.003 the curve is a straight line
+  // and this over-darkens the step slightly, which only costs noise where the encoded buffer
+  // already has codes to spare.
+  vec3 quantizationStep = 2.2749 * pow(max(color, 1e-5), vec3(0.58333)) / 255.0;
+  color += quantizationStep * triangularDither(gl_FragCoord.xy);
 
   outColor = vec4(color, 1.0);
 }

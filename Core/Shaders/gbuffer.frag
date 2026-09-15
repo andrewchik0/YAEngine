@@ -18,8 +18,6 @@ layout(location = 2) out vec2 outVelocity;
 #include "octahedron.glsl"
 
 void main() {
-  float gamma = u_Frame.gamma;
-
   vec2 uv = materialUV(inTexCoord);
 
   float hasAlbedoTexture = float(u_Material.textureMask & 1);
@@ -31,7 +29,6 @@ void main() {
     discard;
 #endif
 
-  albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
 
   float hasNormalMap = float((u_Material.textureMask >> 5) & 1);
   vec3 n_ts = sampleMaterialNormal(uv);

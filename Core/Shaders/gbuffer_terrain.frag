@@ -18,8 +18,6 @@ layout(location = 2) out vec2 outVelocity;
 #include "octahedron.glsl"
 
 void main() {
-  float gamma = u_Frame.gamma;
-
   // Slope-based blend factor: 0 = flat (ground), 1 = steep (rock)
   float slope = 1.0 - abs(dot(normalize(inNormal), vec3(0.0, 1.0, 0.0)));
   float slopeMask = smoothstep(u_Terrain.slopeStart, u_Terrain.slopeEnd, slope);
@@ -51,7 +49,6 @@ void main() {
   float roughness = mix(roughnessGround, rock.roughness, slopeMask);
   float metallic  = mix(metallicGround,  rock.metallic,  slopeMask);
 
-  albedo = vec4(pow(albedo.rgb, vec3(gamma)), albedo.a);
 
   // Bit positions: layer0 normal=1, layer1 normal=5, layer2 normal=9
   float hasAnyNormal = float(((u_Terrain.textureMask >> 1) | (u_Terrain.textureMask >> 5) | (u_Terrain.textureMask >> 9)) & 1);

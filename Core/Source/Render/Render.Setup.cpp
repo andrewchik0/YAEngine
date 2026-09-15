@@ -1392,10 +1392,15 @@ namespace YAEngine
       }
     });
 
-    // Scene compose pass - tone mapping to offscreen texture for editor viewport
+    // Scene compose pass - tone mapping to offscreen texture for editor viewport.
+    // sRGB rather than UNORM: the swapchain is an sRGB format and encodes whatever ImGui
+    // hands it, so this buffer has to hold the encoded image, not linear light. A UNORM
+    // one quantizes linear values and leaves the shadows on a handful of 8-bit codes that
+    // the swapchain encode then pulls apart into visible bands. The format also makes the
+    // round trip exact: the attachment write encodes, the ImGui sample decodes.
     m_SceneColor = m_Graph.CreateResource({
       .name = "sceneColor",
-      .format = VK_FORMAT_R8G8B8A8_UNORM,
+      .format = VK_FORMAT_R8G8B8A8_SRGB,
       .additionalUsage = VK_IMAGE_USAGE_SAMPLED_BIT,
       .resolution = RGResolution::Output
     });

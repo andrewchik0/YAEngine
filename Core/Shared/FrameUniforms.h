@@ -214,6 +214,14 @@ struct FrameUniforms
   // this one. padding0 keeps the mat4 on the 16 byte boundary std140 expects.
   int padding0;
   mat4 unjitteredProj;
+  // The grade applied on top of whichever tone mapping curve is selected, in display encoded
+  // space: power is contrast, saturation pulls each channel away from the pixel's luma.
+  // Both are 1.0 for the curve on its own. Appended at the end so no member offset moves.
+  float tonemapPower;
+  float tonemapSaturation;
+  // std140 rounds the block up to a multiple of 16 bytes; the two floats above leave it 8
+  // short, and the buffer has to be allocated at the size the GPU sees.
+  float padding1[2];
 };
 
 #ifdef __cplusplus

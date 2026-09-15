@@ -263,9 +263,9 @@ PathSurface resolveHitMaterial(RayHitGeometry hit, vec2 barycentrics)
       baseColor *= textureLod(u_BindlessTextures[nonuniformEXT(material.baseColorIndex)],
         texCoord, 0.0).rgb;
 
-    // gbuffer.frag decodes base color with the display gamma rather than through an sRGB
-    // image view, so this has to as well or every traced surface reads far too bright.
-    surface.albedo = pow(baseColor, vec3(u_Frame.gamma));
+    // Base color maps are loaded in sRGB formats, so the sample above is already linear -
+    // the same as what gbuffer.frag hands the raster path.
+    surface.albedo = baseColor;
 
     // Absent maps fall back to white, which is what the raster mix(1.0, sample, hasTexture)
     // collapses to - the fallback is the identity for both the metallic and roughness scales.

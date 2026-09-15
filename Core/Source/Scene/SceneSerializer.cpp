@@ -148,6 +148,8 @@ namespace YAEngine
     settings["gamma"] = render.GetGamma();
     settings["exposure"] = render.GetExposure();
     settings["tonemapMode"] = render.GetTonemapMode();
+    settings["tonemapPower"] = render.GetTonemapPower();
+    settings["tonemapSaturation"] = render.GetTonemapSaturation();
     settings["ao"] = render.GetAOEnabled();
     settings["aoDenoise"] = render.GetAODenoiseEnabled();
     settings["aoQualityLevel"] = render.GetAOQualityLevel();
@@ -293,6 +295,8 @@ namespace YAEngine
     if (settings["gamma"]) render.GetGamma() = settings["gamma"].as<float>();
     if (settings["exposure"]) render.GetExposure() = settings["exposure"].as<float>();
     if (settings["tonemapMode"]) render.GetTonemapMode() = settings["tonemapMode"].as<int>();
+    if (settings["tonemapPower"]) render.GetTonemapPower() = settings["tonemapPower"].as<float>();
+    if (settings["tonemapSaturation"]) render.GetTonemapSaturation() = settings["tonemapSaturation"].as<float>();
     // "ssao" is the pre-GTAO key for the same on/off switch; the tuning keys next to it
     // described the old hemisphere kernel and have no GTAO equivalent, so they are dropped.
     if (settings["ssao"]) render.GetAOEnabled() = settings["ssao"].as<bool>();
