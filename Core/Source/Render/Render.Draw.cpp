@@ -2290,7 +2290,7 @@ namespace YAEngine
           : &GetForwardTransparentPipeline(dc);
         currentPipeline->Bind(cmd);
         currentPipeline->BindDescriptorSets(cmd, {frameUBO}, 0);
-        currentPipeline->BindDescriptorSets(cmd, {m_DeferredLightingLightDescriptorSets[currentFrame].Get()}, 2);
+        currentPipeline->BindDescriptorSets(cmd, {m_ForwardTransparentLightDescriptorSets[currentFrame].Get()}, 2);
         currentPipeline->BindDescriptorSets(cmd, {m_IBLDescriptorSets[currentFrame].Get()}, 3);
         lastPipelineIdx = pipelineIdx;
         lastMaterialIndex = UINT32_MAX;

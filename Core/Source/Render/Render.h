@@ -1092,6 +1092,8 @@ namespace YAEngine
     std::vector<VulkanDescriptorSet> m_RRLayerCompositeDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingDescriptorSets;
     std::vector<VulkanDescriptorSet> m_DeferredLightingLightDescriptorSets;
+    // The deferred layout with the transparent tile lists at binding 1
+    std::vector<VulkanDescriptorSet> m_ForwardTransparentLightDescriptorSets;
     std::vector<VulkanDescriptorSet> m_IBLDescriptorSets;
 
     VulkanDescriptorSet m_InstanceDescriptorSet;

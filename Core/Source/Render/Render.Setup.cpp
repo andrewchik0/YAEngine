@@ -480,7 +480,7 @@ namespace YAEngine
       .name = "LightCull",
       .inputs = {m_MainDepth},
       .isCompute = true,
-      // The tile list only ever feeds the deferred and forward transparent passes. The path
+      // The tile lists only ever feed the deferred and forward transparent passes. The path
       // tracer picks its light per path vertex out of the full LightBuffer instead, so a traced
       // frame needs the list only while its forward transparent layer draws.
       .isEnabled = [this]() { return !IsPathTracingActive() || b_PathTraceTransparencyActive; },
@@ -510,10 +510,13 @@ namespace YAEngine
         bufferBarrier.buffer = m_TileLightBuffer.GetBuffer(currentFrame);
         bufferBarrier.offset = 0;
         bufferBarrier.size = VK_WHOLE_SIZE;
+        VkBufferMemoryBarrier transparentBarrier = bufferBarrier;
+        transparentBarrier.buffer = m_TileLightBuffer.GetTransparentBuffer(currentFrame);
+        std::array barriers = { bufferBarrier, transparentBarrier };
         vkCmdPipelineBarrier(ctx.cmd,
           VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT,
           VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT,
-          0, 0, nullptr, 1, &bufferBarrier, 0, nullptr);
+          0, 0, nullptr, uint32_t(barriers.size()), barriers.data(), 0, nullptr);
       }
     });
 

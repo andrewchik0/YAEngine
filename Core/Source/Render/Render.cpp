@@ -192,6 +192,8 @@ namespace YAEngine
       set.Destroy();
     for (auto& set : m_DeferredLightingLightDescriptorSets)
       set.Destroy();
+    for (auto& set : m_ForwardTransparentLightDescriptorSets)
+      set.Destroy();
     for (auto& set : m_LightCullInputDescriptorSets)
       set.Destroy();
     for (auto& set : m_PathTraceDescriptorSets)
@@ -280,11 +282,12 @@ namespace YAEngine
       uint32_t tileCountX = (renderExtent.width + TILE_SIZE - 1) / TILE_SIZE;
       uint32_t tileCountY = (renderExtent.height + TILE_SIZE - 1) / TILE_SIZE;
       m_TileLightBuffer.Resize(ctx, tileCountX, tileCountY);
-      VkDeviceSize tileBufferSize = tileCountX * tileCountY * sizeof(TileData);
       for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
       {
         m_DeferredLightingLightDescriptorSets[i].WriteStorageBuffer(1,
-          m_TileLightBuffer.GetBuffer(uint32_t(i)), tileBufferSize);
+          m_TileLightBuffer.GetBuffer(uint32_t(i)), m_TileLightBuffer.GetBufferSize());
+        m_ForwardTransparentLightDescriptorSets[i].WriteStorageBuffer(1,
+          m_TileLightBuffer.GetTransparentBuffer(uint32_t(i)), m_TileLightBuffer.GetBufferSize());
       }
     }
 

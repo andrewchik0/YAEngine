@@ -13,18 +13,29 @@ layout(std430, set = 1, binding = 0) readonly buffer LightBufferSSBO
 };
 layout(set = 1, binding = 1) uniform sampler2D depthTexture;
 
-// Set 2: output
+// Set 2: outputs. Transparent surfaces are not in the depth buffer the opaque lists are bounded
+// with; all that is known is that they lie in front of it, so their lists reach from the near
+// plane to the farthest opaque texel, and past it when the tile shows sky.
 layout(std430, set = 2, binding = 0) writeonly buffer TileLightSSBO
 {
   TileData u_Tiles[];
 };
+layout(std430, set = 2, binding = 1) writeonly buffer TransparentTileLightSSBO
+{
+  TileData u_TransparentTiles[];
+};
 
 shared uint s_minDepthBits;
 shared uint s_maxDepthBits;
+shared uint s_skyTexels;
 shared uint s_pointCount;
 shared uint s_spotCount;
 shared uint s_pointIndices[MAX_LIGHTS_PER_TILE / 2];
 shared uint s_spotIndices[MAX_LIGHTS_PER_TILE / 2];
+shared uint s_transparentPointCount;
+shared uint s_transparentSpotCount;
+shared uint s_transparentPointIndices[MAX_LIGHTS_PER_TILE / 2];
+shared uint s_transparentSpotIndices[MAX_LIGHTS_PER_TILE / 2];
 
 // Test sphere against 6 frustum planes (returns true if sphere is inside or intersects)
 bool sphereInsideFrustum(vec3 center, float radius, vec4 planes[6])
@@ -48,25 +59,31 @@ void main()
   {
     s_minDepthBits = 0xFFFFFFFFu;
     s_maxDepthBits = 0;
+    s_skyTexels = 0;
     s_pointCount = 0;
     s_spotCount = 0;
+    s_transparentPointCount = 0;
+    s_transparentSpotCount = 0;
   }
   barrier();
 
-  // Read depth and compute linear Z
-  float depth = 0.0;
+  // Texels past the screen edge of a border tile are neither geometry nor sky
   if (pixelCoord.x < u_Frame.screenWidth && pixelCoord.y < u_Frame.screenHeight)
   {
     vec2 uv = (vec2(pixelCoord) + 0.5) / vec2(u_Frame.screenWidth, u_Frame.screenHeight);
-    depth = texture(depthTexture, uv).r;
-  }
-  float linearZ = linearizeDepth(depth);
+    float depth = texture(depthTexture, uv).r;
 
-  // Skip sky pixels for min/max (cleared depth = 0.0)
-  if (depth > 0.0)
-  {
-    atomicMin(s_minDepthBits, floatBitsToUint(linearZ));
-    atomicMax(s_maxDepthBits, floatBitsToUint(linearZ));
+    // Sky texels (cleared depth = 0.0) stay out of min/max
+    if (depth > 0.0)
+    {
+      float linearZ = linearizeDepth(depth);
+      atomicMin(s_minDepthBits, floatBitsToUint(linearZ));
+      atomicMax(s_maxDepthBits, floatBitsToUint(linearZ));
+    }
+    else
+    {
+      atomicAdd(s_skyTexels, 1);
+    }
   }
   barrier();
 
@@ -74,17 +91,8 @@ void main()
   float minZ = uintBitsToFloat(s_minDepthBits);
   float maxZ = uintBitsToFloat(s_maxDepthBits);
 
-  // If all pixels are sky, no lights affect this tile
-  if (s_minDepthBits == 0xFFFFFFFFu)
-  {
-    if (threadIndex == 0)
-    {
-      uint tileIndex = tileId.y * u_Frame.tileCountX + tileId.x;
-      u_Tiles[tileIndex].pointCount = 0;
-      u_Tiles[tileIndex].spotCount = 0;
-    }
-    return;
-  }
+  // All pixels sky: no opaque surface for a light to reach
+  bool hasGeometry = s_minDepthBits != 0xFFFFFFFFu;
 
   // Compute tile screen bounds in NDC [-1, 1]
   vec2 tileMin = vec2(tileId) * float(TILE_SIZE) / vec2(u_Frame.screenWidth, u_Frame.screenHeight) * 2.0 - 1.0;
@@ -125,6 +133,15 @@ void main()
   // Far: normal = (0,0,1), d = -maxZ
   planes[5] = vec4(0.0, 0.0, 1.0, maxZ);
 
+  // Same side planes, near plane at the camera's. A zero plane never rejects, which lifts the
+  // far bound where the sky shows through.
+  vec4 transparentPlanes[6] = planes;
+  transparentPlanes[4] = vec4(0.0, 0.0, -1.0, -u_Frame.nearPlane);
+  transparentPlanes[5] = s_skyTexels > 0 ? vec4(0.0) : planes[5];
+
+  // The opaque depth range lies inside the transparent one, so a light the transparent test
+  // rejects is out of both lists
+
   // Cull point lights
   uint pointLightCount = uint(u_Lights.pointLightCount);
   for (uint i = threadIndex; i < pointLightCount; i += TILE_SIZE * TILE_SIZE)
@@ -134,7 +151,14 @@ void main()
 
     vec3 viewPos = (u_Frame.view * vec4(worldPos, 1.0)).xyz;
 
-    if (sphereInsideFrustum(viewPos, radius, planes))
+    if (!sphereInsideFrustum(viewPos, radius, transparentPlanes))
+      continue;
+
+    uint transparentSlot = atomicAdd(s_transparentPointCount, 1);
+    if (transparentSlot < MAX_LIGHTS_PER_TILE / 2)
+      s_transparentPointIndices[transparentSlot] = i;
+
+    if (hasGeometry && sphereInsideFrustum(viewPos, radius, planes))
     {
       uint slot = atomicAdd(s_pointCount, 1);
       if (slot < MAX_LIGHTS_PER_TILE / 2)
@@ -151,7 +175,14 @@ void main()
 
     vec3 viewPos = (u_Frame.view * vec4(worldPos, 1.0)).xyz;
 
-    if (sphereInsideFrustum(viewPos, radius, planes))
+    if (!sphereInsideFrustum(viewPos, radius, transparentPlanes))
+      continue;
+
+    uint transparentSlot = atomicAdd(s_transparentSpotCount, 1);
+    if (transparentSlot < MAX_LIGHTS_PER_TILE / 2)
+      s_transparentSpotIndices[transparentSlot] = i;
+
+    if (hasGeometry && sphereInsideFrustum(viewPos, radius, planes))
     {
       uint slot = atomicAdd(s_spotCount, 1);
       if (slot < MAX_LIGHTS_PER_TILE / 2)
@@ -161,10 +192,11 @@ void main()
 
   barrier();
 
-  // Write results to output buffer
+  // Write results to output buffers
   if (threadIndex == 0)
   {
     uint tileIndex = tileId.y * u_Frame.tileCountX + tileId.x;
+
     uint finalPointCount = min(s_pointCount, MAX_LIGHTS_PER_TILE / 2);
     uint finalSpotCount = min(s_spotCount, MAX_LIGHTS_PER_TILE / 2);
 
@@ -176,5 +208,17 @@ void main()
 
     for (uint i = 0; i < finalSpotCount; i++)
       u_Tiles[tileIndex].indices[finalPointCount + i] = s_spotIndices[i];
+
+    uint transparentPointCount = min(s_transparentPointCount, MAX_LIGHTS_PER_TILE / 2);
+    uint transparentSpotCount = min(s_transparentSpotCount, MAX_LIGHTS_PER_TILE / 2);
+
+    u_TransparentTiles[tileIndex].pointCount = transparentPointCount;
+    u_TransparentTiles[tileIndex].spotCount = transparentSpotCount;
+
+    for (uint i = 0; i < transparentPointCount; i++)
+      u_TransparentTiles[tileIndex].indices[i] = s_transparentPointIndices[i];
+
+    for (uint i = 0; i < transparentSpotCount; i++)
+      u_TransparentTiles[tileIndex].indices[transparentPointCount + i] = s_transparentSpotIndices[i];
   }
 }

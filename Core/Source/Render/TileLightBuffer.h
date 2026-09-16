@@ -31,6 +31,17 @@ namespace YAEngine
       return m_StorageBuffers[frameIndex].Get();
     }
 
+    // Lists for surfaces that are not in the depth buffer the tiles were bounded with
+    VkBuffer GetTransparentBuffer(uint32_t frameIndex)
+    {
+      return m_TransparentStorageBuffers[frameIndex].Get();
+    }
+
+    VkDeviceSize GetBufferSize() const
+    {
+      return VkDeviceSize(m_TileCountX) * m_TileCountY * sizeof(TileData);
+    }
+
     uint32_t GetTileCountX() const { return m_TileCountX; }
     uint32_t GetTileCountY() const { return m_TileCountY; }
 
@@ -41,6 +52,7 @@ namespace YAEngine
 
     std::vector<VulkanDescriptorSet> m_DescriptorSets;
     std::vector<VulkanStorageBuffer> m_StorageBuffers;
+    std::vector<VulkanStorageBuffer> m_TransparentStorageBuffers;
     uint32_t m_TileCountX = 0;
     uint32_t m_TileCountY = 0;
   };

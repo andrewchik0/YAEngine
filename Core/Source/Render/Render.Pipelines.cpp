@@ -929,8 +929,10 @@ namespace YAEngine
     }
     WriteIrradianceVolumeDescriptors();
 
-    // Deferred lighting set 2: lights SSBO (binding 0) + tile light indices SSBO (binding 1)
+    // Deferred lighting set 2: lights SSBO (binding 0) + tile light indices SSBO (binding 1).
+    // Forward transparent gets the same set over the transparent tile lists.
     m_DeferredLightingLightDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
+    m_ForwardTransparentLightDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
     for (size_t i = 0; i < m_Backend.GetMaxFramesInFlight(); i++)
     {
       SetDescription dlLightDesc = {
@@ -945,16 +947,21 @@ namespace YAEngine
         }
       };
       m_DeferredLightingLightDescriptorSets[i].Init(ctx, dlLightDesc);
-      m_DeferredLightingLightDescriptorSets[i].WriteStorageBuffer(0,
-        m_LightBuffer.GetBuffer(uint32_t(i)), sizeof(LightBuffer));
+      m_ForwardTransparentLightDescriptorSets[i].Init(ctx, dlLightDesc);
+
+      for (auto* set : { &m_DeferredLightingLightDescriptorSets[i], &m_ForwardTransparentLightDescriptorSets[i] })
+      {
+        set->WriteStorageBuffer(0, m_LightBuffer.GetBuffer(uint32_t(i)), sizeof(LightBuffer));
+        set->WriteUniformBuffer(2, m_ShadowManager.GetShadowUBOBuffer(uint32_t(i)), sizeof(ShadowBuffer));
+        set->WriteCombinedImageSampler(3,
+          m_ShadowManager.GetAtlas().GetView(), m_ShadowManager.GetAtlas().GetSampler(),
+          VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+      }
+
       m_DeferredLightingLightDescriptorSets[i].WriteStorageBuffer(1,
-        m_TileLightBuffer.GetBuffer(uint32_t(i)),
-        m_TileLightBuffer.GetTileCountX() * m_TileLightBuffer.GetTileCountY() * sizeof(TileData));
-      m_DeferredLightingLightDescriptorSets[i].WriteUniformBuffer(2,
-        m_ShadowManager.GetShadowUBOBuffer(uint32_t(i)), sizeof(ShadowBuffer));
-      m_DeferredLightingLightDescriptorSets[i].WriteCombinedImageSampler(3,
-        m_ShadowManager.GetAtlas().GetView(), m_ShadowManager.GetAtlas().GetSampler(),
-        VK_IMAGE_LAYOUT_DEPTH_STENCIL_READ_ONLY_OPTIMAL);
+        m_TileLightBuffer.GetBuffer(uint32_t(i)), m_TileLightBuffer.GetBufferSize());
+      m_ForwardTransparentLightDescriptorSets[i].WriteStorageBuffer(1,
+        m_TileLightBuffer.GetTransparentBuffer(uint32_t(i)), m_TileLightBuffer.GetBufferSize());
     }
 
     PipelineCreateInfo deferredInfo = {
@@ -971,7 +978,7 @@ namespace YAEngine
     };
     m_DeferredLightingPipeline = m_PSOCache.Register(ctx.device, deferredRP, deferredInfo, pipelineCache);
 
-    // Forward Transparent pipelines - same lights/IBL/material descriptor sets as deferred,
+    // Forward Transparent pipelines - same lights/IBL/material set layouts as deferred,
     // depth LOAD/test/GEQUAL, premultiplied-alpha blending, output to SSRColor so the resolve sees it.
     {
       VkRenderPass transparentRP = m_Graph.GetPassRenderPass(m_ForwardTransparentPassIndex);

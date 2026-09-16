@@ -11,6 +11,7 @@ namespace YAEngine
 
     m_DescriptorSets.resize(ctx.maxFramesInFlight);
     m_StorageBuffers.resize(ctx.maxFramesInFlight);
+    m_TransparentStorageBuffers.resize(ctx.maxFramesInFlight);
 
     CreateBuffers(ctx);
   }
@@ -35,8 +36,7 @@ namespace YAEngine
 
   void TileLightBuffer::CreateBuffers(const RenderContext& ctx)
   {
-    uint32_t tileCount = m_TileCountX * m_TileCountY;
-    VkDeviceSize bufferSize = tileCount * sizeof(TileData);
+    VkDeviceSize bufferSize = GetBufferSize();
 
     VkDescriptorSetLayout layout = nullptr;
     for (size_t i = 0; i < ctx.maxFramesInFlight; i++)
@@ -45,7 +45,8 @@ namespace YAEngine
         .set = 0,
         .bindings = {
           {
-            { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT }
+            { 0, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT },
+            { 1, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, VK_SHADER_STAGE_FRAGMENT_BIT | VK_SHADER_STAGE_COMPUTE_BIT }
           }
         }
       };
@@ -59,7 +60,9 @@ namespace YAEngine
         m_DescriptorSets[i].Init(ctx, layout);
       }
       m_StorageBuffers[i].Create(ctx, bufferSize);
+      m_TransparentStorageBuffers[i].Create(ctx, bufferSize);
       m_DescriptorSets[i].WriteStorageBuffer(0, m_StorageBuffers[i].Get(), bufferSize);
+      m_DescriptorSets[i].WriteStorageBuffer(1, m_TransparentStorageBuffers[i].Get(), bufferSize);
     }
   }
 
@@ -68,6 +71,8 @@ namespace YAEngine
     for (auto& set : m_DescriptorSets)
       set.Destroy();
     for (auto& ssbo : m_StorageBuffers)
+      ssbo.Destroy(ctx);
+    for (auto& ssbo : m_TransparentStorageBuffers)
       ssbo.Destroy(ctx);
   }
 }
