@@ -41,22 +41,26 @@
 // is the question a value that has already become NaN can no longer be asked. It is the only
 // path tracing view whose image is NOT on the log ramp - see PT_NF_* below.
 #define DEBUG_VIEW_PT_NONFINITE     26
+// How much the sphere lights and the sun disk added where a delta segment ran into them
+// (analyticEmissionAlongRay), on the log scale of the energy views: the one strategy for them that
+// is neither next event estimation nor a hit. Last of the contiguous PT_DEBUG_* range.
+#define DEBUG_VIEW_PT_DELTA_LIGHTS  27
 
-// The magnitude of the final HDR colour, on the same logarithmic grey scale as the three views
+// The magnitude of the final HDR colour, on the same logarithmic grey scale as the energy views
 // above and sampled from the same resolved image the tone map consumes. It therefore works in
 // BOTH render paths, which is the entire point: switching Raster and Path Tracing on one
 // camera reads two numbers off one scale and answers how much energy each path puts on a
 // surface. Comparing a path traced diagnostic against a rasterized image by eye cannot.
-#define DEBUG_VIEW_HDR_MAGNITUDE    27
+#define DEBUG_VIEW_HDR_MAGNITUDE    28
 
 // The specular motion vectors pt_main.rgen writes for ray reconstruction, on the Velocity view's
 // scale. Like PT Guides it only exists while the path tracing render path is effective.
-#define DEBUG_VIEW_PT_SPECULAR_MOTION 28
+#define DEBUG_VIEW_PT_SPECULAR_MOTION 29
 
 // The spacing level of the brick the innermost contributing irradiance volume was sampled in,
 // finest red to coarsest blue as the placement brick gizmo, black = skybox. Written by deferred
 // lighting like Volume Coverage.
-#define DEBUG_VIEW_VOLUME_LEVEL     29
+#define DEBUG_VIEW_VOLUME_LEVEL     30
 
 // PathTraceConstants::debugMode, and the order the views above map onto it.
 #define PT_DEBUG_OFF          0
@@ -64,6 +68,7 @@
 #define PT_DEBUG_NEE          2
 #define PT_DEBUG_ENVIRONMENT  3
 #define PT_DEBUG_NONFINITE    4
+#define PT_DEBUG_DELTA_LIGHTS 5
 
 // PT_DEBUG_NONFINITE codes. The tracer stores the FIRST one that fired in R of the noisy
 // image and the bounce it fired on in G, both as raw integers so a capture reads them back
@@ -86,6 +91,7 @@
 //  11  throughput after the weight was multiplied in
 //  12  the environment contribution on a bounce miss
 //  13  the emissive contribution on an emissive texel
+//  14  what a delta segment gathered from the sphere lights and the sun disk
 #define PT_NF_NONE          0
 #define PT_NF_DIRECT_LIGHT  1
 #define PT_NF_GGX_H         2
@@ -100,7 +106,8 @@
 #define PT_NF_THROUGHPUT    11
 #define PT_NF_ENVIRONMENT   12
 #define PT_NF_EMISSIVE      13
-#define PT_NF_COUNT         14
+#define PT_NF_DELTA_LIGHTS  14
+#define PT_NF_COUNT         15
 
 // Bounds of the diagnostic scale, as base-10 exponents. Centred on one rather than starting
 // there: a healthy contribution IS around one, so the scale has to show both what is far
@@ -219,9 +226,11 @@ struct FrameUniforms
   // Both are 1.0 for the curve on its own. Appended at the end so no member offset moves.
   float tonemapPower;
   float tonemapSaturation;
-  // std140 rounds the block up to a multiple of 16 bytes; the two floats above leave it 8
-  // short, and the buffer has to be allocated at the size the GPU sees.
-  float padding1[2];
+  // Nonzero: the tone map adds its triangular dither of one 8-bit output step. Appended at the end.
+  int ditherEnabled;
+  // std140 rounds the block up to a multiple of 16 bytes; the members above leave it 4 short, and
+  // the buffer has to be allocated at the size the GPU sees.
+  float padding1;
 };
 
 #ifdef __cplusplus

@@ -59,14 +59,17 @@ vec3 decodeEmissive(vec4 gbuffer0)
 
 // --- Shading model ---
 // Packed into the 2-bit alpha of GBuffer1, so only four values exist. The encode side
-// writes the float, the lighting pass reads the int back.
+// writes the float, the lighting pass reads the int back. A clear coat texel is PBR with
+// GBuffer1 describing the coat and GBuffer2 the surface under it, see clear_coat.glsl.
 const float SHADING_MODEL_PBR = 0.0;
 const float SHADING_MODEL_UNLIT = 1.0 / 3.0;
 const float SHADING_MODEL_EMISSIVE = 2.0 / 3.0;
+const float SHADING_MODEL_CLEAR_COAT = 1.0;
 
 const int SHADING_PBR = 0;
 const int SHADING_UNLIT = 1;
 const int SHADING_EMISSIVE = 2;
+const int SHADING_CLEAR_COAT = 3;
 
 int decodeShadingModel(float packed)
 {

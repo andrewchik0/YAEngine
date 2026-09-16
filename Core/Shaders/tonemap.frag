@@ -138,6 +138,7 @@ void main()
   case DEBUG_VIEW_PT_MAX_CONTRIB:
   case DEBUG_VIEW_PT_NEE:
   case DEBUG_VIEW_PT_ENVIRONMENT:
+  case DEBUG_VIEW_PT_DELTA_LIGHTS:
     // The tracer stored a base-10 logarithm rather than radiance, so it is raised back before
     // the shared ramp takes it - and no exposure and no tone map, which would compress exactly
     // the range these views exist to show.
@@ -228,8 +229,11 @@ void main()
   // d(linear)/d(encoded) of the sRGB curve. Below linear 0.003 the curve is a straight line
   // and this over-darkens the step slightly, which only costs noise where the encoded buffer
   // already has codes to spare.
-  vec3 quantizationStep = 2.2749 * pow(max(color, 1e-5), vec3(0.58333)) / 255.0;
-  color += quantizationStep * triangularDither(gl_FragCoord.xy);
+  if (u_Frame.ditherEnabled != 0)
+  {
+    vec3 quantizationStep = 2.2749 * pow(max(color, 1e-5), vec3(0.58333)) / 255.0;
+    color += quantizationStep * triangularDither(gl_FragCoord.xy);
+  }
 
   outColor = vec4(color, 1.0);
 }

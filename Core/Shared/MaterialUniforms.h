@@ -12,6 +12,11 @@ namespace YAEngine {
 // texel is one whose luminance is strictly above it.
 #define EMISSIVE_SHADING_CUTOFF 1.0
 
+// GBuffer2 stores the clear coat weight in 8 bits, and every consumer takes the weight on that grid
+// so a G-buffer texel and a traced hit of the same material agree; a weight that rounds to zero is
+// no coat.
+#define CLEAR_COAT_WEIGHT_STEPS 255.0
+
 struct MaterialUniforms
 {
   vec3 albedo;
@@ -24,7 +29,11 @@ struct MaterialUniforms
   float opacity;
   vec2 uvScale;
   float fresnelOpacity;
-  float _pad1;            // keeps the struct at 64 bytes (std140 needs a multiple of 16)
+  // The clear coat's weight (0 = none) and roughness, see Material::clearCoat.
+  float clearCoat;
+  float clearCoatRoughness;
+  float _pad1;
+  vec2 _pad2;             // keeps the struct at 80 bytes (std140 needs a multiple of 16)
 };
 
 #ifdef __cplusplus

@@ -40,6 +40,9 @@ namespace YAEngine
     float ior = 1.5f;
     glm::vec3 transmittanceColor { 1.0f };
     float transmittanceDistance = 1.0f;
+    // Clear coat factors (glTF KHR_materials_clearcoat, OBJ MTL Pct / Pcr); coat textures are not read.
+    float clearCoat = 0.0f;
+    float clearCoatRoughness = 0.0f;
 
     std::string baseColorTexture;
     std::string metallicTexture;

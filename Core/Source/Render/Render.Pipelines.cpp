@@ -281,7 +281,7 @@ namespace YAEngine
       .vertexShaderFile = "mesh.vert",
       .pushConstantSize = gbufferPushConstantSize,
       .depthWrite = false,
-      .colorAttachmentCount = 3,
+      .colorAttachmentCount = GBUFFER_COLOR_ATTACHMENTS,
       .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
       .vertexInputFormat = "f3|f2f3f4",
       .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(),
@@ -320,7 +320,7 @@ namespace YAEngine
         .vertexShaderFile = "mesh.vert",
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
-        .colorAttachmentCount = 3,
+        .colorAttachmentCount = GBUFFER_COLOR_ATTACHMENTS,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_TerrainMaterial.GetLayout(),
@@ -337,7 +337,7 @@ namespace YAEngine
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
         .doubleSided = true,
-        .colorAttachmentCount = 3,
+        .colorAttachmentCount = GBUFFER_COLOR_ATTACHMENTS,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(),
@@ -354,7 +354,7 @@ namespace YAEngine
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
         .doubleSided = true,
-        .colorAttachmentCount = 3,
+        .colorAttachmentCount = GBUFFER_COLOR_ATTACHMENTS,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .vertexInputFormat = "f3|f2f3f4",
         .sets = std::vector({ m_FrameUniformBuffer.GetLayout(), m_DefaultMaterial.GetLayout(),
@@ -372,7 +372,7 @@ namespace YAEngine
         .vertexShaderFile = "mesh_notbn.vert",
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
-        .colorAttachmentCount = 3,
+        .colorAttachmentCount = GBUFFER_COLOR_ATTACHMENTS,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
@@ -408,7 +408,7 @@ namespace YAEngine
         .vertexShaderFile = "mesh_notbn.vert",
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
-        .colorAttachmentCount = 3,
+        .colorAttachmentCount = GBUFFER_COLOR_ATTACHMENTS,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
@@ -425,7 +425,7 @@ namespace YAEngine
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
         .doubleSided = true,
-        .colorAttachmentCount = 3,
+        .colorAttachmentCount = GBUFFER_COLOR_ATTACHMENTS,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
@@ -448,7 +448,7 @@ namespace YAEngine
         .vertexShaderFile = "mesh_notbn.vert",
         .pushConstantSize = gbufferPushConstantSize,
         .depthWrite = false,
-        .colorAttachmentCount = 3,
+        .colorAttachmentCount = GBUFFER_COLOR_ATTACHMENTS,
         .compareOp = VK_COMPARE_OP_GREATER_OR_EQUAL,
         .polygonMode = VK_POLYGON_MODE_LINE,
         .depthBiasEnable = true,
@@ -831,7 +831,7 @@ namespace YAEngine
     };
     m_GTAODenoisePipeline = m_PSOCache.Register(ctx.device, gtaoDenoiseRP, gtaoDenoiseInfo, pipelineCache);
 
-    // SSR descriptor sets and pipeline (5 bindings: litColor, depth, gbuffer1, gbuffer0, hiZ)
+    // SSR descriptor sets and pipeline (6 bindings: litColor, depth, gbuffer1, gbuffer0, hiZ, gbuffer2)
     VkRenderPass ssrRP = m_Graph.GetPassRenderPass(m_SSRPassIndex);
 
     m_SSRPassDescriptorSets.resize(m_Backend.GetMaxFramesInFlight());
@@ -846,6 +846,7 @@ namespace YAEngine
             { 2, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
@@ -879,6 +880,8 @@ namespace YAEngine
             // Denoised SSGI + bent normal
             { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
             { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+            // GBuffer2, the surface under a clear coat
+            { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           }
         }
       };
@@ -1142,6 +1145,8 @@ namespace YAEngine
             // The forward transparent layer laid into the sample, and the sample from before it
             { 25, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_RAYGEN_BIT_KHR },
             { 26, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, VK_SHADER_STAGE_RAYGEN_BIT_KHR },
+            // GBuffer2, the surface under a clear coat first vertex
+            { 27, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_RAYGEN_BIT_KHR },
           }
         };
 

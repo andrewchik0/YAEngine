@@ -1,3 +1,6 @@
+#ifndef OCTAHEDRON_GLSL
+#define OCTAHEDRON_GLSL
+
 // Octahedron normal encoding/decoding (Cigolle et al. 2014)
 // Maps unit normals to [-1,1]^2 via L1 sphere projection
 
@@ -16,3 +19,5 @@ vec3 octDecode(vec2 e)
     n.xy = (1.0 - abs(n.yx)) * vec2(n.x >= 0.0 ? 1.0 : -1.0, n.y >= 0.0 ? 1.0 : -1.0);
   return normalize(n);
 }
+
+#endif

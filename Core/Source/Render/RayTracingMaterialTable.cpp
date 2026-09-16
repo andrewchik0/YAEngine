@@ -1,5 +1,7 @@
 #include "RayTracingMaterialTable.h"
 
+#include <glm/gtc/packing.hpp>
+
 #include "BindlessTextureRegistry.h"
 #include "RenderContext.h"
 #include "VulkanTexture.h"
@@ -186,6 +188,10 @@ namespace YAEngine
       record.opacity = material.opacity;
       record.uvScale = material.uvScale;
       record.textureMask = textureMask;
+      // The weight exactly as the G-buffer stores it, see GetShadedClearCoat. It takes the 8-bit grid
+      // into unorm16 without loss.
+      record.clearCoatPacked = glm::packUnorm2x16(glm::vec2(GetShadedClearCoat(material),
+        std::clamp(material.clearCoatRoughness, 0.0f, 1.0f)));
 
       // Written for every material and read only on the instances TlasBuilder flags as
       // dielectrics, which is decided on the same transparent-and-mode rule.

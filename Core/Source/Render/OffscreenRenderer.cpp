@@ -59,6 +59,11 @@ namespace YAEngine
       .name = "offMainVelocity",
       .format = VK_FORMAT_R16G16_SFLOAT
     });
+    m_GBuffer2 = m_Graph.CreateResource({
+      .name = "offGBuffer2",
+      .format = VK_FORMAT_R8G8B8A8_UNORM,
+      .filter = VK_FILTER_NEAREST
+    });
     m_LitColor = m_Graph.CreateResource({
       .name = "offLitColor",
       .format = VK_FORMAT_R16G16B16A16_SFLOAT,
@@ -78,7 +83,7 @@ namespace YAEngine
 
     m_GBufferPassIndex = m_Graph.AddPass({
       .name = "OffGBufferPass",
-      .colorOutputs = { m_GBuffer0, m_GBuffer1, m_MainVelocity },
+      .colorOutputs = { m_GBuffer0, m_GBuffer1, m_MainVelocity, m_GBuffer2 },
       .depthOutput = m_MainDepth,
       .clearColor = true,
       .clearDepth = false,
@@ -128,11 +133,12 @@ namespace YAEngine
 
     m_DeferredLightingPassIndex = m_Graph.AddPass({
       .name = "OffDeferredLighting",
-      .inputs = { m_GBuffer0, m_GBuffer1, m_MainDepth },
+      .inputs = { m_GBuffer0, m_GBuffer1, m_MainDepth, m_GBuffer2 },
       .colorOutputs = { m_LitColor },
       .execute = [this](const RGExecuteContext& ctx) {
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
+        auto& gbuffer2 = m_Graph.GetResource(m_GBuffer2);
         auto& mainDepth = m_Graph.GetResource(m_MainDepth);
 
         auto& pipeline = m_Render->m_PSOCache.Get(
@@ -148,6 +154,9 @@ namespace YAEngine
           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(2,
           mainDepth.GetView(), mainDepth.GetSampler(),
+          VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_DeferredGBufferDescriptorSet.WriteCombinedImageSampler(6,
+          gbuffer2.GetView(), gbuffer2.GetSampler(),
           VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         pipeline.BindDescriptorSets(ctx.cmd, { m_FrameUBO.GetDescriptorSet(0) }, 0);
@@ -168,7 +177,7 @@ namespace YAEngine
 
   void OffscreenRenderer::InitDescriptors()
   {
-    // Deferred lighting set 1: GBuffer textures + AO + SSGI (6 samplers, matching deferred_lighting.frag)
+    // Deferred lighting set 1: GBuffer textures + AO + SSGI + GBuffer2 (7 samplers, matching deferred_lighting.frag)
     SetDescription dlGBufferDesc = {
       .set = 1,
       .bindings = {
@@ -179,6 +188,7 @@ namespace YAEngine
           { 3, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 4, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
           { 5, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
+          { 6, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, VK_SHADER_STAGE_FRAGMENT_BIT },
         }
       }
     };
@@ -312,6 +322,7 @@ namespace YAEngine
     // (ReflectionProbeBaker copies LitColor between faces, changing layouts outside the graph)
     m_Graph.SetResourceLayout(m_GBuffer0, VK_IMAGE_LAYOUT_UNDEFINED);
     m_Graph.SetResourceLayout(m_GBuffer1, VK_IMAGE_LAYOUT_UNDEFINED);
+    m_Graph.SetResourceLayout(m_GBuffer2, VK_IMAGE_LAYOUT_UNDEFINED);
     m_Graph.SetResourceLayout(m_MainDepth, VK_IMAGE_LAYOUT_UNDEFINED);
     m_Graph.SetResourceLayout(m_MainVelocity, VK_IMAGE_LAYOUT_UNDEFINED);
     m_Graph.SetResourceLayout(m_LitColor, VK_IMAGE_LAYOUT_UNDEFINED);

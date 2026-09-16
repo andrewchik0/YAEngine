@@ -14,6 +14,7 @@ layout(location = 7) in vec4 inPrevClipPos;
 layout(location = 0) out vec4 outGBuffer0;
 layout(location = 1) out vec4 outGBuffer1;
 layout(location = 2) out vec2 outVelocity;
+layout(location = 3) out vec4 outGBuffer2;
 
 #include "octahedron.glsl"
 
@@ -65,4 +66,5 @@ void main() {
   outGBuffer1 = vec4(octNorm, roughness, shadingModelPBR);
 
   outVelocity = velocity;
+  outGBuffer2 = vec4(0.0);
 }

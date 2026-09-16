@@ -510,6 +510,7 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.exposure = m_Exposure;
     m_FrameUniformBuffer.uniforms.tonemapPower = m_TonemapPower;
     m_FrameUniformBuffer.uniforms.tonemapSaturation = m_TonemapSaturation;
+    m_FrameUniformBuffer.uniforms.ditherEnabled = b_DitherEnabled ? 1 : 0;
     m_FrameUniformBuffer.uniforms.currentTexture = m_CurrentTexture;
     // The path tracer's two views display images only its own pass ever writes, and that pass
     // runs later in this very frame. Until it has run once - no ray tracing on this device, a
@@ -611,6 +612,7 @@ namespace YAEngine
     // Reads back the projection and viewport SetUpCamera just wrote, so it has to run after it.
     UpdateGTAOConstants(currentFrame);
     m_LightBuffer.SetUp(currentFrame, frame.lights);
+    m_PathTraceSphereLights = FindSphereLightSpan(frame.lights);
 
     // Update IBL when skybox changes: upload to atlas slot 0 + update display cubemap
     auto skybox = frame.snapshot.skybox;

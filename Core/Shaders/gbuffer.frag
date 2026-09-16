@@ -14,8 +14,9 @@ layout(location = 7) in vec4 inPrevClipPos;
 layout(location = 0) out vec4 outGBuffer0;
 layout(location = 1) out vec4 outGBuffer1;
 layout(location = 2) out vec2 outVelocity;
+layout(location = 3) out vec4 outGBuffer2;
 
-#include "octahedron.glsl"
+#include "clear_coat.glsl"
 
 void main() {
   vec2 uv = materialUV(inTexCoord);
@@ -63,12 +64,25 @@ void main() {
     // SSR from tracing rays out of a self-lit texel - it rejects anything above MAX_ROUGHNESS.
     outGBuffer0 = encodeEmissive(emissive);
     outGBuffer1 = vec4(octNorm, 1.0, SHADING_MODEL_EMISSIVE);
+    outGBuffer2 = vec4(0.0);
+  }
+  else if (quantizeClearCoatWeight(u_Material.clearCoat) > 0.0)
+  {
+    // GBuffer1 holds the coat, which keeps the interpolated vertex normal; GBuffer2 the surface under
+    // it, with the normal map applied.
+    vec3 coatNormal = normalize(inNormal);
+    outGBuffer0 = vec4(albedo.rgb, metallic);
+    outGBuffer1 = vec4(octEncode(coatNormal) * 0.5 + 0.5, u_Material.clearCoatRoughness,
+      SHADING_MODEL_CLEAR_COAT);
+    outGBuffer2 = encodeClearCoatGBuffer(quantizeClearCoatWeight(u_Material.clearCoat), roughness,
+      coatNormal, normalize(normal), hasNormalMap > 0.0);
   }
   else
   {
     // GBuffer0: albedo.rgb + metallic
     outGBuffer0 = vec4(albedo.rgb, metallic);
     outGBuffer1 = vec4(octNorm, roughness, SHADING_MODEL_PBR);
+    outGBuffer2 = vec4(0.0);
   }
 
   outVelocity = velocity;

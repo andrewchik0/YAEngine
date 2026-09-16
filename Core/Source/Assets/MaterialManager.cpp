@@ -41,6 +41,8 @@ namespace YAEngine
     dst.transmittanceColor = src.transmittanceColor;
     dst.transmittanceDistance = src.transmittanceDistance;
     dst.mediumPriority = src.mediumPriority;
+    dst.clearCoat = src.clearCoat;
+    dst.clearCoatRoughness = src.clearCoatRoughness;
     dst.shadingModel = src.shadingModel;
     dst.uvScale = src.uvScale;
     dst.baseColorTexture = src.baseColorTexture;

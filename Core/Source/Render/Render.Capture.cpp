@@ -94,7 +94,7 @@ namespace YAEngine
       { "pt_accum",      "pathTraceAccum" },
     };
 
-    constexpr const char* GBUFFER_GROUP[] = { "gbuffer0", "gbuffer1", "mainDepth", "mainVelocity" };
+    constexpr const char* GBUFFER_GROUP[] = { "gbuffer0", "gbuffer1", "gbuffer2", "mainDepth", "mainVelocity" };
     constexpr const char* PT_GROUP[] = {
       "pt_noisy", "pt_accum", "ptHitDistance", "ptSpecularMotion", "ptDiffuseAlbedo", "ptSpecularAlbedo",
       "ptNormalRoughness", "ptPrimaryAlbedo", "ptPrimaryNormal", "ptPrimaryThroughput", "ptDepth", "ptMotion"
@@ -406,12 +406,13 @@ namespace YAEngine
     {
       switch (mode)
       {
-      case PT_DEBUG_OFF:         return "PT_DEBUG_OFF";
-      case PT_DEBUG_MAX_CONTRIB: return "PT_DEBUG_MAX_CONTRIB";
-      case PT_DEBUG_NEE:         return "PT_DEBUG_NEE";
-      case PT_DEBUG_ENVIRONMENT: return "PT_DEBUG_ENVIRONMENT";
-      case PT_DEBUG_NONFINITE:   return "PT_DEBUG_NONFINITE";
-      default:                   return "Unknown";
+      case PT_DEBUG_OFF:          return "PT_DEBUG_OFF";
+      case PT_DEBUG_MAX_CONTRIB:  return "PT_DEBUG_MAX_CONTRIB";
+      case PT_DEBUG_NEE:          return "PT_DEBUG_NEE";
+      case PT_DEBUG_ENVIRONMENT:  return "PT_DEBUG_ENVIRONMENT";
+      case PT_DEBUG_NONFINITE:    return "PT_DEBUG_NONFINITE";
+      case PT_DEBUG_DELTA_LIGHTS: return "PT_DEBUG_DELTA_LIGHTS";
+      default:                    return "Unknown";
       }
     }
 
@@ -480,6 +481,7 @@ namespace YAEngine
       int tonemapMode = 0;
       float exposure = 0.0f;
       float gamma = 0.0f;
+      bool dither = false;
       bool autoExposure = false;
       bool bloomEnabled = false;
       float bloomIntensity = 0.0f;
@@ -490,6 +492,7 @@ namespace YAEngine
       int pathTraceMaxBounces = 0;
       float pathTraceFireflyClamp = 0.0f;
       bool pathTraceGlass = false;
+      bool pathTraceMirrorSun = false;
       int pathTraceMaxTransmissionDepth = 0;
       PathTraceGlassOverflow pathTraceGlassOverflow = PathTraceGlassOverflow::Straight;
       PathTraceGlassHandling pathTraceSecondaryGlass = PathTraceGlassHandling::Straight;
@@ -575,6 +578,7 @@ namespace YAEngine
           << ", \"name\": \"" << GetTonemapName(mc.tonemapMode) << "\" },\n";
       out << "    \"exposure\": " << JsonNumber(mc.exposure) << ",\n";
       out << "    \"gamma\": " << JsonNumber(mc.gamma) << ",\n";
+      out << "    \"dither\": " << (mc.dither ? "true" : "false") << ",\n";
       out << "    \"autoExposure\": " << (mc.autoExposure ? "true" : "false") << ",\n";
       out << "    \"bloom\": { \"enabled\": " << (mc.bloomEnabled ? "true" : "false")
           << ", \"intensity\": " << JsonNumber(mc.bloomIntensity)
@@ -586,6 +590,7 @@ namespace YAEngine
       out << "      \"maxBounces\": " << mc.pathTraceMaxBounces << ",\n";
       out << "      \"fireflyClamp\": " << JsonNumber(mc.pathTraceFireflyClamp) << ",\n";
       out << "      \"glass\": " << (mc.pathTraceGlass ? "true" : "false") << ",\n";
+      out << "      \"mirrorSun\": " << (mc.pathTraceMirrorSun ? "true" : "false") << ",\n";
       out << "      \"maxTransmissionDepth\": " << mc.pathTraceMaxTransmissionDepth << ",\n";
       out << "      \"glassOverflow\": \""
           << (mc.pathTraceGlassOverflow == PathTraceGlassOverflow::Straight ? "straight" : "terminate") << "\",\n";
@@ -1218,6 +1223,7 @@ namespace YAEngine
       .tonemapMode = m_TonemapMode,
       .exposure = m_Exposure,
       .gamma = m_Gamma,
+      .dither = b_DitherEnabled,
       .autoExposure = b_AutoExposureEnabled,
       .bloomEnabled = b_BloomEnabled,
       .bloomIntensity = m_BloomIntensity,
@@ -1228,6 +1234,7 @@ namespace YAEngine
       .pathTraceMaxBounces = m_PathTraceMaxBounces,
       .pathTraceFireflyClamp = m_PathTraceFireflyClamp,
       .pathTraceGlass = b_PathTraceGlass,
+      .pathTraceMirrorSun = b_PathTraceMirrorSun,
       .pathTraceMaxTransmissionDepth = m_PathTraceMaxTransmissionDepth,
       .pathTraceGlassOverflow = m_PathTraceGlassOverflow,
       .pathTraceSecondaryGlass = m_PathTraceSecondaryGlass,

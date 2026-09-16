@@ -162,6 +162,14 @@ struct PathTraceConstants
   // Nonzero: the forward transparent layer was drawn this frame and is laid over the sample, the one
   // ray reconstruction denoises and the one the running mean takes in.
   int transparentLayer;
+  // Nonzero: a path segment that left a delta lobe can see the sun disk. Off for an environment map
+  // that already holds the sun, which would otherwise be counted twice.
+  int mirrorSun;
+  // The span [sphereLightBegin, sphereLightEnd) of the flattened light candidates (0 is the sun) that
+  // holds every sphere light a delta segment can run into, see analyticEmissionAlongRay in
+  // pt_path.glsl. Empty where no light is one, which skips that test entirely.
+  int sphereLightBegin;
+  int sphereLightEnd;
 };
 
 #ifdef __cplusplus

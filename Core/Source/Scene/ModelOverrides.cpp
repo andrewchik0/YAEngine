@@ -161,6 +161,9 @@ namespace YAEngine::ModelOverrides
     if (material.transmittanceDistance != pristine.transmittanceDistance)
       n["transmittanceDistance"] = material.transmittanceDistance;
     if (material.mediumPriority != pristine.mediumPriority) n["mediumPriority"] = material.mediumPriority;
+    if (material.clearCoat != pristine.clearCoat) n["clearCoat"] = material.clearCoat;
+    if (material.clearCoatRoughness != pristine.clearCoatRoughness)
+      n["clearCoatRoughness"] = material.clearCoatRoughness;
     if (material.uvScale != pristine.uvScale) n["uvScale"] = SerializeVec2(material.uvScale);
     if (material.shadingModel != pristine.shadingModel)
       n["shadingModel"] = (material.shadingModel == ShadingModel::Unlit) ? "unlit" : "lit";
@@ -226,6 +229,9 @@ namespace YAEngine::ModelOverrides
     if (n["transmittanceDistance"]) material.transmittanceDistance = n["transmittanceDistance"].as<float>();
     if (n["mediumPriority"]) material.mediumPriority = n["mediumPriority"].as<int32_t>();
     ClampTransmission(material);
+    if (n["clearCoat"]) material.clearCoat = n["clearCoat"].as<float>();
+    if (n["clearCoatRoughness"]) material.clearCoatRoughness = n["clearCoatRoughness"].as<float>();
+    ClampClearCoat(material);
     if (n["uvScale"]) material.uvScale = DeserializeVec2(n["uvScale"]);
     if (n["shadingModel"])
     {

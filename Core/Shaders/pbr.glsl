@@ -101,6 +101,25 @@ float normalDistributionGGX(float alpha, float NdotH)
   return alpha2 / denominator;
 }
 
+// GGX D at the half vector H, exact down to small alphas: sin^2 comes off a cross product instead of
+// 1 - cos^2, and nothing is floored. normalDistributionGGX floors its denominator at 1e-5, which caps
+// the peak at alpha^2 / 1e-5 - roughness 0.04 peaks at 0.256 there instead of about 1.2e5. Zero where
+// H lies on or below the surface, and for a delta lobe exactly along N, which has no density.
+float exactDistributionGGX(vec3 N, vec3 H, float alpha)
+{
+  float NdotH = dot(N, H);
+  if (!(NdotH > 0.0))
+    return 0.0;
+
+  vec3 axis = cross(N, H);
+  float alpha2 = alpha * alpha;
+  float denominator = dot(axis, axis) + alpha2 * NdotH * NdotH;
+  if (!(denominator > 0.0))
+    return 0.0;
+
+  return alpha2 / (PI * denominator * denominator);
+}
+
 float geometrySchlickGGX(float k, float cosTheta)
 {
   float numerator = max(cosTheta, 0.0);

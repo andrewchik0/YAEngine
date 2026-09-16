@@ -4,6 +4,33 @@
 
 namespace YAEngine
 {
+  SphereLightSpan FindSphereLightSpan(const LightBuffer& lights)
+  {
+    const int32_t pointCount = std::clamp(lights.pointLightCount, 0, MAX_POINT_LIGHTS);
+    const int32_t spotCount = std::clamp(lights.spotLightCount, 0, MAX_SPOT_LIGHTS);
+
+    SphereLightSpan span;
+    auto include = [&span](int32_t candidate) {
+      if (span.begin == span.end)
+        span.begin = candidate;
+      span.end = candidate + 1;
+    };
+
+    for (int32_t i = 0; i < pointCount; i++)
+    {
+      const glm::vec4& shadowPad = lights.pointLights[i].shadowPad;
+      if (shadowPad.y > 0.0f && shadowPad.z <= 0.5f)
+        include(1 + i);
+    }
+    for (int32_t i = 0; i < spotCount; i++)
+    {
+      const glm::vec4& intensityShadow = lights.spotLights[i].intensityShadow;
+      if (intensityShadow.z > 0.0f && intensityShadow.w <= 0.5f)
+        include(1 + pointCount + i);
+    }
+    return span;
+  }
+
   void LightStorageBuffer::Init(const RenderContext& ctx)
   {
     m_DescriptorSets.resize(ctx.maxFramesInFlight);

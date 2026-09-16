@@ -145,6 +145,8 @@ namespace YAEngine
     uniforms.opacity = material.opacity;
     uniforms.fresnelOpacity = material.fresnelOpacity;
     uniforms.uvScale = material.uvScale;
+    uniforms.clearCoat = GetShadedClearCoat(material);
+    uniforms.clearCoatRoughness = std::clamp(material.clearCoatRoughness, 0.0f, 1.0f);
 
     m_UniformBuffers[currentFrame].Update(uniforms);
     writer.WriteUniformBuffer(0, m_UniformBuffers[currentFrame].Get(), sizeof(MaterialUniforms));

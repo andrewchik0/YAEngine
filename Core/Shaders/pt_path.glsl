@@ -30,6 +30,7 @@
 #include "light_eval.glsl"
 #include "normal_map.glsl"
 #include "dielectric.glsl"
+#include "clear_coat.glsl"
 #include "../Shared/PathTraceData.h"
 #include "../Shared/EmissiveLightData.h"
 
@@ -155,7 +156,7 @@ void recordDebugContribution(vec3 contribution, int bounce,
 // --- PT_DEBUG_NONFINITE state ---
 //
 // Globals rather than an inout parameter threaded through the sampling functions: the codes
-// that matter most fire from inside sampleBrdfDirection's GGX branch, on both sides of an
+// that matter most fire from inside sampleBsdfLobe's GGX branch, on both sides of an
 // early return, and growing every signature there by two diagnostic arguments would put the
 // instrument into the shading code instead of alongside it.
 bool g_NonFiniteTracking = false;
@@ -188,23 +189,52 @@ void recordNonFinite(float value, int code)
   recordNonFinite(vec3(value), code);
 }
 
+// What a path vertex scatters with. One record, so every function that samples, weighs or
+// evaluates a vertex reads the same description of it.
+struct PathBsdf
+{
+  // The shading normal: at a hit, the interpolated vertex normal bent by the normal map as
+  // gbuffer.frag bends it, on the side of the geometric normal that faces the ray. Shading reads
+  // this one; ray offsets, facing and the below-surface test keep RayHitGeometry::normal.
+  vec3 N;
+  vec3 albedo;
+  float metallic;
+  float roughness;
+  // The clear coat over the surface above; a weight of zero is no coat.
+  float clearCoat;
+  float coatRoughness;
+  // The coat's normal: at a hit the interpolated vertex normal, before the normal map. uncoatedBsdf
+  // copies N here, bent or not, and the G-buffer vertex reads it as its geometric normal.
+  vec3 coatN;
+};
+
+PathBsdf uncoatedBsdf(vec3 N, vec3 albedo, float metallic, float roughness)
+{
+  return PathBsdf(N, albedo, metallic, roughness, 0.0, 0.0, N);
+}
+
+vec3 pathF0(PathBsdf bsdf)
+{
+  return mix(vec3(0.04), bsdf.albedo, bsdf.metallic);
+}
+
+// The cosine every BRDF evaluation of a vertex uses, kept off exact zero and one.
+float pathNdotV(vec3 N, vec3 V)
+{
+  return clamp(abs(dot(N, V)), 0.01, 0.99);
+}
+
 // Everything one hit surface is worth, decoded the way gbuffer.frag decodes the same
 // material out of its own descriptor set. Keeping the two in step is what makes a traced
 // image comparable with the rasterized one at all.
 struct PathSurface
 {
-  vec3 albedo;
-  float metallic;
-  float roughness;
+  PathBsdf bsdf;
   vec3 emissive;
   // True for a texel the G-buffer pass would have written as pure emission, seen from a face
   // that emits (emitsFromFace). It has given up its PBR response - so the path ends there,
   // exactly as the raster shading does.
   bool emissiveTexel;
-  // The shading normal: the interpolated vertex normal bent by the normal map as gbuffer.frag
-  // bends it, on the side of the geometric normal that faces the ray. Shading reads this one;
-  // ray offsets, facing and the below-surface test keep RayHitGeometry::normal.
-  vec3 normal;
 };
 
 // The per-texel decision the G-buffer pass makes: below the cutoff the emission is dropped and
@@ -233,12 +263,9 @@ bool resolveEmissiveTexel(RayTracingMaterialRecord material, vec2 texCoord, out 
 PathSurface resolveHitMaterial(RayHitGeometry hit, vec2 barycentrics)
 {
   PathSurface surface;
-  surface.albedo = vec3(0.72);
-  surface.metallic = 0.0;
-  surface.roughness = 1.0;
+  surface.bsdf = uncoatedBsdf(hit.shadingNormal, vec3(0.72), 0.0, 1.0);
   surface.emissive = vec3(0.0);
   surface.emissiveTexel = false;
-  surface.normal = hit.shadingNormal;
 
   if (hit.materialIndex >= uint(u_Materials.length()))
     return surface;
@@ -265,7 +292,7 @@ PathSurface resolveHitMaterial(RayHitGeometry hit, vec2 barycentrics)
 
     // Base color maps are loaded in sRGB formats, so the sample above is already linear -
     // the same as what gbuffer.frag hands the raster path.
-    surface.albedo = baseColor;
+    surface.bsdf.albedo = baseColor;
 
     // Absent maps fall back to white, which is what the raster mix(1.0, sample, hasTexture)
     // collapses to - the fallback is the identity for both the metallic and roughness scales.
@@ -273,15 +300,20 @@ PathSurface resolveHitMaterial(RayHitGeometry hit, vec2 barycentrics)
     if ((material.textureMask & RT_MATERIAL_METALLIC) != 0u)
       metallicSample = textureLod(u_BindlessTextures[nonuniformEXT(material.metallicIndex)],
         texCoord, 0.0);
-    surface.metallic = material.metallic * metallicSample.b;
+    surface.bsdf.metallic = material.metallic * metallicSample.b;
 
     float roughnessSample = 1.0;
     if ((material.textureMask & RT_MATERIAL_ROUGHNESS) != 0u)
       roughnessSample = textureLod(u_BindlessTextures[nonuniformEXT(material.roughnessIndex)],
         texCoord, 0.0).r;
     // A combined ORM map keeps roughness in green and overrides the separate map entirely.
-    surface.roughness = material.roughness
+    surface.bsdf.roughness = material.roughness
       * (((material.textureMask & RT_MATERIAL_COMBINED) != 0u) ? metallicSample.g : roughnessSample);
+
+    // The coat keeps the normal uncoatedBsdf was given, the vertex normal before the normal map.
+    vec2 coat = unpackUnorm2x16(material.clearCoatPacked);
+    surface.bsdf.clearCoat = coat.x;
+    surface.bsdf.coatRoughness = coat.y;
   }
 
   // A mesh without tangents has no frame to decode the map in, and keeps the vertex normal.
@@ -292,7 +324,7 @@ PathSurface resolveHitMaterial(RayHitGeometry hit, vec2 barycentrics)
       (material.textureMask & RT_MATERIAL_TWO_CHANNEL_NORMAL) != 0u ? 1.0 : 0.0);
     vec3 mapped = normalizeOrZero(mat3(hit.tangent, hit.bitangent, hit.vertexNormal) * tangentNormal);
     if (dot(mapped, mapped) > 0.0)
-      surface.normal = dot(mapped, hit.normal) < 0.0 ? -mapped : mapped;
+      surface.bsdf.N = dot(mapped, hit.normal) < 0.0 ? -mapped : mapped;
   }
 
   // The back of a single sided emitter emits nothing and keeps the PBR response resolved above,
@@ -321,6 +353,13 @@ struct PathSettings
   bool secondaryRefract;
   // The PT Glass switch. Off, the TLAS holds no glass and nothing traces for it.
   bool glass;
+  // Whether a delta segment can run into the sun disk, see analyticEmissionAlongRay. Off where the
+  // environment map already holds the sun.
+  bool mirrorSun;
+  // PathTraceConstants::sphereLightBegin and ::sphereLightEnd: the candidates a delta segment tests as
+  // spheres.
+  int sphereLightBegin;
+  int sphereLightEnd;
 };
 
 // --- Glass crossed straight ---
@@ -350,9 +389,10 @@ int solidTreatment(bool refractRole, int transmissionEvents, PathSettings settin
 
 // A vertex that scatters along its mirror direction and nothing else, which the camera's chain
 // continues through - the surfaces Primary Surface Replacement walks through.
-bool isPureDeltaMirror(float roughness, float metallic)
+bool isPureDeltaMirror(PathBsdf bsdf)
 {
-  return roughness * roughness <= PT_DELTA_MAX_ALPHA && metallic >= PT_PSR_MIN_METALLIC;
+  return bsdf.roughness * bsdf.roughness <= PT_DELTA_MAX_ALPHA && bsdf.metallic >= PT_PSR_MIN_METALLIC
+    && bsdf.clearCoat <= 0.0;
 }
 
 // The glass a segment crosses straight under a Solid treatment.
@@ -383,9 +423,11 @@ vec3 traceStraightTransmittance(vec3 origin, vec3 direction, float tMin, float t
 
 // Finishes a segment whose closest hit over RT_MASK_PATH is in payload. A hit on glass the segment
 // crosses straight is traced past, over everything else, to the next surface that counts, which
-// replaces it in payload, and the straight glass on the span is queried. Returns that transmittance.
-vec3 passStraightGlass(vec3 origin, vec3 direction, float tMin, int solidTreatment)
+// replaces it in payload, and the straight glass on the span is queried. Returns that transmittance;
+// straightGlassT is where the first of that glass lies, PT_RAY_TMAX where there is none.
+vec3 passStraightGlass(vec3 origin, vec3 direction, float tMin, int solidTreatment, out float straightGlassT)
 {
+  straightGlassT = PT_RAY_TMAX;
   if (payload.hit == 0u)
     return vec3(1.0);
 
@@ -394,6 +436,8 @@ vec3 passStraightGlass(vec3 origin, vec3 direction, float tMin, int solidTreatme
     || (solidTreatment == PT_SOLID_STRAIGHT && (flags & RT_INSTANCE_SOLID_DIELECTRIC) != 0u);
   if (!straight)
     return vec3(1.0);
+
+  straightGlassT = payload.hitT;
 
   // The same line from the same start, so nothing nearer than the glass can turn up.
   uint mask = straightGlassMask(solidTreatment);
@@ -409,8 +453,9 @@ vec3 passStraightGlass(vec3 origin, vec3 direction, float tMin, int solidTreatme
 }
 
 // One path segment: the surface it ends on, in payload, and what the glass it crosses straight on the
-// way lets through. One trace where it meets no such glass, three where it meets any.
-vec3 traceSegment(vec3 origin, vec3 direction, float tMin, int solidTreatment)
+// way lets through, from straightGlassT on. One trace where it meets no such glass, three where it
+// meets any.
+vec3 traceSegment(vec3 origin, vec3 direction, float tMin, int solidTreatment, out float straightGlassT)
 {
   payload.hit = 0u;
 
@@ -423,7 +468,7 @@ vec3 traceSegment(vec3 origin, vec3 direction, float tMin, int solidTreatment)
     origin, tMin, direction, PT_RAY_TMAX,
     0); // payload location
 
-  return passStraightGlass(origin, direction, tMin, solidTreatment);
+  return passStraightGlass(origin, direction, tMin, solidTreatment, straightGlassT);
 }
 
 // One shadow ray: how much of the light reaches its far end, per channel. TerminateOnFirstHit plus
@@ -618,8 +663,9 @@ vec3 sampleUniformCone(vec3 axis, float oneMinusCosMax, vec2 xi,
 }
 
 // Gives the light selectLight picked its emitter size: a sphere of the source radius around a
-// point or spot light, a disk of the angular radius for the sun. Next event estimation only -
-// neither is geometry, so no bounce ray can hit one and there is nothing to weigh against.
+// point or spot light, a disk of the angular radius for the sun. Neither is geometry: only a ray
+// that left a delta lobe, which next event estimation never samples, gathers them along its way
+// (analyticEmissionAlongRay), so there is nothing to weigh against.
 //
 // The direction is drawn uniformly inside the cone the emitter subtends. The radiance stays the
 // one light_eval.glsl computed at the light's centre - falloff at the centre distance, spot cone
@@ -670,6 +716,155 @@ void sampleAnalyticLightDirection(inout PathLightSample light, vec3 worldPos, ve
   // discriminant is non-negative up to rounding.
   shadowDistance = centerDistance * cosTheta
     - safeSqrt(sourceRadius * sourceRadius - centerDistance * centerDistance * sin2Theta);
+}
+
+// A sphere light - a point or spot light of the flattened candidate list with a source radius, not
+// raster only - as a ray from origin along direction meets it: true where the ray enters the sphere
+// from outside before tMax, entry distance along. oneMinusCosMax is the cone the sphere subtends at
+// origin, 1 - cos(theta max) as sampleAnalyticLightDirection takes it.
+bool sphereLightAlongRay(int candidate, vec3 origin, vec3 direction, float tMax,
+  out float entry, out float oneMinusCosMax, out vec3 center)
+{
+  entry = 0.0;
+  oneMinusCosMax = 0.0;
+  center = vec3(0.0);
+
+  // The size and the raster only flag first, one load for both.
+  int pointCount = min(u_Lights.pointLightCount, MAX_POINT_LIGHTS);
+  int index = candidate - 1;
+  bool point = index < pointCount;
+  float sourceRadius;
+  float rasterOnly;
+  if (point)
+  {
+    vec4 shadowPad = u_Lights.pointLights[index].shadowPad;
+    sourceRadius = shadowPad.y;
+    rasterOnly = shadowPad.z;
+  }
+  else
+  {
+    vec4 intensityShadow = u_Lights.spotLights[index - pointCount].intensityShadow;
+    sourceRadius = intensityShadow.z;
+    rasterOnly = intensityShadow.w;
+  }
+  if (sourceRadius <= 0.0 || rasterOnly > 0.5)
+    return false;
+
+  if (point)
+    center = u_Lights.pointLights[index].positionRadius.xyz;
+  else
+    center = u_Lights.spotLights[index - pointCount].positionRadius.xyz;
+
+  vec3 toCenter = center - origin;
+  float along = dot(toCenter, direction);
+  if (along <= 0.0)
+    return false;
+
+  float centerDistance2 = dot(toCenter, toCenter);
+  float radius2 = sourceRadius * sourceRadius;
+  float miss2 = centerDistance2 - along * along;
+  if (centerDistance2 <= radius2 || miss2 > radius2)
+    return false;
+
+  entry = along - safeSqrt(radius2 - miss2);
+  if (entry >= tMax)
+    return false;
+
+  // As sin^2 / (1 + cos), which does not cancel for a small sphere.
+  float sin2ThetaMax = radius2 / centerDistance2;
+  oneMinusCosMax = sin2ThetaMax / (1.0 + safeSqrt(1.0 - sin2ThetaMax));
+  return true;
+}
+
+// What the analytic emitters a ray runs into add along one segment: every sphere light it enters before
+// segmentEnd, and the sun disk where the segment leaves the scene (missed) along a direction inside it,
+// while PathSettings::mirrorSun allows. Only a segment that left its vertex along a delta lobe asks:
+// next event estimation never samples such a lobe, so the two strategies see disjoint directions and
+// neither needs an MIS weight.
+//
+// An emitter's radiance is what next event estimation receives from it at origin - light_eval.glsl at
+// the light's centre, range and cone included - spread over the solid angle the emitter subtends,
+// which is exactly how sampleAnalyticLightDirection spreads it over the cone it samples. A sphere is
+// dimmed by the medium the segment runs through up to its own entry, absorption per unit length, and by
+// the segment's straight glass (transmittance, from straightGlassT on) once it lies past the first of
+// that glass. All of that glass counts then, some of which may lie beyond the light: exact unless a
+// sphere sits between two straight interfaces - a bulb inside a closed glass shade loses its far wall
+// too. The sun lies past all of it.
+vec3 analyticEmissionAlongRay(vec3 origin, vec3 direction, float segmentEnd, bool missed,
+  PathSettings settings, vec3 absorption, float straightGlassT, vec3 transmittance)
+{
+  vec3 emitted = vec3(0.0);
+
+  for (int candidate = settings.sphereLightBegin; candidate < settings.sphereLightEnd; candidate++)
+  {
+    float entry;
+    float oneMinusCosMax;
+    vec3 center;
+    if (!sphereLightAlongRay(candidate, origin, direction, segmentEnd, entry, oneMinusCosMax, center))
+      continue;
+
+    vec3 L;
+    float lightDistance;
+    vec3 radiance;
+    if (!evaluateLightCandidate(candidate, origin, L, lightDistance, radiance))
+      continue;
+
+    vec3 dimming = exp(-absorption * entry);
+    if (entry >= straightGlassT)
+      dimming *= transmittance;
+    emitted += dimming * radiance / (2.0 * PI * oneMinusCosMax);
+  }
+
+  float angularRadius = u_Lights.directional.colorPad.w;
+  if (missed && settings.mirrorSun && angularRadius > 0.0
+    && (u_Lights.directionalFlags & LIGHT_FLAG_RASTER_ONLY) == 0)
+  {
+    vec3 L;
+    vec3 radiance = evaluateDirectionalLight(u_Lights.directional.directionIntensity,
+      u_Lights.directional.colorPad.rgb, L);
+    // Inside the disk as chords of the unit sphere: |direction - L| is at most 2 sin(r / 2), a test
+    // that keeps its precision where 1 - dot(direction, L) is down to a few float steps. 1 - cos(r) is
+    // 2 sin^2(r / 2), as the sampler takes it.
+    float halfSin = sin(0.5 * angularRadius);
+    float halfSin2 = halfSin * halfSin;
+    vec3 chord = direction - L;
+    if (dot(chord, chord) <= 4.0 * halfSin2)
+      emitted += transmittance * radiance / (4.0 * PI * halfSin2);
+  }
+
+  return emitted;
+}
+
+// The nearest sphere light a delta segment would gather along a ray before tMax (see
+// analyticEmissionAlongRay) that gives the ray any light: its entry distance, -1 where there is none,
+// and its centre. What Primary Surface Replacement and the specular hit distance probe describe a glint
+// with.
+float nearestSphereLight(vec3 origin, vec3 direction, float tMax, PathSettings settings, out vec3 center)
+{
+  float nearest = -1.0;
+  center = vec3(0.0);
+
+  for (int candidate = settings.sphereLightBegin; candidate < settings.sphereLightEnd; candidate++)
+  {
+    float entry;
+    float oneMinusCosMax;
+    vec3 candidateCenter;
+    if (!sphereLightAlongRay(candidate, origin, direction, nearest >= 0.0 ? nearest : tMax, entry,
+      oneMinusCosMax, candidateCenter))
+      continue;
+
+    vec3 L;
+    float lightDistance;
+    vec3 radiance;
+    if (!evaluateLightCandidate(candidate, origin, L, lightDistance, radiance)
+      || max(radiance.r, max(radiance.g, radiance.b)) <= 0.0)
+      continue;
+
+    nearest = entry;
+    center = candidateCenter;
+  }
+
+  return nearest;
 }
 
 // --- Emissive lights ---
@@ -767,9 +962,8 @@ vec3 emissiveTargetRadiance(uint tableIndex)
   if (materialIndex >= uint(u_Materials.length()))
     return vec3(0.0);
 
-  RayTracingMaterialRecord material = u_Materials[materialIndex];
-  return (material.textureMask & RT_MATERIAL_EMISSIVE_SHADING) != 0u
-    ? material.emissivity : vec3(0.0);
+  return (u_Materials[materialIndex].textureMask & RT_MATERIAL_EMISSIVE_SHADING) != 0u
+    ? u_Materials[materialIndex].emissivity : vec3(0.0);
 }
 
 // What the chosen emissive candidate really emits, resolved exactly as resolveHitMaterial
@@ -803,8 +997,8 @@ vec3 resolveEmissiveSampleRadiance(EmissiveLightSample emitter)
 // --- BRDF sampling ---
 
 // The Smith-Schlick k of every BRDF evaluation the path tracer makes: the GGX bounce weight in
-// sampleBrdfDirection and next event estimation's evaluateNeeResponse alike, so both strategies
-// of the emitter MIS weigh the identical BRDF. sampleBrdfDirection explains why it is alpha / 2
+// sampleBsdfLobe and next event estimation's evaluateNeeResponse alike, so both strategies
+// of the emitter MIS weigh the identical BRDF. sampleBsdfLobe explains why it is alpha / 2
 // rather than the (roughness + 1)^2 / 8 raster shading keeps.
 float pathSmithK(float alpha)
 {
@@ -848,24 +1042,150 @@ float specularLobeProbability(vec3 albedo, vec3 f0, float metallic, float roughn
   return clamp(probability, PT_MIN_LOBE_PROBABILITY, 1.0 - PT_MIN_LOBE_PROBABILITY);
 }
 
-// Picks the next direction and the throughput factor that goes with it. Returns false when
-// the sampled direction ends up below the surface, which is a path that has to end rather
-// than a sample worth zero - a GGX lobe at grazing angles produces those regularly.
+// What the starting vertex samples. A reflection layer pixel runs the path twice from the same
+// vertex, BASE then MIRROR - see pt_main.rgen and reflectionLayerLobe.
+const int PT_FIRST_VERTEX_COIN = 0;
+// NEE and every lobe but the layer lobe.
+const int PT_FIRST_VERTEX_BASE = 1;
+// The layer lobe alone.
+const int PT_FIRST_VERTEX_MIRROR = 2;
+
+// The lobe a reflection layer pixel traces on its own (PT_FIRST_VERTEX_MIRROR), always a delta: the
+// coat where it is one, otherwise the surface's specular lobe where that is one and the surface is no
+// metallic mirror - PSR's, see isPureDeltaMirror - under a glossy coat as on a bare smooth
+// dielectric. A metallic mirror under a glossy coat has none and stays on the coin, a limitation: its
+// strongly coloured layer weight does not fit the one scalar F the layer carries.
+const int PT_LAYER_LOBE_NONE = 0;
+const int PT_LAYER_LOBE_COAT = 1;
+const int PT_LAYER_LOBE_SURFACE = 2;
+
+int reflectionLayerLobe(PathBsdf bsdf)
+{
+  if (bsdf.clearCoat > 0.0 && bsdf.coatRoughness * bsdf.coatRoughness <= PT_DELTA_MAX_ALPHA)
+    return PT_LAYER_LOBE_COAT;
+  if (bsdf.roughness * bsdf.roughness <= PT_DELTA_MAX_ALPHA && bsdf.metallic < PT_PSR_MIN_METALLIC)
+    return PT_LAYER_LOBE_SURFACE;
+  return PT_LAYER_LOBE_NONE;
+}
+
+// How a vertex's sampler picks its lobe - the coat, the surface's specular lobe, or with the rest of
+// the probability the surface's diffuse lobe - and the widths of the two GGX lobes. All the density of
+// a direction needs besides the normals, see brdfDirectionPdf.
+struct PathLobeMixture
+{
+  float coat;
+  float specular;
+  float alpha;
+  float coatAlpha;
+};
+
+// What sampling, evaluating and weighing one vertex keep reading, computed once per vertex.
+struct PathVertexTerms
+{
+  vec3 f0;
+  float NdotV;
+  // Against the coat normal, and what of the light leaving along V the coat lets out: one without a
+  // coat.
+  float coatNdotV;
+  float coatViewTransmission;
+  PathLobeMixture lobes;
+};
+
+// --- Clear coat ---
+//
+// A coat is a smooth dielectric layer, F0 0.04, over the surface, with its own roughness and its own
+// normal - the vertex normal, where the surface keeps its normal map. With Fc(x) its Fresnel scaled by
+// the weight, x the cosine against the coat normal, the layered BSDF is
+//   f = f_coat(V, L) + (1 - Fc(V)) * (1 - Fc(L)) * f_surface(V, L)
+// here exactly as in deferred_lighting.frag. f_coat is GGX at F0 0.04 with the coat's roughness, a
+// delta mirror at or below PT_DELTA_MAX_ALPHA.
+
+// What light crosses the coat on the way in along L and out along the vertex's V; one without a coat.
+float clearCoatTransmission(PathBsdf bsdf, PathVertexTerms terms, vec3 L)
+{
+  return terms.coatViewTransmission * (1.0 - clearCoatFresnel(bsdf.clearCoat, max(dot(bsdf.coatN, L), 0.0)));
+}
+
+// How often a coin at a coated vertex picks the coat: its reflectance at V against what the surface
+// under it still returns, floored and clamped the way specularLobeProbability is and for the same
+// reason - a smooth coat carries the whole visible reflection on a small probability.
+float coatLobeProbability(PathBsdf bsdf, vec3 f0, float coatViewTransmission)
+{
+  float coatWeight = 1.0 - coatViewTransmission;
+  float surfaceWeight = coatViewTransmission
+    * (luminance(f0) + luminance(bsdf.albedo) * (1.0 - bsdf.metallic));
+  if (surfaceWeight <= 0.0)
+    return 1.0;
+
+  float probability = coatWeight / max(coatWeight + surfaceWeight, 1e-5);
+  float smoothFloor = mix(PT_SMOOTH_LOBE_FLOOR, 0.0,
+    smoothstep(PT_LOBE_FLOOR_ROUGHNESS_MIN, PT_LOBE_FLOOR_ROUGHNESS_MAX, bsdf.coatRoughness));
+  probability = max(probability, smoothFloor);
+
+  return clamp(probability, PT_MIN_LOBE_PROBABILITY, 1.0 - PT_MIN_LOBE_PROBABILITY);
+}
+
+// The lobe mixture lobeMode samples. The coin picks the coat first and runs the surface's own coin on
+// what is left. A forced mode takes the layer lobe alone (MIRROR) or everything else (BASE): the
+// surface's coin under a delta coat, the glossy coat against the diffuse lobe where the surface's
+// specular lobe is the layer.
+PathLobeMixture pathLobeMixture(PathBsdf bsdf, vec3 f0, float coatViewTransmission, int lobeMode)
+{
+  float alpha = bsdf.roughness * bsdf.roughness;
+  float coatAlpha = bsdf.coatRoughness * bsdf.coatRoughness;
+  bool coated = bsdf.clearCoat > 0.0;
+  float pSpecular = specularLobeProbability(bsdf.albedo, f0, bsdf.metallic, bsdf.roughness);
+
+  if (lobeMode == PT_FIRST_VERTEX_COIN)
+  {
+    float pCoat = coated ? coatLobeProbability(bsdf, f0, coatViewTransmission) : 0.0;
+    return PathLobeMixture(pCoat, (1.0 - pCoat) * pSpecular, alpha, coatAlpha);
+  }
+
+  bool mirror = lobeMode == PT_FIRST_VERTEX_MIRROR;
+  if (reflectionLayerLobe(bsdf) == PT_LAYER_LOBE_COAT)
+    return PathLobeMixture(mirror ? 1.0 : 0.0, mirror ? 0.0 : pSpecular, alpha, coatAlpha);
+
+  float pCoat = coated && !mirror ? coatLobeProbability(bsdf, f0, coatViewTransmission) : 0.0;
+  return PathLobeMixture(pCoat, mirror ? 1.0 : 0.0, alpha, coatAlpha);
+}
+
+PathVertexTerms preparePathVertex(PathBsdf bsdf, vec3 V, int lobeMode)
+{
+  PathVertexTerms terms;
+  terms.f0 = pathF0(bsdf);
+  terms.NdotV = pathNdotV(bsdf.N, V);
+  terms.coatNdotV = pathNdotV(bsdf.coatN, V);
+  terms.coatViewTransmission = 1.0 - clearCoatFresnel(bsdf.clearCoat, terms.coatNdotV);
+  terms.lobes = pathLobeMixture(bsdf, terms.f0, terms.coatViewTransmission, lobeMode);
+  return terms;
+}
+
+// One lobe of the vertex, without the probability of picking it: the coat's, the surface's specular
+// one, or with neither flag the surface's diffuse one. Returns the direction and the throughput factor
+// that goes with it, or false when the sampled direction ends up below the surface, which is a path
+// that has to end rather than a sample worth zero - a GGX lobe at grazing angles produces those
+// regularly. The coat is a specular lobe about its own normal, of its own width, with Schlick at F0 0.04
+// scaled by its weight; the one code path samples both, since every sampling branch the ray generation
+// shader holds costs time whether it runs or not.
 //
 // deltaLobe reports whether the direction came from the delta mirror branch. The emitter MIS
 // needs it: no light sample can reproduce a mirror direction, so an emitter hit through one keeps
 // its full weight. The ray reconstruction hit distance guide does not use it - it measures itself
 // with a probe ray that does not care what the path went on to do.
-bool sampleBrdfDirection(vec3 N, vec3 V, vec3 albedo, float metallic, float roughness,
-  vec3 f0, float NdotV, vec2 xi, float lobeSelector,
+bool sampleBsdfLobe(PathBsdf bsdf, PathVertexTerms terms, vec3 V, vec2 xi, bool coat, bool specular,
   out vec3 L, out vec3 weight, out bool deltaLobe)
 {
-  float pSpecular = specularLobeProbability(albedo, f0, metallic, roughness);
-  float alpha = roughness * roughness;
   deltaLobe = false;
 
-  if (lobeSelector < pSpecular)
+  if (specular)
   {
+    vec3 N = coat ? bsdf.coatN : bsdf.N;
+    float alpha = coat ? terms.lobes.coatAlpha : terms.lobes.alpha;
+    float NdotV = coat ? terms.coatNdotV : terms.NdotV;
+    vec3 f0 = coat ? vec3(CLEAR_COAT_F0) : terms.f0;
+    float fresnelScale = coat ? bsdf.clearCoat : 1.0;
+
     // A mirror is not a narrow lobe, it is a different kind of object: its density is a delta
     // and there is nothing to importance sample. The direction is the reflection, and the
     // whole throughput is Fresnel - the delta cancels against the cosine and against its own
@@ -879,20 +1199,19 @@ bool sampleBrdfDirection(vec3 N, vec3 V, vec3 albedo, float metallic, float roug
         return false;
 
       // The half vector of a mirror is the normal, so the Fresnel angle is NdotV.
-      weight = fresnelSchlick(NdotV, f0);
-      weight /= pSpecular;
+      weight = fresnelSchlick(NdotV, f0) * fresnelScale;
       return true;
     }
 
     // Plain half-vector GGX sampling through importanceSampleGGX from pbr.glsl - the same
     // sampler prefilter.frag bakes the environment with. Reusing it is the point: the
     // tracer's specular lobe cannot drift from the engine's own GGX convention, and it
-    // agrees with the D and F of evaluateDirectLightSplitSmithK by construction. VNDF
+    // agrees with the D and F of evaluateNeeResponse by construction. VNDF
     // sampling would cut variance at grazing angles, where this one wastes samples on
     // microfacets that face away; a second GGX sampler in the codebase is its price.
     // Nothing is floored: the branch above owns everything at or below the delta threshold,
     // so the alpha reaching the sampler is always wide enough to have a finite density.
-    vec3 H = importanceSampleGGX(xi, N, roughness);
+    vec3 H = importanceSampleGGX(xi, N, coat ? bsdf.coatRoughness : bsdf.roughness);
     recordNonFinite(H, PT_NF_GGX_H);
     L = reflect(-V, H);
 
@@ -924,87 +1243,87 @@ bool sampleBrdfDirection(vec3 N, vec3 V, vec3 albedo, float metallic, float roug
     // look load bearing. With alpha / 2 the two branches meet within a fraction of a percent
     // and the threshold stops deciding anything visible. Next event estimation evaluates its
     // BRDF with the same pathSmithK, so it and this sampler weigh one BRDF; raster keeps its remap.
-    float k = pathSmithK(alpha);
-    float G = geometrySmith(k, NdotV, NdotL);
+    float G = geometrySmith(pathSmithK(alpha), NdotV, NdotL);
     recordNonFinite(G, PT_NF_GGX_G);
-    vec3 F = fresnelSchlick(VdotH, f0);
+    vec3 F = fresnelSchlick(VdotH, f0) * fresnelScale;
     recordNonFinite(F, PT_NF_GGX_F);
 
     weight = F * G * VdotH / max(NdotV * NdotH, 1e-4);
     recordNonFinite(weight, PT_NF_GGX_WEIGHT);
-    weight /= pSpecular;
     return true;
   }
 
+  vec3 N = bsdf.N;
   L = sampleCosineHemisphere(xi, N);
   if (dot(N, L) <= 0.0)
     return false;
 
   // Cosine-weighted sampling collapses the Lambert term to the albedo: the pdf is
   // NdotL / PI and the BRDF is kD * albedo / PI, so everything but kD * albedo cancels.
-  // kD is built exactly as evaluateDirectLightSplit builds it.
+  // kD is built exactly as evaluateNeeResponse builds it.
   vec3 H = normalize(V + L);
-  vec3 F = fresnelSchlick(max(dot(H, V), 0.0), f0);
-  vec3 kD = (1.0 - F) * (1.0 - metallic);
-
-  weight = kD * albedo;
-  weight /= 1.0 - pSpecular;
+  vec3 F = fresnelSchlick(max(dot(H, V), 0.0), terms.f0);
+  weight = (1.0 - F) * (1.0 - bsdf.metallic) * bsdf.albedo;
   return true;
 }
 
-// What the starting vertex samples. A reflection layer pixel runs the path twice from the same
-// vertex, BASE then MIRROR - see pt_main.rgen.
-const int PT_FIRST_VERTEX_COIN = 0;
-// NEE and the diffuse lobe.
-const int PT_FIRST_VERTEX_BASE = 1;
-// The mirror lobe alone.
-const int PT_FIRST_VERTEX_MIRROR = 2;
-
-// The solid angle density with which sampleBrdfDirection, driven the way tracePath drives it at
-// this vertex, generates L. It is the BSDF half of every emitter MIS weight, so it follows the
-// sampler exactly: the lobe coin's mixture of the half vector GGX density and the cosine density,
-// with the same lobe probability and the same rejections. A delta mirror lobe has no density to
-// share and adds nothing; the sampler flags a direction it produces instead. A forced first
-// vertex lobe (lobeMode PT_FIRST_VERTEX_BASE or _MIRROR) is sampled with that lobe's own
-// density, and nothing else.
-float brdfDirectionPdf(vec3 N, vec3 V, vec3 L, vec3 albedo, float metallic, float roughness,
-  vec3 f0, int lobeMode)
+// Picks the next direction by the vertex's lobe mixture, and the throughput factor that goes with it:
+// the lobe's own weight over the probability of picking it, and under a coat what the coat lets
+// through both ways for a lobe of the surface. One selector partitions [0, 1) into the coat, the
+// specular and the diffuse lobe.
+bool sampleBrdfDirection(PathBsdf bsdf, PathVertexTerms terms, vec3 V, vec2 xi, float lobeSelector,
+  out vec3 L, out vec3 weight, out bool deltaLobe)
 {
-  float NdotL = dot(N, L);
-  if (NdotL <= 0.0)
+  PathLobeMixture lobes = terms.lobes;
+  bool coat = lobeSelector < lobes.coat;
+  bool specular = lobeSelector < lobes.coat + lobes.specular;
+  if (!sampleBsdfLobe(bsdf, terms, V, xi, coat, specular, L, weight, deltaLobe))
+    return false;
+
+  float probability = coat ? lobes.coat : (specular ? lobes.specular : 1.0 - lobes.coat - lobes.specular);
+  weight *= (coat ? 1.0 : clearCoatTransmission(bsdf, terms, L)) / probability;
+  return true;
+}
+
+// The density with which importanceSampleGGX about N at this alpha, reflected, generates L; zero for
+// a delta lobe.
+float ggxReflectionPdf(vec3 N, vec3 V, vec3 L, float alpha)
+{
+  if (alpha <= PT_DELTA_MAX_ALPHA)
     return 0.0;
 
-  float diffusePdf = NdotL / PI;
+  vec3 H = normalize(V + L);
+  float VdotH = dot(V, H);
+  if (VdotH <= 0.0)
+    return 0.0;
 
-  float specularPdf = 0.0;
-  float alpha = roughness * roughness;
-  if (alpha > PT_DELTA_MAX_ALPHA)
+  // The half vector density D * NdotH through the reflection's Jacobian 1 / (4 VdotH). D is the exact
+  // one importanceSampleGGX draws from: normalDistributionGGX's floor is orders of magnitude off it
+  // just above the delta threshold.
+  return exactDistributionGGX(N, H, alpha) * max(dot(N, H), 0.0) / (4.0 * VdotH);
+}
+
+// The solid angle density with which sampleBrdfDirection, driven by the same lobe mixture, generates
+// L from a vertex with shading normal N and coat normal coatN. It is the BSDF half of every emitter
+// MIS weight, so it follows the sampler exactly: the mixture of the specular lobe's and the coat's
+// half vector GGX densities and the cosine density, with the same rejections. A delta lobe has no
+// density to share and adds nothing; the sampler flags a direction it produces instead.
+float brdfDirectionPdf(vec3 N, vec3 coatN, vec3 V, vec3 L, PathLobeMixture lobes)
+{
+  float NdotL = dot(N, L);
+  float pdf = NdotL > 0.0 ? (1.0 - lobes.coat - lobes.specular) * NdotL / PI : 0.0;
+
+  // The specular lobe, then the coat: one evaluation in a loop, for the reason sampleBsdfLobe gives.
+  int lobeCount = lobes.coat > 0.0 ? 2 : 1;
+  for (int lobe = 0; lobe < lobeCount; lobe++)
   {
-    vec3 H = normalize(V + L);
-    float NdotH = dot(N, H);
-    float VdotH = dot(V, H);
-    if (NdotH > 0.0 && VdotH > 0.0)
-    {
-      // The GGX distribution importanceSampleGGX draws from, with sin^2 taken off a cross
-      // product: normalDistributionGGX floors its denominator, which just above the delta
-      // threshold is orders of magnitude off the density the sampler really has, and 1 - cos^2
-      // cancels away there.
-      vec3 axis = cross(N, H);
-      float alpha2 = alpha * alpha;
-      float denominator = dot(axis, axis) + alpha2 * NdotH * NdotH;
-      float D = alpha2 / (PI * denominator * denominator);
-      // The half vector density D * NdotH through the reflection's Jacobian 1 / (4 VdotH).
-      specularPdf = D * NdotH / (4.0 * VdotH);
-    }
+    bool coat = lobe == 1;
+    float probability = coat ? lobes.coat : lobes.specular;
+    vec3 lobeN = coat ? coatN : N;
+    if (probability > 0.0 && dot(lobeN, L) > 0.0)
+      pdf += probability * ggxReflectionPdf(lobeN, V, L, coat ? lobes.coatAlpha : lobes.alpha);
   }
-
-  if (lobeMode == PT_FIRST_VERTEX_BASE)
-    return diffusePdf;
-  if (lobeMode == PT_FIRST_VERTEX_MIRROR)
-    return specularPdf;
-
-  float pSpecular = specularLobeProbability(albedo, f0, metallic, roughness);
-  return pSpecular * specularPdf + (1.0 - pSpecular) * diffusePdf;
+  return pdf;
 }
 
 // The power heuristic weight of the strategy that drew a sample with density a, against one that
@@ -1024,29 +1343,60 @@ float powerHeuristic(float a, float b)
 
 // --- Next event estimation ---
 
-// What next event estimation gets from radiance arriving along L: pbr.glsl's D, F and kD split that
-// deferred_lighting.frag evaluates per light, but with the path tracer's Smith-Schlick k
-// (pathSmithK) in place of the raster remap, so a light sample and a BSDF sample of one direction
-// weigh the identical BRDF - which the emitter MIS weights assume - times the receiver cosine. The
-// diffuse half does not depend on k and still matches the raster exactly.
+// What next event estimation gets from radiance arriving along L: the D, F and kD split that
+// deferred_lighting.frag evaluates per light, but with the path tracer's Smith-Schlick k (pathSmithK)
+// in place of the raster remap and the exact GGX D (exactDistributionGGX) in place of
+// normalDistributionGGX, whose floor removes the peak of a lobe below roughness 0.2 or so. A light
+// sample and a BSDF sample of one direction therefore weigh the identical BRDF, which the emitter MIS
+// weights assume, and a lobe just above PT_DELTA_MAX_ALPHA shows its highlight instead of a jump at the
+// threshold. The diffuse half does not depend on either and still matches the raster exactly.
 //
 // A delta lobe keeps the diffuse half only; see PT_DELTA_MAX_ALPHA. No light sample can land in
 // a mirror direction, so the specular term there is not small but identically nothing - the split
-// evaluation exists so the diffuse half a dielectric mirror still has survives. A sphere light or
-// the sun disk is therefore not reflected in a mirror at all; emitting geometry is, through the
-// mirror bounce hitting it. The raster path needs no such branch: it never samples the lobe, so
-// its narrow highlight is the intended stand-in for a light that has no area.
-vec3 evaluateNeeResponse(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, float metallic,
-  float roughness, vec3 f0, float NdotV)
+// evaluation exists so the diffuse half a dielectric mirror still has survives. A sphere light, the
+// sun disk and emitting geometry are reflected in a mirror through the mirror bounce reaching them
+// instead. The raster path needs no such branch: it never samples the lobe, so its narrow highlight
+// is the intended stand-in for a light that has no area.
+//
+// Under a coat the surface's response is dimmed by what crosses the coat, and the coat adds its own
+// lobe - nothing where the coat itself is a delta, by the same rule.
+vec3 evaluateNeeResponse(PathBsdf bsdf, PathVertexTerms terms, vec3 V, vec3 L, vec3 radiance)
 {
-  float alpha = roughness * roughness;
+  vec3 H = normalize(V + L);
+  float HdotV = max(dot(H, V), 0.0);
+  float NdotL = max(dot(bsdf.N, L), 0.0);
+  float coatNdotL = max(dot(bsdf.coatN, L), 0.0);
+  vec3 F = fresnelSchlick(HdotV, terms.f0);
+  // What crosses the coat both ways: one without a coat.
+  float transmission = terms.coatViewTransmission * (1.0 - clearCoatFresnel(bsdf.clearCoat, coatNdotL));
 
-  vec3 diffuse;
-  vec3 specular;
-  vec3 total = evaluateDirectLightSplitSmithK(N, V, L, radiance, albedo, metallic, alpha,
-    pathSmithK(alpha), f0, NdotV, diffuse, specular);
+  vec3 response = (1.0 - F) * (1.0 - bsdf.metallic) * bsdf.albedo * (NdotL * transmission / PI);
 
-  return alpha <= PT_DELTA_MAX_ALPHA ? diffuse : total;
+  // The surface's specular lobe, then the coat's: one evaluation in a loop, for the reason
+  // sampleBsdfLobe gives.
+  int lobeCount = bsdf.clearCoat > 0.0 ? 2 : 1;
+  for (int lobe = 0; lobe < lobeCount; lobe++)
+  {
+    bool coat = lobe == 1;
+    float alpha = coat ? terms.lobes.coatAlpha : terms.lobes.alpha;
+    if (alpha <= PT_DELTA_MAX_ALPHA)
+      continue;
+
+    float lobeNdotV = coat ? terms.coatNdotV : terms.NdotV;
+    float lobeNdotL = coat ? coatNdotL : NdotL;
+    vec3 lobeF = coat ? vec3(clearCoatFresnel(bsdf.clearCoat, HdotV)) : F * transmission;
+    float G = geometrySmith(pathSmithK(alpha), lobeNdotV, lobeNdotL);
+    response += exactDistributionGGX(coat ? bsdf.coatN : bsdf.N, H, alpha) * G * lobeF
+      * (lobeNdotL / (4.0 * lobeNdotV * lobeNdotL + 0.0001));
+  }
+
+  return response * radiance;
+}
+
+// Whether light arriving along L can reach any lobe of the vertex.
+bool bsdfFacesDirection(PathBsdf bsdf, vec3 L)
+{
+  return dot(bsdf.N, L) > 0.0 || (bsdf.clearCoat > 0.0 && dot(bsdf.coatN, L) > 0.0);
 }
 
 // Next event estimation at one path vertex: candidates from two kinds of light resampled down to
@@ -1065,16 +1415,15 @@ vec3 evaluateNeeResponse(vec3 N, vec3 V, vec3 L, vec3 radiance, vec3 albedo, flo
 // An emissive candidate is weighed by its material's constant emissivity; only the one picked
 // fetches its true emission. It then shares its emitter with the bounce ray that could hit the same
 // point, by the power heuristic over emissiveSourcePdf and brdfDirectionPdf - tracePath applies
-// the other half. The analytic lights need no MIS weight, since no bounce ray can hit them, and
-// neither does the environment: only a bounce ray that misses collects it, which next event
-// estimation never samples.
+// the other half. The analytic lights need no MIS weight, since only a delta bounce, which next
+// event estimation never samples, gathers them, and neither does the environment: only a bounce ray
+// that misses collects it, which next event estimation never samples.
 //
-// N shades; Ng, the geometric normal, offsets the shadow ray and rejects light from below the
-// surface. solidBlocksBounce says a bounce ray from here would not cross a Solid straight. glass is
-// PathSettings::glass.
-vec3 estimateDirectLight(vec3 worldPos, vec3 N, vec3 Ng, vec3 V, vec3 albedo, float metallic,
-  float roughness, vec3 f0, float NdotV, int lobeMode, bool solidBlocksBounce, bool glass,
-  inout uint rngState)
+// The BSDF's normal shades; Ng, the geometric normal, offsets the shadow ray and rejects light from
+// below the surface. terms is preparePathVertex's for the vertex. solidBlocksBounce says a bounce ray
+// from here would not cross a Solid straight. glass is PathSettings::glass.
+vec3 estimateDirectLight(vec3 worldPos, PathBsdf bsdf, PathVertexTerms terms, vec3 Ng, vec3 V,
+  bool solidBlocksBounce, bool glass, inout uint rngState)
 {
   float weightSum = 0.0;
   bool chosenEmissive = false;
@@ -1095,9 +1444,8 @@ vec3 estimateDirectLight(vec3 worldPos, vec3 N, vec3 Ng, vec3 V, vec3 albedo, fl
 
     // Backfacing directions cost nothing but the test - no shadow ray is traced for them.
     vec3 estimate = vec3(0.0);
-    if (dot(N, light.direction) > 0.0 && dot(Ng, light.direction) > 0.0)
-      estimate = evaluateNeeResponse(N, V, light.direction, light.radiance, albedo, metallic,
-        roughness, f0, NdotV) / light.selectionPdf;
+    if (bsdfFacesDirection(bsdf, light.direction) && dot(Ng, light.direction) > 0.0)
+      estimate = evaluateNeeResponse(bsdf, terms, V, light.direction, light.radiance) / light.selectionPdf;
 
     // The one analytic candidate, so its weight is divided by one.
     float target = max(luminance(estimate), 0.0);
@@ -1119,11 +1467,10 @@ vec3 estimateDirectLight(vec3 worldPos, vec3 N, vec3 Ng, vec3 V, vec3 albedo, fl
       EmissiveLightSample emitter;
       if (!sampleEmissiveLight(worldPos, rngState, emitter))
         continue;
-      if (dot(N, emitter.direction) <= 0.0 || dot(Ng, emitter.direction) <= 0.0)
+      if (!bsdfFacesDirection(bsdf, emitter.direction) || dot(Ng, emitter.direction) <= 0.0)
         continue;
 
-      vec3 response = evaluateNeeResponse(N, V, emitter.direction, vec3(1.0), albedo, metallic,
-        roughness, f0, NdotV) / emitter.sourcePdf;
+      vec3 response = evaluateNeeResponse(bsdf, terms, V, emitter.direction, vec3(1.0)) / emitter.sourcePdf;
       float target = max(luminance(response * emissiveTargetRadiance(emitter.tableIndex)), 0.0);
       float weight = target / float(PT_EMISSIVE_CANDIDATES);
 
@@ -1187,7 +1534,7 @@ vec3 estimateDirectLight(vec3 worldPos, vec3 N, vec3 Ng, vec3 V, vec3 albedo, fl
     if (!bounceCrossesEmitter)
     {
       misWeight = powerHeuristic(chosenEmitter.sourcePdf,
-        brdfDirectionPdf(N, V, chosenDirection, albedo, metallic, roughness, f0, lobeMode));
+        brdfDirectionPdf(bsdf.N, bsdf.coatN, V, chosenDirection, terms.lobes));
     }
   }
 
@@ -1205,6 +1552,8 @@ struct PathDebug
   float maxBounce;
   vec3 nee;
   vec3 environment;
+  // What delta segments gathered from the analytic lights, see analyticEmissionAlongRay.
+  vec3 deltaLights;
 };
 
 // --- Smooth dielectrics ---
@@ -1481,7 +1830,8 @@ bool scatterDielectric(RayHitGeometry hit, vec3 N, vec3 direction, DielectricInt
   return true;
 }
 
-// The vertex a ray left from, as far as the emitter MIS weight at the far end needs it.
+// The vertex a ray left from, as far as the emitter MIS weight at the far end needs it:
+// brdfDirectionPdf's arguments and the position.
 struct PathNeeVertex
 {
   // Whether it gathered next event estimation at all.
@@ -1489,17 +1839,15 @@ struct PathNeeVertex
   // Whether the ray left it along a delta lobe, which no light sample reproduces.
   bool delta;
   vec3 P;
-  vec3 N;
   vec3 V;
-  vec3 albedo;
-  float metallic;
-  float roughness;
-  vec3 f0;
-  int lobeMode;
+  vec3 N;
+  vec3 coatN;
+  PathLobeMixture lobes;
 };
 
 // Follows one ray through every dielectric it meets to the surface the path shades next, and returns
-// true with it. The sky on a miss and an emitter on a hit are added here and end the path, as does a
+// true with it: its position, geometric normal, view vector and BSDF. The sky on a miss and an emitter
+// on a hit are added here and end the path, as does a
 // Solid the path may no longer refract at under PT_GLASS_OVERFLOW_TERMINATE, or a dielectric event
 // that goes nowhere. onChain is the role the rays of this walk have, see PathSettings::chainRefract.
 //
@@ -1515,7 +1863,7 @@ struct PathNeeVertex
 bool followPathRay(vec3 origin, vec3 direction, float tMin, PathNeeVertex nee,
   PathSettings settings, int bounce, bool onChain, inout vec3 throughput, inout int transmissionEvents,
   inout MediumStack media, inout uint rngState, inout vec3 radiance, inout PathDebug pathDebug,
-  out RayHitGeometry hit, out PathSurface surface, out vec3 incoming)
+  out vec3 hitP, out vec3 hitNg, out vec3 hitV, out PathBsdf hitBsdf)
 {
   bool refractRole = onChain ? settings.chainRefract : settings.secondaryRefract;
   bool reflectedOnWay = false;
@@ -1528,9 +1876,27 @@ bool followPathRay(vec3 origin, vec3 direction, float tMin, PathNeeVertex nee,
     if (solid == PT_SOLID_STRAIGHT && media.count > 0)
       media = emptyMediumStack();
 
-    throughput *= traceSegment(origin, direction, tMin, solid);
+    float straightGlassT;
+    vec3 straightGlass = traceSegment(origin, direction, tMin, solid, straightGlassT);
+    bool missed = payload.hit == 0u;
 
-    if (payload.hit == 0u)
+    // The analytic lights are no geometry, so no hit finds them: a segment of a walk that left its
+    // vertex along a delta lobe gathers the ones it passes itself. Nothing to test without a sphere
+    // light, and the sun only where the segment leaves the scene.
+    if (nee.delta && (settings.sphereLightBegin < settings.sphereLightEnd || (missed && settings.mirrorSun)))
+    {
+      vec3 lightContribution = throughput * analyticEmissionAlongRay(origin, direction,
+        missed ? PT_RAY_TMAX : payload.hitT, missed, settings, mediumAbsorption(media), straightGlassT,
+        straightGlass);
+      recordNonFinite(lightContribution, PT_NF_DELTA_LIGHTS);
+      recordDebugContribution(lightContribution, bounce, pathDebug.maxContribution, pathDebug.maxBounce);
+      pathDebug.deltaLights += lightContribution;
+      radiance += clampContribution(lightContribution, settings.fireflyClamp);
+    }
+
+    throughput *= straightGlass;
+
+    if (missed)
     {
       // The environment is gathered here and only here - by BRDF sampling, never by
       // next event estimation. That is what keeps the two strategies disjoint for it and
@@ -1547,10 +1913,9 @@ bool followPathRay(vec3 origin, vec3 direction, float tMin, PathNeeVertex nee,
     // Beer-Lambert over the segment that just ended, in the medium it ran through.
     throughput *= exp(-mediumAbsorption(media) * payload.hitT);
 
-    hit = resolveHitGeometry(payload.instanceIndex, payload.primitiveIndex,
+    RayHitGeometry hit = resolveHitGeometry(payload.instanceIndex, payload.primitiveIndex,
       payload.objectToWorld, payload.barycentrics, direction);
-    surface = resolveHitMaterial(hit, payload.barycentrics);
-    incoming = direction;
+    PathSurface surface = resolveHitMaterial(hit, payload.barycentrics);
 
     // An emissive texel is an emitter first, whatever else its instance is. Any other dielectric
     // still here is a Solid the segment does not cross straight.
@@ -1564,7 +1929,7 @@ bool followPathRay(vec3 origin, vec3 direction, float tMin, PathNeeVertex nee,
       DielectricInterface face = resolveDielectricInterface(media, hit.materialIndex, hit.flags,
         payload.frontFacing != 0u);
       DielectricScatter scatter;
-      if (!scatterDielectric(hit, surface.normal, direction, face, PT_DIELECTRIC_COIN,
+      if (!scatterDielectric(hit, surface.bsdf.N, direction, face, PT_DIELECTRIC_COIN,
         randomFloat(rngState), hit.materialIndex, media, scatter))
         return false;
 
@@ -1597,8 +1962,7 @@ bool followPathRay(vec3 origin, vec3 direction, float tMin, PathNeeVertex nee,
           && hit.area > 0.0 && cosEmitter > 0.0)
         {
           misWeight = refracted ? 0.0 : powerHeuristic(
-            brdfDirectionPdf(nee.N, nee.V, direction, nee.albedo, nee.metallic, nee.roughness,
-              nee.f0, nee.lobeMode),
+            brdfDirectionPdf(nee.N, nee.coatN, nee.V, direction, nee.lobes),
             emissiveSourcePdf(emissiveIndex, hit.area, dot(toHit, toHit), cosEmitter));
         }
       }
@@ -1611,6 +1975,10 @@ bool followPathRay(vec3 origin, vec3 direction, float tMin, PathNeeVertex nee,
       return false;
     }
 
+    hitP = hit.position;
+    hitNg = hit.normal;
+    hitV = -direction;
+    hitBsdf = surface.bsdf;
     return true;
   }
 
@@ -1620,10 +1988,10 @@ bool followPathRay(vec3 origin, vec3 direction, float tMin, PathNeeVertex nee,
 // --- The bounce loop ---
 
 // The bounce loop, from a vertex whose surface is already known or from a ray. A vertex is P with its
-// shading normal N and geometric normal Ng, V pointing back along the ray that reached it. A path from
-// a ray - the camera ray past a glass first vertex, or its reflection, see pt_main.rgen - first follows
-// rayOrigin along rayDirection to the surface that becomes its bounce zero; nothing before that surface
-// gathered next event estimation. Either way the path starts inside the media on the stack, with
+// BSDF, geometric normal Ng and V pointing back along the ray that reached it. A path from a ray - the
+// camera ray past a glass first vertex, or its reflection, see pt_main.rgen - first follows rayOrigin
+// along rayDirection to the surface that becomes its bounce zero; nothing before that surface gathered
+// next event estimation. Either way the path starts inside the media on the stack, with
 // transmissionEvents of the budget spent, and onChain says every vertex before it was a pure delta, see
 // PathSettings::chainRefract. Contributions are added to radiance and pathDebug rather than returned,
 // so a pixel that runs several paths sums them.
@@ -1631,10 +1999,9 @@ bool followPathRay(vec3 origin, vec3 direction, float tMin, PathNeeVertex nee,
 // One function for both starts, so every segment of every path is traced from the same call site: a
 // ray tracing pipeline schedules invocations by the trace they wait on, and pixels that walk different
 // sequences of trace calls measured far slower than the same work from shared ones.
-void tracePath(bool fromRay, vec3 rayOrigin, vec3 rayDirection, vec3 P, vec3 N, vec3 Ng, vec3 V,
-  vec3 albedo, float metallic, float roughness, vec3 throughput, PathSettings settings, int firstVertex,
-  int transmissionEvents, MediumStack media, bool onChain, inout uint rngState, inout vec3 radiance,
-  inout PathDebug pathDebug)
+void tracePath(bool fromRay, vec3 rayOrigin, vec3 rayDirection, vec3 P, PathBsdf bsdf, vec3 Ng, vec3 V,
+  vec3 throughput, PathSettings settings, int firstVertex, int transmissionEvents, MediumStack media,
+  bool onChain, inout uint rngState, inout vec3 radiance, inout PathDebug pathDebug)
 {
   g_NonFiniteTracking = settings.trackNonFinite;
 
@@ -1642,8 +2009,8 @@ void tracePath(bool fromRay, vec3 rayOrigin, vec3 rayDirection, vec3 P, vec3 N, 
   vec3 origin = rayOrigin;
   vec3 direction = rayDirection;
   float tMin = 0.0;
-  PathNeeVertex nee = PathNeeVertex(false, false, vec3(0.0), vec3(0.0, 1.0, 0.0),
-    vec3(0.0, 1.0, 0.0), vec3(0.0), 0.0, 1.0, vec3(0.04), PT_FIRST_VERTEX_COIN);
+  PathNeeVertex nee = PathNeeVertex(false, false, vec3(0.0), vec3(0.0, 1.0, 0.0), vec3(0.0, 1.0, 0.0),
+    vec3(0.0, 1.0, 0.0), PathLobeMixture(0.0, 0.0, 1.0, 1.0));
 
   // Bounded by the compile-time maximum so the loop is finite whatever maxBounces says; the
   // user's own budget breaks out below.
@@ -1653,9 +2020,6 @@ void tracePath(bool fromRay, vec3 rayOrigin, vec3 rayDirection, vec3 P, vec3 N, 
 
     if (bounce >= 0)
     {
-      float NdotV = clamp(abs(dot(N, V)), 0.01, 0.99);
-      vec3 f0 = mix(vec3(0.04), albedo, metallic);
-
       // Every dimension of the vertex comes off one stream, the first vertex included - see the
       // sampling note above: the BRDF sample and the lobe coin here, then whatever next event
       // estimation draws for its analytic light, the emitter size, the emissive candidates and
@@ -1666,20 +2030,21 @@ void tracePath(bool fromRay, vec3 rayOrigin, vec3 rayDirection, vec3 P, vec3 N, 
       // A forced first vertex lobe is sampled with that lobe's density alone, and the emitter MIS
       // weights have to describe the sampler that actually runs.
       int lobeMode = bounce == 0 ? firstVertex : PT_FIRST_VERTEX_COIN;
+      PathVertexTerms terms = preparePathVertex(bsdf, V, lobeMode);
 
       // Every ray leaving this vertex meets Solid glass the way the role past it says, the bounce ray
       // the shadow ray's MIS weight is shared with included.
-      onChain = onChain && isPureDeltaMirror(roughness, metallic);
+      onChain = onChain && isPureDeltaMirror(bsdf);
       int bounceSolid = solidTreatment(onChain ? settings.chainRefract : settings.secondaryRefract,
         transmissionEvents, settings);
 
       // The mirror pass gathers no NEE at its first vertex - a delta lobe sees no delta light, and
-      // the diffuse half is the base pass's.
+      // everything else is the base pass's.
       bool neeGathered = firstVertex != PT_FIRST_VERTEX_MIRROR || bounce > 0;
       if (neeGathered)
       {
-        vec3 directLight = estimateDirectLight(P, N, Ng, V, albedo, metallic, roughness, f0,
-          NdotV, lobeMode, bounceSolid != PT_SOLID_STRAIGHT, settings.glass, rngState);
+        vec3 directLight = estimateDirectLight(P, bsdf, terms, Ng, V,
+          bounceSolid != PT_SOLID_STRAIGHT, settings.glass, rngState);
         recordNonFinite(directLight, PT_NF_DIRECT_LIGHT);
 
         vec3 neeContribution = throughput * directLight;
@@ -1695,20 +2060,7 @@ void tracePath(bool fromRay, vec3 rayOrigin, vec3 rayDirection, vec3 P, vec3 N, 
       vec3 L;
       vec3 weight;
       bool deltaBounce;
-      if (firstVertex != PT_FIRST_VERTEX_COIN && bounce == 0)
-      {
-        // Forced lobe. A selector of 1 is never below the specular probability
-        // (clamped to at most 0.9) and 0 always is; multiplying that probability back in
-        // cancels the 1 / p the sampler divides by.
-        float pSpecular = specularLobeProbability(albedo, f0, metallic, roughness);
-        bool basePass = firstVertex == PT_FIRST_VERTEX_BASE;
-        if (!sampleBrdfDirection(N, V, albedo, metallic, roughness, f0, NdotV, brdfXi,
-          basePass ? 1.0 : 0.0, L, weight, deltaBounce))
-          break;
-        weight *= basePass ? (1.0 - pSpecular) : pSpecular;
-      }
-      else if (!sampleBrdfDirection(N, V, albedo, metallic, roughness, f0, NdotV, brdfXi,
-        lobeSelector, L, weight, deltaBounce))
+      if (!sampleBrdfDirection(bsdf, terms, V, brdfXi, lobeSelector, L, weight, deltaBounce))
         break;
 
       // Only on the accepting path: a rejected sample leaves both outputs unwritten, and
@@ -1740,26 +2092,16 @@ void tracePath(bool fromRay, vec3 rayOrigin, vec3 rayDirection, vec3 P, vec3 N, 
 
       // The ray leaves from the geometric surface and is followed through every dielectric it meets;
       // what ends it - the sky, an emitter - is added on the way.
-      nee = PathNeeVertex(neeGathered, deltaBounce, P, N, V, albedo, metallic, roughness, f0, lobeMode);
+      nee = PathNeeVertex(neeGathered, deltaBounce, P, V, bsdf.N, bsdf.coatN, terms.lobes);
       origin = offsetRayOrigin(P, Ng);
       direction = L;
       tMin = PT_RAY_TMIN;
     }
 
-    RayHitGeometry hit;
-    PathSurface surface;
-    vec3 incoming;
     if (!followPathRay(origin, direction, tMin, nee, settings, max(bounce, 0), onChain, throughput,
-      transmissionEvents, media, rngState, radiance, pathDebug, hit, surface, incoming))
+      transmissionEvents, media, rngState, radiance, pathDebug, P, Ng, V, bsdf))
       break;
 
-    P = hit.position;
-    N = surface.normal;
-    Ng = hit.normal;
-    V = -incoming;
-    albedo = surface.albedo;
-    metallic = surface.metallic;
-    roughness = surface.roughness;
     bounce++;
   }
 }

@@ -3,7 +3,7 @@ layout(location = 0) out vec4 outColor;
 
 #include "common.glsl"
 #include "utils.glsl"
-#include "octahedron.glsl"
+#include "clear_coat.glsl"
 #include "pbr.glsl"
 #include "noise.glsl"
 #include "hiz_trace.glsl"
@@ -13,6 +13,8 @@ layout(set = 1, binding = 1) uniform sampler2D depthTexture;
 layout(set = 1, binding = 2) uniform sampler2D gbuffer1Texture;
 layout(set = 1, binding = 3) uniform sampler2D gbuffer0Texture;
 layout(set = 1, binding = 4) uniform sampler2D hiZTexture;
+// The coat weight of a clear coat texel, see clear_coat.glsl.
+layout(set = 1, binding = 5) uniform sampler2D gbuffer2Texture;
 
 // --- Configuration ---
 // The cell-crossing traversal converges long before this; it only bounds runaway rays.
@@ -133,7 +135,11 @@ void main()
   // How steeply the reflection leaves the surface (1.0 = perpendicular, 0.0 = grazing)
   float reflNormalDot = abs(dot(reflectDir, viewNormal));
 
-  vec3 F0 = mix(vec3(0.04), albedo, metallic);
+  // A coat texel's GBuffer1 already holds the coat's normal and roughness; what reflects there is the
+  // coat.
+  vec3 F0 = decodeShadingModel(gb1.a) == SHADING_CLEAR_COAT
+    ? vec3(CLEAR_COAT_F0 * texelFetch(gbuffer2Texture, ivec2(gl_FragCoord.xy), 0).r)
+    : mix(vec3(0.04), albedo, metallic);
   float NdotV = clamp(dot(-viewDir, viewNormal), 0.01, 1.0);
   vec3 F = fresnelSchlickRoughness(NdotV, F0, roughness);
   float roughnessFade = 1.0 - smoothstep(0.0, MAX_ROUGHNESS, roughness);

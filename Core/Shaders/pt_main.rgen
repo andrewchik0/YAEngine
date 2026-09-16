@@ -91,6 +91,9 @@ layout(std430, set = 1, binding = 24) readonly buffer PathTraceEmissiveLightSSBO
 layout(set = 1, binding = 25) uniform sampler2D u_TransparentLayer;
 layout(set = 1, binding = 26, rgba16f) uniform writeonly image2D outColorBeforeTransparency;
 
+// The surface under a clear coat texel, read unfiltered, see clear_coat.glsl.
+layout(set = 1, binding = 27) uniform sampler2D u_GBuffer2;
+
 layout(push_constant) uniform PathTracePushBlock
 {
   PathTraceConstants pc;
@@ -149,8 +152,15 @@ float projectDepth(vec3 worldPosition)
 // chain's length instead, as if every refraction had gone straight on, and moves with the instance
 // it lands on; the mirrors are still unfolded exactly around it. A dielectric that totally reflects,
 // or one the chain may not refract at, ends the chain on itself, described as a smooth surface.
+//
+// A segment the estimator gathers analytic lights on - one past a delta vertex: the G-buffer vertex
+// where startGathers says so, and every mirror of the chain - ends the chain on the nearest sphere
+// light it enters before its hit (nearestSphereLight), described as an emitter and as a static point:
+// the light buffer keeps no previous positions, so a moving light's glint trails. The start segment's
+// light, startLight (-1 for none) with its centre, comes from the caller, which has tested it already.
 void replacePrimarySurface(vec3 chainStart, vec3 rayOrigin, vec3 direction,
-  RayTracingPayload hitPayload, float startDistance, float depthScale,
+  RayTracingPayload hitPayload, float startLight, vec3 startLightCenter, bool startGathers,
+  float startDistance, float depthScale,
   vec3 cameraDirection, vec3 throughput, int mirrorCount, int maxMirrors, vec3 firstMirrorNormal,
   vec3 firstPreviousMirrorPoint, vec3 firstPreviousMirrorNormal, MediumStack media,
   PathSettings settings, bool refractRole, int transmissions, vec2 currentNDC,
@@ -174,11 +184,23 @@ void replacePrimarySurface(vec3 chainStart, vec3 rayOrigin, vec3 direction,
   vec3 segmentOrigin = rayOrigin;
 
   int solid = solidTreatment(refractRole, transmissions, settings);
+  bool gathers = startGathers;
 
   // Bounded by the most links a chain can take before it has to describe a surface.
   for (int link = 0; link <= PT_PSR_MAX_CHAIN_DEPTH + PT_MAX_TRANSMISSION_DEPTH; link++)
   {
-    if (hitPayload.hit == 0u)
+    float lightT = startLight;
+    vec3 lightCenter = startLightCenter;
+    if (link > 0)
+    {
+      lightT = gathers
+        ? nearestSphereLight(segmentOrigin, direction, hitPayload.hit != 0u ? hitPayload.hitT : PT_RAY_TMAX,
+          settings, lightCenter)
+        : -1.0;
+    }
+    bool lightFirst = lightT >= 0.0;
+
+    if (hitPayload.hit == 0u && !lightFirst)
     {
       // The sky through the chain: a direction at infinity, mirrored back across last frame's
       // planes the way the probe's own motion vector does it. A bent chain looks along the
@@ -202,86 +224,101 @@ void replacePrimarySurface(vec3 chainStart, vec3 rayOrigin, vec3 direction,
       return;
     }
 
-    RayHitGeometry hit = resolveHitGeometry(hitPayload.instanceIndex, hitPayload.primitiveIndex,
-      hitPayload.objectToWorld, hitPayload.barycentrics, direction);
-    PathSurface surface = resolveHitMaterial(hit, hitPayload.barycentrics);
-    vec4 hitDelta[3] = u_Instances[hitPayload.instanceIndex].worldToPrevWorld;
-
     // Based at the unoffset segment start for the same reason the probe's motion vector is:
     // the ray origin offset runs along the normal and would carry the point off the camera ray.
     // Only the offset's component along the ray is added back to hitT.
-    float segmentLength = hitPayload.hitT + dot(segmentOrigin - segmentBase, direction);
+    float segmentLength = (lightFirst ? lightT : hitPayload.hitT) + dot(segmentOrigin - segmentBase, direction);
     vec3 X = segmentBase + direction * segmentLength;
     chainDistance += segmentLength;
 
     // What the estimator's own absorption takes off the same segment.
     throughput *= exp(-mediumAbsorption(media) * segmentLength);
 
-    bool dielectric = !surface.emissiveTexel && (hit.flags & RT_INSTANCE_DIELECTRIC) != 0u
-      && hit.materialIndex < uint(u_Materials.length());
+    // What the chain ends on is described from its normal and its motion; a light's is the sphere's.
+    vec3 endNormal;
+    vec4 hitDelta[3] = WORLD_TO_PREV_WORLD_IDENTITY;
+    PathSurface surface;
+    bool dielectric = false;
 
     // The next link, a transmission or a mirror, is traced from one place below.
     bool follow = false;
     float linkTMin = 0.0;
 
-    if (dielectric && solid == PT_SOLID_REFRACT)
+    if (lightFirst)
     {
-      DielectricInterface face = resolveDielectricInterface(media, hit.materialIndex, hit.flags,
-        hitPayload.frontFacing != 0u);
-      MediumStack nextMedia = media;
-      DielectricScatter scatter;
-      if (scatterDielectric(hit, surface.normal, direction, face, PT_DIELECTRIC_TRANSMIT, 0.0,
-        hit.materialIndex, nextMedia, scatter))
+      endNormal = normalize(X - lightCenter);
+    }
+    else
+    {
+      RayHitGeometry hit = resolveHitGeometry(hitPayload.instanceIndex, hitPayload.primitiveIndex,
+        hitPayload.objectToWorld, hitPayload.barycentrics, direction);
+      surface = resolveHitMaterial(hit, hitPayload.barycentrics);
+      hitDelta = u_Instances[hitPayload.instanceIndex].worldToPrevWorld;
+      endNormal = surface.bsdf.N;
+
+      dielectric = !surface.emissiveTexel && (hit.flags & RT_INSTANCE_DIELECTRIC) != 0u
+        && hit.materialIndex < uint(u_Materials.length());
+
+      if (dielectric && solid == PT_SOLID_REFRACT)
       {
-        transmissions++;
-        throughput *= scatter.weight;
-        bent = bent || (scatter.crossedSolid && face.real);
-        media = nextMedia;
+        DielectricInterface face = resolveDielectricInterface(media, hit.materialIndex, hit.flags,
+          hitPayload.frontFacing != 0u);
+        MediumStack nextMedia = media;
+        DielectricScatter scatter;
+        if (scatterDielectric(hit, surface.bsdf.N, direction, face, PT_DIELECTRIC_TRANSMIT, 0.0,
+          hit.materialIndex, nextMedia, scatter))
+        {
+          transmissions++;
+          throughput *= scatter.weight;
+          bent = bent || (scatter.crossedSolid && face.real);
+          media = nextMedia;
+
+          segmentBase = X;
+          segmentOrigin = scatter.origin;
+          direction = scatter.direction;
+
+          solid = solidTreatment(refractRole, transmissions, settings);
+          if (solid == PT_SOLID_STRAIGHT && media.count > 0)
+            media = emptyMediumStack();
+
+          follow = true;
+        }
+      }
+
+      bool isMirror = !dielectric && !surface.emissiveTexel
+        && isPureDeltaMirror(surface.bsdf);
+      vec3 reflected = reflect(direction, surface.bsdf.N);
+
+      if (!follow && isMirror && mirrorCount < maxMirrors && dot(reflected, hit.normal) > 0.0)
+      {
+        throughput *= fresnelSchlick(pathNdotV(surface.bsdf.N, direction), pathF0(surface.bsdf));
+
+        mirrorNormals[mirrorCount] = surface.bsdf.N;
+        mirrorPoints[mirrorCount] = X;
+        previousMirrorPoints[mirrorCount] = applyWorldToPrevWorldPoint(hitDelta, X);
+        previousMirrorNormals[mirrorCount] = applyWorldToPrevWorldDirection(hitDelta, surface.bsdf.N);
+        mirrorCount++;
 
         segmentBase = X;
-        segmentOrigin = scatter.origin;
-        direction = scatter.direction;
-
-        solid = solidTreatment(refractRole, transmissions, settings);
-        if (solid == PT_SOLID_STRAIGHT && media.count > 0)
-          media = emptyMediumStack();
+        segmentOrigin = offsetRayOrigin(hit.position, hit.normal);
+        direction = reflected;
 
         follow = true;
+        linkTMin = PT_RAY_TMIN;
+        gathers = true;
       }
-    }
-
-    bool isMirror = !dielectric && !surface.emissiveTexel
-      && isPureDeltaMirror(surface.roughness, surface.metallic);
-    vec3 reflected = reflect(direction, surface.normal);
-
-    if (!follow && isMirror && mirrorCount < maxMirrors && dot(reflected, hit.normal) > 0.0)
-    {
-      float hitNdotV = clamp(abs(dot(surface.normal, direction)), 0.01, 0.99);
-      throughput *= fresnelSchlick(hitNdotV, mix(vec3(0.04), surface.albedo, surface.metallic));
-
-      mirrorNormals[mirrorCount] = surface.normal;
-      mirrorPoints[mirrorCount] = X;
-      previousMirrorPoints[mirrorCount] = applyWorldToPrevWorldPoint(hitDelta, X);
-      previousMirrorNormals[mirrorCount] = applyWorldToPrevWorldDirection(hitDelta, surface.normal);
-      mirrorCount++;
-
-      segmentBase = X;
-      segmentOrigin = offsetRayOrigin(hit.position, hit.normal);
-      direction = reflected;
-
-      follow = true;
-      linkTMin = PT_RAY_TMIN;
     }
 
     if (follow)
     {
-      throughput *= traceSegment(segmentOrigin, direction, linkTMin, solid);
+      float straightGlassT;
+      throughput *= traceSegment(segmentOrigin, direction, linkTMin, solid, straightGlassT);
       hitPayload = payload;
       continue;
     }
 
     // The last mirror of the chain images the point first, the primary vertex last.
-    vec3 virtualNormal = surface.normal;
+    vec3 virtualNormal = endNormal;
     for (int i = mirrorCount - 1; i >= 0; i--)
       virtualNormal = mirrorDirection(virtualNormal, mirrorNormals[i]);
 
@@ -299,7 +336,13 @@ void replacePrimarySurface(vec3 chainStart, vec3 rayOrigin, vec3 direction,
     for (int i = mirrorCount - 1; i >= 0; i--)
       previousVirtual = mirrorPoint(previousVirtual, previousMirrorPoints[i], previousMirrorNormals[i]);
 
-    if (dielectric)
+    if (lightFirst)
+    {
+      guides.albedo = vec4(0.0);
+      guides.normal = vec4(virtualNormal, 1.0);
+      guides.throughput = vec4(throughput, 0.0);
+    }
+    else if (dielectric)
     {
       // Total internal reflection or a Solid the chain may not refract at: the dielectric is the
       // surface, and a smooth one with no diffuse response.
@@ -310,8 +353,8 @@ void replacePrimarySurface(vec3 chainStart, vec3 rayOrigin, vec3 direction,
     else
     {
       bool hasPbrResponse = !surface.emissiveTexel;
-      guides.albedo = vec4(surface.albedo, surface.metallic);
-      guides.normal = vec4(virtualNormal, hasPbrResponse ? surface.roughness : 1.0);
+      guides.albedo = vec4(surface.bsdf.albedo, surface.bsdf.metallic);
+      guides.normal = vec4(virtualNormal, hasPbrResponse ? surface.bsdf.roughness : 1.0);
       guides.throughput = vec4(throughput, hasPbrResponse ? 1.0 : 0.0);
     }
 
@@ -326,26 +369,31 @@ void replacePrimarySurface(vec3 chainStart, vec3 rayOrigin, vec3 direction,
 }
 
 // The ray reconstruction specular guides from the probe ray's hit, glass it crosses straight already
-// passed, so they describe the surface the mirror direction really shows. P is the G-buffer vertex the
-// probe left from, previousP and previousN its plane as of the previous frame.
-void probeSpecularGuides(RayTracingPayload hitPayload, vec3 P, vec3 probeOrigin, vec3 probeDirection,
-  vec3 previousP, vec3 previousN, vec2 currentNDC, out float hitDistance, out vec2 motion)
+// passed, so they describe the surface the mirror direction really shows - or the sphere light it runs
+// into first, lightDistance along (-1 for none), as a static point. P is the G-buffer vertex the probe
+// left from, previousP and previousN its plane as of the previous frame.
+void probeSpecularGuides(RayTracingPayload hitPayload, float lightDistance, vec3 P, vec3 probeOrigin,
+  vec3 probeDirection, vec3 previousP, vec3 previousN, vec2 currentNDC, out float hitDistance, out vec2 motion)
 {
+  bool lightFirst = lightDistance >= 0.0;
+  bool hit = lightFirst || hitPayload.hit != 0u;
+  float hitT = lightFirst ? lightDistance : hitPayload.hitT;
+
   // A reflection that leaves the scene has its virtual image at infinity, which is what the largest
   // distance the R16F guide can carry says. A real hit is clamped to the same ceiling so a far wall in a
   // large scene cannot overflow fp16 into infinity; the motion below takes hitT unclamped.
-  hitDistance = hitPayload.hit == 0u
-    ? PT_SPECULAR_MISS_DISTANCE
-    : min(hitPayload.hitT, PT_SPECULAR_MISS_DISTANCE);
+  hitDistance = hit ? min(hitT, PT_SPECULAR_MISS_DISTANCE) : PT_SPECULAR_MISS_DISTANCE;
 
   vec4 previousClip;
-  if (hitPayload.hit != 0u)
+  if (hit)
   {
     // Based at P, not at the probe origin: that offset runs along N, and mirroring would carry it off
     // the camera ray - a constant bias even on a frame where nothing moves. hitT runs from the probe
     // origin, so the offset's component along the ray is added.
-    vec3 X = P + probeDirection * (hitPayload.hitT + dot(probeOrigin - P, probeDirection));
-    vec3 previousX = applyWorldToPrevWorldPoint(u_Instances[hitPayload.instanceIndex].worldToPrevWorld, X);
+    vec3 X = P + probeDirection * (hitT + dot(probeOrigin - P, probeDirection));
+    vec3 previousX = X;
+    if (!lightFirst)
+      previousX = applyWorldToPrevWorldPoint(u_Instances[hitPayload.instanceIndex].worldToPrevWorld, X);
     vec3 previousVirtual = mirrorPoint(previousX, previousP, previousN);
     previousClip = u_Frame.prevProj * (u_Frame.prevView * vec4(previousVirtual, 1.0));
   }
@@ -384,22 +432,19 @@ struct ChainWalk
   // Describes the layer's first vertex rather than the primary one.
   bool layer;
   // hitPayload is the specular hit distance probe's, which the guides are taken from once its straight
-  // glass is passed; guidesOnly stops there, with no chain to walk.
+  // glass is passed; guidesOnly stops there, with no chain to walk. A probe leaves the G-buffer vertex,
+  // so its first segment is one a delta lobe gathers analytic lights on.
   bool probe;
   bool guidesOnly;
 };
 
-// One tracePath call as main gathers it.
+// One tracePath call as main gathers it. A path from a vertex starts at the pixel's G-buffer vertex.
 struct PathJob
 {
   bool fromRay;
   // The ray of a path from a ray; the vertex P and view vector V of one from a vertex.
   vec3 origin;
   vec3 direction;
-  vec3 N;
-  vec3 albedo;
-  float metallic;
-  float roughness;
   vec3 throughput;
   int firstVertex;
   int transmissionEvents;
@@ -430,13 +475,13 @@ void main()
   uint rngState = initRandomSeed(uvec2(gl_LaunchIDEXT.xy), uint(u_Frame.frameIndex));
 
   vec3 radiance = vec3(0.0);
-  PathDebug pathDebug = PathDebug(0.0, -1.0, vec3(0.0), vec3(0.0));
+  PathDebug pathDebug = PathDebug(0.0, -1.0, vec3(0.0), vec3(0.0), vec3(0.0));
   // The camera's own chain always refracts at a Solid: what the pixel shows through glass is the
   // image itself, so the knobs govern the rays past the first vertex that is not a pure delta.
   PathSettings pathSettings = PathSettings(pc.maxBounces, pc.fireflyClamp,
     pc.debugMode == PT_DEBUG_NONFINITE, pc.maxTransmissionDepth,
     pc.glassOverflow == PT_GLASS_OVERFLOW_STRAIGHT, true, pc.secondaryGlass == PT_GLASS_REFRACT,
-    pc.glassEnabled != 0);
+    pc.glassEnabled != 0, pc.mirrorSun != 0, pc.sphereLightBegin, pc.sphereLightEnd);
   // The path reflected off a glass first vertex has a bounce budget and a Solid handling of its own.
   PathSettings reflectionSettings = pathSettings;
   reflectionSettings.maxBounces = pc.glassReflectionBounces;
@@ -474,10 +519,11 @@ void main()
   FirstVertexGuides primary = FirstVertexGuides(vec4(0.0), vec4(0.0, 0.0, 0.0, 1.0),
     vec4(1.0, 1.0, 1.0, 0.0), texelFetch(u_Depth, pixel, 0).r, texelFetch(u_MainVelocity, pixel, 0).rg);
 
-  // The reflection layer. A layer pixel is a smooth dielectric or glass first vertex: its mirror
-  // lobe is traced as a path of its own into layerRadiance, weighted by F - the delta branch
-  // without the lobe coin - and the second RR instance is told about the reflected surface.
-  // Everywhere else the layer first vertex copies the primary one.
+  // The reflection layer. A layer pixel is a G-buffer vertex with a delta layer lobe
+  // (reflectionLayerLobe) or a glass first vertex: that lobe is traced as a path of its own into
+  // layerRadiance, weighted by its expected weight F - the delta branch without the lobe coin - and
+  // the second RR instance is told about the reflected surface. Everywhere else the layer first
+  // vertex copies the primary one.
   bool layerPixel = false;
   vec3 layerF = vec3(0.0);
   vec3 layerRadiance = vec3(0.0);
@@ -491,6 +537,8 @@ void main()
   int walkCount = 0;
   PathJob paths[PT_PIXEL_JOBS];
   int pathCount = 0;
+  // The G-buffer vertex of the paths that start from one.
+  PathBsdf vertexBsdf = uncoatedBsdf(vec3(0.0, 1.0, 0.0), vec3(0.0), 0.0, 1.0);
   // Primary Surface Replacement took over the primary guides.
   bool primaryReplaced = false;
 
@@ -601,19 +649,38 @@ void main()
     }
     else
     {
-      vec3 albedo = gb0.rgb;
-      float metallic = gb0.a;
-      float roughness = gb1.b;
-      vec3 N = octDecode(gb1.rg * 2.0 - 1.0);
+      // On a coat texel GBuffer1 describes the coat, and the surface under it comes out of GBuffer2;
+      // the G-buffer pass writes that shading model only for a weight GBuffer2 keeps above zero.
+      vec3 coatN = octDecode(gb1.rg * 2.0 - 1.0);
+      bool coated = shadingModel == SHADING_CLEAR_COAT;
+      PathBsdf bsdf = uncoatedBsdf(coatN, gb0.rgb, gb0.a, gb1.b);
+      if (coated)
+      {
+        vec4 gb2 = texelFetch(u_GBuffer2, pixel, 0);
+        bsdf.N = decodeClearCoatBaseNormal(gb2, coatN);
+        bsdf.roughness = gb2.g;
+        bsdf.clearCoat = gb2.r;
+        bsdf.coatRoughness = gb1.b;
+      }
+      vertexBsdf = bsdf;
 
-      primary.albedo = gb0Texel;
-      primary.normal = vec4(texelNormal, gb1Texel.b);
-      primary.throughput = vec4(1.0);
+      // A glass pixel's layer is its glass.
+      int layerLobe = glassPixel ? PT_LAYER_LOBE_NONE : reflectionLayerLobe(bsdf);
+      // The normal the mirror direction is taken about: the surface's where its specular lobe is the
+      // layer, the coat's otherwise (the shading normal without a coat).
+      vec3 mirrorN = layerLobe == PT_LAYER_LOBE_SURFACE ? bsdf.N : coatN;
+
       vec3 P = worldPos;
       // The view vector deferred_lighting.frag builds, not -rayDirection: the two differ by
       // the pixel centre and the sub-pixel jitter, and matching the raster is the whole
       // reason this path starts from its G-buffer.
       vec3 V = normalize(u_Frame.cameraPosition - P);
+
+      // The base instance is told about the surface, under a coat as seen through what the coat
+      // lets back out.
+      primary.albedo = gb0Texel;
+      primary.normal = coated ? vec4(bsdf.N, bsdf.roughness) : vec4(texelNormal, gb1Texel.b);
+      primary.throughput = vec4(vec3(1.0 - clearCoatFresnel(bsdf.clearCoat, pathNdotV(coatN, V))), 1.0);
 
       // Past a Solid or an emitting glass the pixel describes something else entirely, so the
       // G-buffer surface's own guides and paths are worth no ray there.
@@ -625,8 +692,8 @@ void main()
         // hit shader writes the parametric distance and the path loop below never sees this
         // payload. Opaque flag deliberately absent so alpha-tested geometry cuts out here too,
         // otherwise a foliage card would report a reflection that is not there.
-        vec3 probeOrigin = offsetRayOrigin(P, N);
-        vec3 probeDirection = reflect(-V, N);
+        vec3 probeOrigin = offsetRayOrigin(P, coatN);
+        vec3 probeDirection = reflect(-V, mirrorN);
 
         payload.hit = 0u;
         traceRayEXT(u_Tlas, gl_RayFlagsNoneEXT, RT_MASK_PATH,
@@ -657,35 +724,39 @@ void main()
         if (payload.hit != 0u && abs(payload.hitT - primaryDistance) <= lookupTolerance)
           reflectorDelta = u_Instances[payload.instanceIndex].worldToPrevWorld;
 
-        // N is the normal the probe direction was reflected about.
+        // mirrorN is the normal the probe direction was reflected about.
         vec3 previousP = applyWorldToPrevWorldPoint(reflectorDelta, P);
-        vec3 previousN = applyWorldToPrevWorldDirection(reflectorDelta, N);
+        vec3 previousN = applyWorldToPrevWorldDirection(reflectorDelta, mirrorN);
 
         vec3 cameraDirection = (P - u_Frame.cameraPosition) / primaryDistance;
-        vec3 f0 = mix(vec3(0.04), albedo, metallic);
-        float NdotV = clamp(abs(dot(N, V)), 0.01, 0.99);
+        // f0, NdotV and the coat's transmission exactly as the bounce loop builds them, so a layer's F
+        // is its delta branch's weight.
+        PathVertexTerms terms = preparePathVertex(bsdf, V, PT_FIRST_VERTEX_MIRROR);
 
-        if (roughness * roughness <= PT_DELTA_MAX_ALPHA && metallic >= PT_PSR_MIN_METALLIC)
+        if (isPureDeltaMirror(bsdf))
         {
           // The delta branch's expected weight, Fresnel. Its division by the lobe probability
           // is the estimator's business, not a property of the surface RR is told about. A pure
           // delta keeps the camera's chain going, so glass past it is met by that role.
           walks[walkCount++] = ChainWalk(P, probeOrigin, probeDirection, probePayload, PT_RAY_TMIN,
-            primaryDistance, depth * primaryDistance, cameraDirection, fresnelSchlick(NdotV, f0), 1,
-            pc.maxBounces, N, previousP, previousN, false, pathSettings.chainRefract, 0, false, true, false);
+            primaryDistance, depth * primaryDistance, cameraDirection, fresnelSchlick(terms.NdotV, terms.f0), 1,
+            pc.maxBounces, mirrorN, previousP, previousN, false, pathSettings.chainRefract, 0, false, true,
+            false);
           primaryReplaced = true;
         }
-        else if (roughness * roughness <= PT_DELTA_MAX_ALPHA && !glassPixel)
+        else if (layerLobe != PT_LAYER_LOBE_NONE)
         {
-          // The same machinery pointed at the layer first vertex instead of the primary one. f0
-          // and NdotV exactly as the bounce loop builds them, so layerF is the delta branch's
-          // weight. F itself rides the RR colour alpha and is applied in rr_layer_composite.comp,
-          // so the chain starts at a throughput of one. The surface has a diffuse lobe, so what
-          // its mirror path meets is past the camera's chain.
+          // The same machinery pointed at the layer first vertex instead of the primary one: a delta
+          // coat, or a smooth dielectric's own specular lobe - under a glossy coat, seen through both
+          // crossings of the coat. F itself rides the RR colour alpha and is applied in
+          // rr_layer_composite.comp, so the chain starts at a throughput of one. The vertex has more
+          // lobes than the mirror, so what its mirror path meets is past the camera's chain.
           layerPixel = true;
-          layerF = fresnelSchlick(NdotV, f0);
+          layerF = layerLobe == PT_LAYER_LOBE_COAT
+            ? vec3(1.0 - terms.coatViewTransmission)
+            : fresnelSchlick(terms.NdotV, terms.f0) * clearCoatTransmission(bsdf, terms, probeDirection);
           walks[walkCount++] = ChainWalk(P, probeOrigin, probeDirection, probePayload, PT_RAY_TMIN,
-            primaryDistance, depth * primaryDistance, cameraDirection, vec3(1.0), 1, pc.maxBounces, N,
+            primaryDistance, depth * primaryDistance, cameraDirection, vec3(1.0), 1, pc.maxBounces, mirrorN,
             previousP, previousN, false, pathSettings.secondaryRefract, 0, true, true, false);
         }
         else
@@ -693,22 +764,22 @@ void main()
           // No chain to walk: the probe only passes its straight glass and gives the guides, from the
           // role a bounce off this vertex has.
           walks[walkCount++] = ChainWalk(P, probeOrigin, probeDirection, probePayload, PT_RAY_TMIN,
-            primaryDistance, depth * primaryDistance, cameraDirection, vec3(1.0), 1, pc.maxBounces, N,
+            primaryDistance, depth * primaryDistance, cameraDirection, vec3(1.0), 1, pc.maxBounces, mirrorN,
             previousP, previousN, false, pathSettings.secondaryRefract, 0, false, true, true);
         }
 
-        // A layer pixel runs two paths from the same first vertex - the base path (NEE and the
-        // diffuse lobe) and the mirror path - so both lobes are sampled every frame instead of one
-        // by the coin. The expected value is the coin's: each lobe keeps its weight and only loses
-        // the 1 / p it paid for being picked. Straight glass in front dims both from the start.
-        // The G-buffer carries no geometric normal, so its shading normal stands in for both.
+        // A layer pixel runs two paths from the same first vertex - the base path (NEE and every
+        // other lobe) and the mirror path - so both are sampled every frame instead of one by the
+        // coin. The expected value is the coin's: each lobe keeps its weight and only loses the 1 / p
+        // it paid for being picked. Straight glass in front dims both from the start. A metallic
+        // mirror under a glossy coat stays with the coin, see reflectionLayerLobe.
         int passes = layerPixel ? 2 : 1;
         for (int pass = 0; pass < passes; pass++)
         {
           int firstVertex = !layerPixel ? PT_FIRST_VERTEX_COIN
             : (pass == 0 ? PT_FIRST_VERTEX_BASE : PT_FIRST_VERTEX_MIRROR);
-          paths[pathCount++] = PathJob(false, P, V, N, albedo, metallic, roughness, frontTransmittance,
-            firstVertex, 0, emptyMediumStack(), false, pass == 1);
+          paths[pathCount++] = PathJob(false, P, V, frontTransmittance, firstVertex, 0,
+            emptyMediumStack(), false, pass == 1);
         }
       }
     }
@@ -725,7 +796,7 @@ void main()
       // Emission wins over transmission on a dielectric as it does everywhere: a pure emitter,
       // described the way an emissive G-buffer texel is.
       radiance = frontSurface.emissive;
-      primary = FirstVertexGuides(vec4(0.0), vec4(frontSurface.normal, 1.0),
+      primary = FirstVertexGuides(vec4(0.0), vec4(frontSurface.bsdf.N, 1.0),
         vec4(1.0, 1.0, 1.0, 0.0), depthScale / frontPayload.hitT,
         specularMotionFromPrevClip(
           u_Frame.prevProj * (u_Frame.prevView * vec4(previousFrontPoint, 1.0)), currentNDC));
@@ -767,12 +838,11 @@ void main()
             solidHit.flags, solidPayload.frontFacing != 0u);
           MediumStack media = air;
           DielectricScatter transmission;
-          if (scatterDielectric(solidHit, solidSurface.normal, rayDirection, solidFace,
+          if (scatterDielectric(solidHit, solidSurface.bsdf.N, rayDirection, solidFace,
             PT_DIELECTRIC_TRANSMIT, 0.0, solidHit.materialIndex, media, transmission))
           {
             paths[pathCount++] = PathJob(true, transmission.origin, transmission.direction,
-              vec3(0.0, 1.0, 0.0), vec3(0.0), 0.0, 1.0, frontTransmittance * transmission.weight,
-              PT_FIRST_VERTEX_COIN, 1, media, false, false);
+              frontTransmittance * transmission.weight, PT_FIRST_VERTEX_COIN, 1, media, false, false);
           }
         }
       }
@@ -786,7 +856,7 @@ void main()
       // About the normal the rest of the pixel weighs the same interface with, so the layer and what the
       // base lets through add up to one: a Solid in front transmits about its shading normal above, and
       // straight glass is weighed by the transmittance query, whose any-hit reads no normal map.
-      vec3 frontNormal = frontSolid ? frontSurface.normal : frontHit.shadingNormal;
+      vec3 frontNormal = frontSolid ? frontSurface.bsdf.N : frontHit.shadingNormal;
       MediumStack reflectionMedia = air;
       DielectricScatter reflection;
       bool reflects = scatterDielectric(frontHit, frontNormal, rayDirection, frontFace,
@@ -802,8 +872,9 @@ void main()
       vec3 reflectedDirection = reflect(rayDirection, mirrorNormal);
       vec3 reflectedOrigin = offsetDielectricOrigin(frontHit.position, frontHit.normal);
 
+      float reflectedGlassT;
       vec3 reflectedTransmittance = traceSegment(reflectedOrigin, reflectedDirection, 0.0,
-        solidTreatment(reflectionSettings.chainRefract, reflectionEvents, reflectionSettings));
+        solidTreatment(reflectionSettings.chainRefract, reflectionEvents, reflectionSettings), reflectedGlassT);
 
       walks[walkCount++] = ChainWalk(frontHit.position, reflectedOrigin, reflectedDirection, payload,
         0.0, frontPayload.hitT, depthScale, rayDirection, reflectedTransmittance, 1,
@@ -814,26 +885,32 @@ void main()
       if (reflects)
       {
         paths[pathCount++] = PathJob(true, reflection.origin, reflection.direction,
-          vec3(0.0, 1.0, 0.0), vec3(0.0), 0.0, 1.0, reflection.weight, PT_FIRST_VERTEX_COIN,
-          reflectionEvents, reflectionMedia, true, true);
+          reflection.weight, PT_FIRST_VERTEX_COIN, reflectionEvents, reflectionMedia, true, true);
       }
     }
   }
 
   // The gathered walks. Each first passes the glass its start segment crosses straight - a no-op for a
-  // segment traceSegment already finished - and the probe's guides are taken past it.
+  // segment traceSegment already finished - and the probe's guides are taken past it, as far as the
+  // sphere light the start segment of a probe runs into first.
   for (int w = 0; w < walkCount; w++)
   {
     ChainWalk walk = walks[w];
+    PathSettings walkSettings = walk.reflection ? reflectionSettings : pathSettings;
 
     payload = walk.hitPayload;
+    float straightGlassT;
     vec3 startTransmittance = passStraightGlass(walk.rayOrigin, walk.direction, walk.startTMin,
-      solidTreatment(walk.refractRole, walk.transmissions, walk.reflection ? reflectionSettings : pathSettings));
+      solidTreatment(walk.refractRole, walk.transmissions, walkSettings), straightGlassT);
     RayTracingPayload startPayload = payload;
 
+    vec3 startLightCenter = vec3(0.0);
+    float startLight = -1.0;
     if (walk.probe)
     {
-      probeSpecularGuides(startPayload, walk.chainStart, walk.rayOrigin, walk.direction,
+      startLight = nearestSphereLight(walk.rayOrigin, walk.direction,
+        startPayload.hit != 0u ? startPayload.hitT : PT_RAY_TMAX, walkSettings, startLightCenter);
+      probeSpecularGuides(startPayload, startLight, walk.chainStart, walk.rayOrigin, walk.direction,
         walk.firstPreviousMirrorPoint, walk.firstPreviousMirrorNormal, currentNDC, specularHitDistance,
         specularMotion);
     }
@@ -841,12 +918,11 @@ void main()
       continue;
 
     FirstVertexGuides guides = walk.layer ? layer : primary;
-    replacePrimarySurface(walk.chainStart, walk.rayOrigin, walk.direction, startPayload,
-      walk.startDistance, walk.depthScale, walk.cameraDirection, walk.throughput * startTransmittance,
-      walk.mirrorCount, walk.maxMirrors, walk.firstMirrorNormal, walk.firstPreviousMirrorPoint,
-      walk.firstPreviousMirrorNormal, emptyMediumStack(),
-      walk.reflection ? reflectionSettings : pathSettings, walk.refractRole, walk.transmissions,
-      currentNDC, guides);
+    replacePrimarySurface(walk.chainStart, walk.rayOrigin, walk.direction, startPayload, startLight,
+      startLightCenter, walk.probe, walk.startDistance, walk.depthScale, walk.cameraDirection,
+      walk.throughput * startTransmittance, walk.mirrorCount, walk.maxMirrors, walk.firstMirrorNormal,
+      walk.firstPreviousMirrorPoint, walk.firstPreviousMirrorNormal, emptyMediumStack(), walkSettings,
+      walk.refractRole, walk.transmissions, currentNDC, guides);
     if (walk.layer)
       layer = guides;
     else
@@ -874,10 +950,11 @@ void main()
     PathJob job = paths[p];
     vec3 passRadianceStart = radiance;
 
-    tracePath(job.fromRay, job.origin, job.direction, job.origin, job.N, job.N, job.direction,
-      job.albedo, job.metallic, job.roughness, job.throughput,
-      job.reflection ? reflectionSettings : pathSettings, job.firstVertex, job.transmissionEvents,
-      job.media, true, rngState, radiance, pathDebug);
+    // The G-buffer carries no geometric normal. The coat normal - the vertex normal under a coat, the
+    // shading normal without one - stands in for it. A path from a ray reads no vertex.
+    tracePath(job.fromRay, job.origin, job.direction, job.origin, vertexBsdf, vertexBsdf.coatN, job.direction,
+      job.throughput, job.reflection ? reflectionSettings : pathSettings, job.firstVertex,
+      job.transmissionEvents, job.media, true, rngState, radiance, pathDebug);
 
     if (job.layer)
     {
@@ -947,6 +1024,8 @@ void main()
       value = pathDebug.nee;
     else if (pc.debugMode == PT_DEBUG_ENVIRONMENT)
       value = pathDebug.environment;
+    else if (pc.debugMode == PT_DEBUG_DELTA_LIGHTS)
+      value = pathDebug.deltaLights;
 
     float magnitude = max(value.r, max(value.g, value.b));
     float logMagnitude = log(max(magnitude, PT_DEBUG_LOG_FLOOR)) / log(10.0);

@@ -70,6 +70,33 @@ namespace YAEngine
       return edit;
     }
 
+    PropertyEdit DrawClearCoatGroup(Material& mat)
+    {
+      PropertyEdit edit;
+      if (!EditorWidgets::BeginPropertyGroup("Clear Coat", { .icon = ICON_LC_SPARKLES }))
+        return edit;
+
+      EditorWidgets::PushDependency(IsClearCoatShaded(mat), mat.transparent
+        ? "A transparent material ignores the coat"
+        : "The Unlit shading model ignores the coat");
+      edit |= EditorWidgets::PropertyFloat("Weight", mat.clearCoat, {
+        .min = 0.0f, .max = 1.0f, .slider = true, .defaultValue = 0.0f,
+        .tooltip = "Normalized 0-1. A smooth varnish layer over the surface, like car paint, in raster and the path "
+                   "tracer; 0 is no coat. The coat follows the mesh normal while the surface under it keeps its normal "
+                   "map and every other texture. Stored in 256 steps: a weight below 0.002 is no coat." });
+
+      EditorWidgets::PushDependency(mat.clearCoat > 0.0f, "Requires a Weight");
+      edit |= EditorWidgets::PropertyFloat("Roughness", mat.clearCoatRoughness, {
+        .min = 0.0f, .max = 1.0f, .slider = true, .defaultValue = 0.0f,
+        .tooltip = "Normalized 0-1, the coat's own roughness. Surface > Roughness stays the roughness of the surface "
+                   "under the coat." });
+      EditorWidgets::PopDependency();
+      EditorWidgets::PopDependency();
+
+      EditorWidgets::EndPropertyGroup();
+      return edit;
+    }
+
     PropertyEdit DrawEmissionGroup(Material& mat)
     {
       PropertyEdit edit;
@@ -271,6 +298,7 @@ namespace YAEngine
 
     PropertyEdit edit;
     edit |= DrawSurfaceGroup(mat);
+    edit |= DrawClearCoatGroup(mat);
     edit |= DrawEmissionGroup(mat);
     edit |= DrawOpacityGroup(mat);
     edit |= DrawTransmissionGroup(mat, context.render);

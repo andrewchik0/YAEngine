@@ -288,6 +288,10 @@ namespace YAEngine
           n["transmittanceDistance"] = mat.transmittanceDistance;
         if (mat.mediumPriority != 0)
           n["mediumPriority"] = mat.mediumPriority;
+        if (mat.clearCoat != 0.0f)
+          n["clearCoat"] = mat.clearCoat;
+        if (mat.clearCoatRoughness != 0.0f)
+          n["clearCoatRoughness"] = mat.clearCoatRoughness;
         if (mat.uvScale != glm::vec2(1.0f))
           n["uvScale"] = SerializeVec2(mat.uvScale);
 
@@ -328,6 +332,9 @@ namespace YAEngine
         if (n["transmittanceDistance"]) mat.transmittanceDistance = n["transmittanceDistance"].as<float>();
         if (n["mediumPriority"]) mat.mediumPriority = n["mediumPriority"].as<int32_t>();
         ClampTransmission(mat);
+        if (n["clearCoat"]) mat.clearCoat = n["clearCoat"].as<float>();
+        if (n["clearCoatRoughness"]) mat.clearCoatRoughness = n["clearCoatRoughness"].as<float>();
+        ClampClearCoat(mat);
         if (n["uvScale"]) mat.uvScale = DeserializeVec2(n["uvScale"]);
         if (n["shadingModel"])
         {

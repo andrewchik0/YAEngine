@@ -345,6 +345,7 @@ namespace YAEngine
     int& GetTonemapMode() { return m_TonemapMode; }
     float& GetTonemapPower() { return m_TonemapPower; }
     float& GetTonemapSaturation() { return m_TonemapSaturation; }
+    bool& GetDitherEnabled() { return b_DitherEnabled; }
     bool& GetAutoExposureEnabled() { return b_AutoExposureEnabled; }
     float& GetAdaptSpeedUp() { return m_AdaptSpeedUp; }
     float& GetAdaptSpeedDown() { return m_AdaptSpeedDown; }
@@ -379,13 +380,13 @@ namespace YAEngine
         || IsPathTraceDebugView();
     }
     // The energy diagnostics - which bounce contributed most and how much, the next event
-    // estimation and environment totals - plus the non-finite locator. They replace the
+    // estimation, environment and delta segment light totals - plus the non-finite locator. They replace the
     // radiance in the noisy image, so nothing may accumulate while one is on. The range has
     // to stay contiguous: GetPathTraceDebugMode maps it onto PT_DEBUG_* by offset.
     bool IsPathTraceDebugView() const
     {
       return m_CurrentTexture >= DEBUG_VIEW_PT_MAX_CONTRIB
-        && m_CurrentTexture <= DEBUG_VIEW_PT_NONFINITE;
+        && m_CurrentTexture <= DEBUG_VIEW_PT_DELTA_LIGHTS;
     }
     int GetPathTraceDebugMode() const
     {
@@ -399,6 +400,7 @@ namespace YAEngine
     int& GetPathTraceMaxBounces() { return m_PathTraceMaxBounces; }
     float& GetPathTraceFireflyClamp() { return m_PathTraceFireflyClamp; }
     bool& GetPathTraceGlass() { return b_PathTraceGlass; }
+    bool& GetPathTraceMirrorSun() { return b_PathTraceMirrorSun; }
     int& GetPathTraceMaxTransmissionDepth() { return m_PathTraceMaxTransmissionDepth; }
     PathTraceGlassOverflow& GetPathTraceGlassOverflow() { return m_PathTraceGlassOverflow; }
     PathTraceGlassHandling& GetPathTraceSecondaryGlass() { return m_PathTraceSecondaryGlass; }
@@ -553,6 +555,8 @@ namespace YAEngine
     // Grade on top of the tone mapping curve; 1.0 each leaves the curve alone.
     float m_TonemapPower = 1.0f;
     float m_TonemapSaturation = 1.0f;
+    // The tone map's triangular dither of one 8-bit output step, against banding in smooth gradients.
+    bool b_DitherEnabled = true;
     bool b_AutoExposureEnabled = true;
     float m_AdaptSpeedUp = 2.0f;
     float m_AdaptSpeedDown = 1.0f;
@@ -603,6 +607,9 @@ namespace YAEngine
     // tracer - every transparent surface is raster-only in the TLAS, the shaders take no glass
     // branch - and the forward transparent layer draws them over the traced image instead.
     bool b_PathTraceGlass = false;
+    // Whether a mirror or clear coat reflection in the path tracer and the volume baker can show the
+    // sun disk. Off for an environment map that already holds the sun, which would count it twice.
+    bool b_PathTraceMirrorSun = false;
     // Refractive events one path may take on top of its bounces, and the rest of the glass cost and
     // quality knobs - see PT_GLASS_* in PathTraceData.h.
     int m_PathTraceMaxTransmissionDepth = PT_DEFAULT_TRANSMISSION_DEPTH;
@@ -634,19 +641,23 @@ namespace YAEngine
 
     // Near plane of the cube faces rendered by OffscreenRenderer::RenderFace
     static constexpr float PROBE_SHADOW_NEAR_PLANE = 0.01f;
+    // GBuffer0, GBuffer1, MainVelocity and GBuffer2: what every pipeline drawn in a G-buffer pass writes.
+    static constexpr uint32_t GBUFFER_COLOR_ATTACHMENTS = 4;
 
     // probeCenter != nullptr fits the CSM cascades around that point instead of the
     // camera frustum, so one atlas render covers all six faces of a probe bake.
     void RenderShadowMaps(FrameContext& frame, VkCommandBuffer cmd,
       uint32_t frameIndex, const glm::vec3* probeCenter = nullptr);
     void SetUpCamera(FrameContext& frame);
-    // Every glass setting the path traced image depends on, packed so one compare spots a change.
+    // Every glass setting the path traced image depends on, and the mirror sun switch, packed so one
+    // compare spots a change.
     uint64_t GetPathTraceGlassKey() const
     {
       return uint64_t(uint32_t(m_PathTraceMaxTransmissionDepth))
         | (uint64_t(m_PathTraceGlassOverflow) << 32)
         | (uint64_t(m_PathTraceSecondaryGlass) << 36)
         | (uint64_t(m_PathTraceGlassReflectionGlass) << 40)
+        | (uint64_t(b_PathTraceMirrorSun) << 46)
         | (uint64_t(b_PathTraceGlass) << 47)
         | (uint64_t(uint16_t(m_PathTraceGlassReflectionBounces)) << 48);
     }
@@ -842,6 +853,7 @@ namespace YAEngine
     // Render graph resource handles - G-buffer
     RGHandle m_GBuffer0 {};       // R8G8B8A8_UNORM: albedo.rgb + metallic
     RGHandle m_GBuffer1 {};       // A2B10G10R10_UNORM: octNormal.xy + roughness + shadingModel
+    RGHandle m_GBuffer2 {};       // R8G8B8A8_UNORM: the surface under a clear coat, see clear_coat.glsl
     RGHandle m_MainDepth {};
     RGHandle m_MainVelocity {};
 
@@ -1059,6 +1071,8 @@ namespace YAEngine
 
     FrameUniformBuffer m_FrameUniformBuffer {};
     LightStorageBuffer m_LightBuffer;
+    // Of the lights this frame's slot of m_LightBuffer holds, for the path tracer's push constants.
+    SphereLightSpan m_PathTraceSphereLights {};
     TileLightBuffer m_TileLightBuffer;
     ShadowManager m_ShadowManager;
     TlasBuilder m_TlasBuilder;

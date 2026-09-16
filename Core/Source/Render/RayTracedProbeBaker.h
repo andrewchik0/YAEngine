@@ -3,6 +3,7 @@
 #include "Pch.h"
 #include "FrameUniformBuffer.h"
 #include "LightData.h"
+#include "LightStorageBuffer.h"
 #include "PathTraceData.h"
 #include "PipelineCache.h"
 #include "ProbeBakeData.h"
@@ -15,7 +16,7 @@ namespace YAEngine
   class Render;
   struct RenderContext;
 
-  static_assert(sizeof(ProbeBakeConstants) == 48,
+  static_assert(sizeof(ProbeBakeConstants) == 56,
     "ProbeBakeConstants no longer matches its push constant layout");
   static_assert(sizeof(ProbeBakePoint) == 32 && offsetof(ProbeBakePoint, closeHitDistance) == 12
     && offsetof(ProbeBakePoint, seedKey) == 16,
@@ -52,6 +53,8 @@ namespace YAEngine
     int32_t maxTransmissionDepth = PT_DEFAULT_TRANSMISSION_DEPTH;
     int32_t glassOverflow = PT_GLASS_OVERFLOW_STRAIGHT;
     int32_t secondaryGlass = PT_GLASS_STRAIGHT;
+    // The path tracer's mirror sun switch.
+    bool mirrorSun = false;
   };
 
   struct ProbeIntegrateResult
@@ -147,6 +150,8 @@ namespace YAEngine
       int32_t maxTransmissionDepth = 1;
       int32_t glassOverflow = PT_GLASS_OVERFLOW_STRAIGHT;
       int32_t secondaryGlass = PT_GLASS_STRAIGHT;
+      bool mirrorSun = false;
+      SphereLightSpan sphereLights {};
       const char* label = "";
     };
 

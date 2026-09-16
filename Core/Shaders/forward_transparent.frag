@@ -58,8 +58,9 @@ void main()
 
   vec3 directDiffuse;
   vec3 directSpecular;
+  // A transparent material shows no clear coat.
   computeDirectLightingSplit(worldPos, viewPos, normal, viewVec, albedo.rgb, metallic, roughness,
-    f0, NdotV, ivec2(gl_FragCoord.xy), directDiffuse, directSpecular);
+    f0, NdotV, NO_CLEAR_COAT, ivec2(gl_FragCoord.xy), directDiffuse, directSpecular);
 
   vec3 attenuated = max(ambientDiffuse + directDiffuse, vec3(0.0));
   vec3 additive = max(ambientSpecular + directSpecular + materialEmissive(uv), vec3(0.0));

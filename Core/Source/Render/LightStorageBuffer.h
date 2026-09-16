@@ -15,6 +15,17 @@ namespace YAEngine
     && sizeof(LightBuffer) == 48 + 48 * MAX_POINT_LIGHTS + 64 * MAX_SPOT_LIGHTS,
     "LightBuffer no longer matches its std430 layout");
 
+  // The span of the path tracer's flattened light candidates - 0 the sun, then the point lights, then
+  // the spots - that holds every sphere light (a source radius, not raster only), see
+  // PathTraceConstants::sphereLightBegin. Empty, begin == end, where there is none.
+  struct SphereLightSpan
+  {
+    int32_t begin = 0;
+    int32_t end = 0;
+  };
+
+  SphereLightSpan FindSphereLightSpan(const LightBuffer& lights);
+
   class LightStorageBuffer
   {
   public:

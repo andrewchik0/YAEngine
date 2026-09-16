@@ -40,6 +40,7 @@ namespace YAEngine
       { DEBUG_VIEW_PT_NEE,             "pt-nee",             "PT NEE",                    PathTracing },
       { DEBUG_VIEW_PT_ENVIRONMENT,     "pt-environment",     "PT Environment",            PathTracing },
       { DEBUG_VIEW_PT_NONFINITE,       "pt-nonfinite",       "PT Non-Finite",             PathTracing },
+      { DEBUG_VIEW_PT_DELTA_LIGHTS,    "pt-delta-lights",    "PT Delta Lights",           PathTracing },
       { DEBUG_VIEW_PT_SPECULAR_MOTION, "pt-specular-motion", "PT Specular Motion",        PathTracing },
     };
 

@@ -342,6 +342,10 @@ namespace YAEngine
         .min = 0.5f, .max = 3.0f, .speed = 0.01f, .format = "%.2f", .defaultValue = 1.0f,
         .tooltip = "Viewer side gamma adjustment. The sRGB encode itself is done by the output format, so 1.0 is the "
                    "neutral value and this only nudges it the way a game's gamma slider does." });
+      PropertyBool("Dither", render.GetDitherEnabled(), {
+        .defaultValue = true,
+        .tooltip = "Adds noise of one 8-bit step to the final image so smooth gradients do not band. Off shows the "
+                   "plain quantized output." });
 
       EndPropertyGroup();
     }
@@ -494,9 +498,11 @@ namespace YAEngine
       // Path traced debug views in raster mode are driven by the same two settings
       const bool pathTracerAvailable = render.IsPathTracerAvailable();
       const bool pathTracerInUse = effectivePath == RenderPath::PathTracing || render.IsPathTraceView();
-      PushDependency(pathTracerAvailable && pathTracerInUse, pathTracerAvailable
+      const bool pathTracerSettings = pathTracerAvailable && pathTracerInUse;
+      const char* pathTracerReason = pathTracerAvailable
         ? "Requires the Path Tracing render path or a path traced debug view"
-        : "The path tracer is unavailable on this device");
+        : "The path tracer is unavailable on this device";
+      PushDependency(pathTracerSettings, pathTracerReason);
       PropertyInt("PT Bounces", render.GetPathTraceMaxBounces(), {
         .min = PT_MIN_BOUNCES, .max = PT_MAX_BOUNCES, .speed = 0.05f, .defaultValue = 3,
         .tooltip = "Path vertices after the G-buffer one. Every bounce costs a full trace plus a shadow ray, and the image "
@@ -505,8 +511,16 @@ namespace YAEngine
         .min = PT_MIN_FIREFLY_CLAMP, .max = PT_MAX_FIREFLY_CLAMP, .speed = 0.1f, .format = "%.1f", .defaultValue = 10.0f,
         .tooltip = "Ceiling on the radiance one bounce may add. 0 switches it off, which is the unbiased setting - and the "
                    "one to compare against when a converged image looks too dark." });
+      PopDependency();
+
+      PropertyBool("PT Mirror Sun", render.GetPathTraceMirrorSun(), {
+        .defaultValue = false,
+        .tooltip = "The sun disk shows in mirror and clear coat reflections, in the path tracer and in irradiance volume "
+                   "bakes - which is why it can be set on the Raster path too. Turn it off when the skybox already "
+                   "contains the sun, or the sun is counted twice." });
 
       PropertySubHeading("PT Glass");
+      PushDependency(pathTracerSettings, pathTracerReason);
       PropertyBool("Glass", render.GetPathTraceGlass(), {
         .defaultValue = false,
         .tooltip = "Demonstration feature, too expensive for real use: traces transparent materials with a Transmission "

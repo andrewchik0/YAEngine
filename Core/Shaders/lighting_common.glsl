@@ -5,6 +5,7 @@
 #include "utils.glsl"
 #include "pbr.glsl"
 #include "debug_ramps.glsl"
+#include "clear_coat.glsl"
 
 // Lights (set 2). light_eval.glsl carries LightData.h and the falloff/cone math, which the
 // path tracer's ray generation shader reuses from a different set entirely.
@@ -199,9 +200,10 @@ vec3 shadeIBL(vec3 irradiance, vec3 prefiltered, float roughness, float NdotV,
 
 #define NO_PRIORITY (-999999)
 
-// Diagnostics for the probe debug views, filled by computeSpecularIBL: two scalar
-// stores, no extra texture fetches, so the normal path is not affected. They
-// describe SPECULAR only now - diffuse no longer goes through probe selection.
+// Diagnostics for the probe debug views, filled by selectReflectionProbes and
+// blendReflectionProbes: two scalar stores, no extra texture fetches, so the normal
+// path is not affected. They describe SPECULAR only now - diffuse no longer goes
+// through probe selection.
 // g_ProbeDebugTopIndex is -1 when no local probe influences the pixel.
 int g_ProbeDebugTopIndex;
 float g_ProbeDebugRemaining;
@@ -385,23 +387,25 @@ vec3 computeDiffuseIBL(vec3 worldPos, vec3 normal)
   return accumulated + remaining * sampleSkyboxIrradiance(normal);
 }
 
-// Specular only. Irradiance left this loop when volumes took over diffuse, which
-// halved its per-probe cost: one prefilter fetch instead of a prefilter plus an
-// irradiance fetch, up to three times per pixel.
-vec3 computeSpecularIBL(vec3 worldPos, vec3 R, float roughness)
+// The strongest few probes reaching a point, ordered by priority first and weight second.
+struct ReflectionProbeSelection
 {
-  int probeCount = min(u_Probes.probeCount, MAX_REFLECTION_PROBES);
-
-  // Single pass over the probes, keeping the strongest few ordered by priority
-  // first and weight second
   int selected[MAX_BLENDED_REFLECTION_PROBES];
   float weights[MAX_BLENDED_REFLECTION_PROBES];
   int priorities[MAX_BLENDED_REFLECTION_PROBES];
+};
+
+// Kept apart from the blend below so a surface and the clear coat over it walk the probes once.
+ReflectionProbeSelection selectReflectionProbes(vec3 worldPos)
+{
+  int probeCount = min(u_Probes.probeCount, MAX_REFLECTION_PROBES);
+
+  ReflectionProbeSelection selection;
   for (int k = 0; k < MAX_BLENDED_REFLECTION_PROBES; k++)
   {
-    selected[k] = -1;
-    weights[k] = 0.0;
-    priorities[k] = NO_PRIORITY;
+    selection.selected[k] = -1;
+    selection.weights[k] = 0.0;
+    selection.priorities[k] = NO_PRIORITY;
   }
 
   for (int i = 0; i < probeCount; i++)
@@ -416,16 +420,16 @@ vec3 computeSpecularIBL(vec3 worldPos, vec3 R, float roughness)
 
     for (int k = 0; k < MAX_BLENDED_REFLECTION_PROBES; k++)
     {
-      bool outranks = candidatePriority > priorities[k]
-        || (candidatePriority == priorities[k] && candidateWeight > weights[k]);
+      bool outranks = candidatePriority > selection.priorities[k]
+        || (candidatePriority == selection.priorities[k] && candidateWeight > selection.weights[k]);
       if (!outranks) continue;
 
-      int swapIdx = selected[k];
-      float swapWeight = weights[k];
-      int swapPriority = priorities[k];
-      selected[k] = candidateIdx;
-      weights[k] = candidateWeight;
-      priorities[k] = candidatePriority;
+      int swapIdx = selection.selected[k];
+      float swapWeight = selection.weights[k];
+      int swapPriority = selection.priorities[k];
+      selection.selected[k] = candidateIdx;
+      selection.weights[k] = candidateWeight;
+      selection.priorities[k] = candidatePriority;
       candidateIdx = swapIdx;
       candidateWeight = swapWeight;
       candidatePriority = swapPriority;
@@ -433,8 +437,15 @@ vec3 computeSpecularIBL(vec3 worldPos, vec3 R, float roughness)
   }
 
   // Top-ranked entry: priority first, then weight - the probe the blend favours
-  g_ProbeDebugTopIndex = selected[0] >= 0 ? u_Probes.probes[selected[0]].arrayIndex : -1;
+  g_ProbeDebugTopIndex = selection.selected[0] >= 0 ? u_Probes.probes[selection.selected[0]].arrayIndex : -1;
+  return selection;
+}
 
+// Specular only. Irradiance left this loop when volumes took over diffuse, which
+// halved its per-probe cost: one prefilter fetch instead of a prefilter plus an
+// irradiance fetch, up to three times per pixel.
+vec3 blendReflectionProbes(ReflectionProbeSelection selection, vec3 worldPos, vec3 R, float roughness)
+{
   vec3 blendedPrefiltered = vec3(0.0);
   float remaining = 1.0;
 
@@ -442,21 +453,22 @@ vec3 computeSpecularIBL(vec3 worldPos, vec3 R, float roughness)
   // still unclaimed. A nested probe therefore fades into whatever encloses it,
   // however many levels deep, and only the final remainder reaches the skybox.
   int k = 0;
-  while (k < MAX_BLENDED_REFLECTION_PROBES && selected[k] >= 0 && remaining > 0.001)
+  while (k < MAX_BLENDED_REFLECTION_PROBES && selection.selected[k] >= 0 && remaining > 0.001)
   {
-    int levelPriority = priorities[k];
+    int levelPriority = selection.priorities[k];
     vec3 levelPrefiltered = vec3(0.0);
     float levelWeight = 0.0;
 
-    while (k < MAX_BLENDED_REFLECTION_PROBES && selected[k] >= 0 && priorities[k] == levelPriority)
+    while (k < MAX_BLENDED_REFLECTION_PROBES && selection.selected[k] >= 0
+      && selection.priorities[k] == levelPriority)
     {
-      ReflectionProbeInfo probe = u_Probes.probes[selected[k]];
+      ReflectionProbeInfo probe = u_Probes.probes[selection.selected[k]];
 
       // The correction is per-probe: each proxy volume bends the ray differently
       vec3 probeR = parallaxCorrectReflection(worldPos, R, probe);
 
-      levelPrefiltered += weights[k] * fetchProbePrefilter(probeR, roughness, probe.arrayIndex);
-      levelWeight += weights[k];
+      levelPrefiltered += selection.weights[k] * fetchProbePrefilter(probeR, roughness, probe.arrayIndex);
+      levelWeight += selection.weights[k];
       k++;
     }
 
@@ -488,9 +500,9 @@ vec3 computeSpecularIBL(vec3 worldPos, vec3 R, float roughness)
 // complete each other to a full hemisphere. diffuseNormal is the direction the
 // fallback is looked up with (the bent normal when SSGI runs), and this function
 // stays the single point that reads the volumes, as promised in
-// docs/render-pipeline.md.
-vec3 computeAmbientIBLSplit(vec3 worldPos, vec3 normal, vec3 diffuseNormal, vec3 R,
-  float roughness, float NdotV, vec3 f0, vec3 albedo, float metallic,
+// docs/render-pipeline.md. probes is selectReflectionProbes at worldPos.
+vec3 computeAmbientIBLSplit(ReflectionProbeSelection probes, vec3 worldPos, vec3 normal,
+  vec3 diffuseNormal, vec3 R, float roughness, float NdotV, vec3 f0, vec3 albedo, float metallic,
   vec4 ssgiOverride, out vec3 ambientDiffuse, out vec3 ambientSpecular)
 {
   // shadeDiffuseIBL scales by (1 - metallic), so on pure metal the three volume
@@ -500,7 +512,7 @@ vec3 computeAmbientIBLSplit(vec3 worldPos, vec3 normal, vec3 diffuseNormal, vec3
     : shadeDiffuseIBL(
         ssgiOverride.rgb + ssgiOverride.a * computeDiffuseIBL(worldPos, diffuseNormal),
         roughness, NdotV, f0, albedo, metallic);
-  ambientSpecular = shadeSpecularIBL(computeSpecularIBL(worldPos, R, roughness),
+  ambientSpecular = shadeSpecularIBL(blendReflectionProbes(probes, worldPos, R, roughness),
     roughness, NdotV, f0);
   return ambientDiffuse + ambientSpecular;
 }
@@ -510,8 +522,8 @@ vec3 computeAmbientIBLSplit(vec3 worldPos, vec3 normal, vec3 diffuseNormal, vec3
 vec3 computeAmbientIBLSplit(vec3 worldPos, vec3 normal, vec3 R, float roughness, float NdotV,
   vec3 f0, vec3 albedo, float metallic, out vec3 ambientDiffuse, out vec3 ambientSpecular)
 {
-  return computeAmbientIBLSplit(worldPos, normal, normal, R, roughness, NdotV,
-    f0, albedo, metallic, vec4(0.0, 0.0, 0.0, 1.0), ambientDiffuse, ambientSpecular);
+  return computeAmbientIBLSplit(selectReflectionProbes(worldPos), worldPos, normal, normal, R, roughness,
+    NdotV, f0, albedo, metallic, vec4(0.0, 0.0, 0.0, 1.0), ambientDiffuse, ambientSpecular);
 }
 
 // Kept so both fragment shaders stay one call away from the full ambient term and
@@ -525,11 +537,82 @@ vec3 computeAmbientIBL(vec3 worldPos, vec3 normal, vec3 R, float roughness, floa
     f0, albedo, metallic, ambientDiffuse, ambientSpecular);
 }
 
+// The clear coat over a shaded surface, see clear_coat.glsl. A weight of zero is no coat.
+struct ClearCoatLayer
+{
+  float weight;
+  float roughness;
+  vec3 normal;
+  // Against the coat normal, clamped like the surface's own NdotV.
+  float NdotV;
+};
+
+const ClearCoatLayer NO_CLEAR_COAT = ClearCoatLayer(0.0, 0.0, vec3(0.0, 0.0, 1.0), 1.0);
+
+// Keeps a coat glint - where Schlick and 1 / NdotV peak together - far inside the fp16 range of
+// LitColor, which a delta light through the unfloored lobe below would otherwise leave.
+const float CLEAR_COAT_MAX_LIGHT_HIGHLIGHT = 1024.0;
+
+// One light on a surface and its coat: the surface keeps what both crossings of the coat let
+// through, and the coat adds its own GGX lobe about its own normal, at the light roughness floor. Its
+// D is exactDistributionGGX: normalDistributionGGX's floor leaves next to nothing of the peak at that
+// roughness.
+void evaluateLayeredLight(vec3 normal, vec3 viewVec, vec3 L, vec3 radiance, vec3 albedo,
+  float metallic, float roughness, float alpha, vec3 f0, float NdotV, ClearCoatLayer coat,
+  out vec3 diffuse, out vec3 specular)
+{
+  evaluateDirectLightSplit(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV,
+    diffuse, specular);
+  if (coat.weight <= 0.0)
+    return;
+
+  float coatNdotL = max(dot(coat.normal, L), 0.0);
+  float transmitted = (1.0 - clearCoatFresnel(coat.weight, coat.NdotV))
+    * (1.0 - clearCoatFresnel(coat.weight, coatNdotL));
+  diffuse *= transmitted;
+  specular *= transmitted;
+
+  float coatRoughness = max(coat.roughness, CLEAR_COAT_MIN_LIGHT_ROUGHNESS);
+  vec3 H = normalize(viewVec + L);
+  float D = exactDistributionGGX(coat.normal, H, coatRoughness * coatRoughness);
+  float k = (coatRoughness + 1.0) * (coatRoughness + 1.0) / 8.0;
+  float G = geometrySmith(k, coat.NdotV, coatNdotL);
+  float F = clearCoatFresnel(coat.weight, max(dot(H, viewVec), 0.0));
+  vec3 coatSpecular = radiance * (D * G * F * coatNdotL / (4.0 * coat.NdotV * coatNdotL + 0.0001));
+
+  float peak = max(coatSpecular.r, max(coatSpecular.g, coatSpecular.b));
+  if (peak > CLEAR_COAT_MAX_LIGHT_HIGHLIGHT)
+    coatSpecular *= CLEAR_COAT_MAX_LIGHT_HIGHLIGHT / peak;
+  specular += coatSpecular;
+}
+
+// What a coat reflects of the environment: split-sum shading at F0 0.04 along the coat's own
+// reflection, with its own roughness - unfloored, the probes are prefiltered with a width of their own.
+// probes is the selection the surface under the coat was lit with.
+vec3 computeClearCoatIBL(ReflectionProbeSelection probes, vec3 worldPos, vec3 viewVec, ClearCoatLayer coat)
+{
+  vec3 R = reflect(-viewVec, coat.normal);
+  return coat.weight * shadeSpecularIBL(blendReflectionProbes(probes, worldPos, R, coat.roughness),
+    coat.roughness, coat.NdotV, vec3(CLEAR_COAT_F0));
+}
+
+// What of the environment still reaches the surface under a coat. Its reflection leaves through the
+// coat along the view and arrives along about the same direction; its diffuse light arrives from the
+// whole hemisphere, so the second crossing takes the coat's cosine-weighted mean Fresnel.
+void attenuateAmbientUnderClearCoat(ClearCoatLayer coat, inout vec3 ambientDiffuse,
+  inout vec3 ambientSpecular)
+{
+  float viewTransmission = 1.0 - clearCoatFresnel(coat.weight, coat.NdotV);
+  ambientDiffuse *= viewTransmission * (1.0 - clearCoatAverageFresnel(coat.weight));
+  ambientSpecular *= viewTransmission * viewTransmission;
+}
+
 // Same work as computeDirectLighting, with the two halves also handed back on their own.
 // Transparency needs them apart: the diffuse half fades out with the surface alpha while
 // highlights and reflections stay at full strength, so a thin surface keeps its specular.
+// A coat's lobe counts as specular.
 vec3 computeDirectLightingSplit(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 viewVec,
-  vec3 albedo, float metallic, float roughness, vec3 f0, float NdotV,
+  vec3 albedo, float metallic, float roughness, vec3 f0, float NdotV, ClearCoatLayer coat,
   ivec2 fragCoord, out vec3 directDiffuse, out vec3 directSpecular)
 {
   directDiffuse = vec3(0.0);
@@ -547,8 +630,8 @@ vec3 computeDirectLightingSplit(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 v
     float shadowFactor = calculateCSMShadow(worldPos, -viewPos.z, normal);
     radiance *= shadowFactor;
 
-    evaluateDirectLightSplit(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV,
-      lightDiffuse, lightSpecular);
+    evaluateLayeredLight(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV,
+      coat, lightDiffuse, lightSpecular);
     directDiffuse += lightDiffuse;
     directSpecular += lightSpecular;
   }
@@ -574,8 +657,8 @@ vec3 computeDirectLightingSplit(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 v
     if (pointShadowIdx >= 0)
       radiance *= calculatePointShadow(worldPos, normal, lightPos, pointShadowIdx);
 
-    evaluateDirectLightSplit(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV,
-      lightDiffuse, lightSpecular);
+    evaluateLayeredLight(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV,
+      coat, lightDiffuse, lightSpecular);
     directDiffuse += lightDiffuse;
     directSpecular += lightSpecular;
   }
@@ -596,8 +679,8 @@ vec3 computeDirectLightingSplit(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 v
     if (spotShadowIdx >= 0)
       radiance *= calculateSpotShadow(worldPos, normal, lightPos, spotShadowIdx);
 
-    evaluateDirectLightSplit(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV,
-      lightDiffuse, lightSpecular);
+    evaluateLayeredLight(normal, viewVec, L, radiance, albedo, metallic, roughness, alpha, f0, NdotV,
+      coat, lightDiffuse, lightSpecular);
     directDiffuse += lightDiffuse;
     directSpecular += lightSpecular;
   }
@@ -606,13 +689,13 @@ vec3 computeDirectLightingSplit(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 v
 }
 
 vec3 computeDirectLighting(vec3 worldPos, vec3 viewPos, vec3 normal, vec3 viewVec,
-  vec3 albedo, float metallic, float roughness, vec3 f0, float NdotV,
+  vec3 albedo, float metallic, float roughness, vec3 f0, float NdotV, ClearCoatLayer coat,
   ivec2 fragCoord)
 {
   vec3 directDiffuse;
   vec3 directSpecular;
   return computeDirectLightingSplit(worldPos, viewPos, normal, viewVec, albedo, metallic,
-    roughness, f0, NdotV, fragCoord, directDiffuse, directSpecular);
+    roughness, f0, NdotV, coat, fragCoord, directDiffuse, directSpecular);
 }
 
 float computeHeightFog(vec3 rayOrigin, vec3 rayDir, float rayLength)

@@ -19,6 +19,7 @@ namespace YAEngine
     // rest are graph resources a resize reallocates.
     auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
     auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
+    auto& gbuffer2 = m_Graph.GetResource(m_GBuffer2);
     auto& mainDepth = m_Graph.GetResource(m_MainDepth);
     auto& noisy = m_Graph.GetResource(m_PathTraceNoisy);
     auto& accumulation = m_Graph.GetResource(m_PathTraceAccum);
@@ -70,6 +71,8 @@ namespace YAEngine
       .WriteCombinedImageSampler(25, m_Graph.GetResource(m_PTTransparentLayer).GetView(),
         m_Graph.GetResource(m_PTTransparentLayer).GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
       .WriteStorageImage(26, m_Graph.GetResource(m_PTColorBeforeTransparency).GetView())
+      .WriteCombinedImageSampler(27, gbuffer2.GetView(), gbuffer2.GetSampler(),
+        VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
       .Flush();
   }
 
@@ -171,6 +174,12 @@ namespace YAEngine
     m_MainVelocity = m_Graph.CreateResource({
       .name = "mainVelocity",
       .format = VK_FORMAT_R16G16_SFLOAT
+    });
+    // Point filtered: its normal channels are a code, not something to interpolate.
+    m_GBuffer2 = m_Graph.CreateResource({
+      .name = "gbuffer2",
+      .format = VK_FORMAT_R8G8B8A8_UNORM,
+      .filter = VK_FILTER_NEAREST
     });
 
     m_LitColor = m_Graph.CreateResource({
@@ -464,7 +473,8 @@ namespace YAEngine
     m_GBufferPassIndex = m_Graph.AddPass({
       .name = "GBufferPass",
       .inputs = {},
-      .colorOutputs = {m_GBuffer0, m_GBuffer1, m_MainVelocity},
+      // In the order of the fragment shader output locations.
+      .colorOutputs = {m_GBuffer0, m_GBuffer1, m_MainVelocity, m_GBuffer2},
       .depthOutput = m_MainDepth,
       .clearColor = true,
       .clearDepth = false,
@@ -549,7 +559,7 @@ namespace YAEngine
     // pass declares those as inputs: that ORDERS it after the G-buffer pass.
     m_PathTracePassIndex = m_Graph.AddPass({
       .name = "PathTrace",
-      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_MainVelocity, m_PTTransparentLayer},
+      .inputs = {m_GBuffer0, m_GBuffer1, m_GBuffer2, m_MainDepth, m_MainVelocity, m_PTTransparentLayer},
       .storageOutputs = {m_PathTraceNoisy, m_PathTraceAccum, m_PTHitDistance, m_PTSpecularMotion,
         m_PTPrimaryAlbedo, m_PTPrimaryNormal, m_PTPrimaryThroughput, m_PTDepth, m_PTMotion,
         // The reflection layer
@@ -612,6 +622,9 @@ namespace YAEngine
         pc.glassReflectionGlass = int(m_PathTraceGlassReflectionGlass);
         pc.glassEnabled = b_PathTraceGlass ? 1 : 0;
         pc.transparentLayer = IsPathTraceTransparentLayerDrawn() ? 1 : 0;
+        pc.mirrorSun = b_PathTraceMirrorSun ? 1 : 0;
+        pc.sphereLightBegin = m_PathTraceSphereLights.begin;
+        pc.sphereLightEnd = m_PathTraceSphereLights.end;
         pipeline.PushConstants(ctx.cmd, &pc);
 
         // One invocation per pixel exactly, not a rounded-up tile count: a trace launch is
@@ -852,7 +865,7 @@ namespace YAEngine
     // 6. Deferred Lighting - fullscreen IBL + analytical lights from G-buffer
     m_DeferredLightingPassIndex = m_Graph.AddPass({
       .name = "DeferredLighting",
-      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_AOFinal, m_SSGIFinal, m_SSGIBentFinal},
+      .inputs = {m_GBuffer0, m_GBuffer1, m_MainDepth, m_AOFinal, m_SSGIFinal, m_SSGIBentFinal, m_GBuffer2},
       .colorOutputs = {m_LitColor},
       // The pass the path tracer replaces. LitColor - and SSRColor after it - therefore
       // hold the last raster frame while that path is effective; nothing reads either,
@@ -867,6 +880,7 @@ namespace YAEngine
         auto& aoFinal = m_Graph.GetResource(m_AOFinal);
         auto& ssgiFinal = m_Graph.GetResource(m_SSGIFinal);
         auto& ssgiBentFinal = m_Graph.GetResource(m_SSGIBentFinal);
+        auto& gbuffer2 = m_Graph.GetResource(m_GBuffer2);
 
         auto& pipeline = m_PSOCache.Get(m_DeferredLightingPipeline);
         pipeline.Bind(ctx.cmd);
@@ -882,6 +896,8 @@ namespace YAEngine
           ssgiFinal.GetView(), ssgiFinal.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(5,
           ssgiBentFinal.GetView(), ssgiBentFinal.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_DeferredLightingDescriptorSets[currentFrame].WriteCombinedImageSampler(6,
+          gbuffer2.GetView(), gbuffer2.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_DeferredLightingDescriptorSets[currentFrame].Get()}, 1);
@@ -952,7 +968,7 @@ namespace YAEngine
 
     m_SSRPassIndex = m_Graph.AddPass({
       .name = "SSRPass",
-      .inputs = {m_LitColor, m_MainDepth, m_GBuffer1, m_GBuffer0, m_HiZResource},
+      .inputs = {m_LitColor, m_MainDepth, m_GBuffer1, m_GBuffer0, m_HiZResource, m_GBuffer2},
       .colorOutputs = {m_SSRColor},
       // Traced reflections are what the path tracer's specular lobe produces, so the
       // screen space approximation has nothing to add and no consumer left.
@@ -965,6 +981,7 @@ namespace YAEngine
         auto& gbuffer1 = m_Graph.GetResource(m_GBuffer1);
         auto& gbuffer0 = m_Graph.GetResource(m_GBuffer0);
         auto& hiZ = m_Graph.GetResource(m_HiZResource);
+        auto& gbuffer2 = m_Graph.GetResource(m_GBuffer2);
 
         auto& pipeline = m_PSOCache.Get(m_SSRPipeline);
         pipeline.Bind(ctx.cmd);
@@ -978,6 +995,8 @@ namespace YAEngine
           gbuffer0.GetView(), gbuffer0.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
         m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(4,
           hiZ.GetView(), hiZ.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+        m_SSRPassDescriptorSets[currentFrame].WriteCombinedImageSampler(5,
+          gbuffer2.GetView(), gbuffer2.GetSampler(), VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 
         pipeline.BindDescriptorSets(ctx.cmd, {m_FrameUniformBuffer.GetDescriptorSet(currentFrame)}, 0);
         pipeline.BindDescriptorSets(ctx.cmd, {m_SSRPassDescriptorSets[currentFrame].Get()}, 1);

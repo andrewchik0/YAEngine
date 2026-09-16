@@ -35,7 +35,10 @@ struct ProbeBakeConstants
   int secondaryGlass;
   // The PT Glass switch; zero bakes as if no material had a transmission mode.
   int glassEnabled;
-  uint _pad0;
+  // PathTraceConstants::mirrorSun, ::sphereLightBegin and ::sphereLightEnd.
+  int mirrorSun;
+  int sphereLightBegin;
+  int sphereLightEnd;
 };
 
 // One point to trace from, 32 bytes. The seed key and the pass index are all its random streams

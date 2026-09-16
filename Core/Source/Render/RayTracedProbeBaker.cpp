@@ -197,13 +197,19 @@ namespace YAEngine
     // Worst case in the rays the submit caps count. selectLight walks every candidate twice at each
     // of a sample's maxBounces + 1 path vertices, the directional slot included whether lit or not,
     // and each vertex draws PT_EMISSIVE_CANDIDATES emissive candidates on top, counted one evaluation
-    // apiece whether the table holds anything or not.
-    uint32_t IntegrateWorkPerSample(uint32_t raysPerSample, int32_t maxBounces, const LightBuffer& lights)
+    // apiece whether the table holds anything or not. Every segment of a walk that left a vertex along
+    // a delta lobe walks the sphere light span once more: the first segment out of each vertex, and
+    // one more per refractive event, which keep the walk going.
+    uint32_t IntegrateWorkPerSample(uint32_t raysPerSample, int32_t maxBounces, uint32_t refractions,
+      const LightBuffer& lights, SphereLightSpan sphereLights)
     {
+      const uint32_t vertices = uint32_t(maxBounces + 1);
       const uint32_t candidates = 1
         + uint32_t(std::clamp(lights.pointLightCount, 0, MAX_POINT_LIGHTS))
         + uint32_t(std::clamp(lights.spotLightCount, 0, MAX_SPOT_LIGHTS));
-      const uint32_t evaluations = uint32_t(maxBounces + 1) * (2 * candidates + PT_EMISSIVE_CANDIDATES);
+      const uint32_t sphereCandidates = uint32_t(std::max(sphereLights.end - sphereLights.begin, 0));
+      const uint32_t evaluations = vertices * (2 * candidates + PT_EMISSIVE_CANDIDATES)
+        + (vertices + refractions) * sphereCandidates;
       return raysPerSample + (evaluations + LIGHT_EVALUATIONS_PER_RAY - 1) / LIGHT_EVALUATIONS_PER_RAY;
     }
 
@@ -232,11 +238,12 @@ namespace YAEngine
 
   // One point's pass has to fit into a single submit. A pass traces at most
   // RT_PROBE_MAX_RAYS_PER_POINT_PASS rays, and a sample evaluates light candidates at most rays x
-  // (MAX_LIGHT_CANDIDATES + PT_EMISSIVE_CANDIDATES / 2) times (two walks, the emissive draws and two
-  // rays per vertex), which the emissive term below overstates; the rest covers the rays themselves
-  // and the rounding.
+  // (2 MAX_LIGHT_CANDIDATES + PT_EMISSIVE_CANDIDATES / 2) times: two walks and the emissive draws per
+  // vertex against two rays per vertex, and a sphere light walk per delta segment, which is a ray of
+  // its own. The emissive term below overstates it; the rest covers the rays themselves and the
+  // rounding.
   static_assert(uint64_t(BakeLimits::RT_PROBE_MAX_RAYS_PER_POINT_PASS)
-    * (2 + (MAX_LIGHT_CANDIDATES + PT_EMISSIVE_CANDIDATES) / LIGHT_EVALUATIONS_PER_RAY + 1)
+    * (2 + (2 * MAX_LIGHT_CANDIDATES + PT_EMISSIVE_CANDIDATES) / LIGHT_EVALUATIONS_PER_RAY + 1)
     <= BakeLimits::RT_PROBE_MAX_RAYS_PER_SUBMIT,
     "One point's pass, light evaluations included, has to fit into a single submit");
 
@@ -491,6 +498,9 @@ namespace YAEngine
             .glassOverflow = desc.glassOverflow,
             .secondaryGlass = desc.secondaryGlass,
             .glassEnabled = desc.glass ? 1 : 0,
+            .mirrorSun = desc.mirrorSun ? 1 : 0,
+            .sphereLightBegin = desc.sphereLights.begin,
+            .sphereLightEnd = desc.sphereLights.end,
           };
 
           const double submitStart = glfwGetTime();
@@ -661,6 +671,8 @@ namespace YAEngine
         PT_MAX_TRANSMISSION_DEPTH),
       .glassOverflow = std::clamp(desc.glassOverflow, PT_GLASS_OVERFLOW_TERMINATE, PT_GLASS_OVERFLOW_STRAIGHT),
       .secondaryGlass = std::clamp(desc.secondaryGlass, PT_GLASS_REFRACT, PT_GLASS_STRAIGHT),
+      .mirrorSun = desc.mirrorSun,
+      .sphereLights = FindSphereLightSpan(lights),
       .label = "Probe integration",
     };
     // Sized from the clamped glass settings above, so a bake with glass takes fewer samples per pass and
@@ -669,7 +681,10 @@ namespace YAEngine
       dispatch.maxTransmissionDepth, dispatch.secondaryGlass);
     dispatch.samplesPerPass = SamplesPerPass(desc.samplesPerPass, samplesPerProbe, raysPerSample);
     dispatch.passCount = (samplesPerProbe - 1) / dispatch.samplesPerPass + 1;
-    dispatch.workPerSample = IntegrateWorkPerSample(raysPerSample, dispatch.maxBounces, lights);
+    const uint32_t refractions = dispatch.glass && dispatch.secondaryGlass == PT_GLASS_REFRACT
+      ? uint32_t(dispatch.maxTransmissionDepth) : 0;
+    dispatch.workPerSample = IntegrateWorkPerSample(raysPerSample, dispatch.maxBounces, refractions, lights,
+      dispatch.sphereLights);
 
     // Merged and scattered by block as in GeometryQuery.
     const uint32_t lastPass = dispatch.passCount - 1;

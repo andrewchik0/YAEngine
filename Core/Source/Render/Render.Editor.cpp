@@ -550,6 +550,7 @@ namespace YAEngine
           PT_MAX_TRANSMISSION_DEPTH),
         .glassOverflow = int32_t(m_PathTraceGlassOverflow),
         .secondaryGlass = int32_t(m_PathTraceSecondaryGlass),
+        .mirrorSun = b_PathTraceMirrorSun,
       };
 
       YA_LOG_INFO("Render", "Volume '%s': integrating %u nodes x %u samples, %d bounces, firefly clamp %.1f",

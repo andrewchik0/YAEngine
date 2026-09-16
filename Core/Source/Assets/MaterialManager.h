@@ -56,6 +56,11 @@ namespace YAEngine
     // Where Solid media overlap - a liquid modelled into its glass wall - the higher priority
     // owns the overlap.
     int32_t mediumPriority{0};
+    // A smooth dielectric layer (F0 0.04) over the surface, in raster and the path tracer alike;
+    // weight 0 is no coat. Scalars only: the coat takes no texture map and keeps the interpolated
+    // vertex normal, while the surface under it keeps all of its maps.
+    float clearCoat{0.0f};
+    float clearCoatRoughness{0.0f};
     ShadingModel shadingModel{ShadingModel::Lit};
 
     // Tiling factor folded into the mesh UVs before every material texture fetch, the
@@ -95,6 +100,31 @@ namespace YAEngine
     material.transmittanceColor = glm::clamp(material.transmittanceColor, glm::vec3(0.0f), glm::vec3(1.0f));
     material.transmittanceDistance = std::max(material.transmittanceDistance, MIN_TRANSMITTANCE_DISTANCE);
     material.mediumPriority = std::clamp(material.mediumPriority, 0, MAX_MEDIUM_PRIORITY);
+  }
+
+  inline void ClampClearCoat(Material& material)
+  {
+    material.clearCoat = std::clamp(material.clearCoat, 0.0f, 1.0f);
+    material.clearCoatRoughness = std::clamp(material.clearCoatRoughness, 0.0f, 1.0f);
+  }
+
+  // Whether the raster shading of the material has a clear coat at all: Unlit and transparent
+  // surfaces ignore it, so the path tracer is handed no coat for them either.
+  inline bool IsClearCoatShaded(const Material& material)
+  {
+    return !material.transparent && material.shadingModel == ShadingModel::Lit;
+  }
+
+  // The coat weight every shader is handed: zero where the coat is not shaded, and otherwise snapped
+  // to the grid GBuffer2 stores it on (CLEAR_COAT_WEIGHT_STEPS), so a G-buffer texel and a traced hit
+  // of the same material read the same weight.
+  inline float GetShadedClearCoat(const Material& material)
+  {
+    if (!IsClearCoatShaded(material))
+      return 0.0f;
+
+    const float steps = float(CLEAR_COAT_WEIGHT_STEPS);
+    return std::round(std::clamp(material.clearCoat, 0.0f, 1.0f) * steps) / steps;
   }
 
   class MaterialManager : public AssetManagerBase<Material, MaterialTag>, public IAssetManager

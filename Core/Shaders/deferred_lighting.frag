@@ -13,6 +13,8 @@ layout(set = 1, binding = 3) uniform sampler2D aoTexture;
 // the bent normal the fallback is looked up with. Read only while SSGI is on.
 layout(set = 1, binding = 4) uniform sampler2D ssgiTexture;
 layout(set = 1, binding = 5) uniform sampler2D ssgiBentTexture;
+// The surface under a clear coat texel, read unfiltered, see clear_coat.glsl.
+layout(set = 1, binding = 6) uniform sampler2D gbuffer2Texture;
 
 const float SKY_DEPTH = 0.0;
 
@@ -59,6 +61,18 @@ void main()
   float roughness = gb1.b;
   int shadingModel = decodeShadingModel(gb1.a);
 
+  // On a coat texel GBuffer1 describes the coat, and the surface under it comes out of GBuffer2.
+  ClearCoatLayer coat = NO_CLEAR_COAT;
+  if (shadingModel == SHADING_CLEAR_COAT)
+  {
+    vec4 gb2 = texelFetch(gbuffer2Texture, ivec2(gl_FragCoord.xy), 0);
+    coat.weight = gb2.r;
+    coat.roughness = roughness;
+    coat.normal = normal;
+    normal = decodeClearCoatBaseNormal(gb2, coat.normal);
+    roughness = gb2.g;
+  }
+
   if (shadingModel == SHADING_UNLIT)
   {
     // Unlit bypasses the IBL path entirely, so every indirect view reads black here
@@ -102,29 +116,39 @@ void main()
 
   vec3 viewVec = normalize(u_Frame.cameraPosition - worldPos);
   float NdotV = clamp(abs(dot(normal, viewVec)), 0.01, 0.99);
+  coat.NdotV = clamp(abs(dot(coat.normal, viewVec)), 0.01, 0.99);
   vec3 f0 = mix(vec3(0.04), albedo, metallic);
   vec3 R = reflect(-viewVec, normal);
 
   bool useSSGI = u_Frame.ssgiEnabled != 0;
 
-  vec3 ambientDiffuse;
-  vec3 ambientSpecular;
-  vec3 ambient;
+  // With SSGI, screen part plus weighted volume fallback - the two complete each other to
+  // a full hemisphere, see computeAmbientIBLSplit. The fallback is sampled
+  // along the bent normal: near a wall the open sky sits to the side, not
+  // "on average up". Without it the fallback is the whole hemisphere.
+  vec4 ssgi = vec4(0.0, 0.0, 0.0, 1.0);
+  vec3 diffuseNormal = normal;
   if (useSSGI)
   {
-    // Screen part plus weighted volume fallback - the two complete each other to
-    // a full hemisphere, see computeAmbientIBLSplit. The fallback is sampled
-    // along the bent normal: near a wall the open sky sits to the side, not
-    // "on average up".
-    vec4 ssgi = texture(ssgiTexture, uv);
-    vec3 bentNormal = octDecode(texture(ssgiBentTexture, uv).rg * 2.0 - 1.0);
-    ambient = computeAmbientIBLSplit(worldPos, normal, bentNormal, R, roughness, NdotV,
-      f0, albedo, metallic, ssgi, ambientDiffuse, ambientSpecular);
+    ssgi = texture(ssgiTexture, uv);
+    diffuseNormal = octDecode(texture(ssgiBentTexture, uv).rg * 2.0 - 1.0);
   }
-  else
+
+  // Selected once for the surface and the coat over it.
+  ReflectionProbeSelection probes = selectReflectionProbes(worldPos);
+  vec3 ambientDiffuse;
+  vec3 ambientSpecular;
+  vec3 ambient = computeAmbientIBLSplit(probes, worldPos, normal, diffuseNormal, R, roughness, NdotV,
+    f0, albedo, metallic, ssgi, ambientDiffuse, ambientSpecular);
+
+  // Kept apart from the surface's specular until the specular occlusion, which it takes with the
+  // coat's own roughness and angle.
+  vec3 coatSpecular = vec3(0.0);
+  if (coat.weight > 0.0)
   {
-    ambient = computeAmbientIBLSplit(worldPos, normal, R, roughness, NdotV,
-      f0, albedo, metallic, ambientDiffuse, ambientSpecular);
+    coatSpecular = computeClearCoatIBL(probes, worldPos, viewVec, coat);
+    attenuateAmbientUnderClearCoat(coat, ambientDiffuse, ambientSpecular);
+    ambient = ambientDiffuse + ambientSpecular + coatSpecular;
   }
 
   // Indirect debug views return the raw diagnostic value and stop here. AO, fog,
@@ -145,7 +169,7 @@ void main()
   }
   if (u_Frame.currentTexture == DEBUG_VIEW_AMBIENT_SPECULAR)
   {
-    outColor = vec4(ambientSpecular, 1.0);
+    outColor = vec4(ambientSpecular + coatSpecular, 1.0);
     return;
   }
   if (u_Frame.currentTexture == DEBUG_VIEW_PROBE_INDEX)
@@ -192,9 +216,15 @@ void main()
 
     float specularOcclusion = computeSpecularOcclusion(NdotV, ao, roughness);
     ambientSpecular *= mix(1.0, specularOcclusion, u_Frame.aoSpecularStrength);
+    if (coat.weight > 0.0)
+    {
+      float coatOcclusion = computeSpecularOcclusion(coat.NdotV, ao, coat.roughness);
+      coatSpecular *= mix(1.0, coatOcclusion, u_Frame.aoSpecularStrength);
+    }
   }
 
-  vec3 Lo = computeDirectLighting(worldPos, viewPos, normal, viewVec, albedo, metallic, roughness, f0, NdotV, ivec2(gl_FragCoord.xy));
+  vec3 Lo = computeDirectLighting(worldPos, viewPos, normal, viewVec, albedo, metallic, roughness, f0, NdotV,
+    coat, ivec2(gl_FragCoord.xy));
 
   // Direct light alone. The shadow term multiplies nothing but Lo, so this is the
   // view where a shadow shows up without the probe and volume fill on top of it -
@@ -206,7 +236,7 @@ void main()
     return;
   }
 
-  vec3 resultColor = max(ambientDiffuse + ambientSpecular + Lo, vec3(0.0));
+  vec3 resultColor = max(ambientDiffuse + ambientSpecular + coatSpecular + Lo, vec3(0.0));
 
   if (u_Frame.fogEnabled != 0)
   {

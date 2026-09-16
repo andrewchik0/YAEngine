@@ -392,6 +392,8 @@ namespace YAEngine
       mat.ior = matDesc.ior;
       mat.transmittanceColor = matDesc.transmittanceColor;
       mat.transmittanceDistance = matDesc.transmittanceDistance;
+      mat.clearCoat = matDesc.clearCoat;
+      mat.clearCoatRoughness = matDesc.clearCoatRoughness;
 
       auto loadTexture = [&](const std::string& path, bool linear, bool* hasAlpha)
       {

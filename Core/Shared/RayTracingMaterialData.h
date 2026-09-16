@@ -59,7 +59,9 @@ struct RayTracingMaterialRecord
   // ThinWalled and Solid: the Beer-Lambert coefficient per world unit, -ln(colour) / distance per
   // channel.
   vec3 absorption;
-  uint _pad0;           // keeps the struct at 112 bytes, its std430 stride
+  // The clear coat's weight (0 = none) and roughness, see Material::clearCoat, as packUnorm2x16 packs
+  // them. Zero where the raster shading ignores the coat; ignored on dielectric instances.
+  uint clearCoatPacked;  // keeps the struct at 112 bytes, its std430 stride
 };
 
 #ifdef __cplusplus

@@ -370,7 +370,7 @@ namespace YAEngine::EditorCommands
   const char* GetDebugViewUnavailableReason(Render& render, int view)
   {
     if ((view == DEBUG_VIEW_PT_NOISY || view == DEBUG_VIEW_PT_REFERENCE
-      || (view >= DEBUG_VIEW_PT_MAX_CONTRIB && view <= DEBUG_VIEW_PT_NONFINITE))
+      || (view >= DEBUG_VIEW_PT_MAX_CONTRIB && view <= DEBUG_VIEW_PT_DELTA_LIGHTS))
       && !render.IsPathTracerAvailable())
     {
       return "The path tracer is unavailable on this device.\nIt needs hardware ray tracing and bindless descriptors.";

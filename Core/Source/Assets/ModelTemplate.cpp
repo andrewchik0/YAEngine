@@ -122,6 +122,8 @@ namespace YAEngine
       .transmittanceColor = material.transmittanceColor,
       .transmittanceDistance = material.transmittanceDistance,
       .mediumPriority = material.mediumPriority,
+      .clearCoat = material.clearCoat,
+      .clearCoatRoughness = material.clearCoatRoughness,
       .shadingModel = material.shadingModel,
       .uvScale = material.uvScale,
       .baseColorTexture = material.baseColorTexture,
@@ -159,6 +161,8 @@ namespace YAEngine
     material.transmittanceColor = snapshot.transmittanceColor;
     material.transmittanceDistance = snapshot.transmittanceDistance;
     material.mediumPriority = snapshot.mediumPriority;
+    material.clearCoat = snapshot.clearCoat;
+    material.clearCoatRoughness = snapshot.clearCoatRoughness;
     material.shadingModel = snapshot.shadingModel;
     material.uvScale = snapshot.uvScale;
     material.baseColorTexture = snapshot.baseColorTexture;

@@ -150,6 +150,7 @@ namespace YAEngine
     settings["tonemapMode"] = render.GetTonemapMode();
     settings["tonemapPower"] = render.GetTonemapPower();
     settings["tonemapSaturation"] = render.GetTonemapSaturation();
+    settings["dither"] = render.GetDitherEnabled();
     settings["ao"] = render.GetAOEnabled();
     settings["aoDenoise"] = render.GetAODenoiseEnabled();
     settings["aoQualityLevel"] = render.GetAOQualityLevel();
@@ -173,6 +174,7 @@ namespace YAEngine
     settings["renderPath"] = static_cast<uint32_t>(render.GetRenderPath());
     settings["ptBounces"] = render.GetPathTraceMaxBounces();
     settings["ptGlass"] = render.GetPathTraceGlass();
+    settings["ptMirrorSun"] = render.GetPathTraceMirrorSun();
     settings["ptTransmissionDepth"] = std::clamp(render.GetPathTraceMaxTransmissionDepth(),
       PT_MIN_TRANSMISSION_DEPTH, PT_MAX_TRANSMISSION_DEPTH);
     // The glass enums are stored as their numbers, like renderPath, and clamped both ways.
@@ -283,6 +285,10 @@ namespace YAEngine
       if (ec["pitch"]) camState.pitch = ec["pitch"].as<float>();
     }
 
+    // A patch leaves an absent key alone, a scene does not: one saved before these switches existed
+    // loads without the sun in mirrors and with the output dither, whatever the previous scene had.
+    render.GetPathTraceMirrorSun() = false;
+    render.GetDitherEnabled() = true;
     if (root["settings"])
       SceneSerializer::ApplyRenderSettings(root["settings"], scene, assets, render);
   }
@@ -297,6 +303,7 @@ namespace YAEngine
     if (settings["tonemapMode"]) render.GetTonemapMode() = settings["tonemapMode"].as<int>();
     if (settings["tonemapPower"]) render.GetTonemapPower() = settings["tonemapPower"].as<float>();
     if (settings["tonemapSaturation"]) render.GetTonemapSaturation() = settings["tonemapSaturation"].as<float>();
+    if (settings["dither"]) render.GetDitherEnabled() = settings["dither"].as<bool>();
     // "ssao" is the pre-GTAO key for the same on/off switch; the tuning keys next to it
     // described the old hemisphere kernel and have no GTAO equivalent, so they are dropped.
     if (settings["ssao"]) render.GetAOEnabled() = settings["ssao"].as<bool>();
@@ -342,8 +349,10 @@ namespace YAEngine
       render.GetPathTraceMaxBounces() = std::clamp(settings["ptBounces"].as<int>(),
         PT_MIN_BOUNCES, PT_MAX_BOUNCES);
     }
-    // Absent in scenes saved before the switch existed, which then load with path traced glass off.
+    // Absent in scenes saved before the switch existed, which then keep the value the renderer already
+    // holds: off in a fresh editor, whatever the previous scene set otherwise.
     if (settings["ptGlass"]) render.GetPathTraceGlass() = settings["ptGlass"].as<bool>();
+    if (settings["ptMirrorSun"]) render.GetPathTraceMirrorSun() = settings["ptMirrorSun"].as<bool>();
     if (settings["ptTransmissionDepth"])
     {
       render.GetPathTraceMaxTransmissionDepth() = std::clamp(settings["ptTransmissionDepth"].as<int>(),

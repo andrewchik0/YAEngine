@@ -42,15 +42,16 @@ void main()
     || instance.materialIndex >= uint(u_Materials.length()))
     return;
 
-  RayTracingMaterialRecord material = u_Materials[instance.materialIndex];
+  uint materialIndex = instance.materialIndex;
   vec3 normal = hitVertexNormal(uint(gl_InstanceCustomIndexEXT), uint(gl_PrimitiveID),
     transpose(mat3(gl_WorldToObjectEXT)), hitBarycentrics);
   float cosIncident = clamp(abs(dot(normal, normalize(gl_WorldRayDirectionEXT))), 0.0, 1.0);
-  float eta = 1.0 / material.ior;
+  float eta = 1.0 / u_Materials[materialIndex].ior;
 
   if ((instance.flags & RT_INSTANCE_SHEET_DIELECTRIC) != 0u)
   {
-    payload.transmittance *= (1.0 - thinSlabReflectance(cosIncident, eta)) * material.transmittanceTint;
+    payload.transmittance *= (1.0 - thinSlabReflectance(cosIncident, eta))
+      * u_Materials[materialIndex].transmittanceTint;
   }
   else
   {
@@ -59,7 +60,7 @@ void main()
 
     // Facing by object space winding, the convention the path's medium tracking follows too.
     float side = gl_HitKindEXT == gl_HitKindFrontFacingTriangleEXT ? -1.0 : 1.0;
-    payload.opticalDepth += side * material.absorption * gl_HitTEXT;
+    payload.opticalDepth += side * u_Materials[materialIndex].absorption * gl_HitTEXT;
     if ((instance.flags & RT_INSTANCE_SOLID_DIELECTRIC) != 0u)
       payload.crossedSolid = 1u;
   }

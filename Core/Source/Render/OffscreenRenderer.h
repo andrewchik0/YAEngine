@@ -39,6 +39,7 @@ namespace YAEngine
 
     RGHandle m_GBuffer0 {};
     RGHandle m_GBuffer1 {};
+    RGHandle m_GBuffer2 {};
     RGHandle m_MainDepth {};
     RGHandle m_MainVelocity {};
     RGHandle m_LitColor {};

@@ -217,6 +217,18 @@ namespace YAEngine
       }
     }
 
+    // Reported by assimp's glTF importer (KHR_materials_clearcoat) and its OBJ importer, which maps the
+    // MTL clear coat thickness and roughness (Pct, Pcr) onto the same keys. The coat's textures are left
+    // out: the engine's coat is uniform and keeps the vertex normal.
+    float clearCoat = 0.0f;
+    if (material->Get(AI_MATKEY_CLEARCOAT_FACTOR, clearCoat) == AI_SUCCESS)
+    {
+      matDesc.clearCoat = std::clamp(clearCoat, 0.0f, 1.0f);
+      float clearCoatRoughness = 0.0f;
+      material->Get(AI_MATKEY_CLEARCOAT_ROUGHNESS_FACTOR, clearCoatRoughness);
+      matDesc.clearCoatRoughness = std::clamp(clearCoatRoughness, 0.0f, 1.0f);
+    }
+
     std::string baseColorTexture = ResolveTexturePath(desc, scene, material, aiTextureType_DIFFUSE);
     std::string metallicTexture = ResolveTexturePath(desc, scene, material, aiTextureType_METALNESS);
     std::string roughnessTexture = ResolveTexturePath(desc, scene, material, aiTextureType_DIFFUSE_ROUGHNESS);

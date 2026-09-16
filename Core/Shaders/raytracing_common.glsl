@@ -383,10 +383,11 @@ bool isAlphaCutout(RayTracingInstanceRecord instance, uint primitiveIndex, vec2 
   if (instance.attributeOffset == 0u || instance.materialIndex >= uint(u_Materials.length()))
     return false;
 
-  RayTracingMaterialRecord material = u_Materials[instance.materialIndex];
+  // Field by field rather than the whole record: every any-hit on alpha-tested geometry runs this.
+  uint materialIndex = instance.materialIndex;
   // Without a base color map the alpha is the material's own, which the cutout path never
   // uses to discard - accepting the candidate is what the raster does there too.
-  if ((material.textureMask & RT_MATERIAL_BASE_COLOR) == 0u)
+  if ((u_Materials[materialIndex].textureMask & RT_MATERIAL_BASE_COLOR) == 0u)
     return false;
 
   IndexStream indices = IndexStream(instance.indexAddress);
@@ -397,8 +398,8 @@ bool isAlphaCutout(RayTracingInstanceRecord instance, uint primitiveIndex, vec2 
 
   // Mip 0 explicitly: a ray tracing invocation has no derivatives, so an implicit LOD
   // would be undefined here.
-  float alpha = textureLod(u_BindlessTextures[nonuniformEXT(material.baseColorIndex)],
-    texCoord * material.uvScale, 0.0).a;
+  float alpha = textureLod(u_BindlessTextures[nonuniformEXT(u_Materials[materialIndex].baseColorIndex)],
+    texCoord * u_Materials[materialIndex].uvScale, 0.0).a;
 
   return alpha < RT_ALPHA_CUTOFF;
 }

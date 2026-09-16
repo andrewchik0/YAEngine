@@ -57,6 +57,8 @@ namespace YAEngine
     glm::vec3 transmittanceColor { 1.0f };
     float transmittanceDistance = 1.0f;
     int32_t mediumPriority = 0;
+    float clearCoat = 0.0f;
+    float clearCoatRoughness = 0.0f;
     ShadingModel shadingModel = ShadingModel::Lit;
     glm::vec2 uvScale { 1.0f, 1.0f };
 

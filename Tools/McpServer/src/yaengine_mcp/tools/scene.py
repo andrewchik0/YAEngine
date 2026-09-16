@@ -106,7 +106,7 @@ def register(server: MCPServer, manager: InstanceManager) -> None:
         server,
         description=(
             "Return the render settings of the attached editor as YAML: the 'settings' block of the scene file "
-            "(skybox, exposure, tonemapMode, ao*, ssr*, ssgi*, antialiasing, renderPath, pt*, shadows*, bloom*, "
+            "(skybox, exposure, tonemapMode, dither, ao*, ssr*, ssgi*, antialiasing, renderPath, pt*, shadows*, bloom*, "
             "fog*, autoExposure, probe and volume settings). Editor-only toggles such as the debug view are not "
             "part of it."
         ),
