@@ -54,6 +54,12 @@ namespace YAEngine
     // Playhead time requested from outside the panel (viewport key drag); negative = none
     float sequencerScrubRequest = -1.0f;
 
+    // Volume bakes asked for by a panel. The panels are drawn while the frame is being recorded,
+    // and a bake re-uploads the volume textures that frame has already bound, so EditorLayer
+    // runs them before the next frame instead.
+    Entity volumeBakeRequest = entt::null;
+    bool bakeAllVolumesRequest = false;
+
     bool IsPreviewingCamera() const { return previewCamera != entt::null; }
 
     void StartCameraPreview(Entity e)

@@ -605,7 +605,7 @@ namespace YAEngine
             : "Irradiance volumes bake by ray tracing, and the ray traced baker is unavailable: no hardware ray tracing "
               "pipeline or no bindless texture table." }))
         {
-          render.BakeAllIrradianceVolumes(*context.scene, *context.assetManager);
+          context.bakeAllVolumesRequest = true;
         }
       }
 

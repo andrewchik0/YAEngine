@@ -168,6 +168,21 @@ namespace YAEngine
       EditorStyle::Apply(EditorStyle::GetTheme(), contentScale);
     }
 
+    // Before the scene switch: a bake asked for in the same frame belongs to the scene it was asked in.
+    if (m_Context.bakeAllVolumesRequest)
+    {
+      m_Context.bakeAllVolumesRequest = false;
+      m_Context.volumeBakeRequest = entt::null;
+      GetRender().BakeAllIrradianceVolumes(GetScene(), GetAssets());
+    }
+    else if (m_Context.volumeBakeRequest != entt::null)
+    {
+      Entity volume = m_Context.volumeBakeRequest;
+      m_Context.volumeBakeRequest = entt::null;
+      if (GetScene().GetRegistry().valid(volume))
+        GetRender().BakeIrradianceVolume(volume, GetScene(), GetAssets());
+    }
+
     if (b_PendingNewScene)
     {
       b_PendingNewScene = false;

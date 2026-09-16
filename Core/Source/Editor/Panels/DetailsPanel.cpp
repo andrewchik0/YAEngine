@@ -1412,7 +1412,7 @@ namespace YAEngine
                    "the nodes times Volume Samples, as the estimate below shows.",
         .disabledReason = bakeAvailable ? nullptr : VOLUME_BAKE_UNAVAILABLE }))
       {
-        render.BakeIrradianceVolume(entity, scene, *context.assetManager);
+        context.volumeBakeRequest = entity;
       }
       DrawBakeEstimate(scene, render, entity);
 
