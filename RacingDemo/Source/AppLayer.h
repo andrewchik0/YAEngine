@@ -142,6 +142,10 @@ public:
 
   void Update(double deltaTime) override
   {
+    bool altDown = GetInput().IsKeyDown(YAEngine::Key::LeftAlt) || GetInput().IsKeyDown(YAEngine::Key::RightAlt);
+    if (altDown && GetInput().IsKeyPressed(YAEngine::Key::Enter))
+      GetWindow().ToggleBorderlessFullscreen();
+
     if (GetInput().IsKeyPressed(YAEngine::Key::F9))
       ToggleCameraTrackPlayback();
 

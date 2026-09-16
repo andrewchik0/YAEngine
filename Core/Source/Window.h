@@ -57,11 +57,22 @@ namespace YAEngine
         glfwRestoreWindow(m_WindowHandle);
     }
 
+    // Undecorated window covering the whole monitor it is on. It stays an ordinary window rather
+    // than exclusive fullscreen, so alt-tab and windows on top of it keep working.
+    void SetBorderlessFullscreen(bool enabled);
+    void ToggleBorderlessFullscreen() { SetBorderlessFullscreen(!b_BorderlessFullscreen); }
+    bool IsBorderlessFullscreen() const { return b_BorderlessFullscreen; }
+
   private:
 
     GLFWwindow* m_WindowHandle = nullptr;
     uint32_t m_WindowWidth = 0, m_WindowHeight = 0;
     bool b_Resized = false;
+
+    bool b_BorderlessFullscreen = false;
+    // Windowed placement that leaving borderless fullscreen returns to
+    int32_t m_RestoreX = 0, m_RestoreY = 0, m_RestoreWidth = 0, m_RestoreHeight = 0;
+    bool b_RestoreMaximized = false;
 
     std::vector<WindowEvent> m_WindowEventStack;
 
