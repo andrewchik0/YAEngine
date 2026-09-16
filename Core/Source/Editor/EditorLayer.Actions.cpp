@@ -7,7 +7,7 @@
 #include "Editor/EditorCommands.h"
 #include "LayerManager.h"
 #include "Render/Render.h"
-#include "Scene/CameraTrackPlayer.h"
+#include "Scene/SequencePlayer.h"
 #include "Scene/ComponentRegistry.h"
 #include "Scene/Components.h"
 #include "Utils/CameraOrientation.h"
@@ -952,18 +952,113 @@ namespace YAEngine
 
   void EditorLayer::RegisterPlaybackActions(BridgeActions& actions)
   {
+    // Camera track to play: the explicit one, else the Sequencer's, else the only one in the scene.
+    // Fails the reply and returns false when none can be chosen.
+    auto resolveTrack = [this](const BridgeActionArgs& args, const BridgeReply& reply, Entity& track) {
+      Scene& scene = GetScene();
+      track = entt::null;
+
+      if (args.Has("entity"))
+      {
+        track = args.GetEntity("entity");
+        if (!scene.HasComponent<CameraTrackComponent>(track))
+        {
+          reply.Fail(BridgeErrorCode::NOT_FOUND, "entity " + std::to_string(entt::to_integral(track))
+            + " has no 'cameraTrack' component");
+          return false;
+        }
+      }
+      else if (m_Context.sequencerTrack != entt::null && scene.GetRegistry().valid(m_Context.sequencerTrack)
+        && scene.HasComponent<CameraTrackComponent>(m_Context.sequencerTrack))
+      {
+        track = m_Context.sequencerTrack;
+      }
+      else
+      {
+        std::vector<Entity> tracks = CollectEntitiesWith<CameraTrackComponent>(scene);
+        if (tracks.empty())
+        {
+          reply.Fail(BridgeErrorCode::NOT_FOUND, "the scene has no camera track; pass timeline: true to play the "
+            "motion paths through the active camera");
+          return false;
+        }
+        if (tracks.size() > 1)
+        {
+          reply.Fail(BridgeErrorCode::INVALID_PARAMS, "the scene has " + std::to_string(tracks.size())
+            + " camera tracks; give the 'entity' to play");
+          return false;
+        }
+        track = tracks.front();
+      }
+
+      if (!scene.HasComponent<CameraComponent>(track))
+      {
+        reply.Fail(BridgeErrorCode::FAILED, "'" + scene.GetName(track) + "' has a camera track but no camera");
+        return false;
+      }
+      if (scene.GetComponent<CameraTrackComponent>(track).keys.empty())
+      {
+        reply.Fail(BridgeErrorCode::FAILED, "the camera track of '" + scene.GetName(track) + "' has no keys");
+        return false;
+      }
+      return true;
+    };
+
+    auto sessionResult = [this]() {
+      const SequencePlayer& player = m_Registry->Get<SequencePlayer>();
+      Json result = Json::object();
+      result["active"] = player.IsActive();
+      result["playing"] = player.IsAdvancing();
+      result["time"] = player.GetTime();
+      result["start"] = player.GetStartTime();
+      result["end"] = player.GetEndTime();
+      return result;
+    };
+
     actions.Register({
       .name = "sequencer.play",
-      .description = "Play a camera track, as the Play button of the Sequencer does: a paused session of the same "
-        "track resumes, anything else plays from the start. The track's camera is the active camera until the track "
-        "ends or sequencer.stop. Returns {entity, name, duration, resumed}.",
-      .params = { OptionalParam("entity", ParamType::Entity, "Entity with a cameraTrack component. Default: the "
-        "track bound in the Sequencer panel, else the only camera track of the scene.") },
+      .description = "Play the timeline, as the Play button of the Sequencer does. With a camera track this plays its "
+        "shot (first to last key) through that camera; motion paths are posed at the same timeline time. A paused or "
+        "scrubbed session of the same shot resumes. Every transform the session moved is restored when it ends. "
+        "Returns {entity, name, resumed, active, playing, time, start, end}; entity is absent for timeline: true.",
+      .params = {
+        OptionalParam("entity", ParamType::Entity, "Entity with a cameraTrack component. Default: the track bound in "
+          "the Sequencer panel, else the only camera track of the scene."),
+        OptionalParam("timeline", ParamType::Bool, "True plays the whole timeline without a camera track, through the "
+          "active camera. Default false.") },
       .refusedWhileCapturing = true,
-      .handler = [this](const BridgeActionArgs& args, const BridgeReply& reply) {
+      .handler = [this, resolveTrack, sessionResult](const BridgeActionArgs& args, const BridgeReply& reply) {
         Scene& scene = GetScene();
-        Entity track = entt::null;
+        bool timeline = args.Has("timeline") && args.GetBool("timeline");
 
+        Entity track = entt::null;
+        if (!timeline && !resolveTrack(args, reply, track))
+          return;
+
+        bool resumed = EditorCommands::PlaySequence(m_Registry->Get<SequencePlayer>(), scene, track);
+
+        Json result = track != entt::null ? EntityResult(scene, track) : Json::object();
+        result.update(sessionResult());
+        result["resumed"] = resumed;
+        reply.Ok(std::move(result));
+      }
+    });
+
+    actions.Register({
+      .name = "sequencer.setTime",
+      .description = "Pose the timeline at a time, as scrubbing the Sequencer does. Without a running session this "
+        "opens a paused preview that leaves the active camera alone; the transforms it moves are restored by "
+        "sequencer.stop. Returns {active, playing, time, start, end}.",
+      .params = {
+        RequiredParam("time", ParamType::Number, "Seconds on the timeline, clamped to its length."),
+        OptionalParam("entity", ParamType::Entity, "Camera track to pose along. Default: the session's track, else "
+          "the track bound in the Sequencer panel, else none.") },
+      .refusedWhileCapturing = true,
+      .handler = [this, sessionResult](const BridgeActionArgs& args, const BridgeReply& reply) {
+        Scene& scene = GetScene();
+        SequencePlayer& player = m_Registry->Get<SequencePlayer>();
+
+        Entity track = player.IsActive() ? player.GetCameraTrack() : m_Context.sequencerTrack;
         if (args.Has("entity"))
         {
           track = args.GetEntity("entity");
@@ -974,63 +1069,27 @@ namespace YAEngine
             return;
           }
         }
-        else if (m_Context.sequencerTrack != entt::null && scene.GetRegistry().valid(m_Context.sequencerTrack)
-          && scene.HasComponent<CameraTrackComponent>(m_Context.sequencerTrack))
-        {
-          track = m_Context.sequencerTrack;
-        }
-        else
-        {
-          std::vector<Entity> tracks = CollectEntitiesWith<CameraTrackComponent>(scene);
-          if (tracks.empty())
-          {
-            reply.Fail(BridgeErrorCode::NOT_FOUND, "the scene has no camera track");
-            return;
-          }
-          if (tracks.size() > 1)
-          {
-            reply.Fail(BridgeErrorCode::INVALID_PARAMS, "the scene has " + std::to_string(tracks.size())
-              + " camera tracks; give the 'entity' to play");
-            return;
-          }
-          track = tracks.front();
-        }
+        if (track != entt::null && !scene.GetRegistry().valid(track))
+          track = entt::null;
 
-        if (!scene.HasComponent<CameraComponent>(track))
-        {
-          reply.Fail(BridgeErrorCode::FAILED, "'" + scene.GetName(track) + "' has a camera track but no camera");
-          return;
-        }
-
-        const auto& keys = scene.GetComponent<CameraTrackComponent>(track).keys;
-        if (keys.empty())
-        {
-          reply.Fail(BridgeErrorCode::FAILED, "the camera track of '" + scene.GetName(track) + "' has no keys");
-          return;
-        }
-        float duration = keys.back().time;
-
-        bool resumed = EditorCommands::PlayCameraTrack(m_Registry->Get<CameraTrackPlayer>(), scene, track);
-
-        Json result = EntityResult(scene, track);
-        result["duration"] = duration;
-        result["resumed"] = resumed;
-        reply.Ok(std::move(result));
+        player.Scrub(scene, track, args.GetNumber("time"));
+        m_Context.sequencerScrubRequest = float(player.GetTime());
+        reply.Ok(sessionResult());
       }
     });
 
     actions.Register({
       .name = "sequencer.stop",
-      .description = "Stop camera track playback, as the Stop button of the Sequencer does, and hand the viewport "
-        "back to the camera that was active before. Returns {wasPlaying}.",
+      .description = "End the timeline session, as the Stop button of the Sequencer does: every transform it moved "
+        "goes back and the viewport returns to the camera that was active before. Returns {wasActive}.",
       .refusedWhileCapturing = true,
       .handler = [this](const BridgeActionArgs&, const BridgeReply& reply) {
-        CameraTrackPlayer& player = m_Registry->Get<CameraTrackPlayer>();
-        bool wasPlaying = player.IsPlaying();
+        SequencePlayer& player = m_Registry->Get<SequencePlayer>();
+        bool wasActive = player.IsActive();
         player.Stop(GetScene());
 
         Json result = Json::object();
-        result["wasPlaying"] = wasPlaying;
+        result["wasActive"] = wasActive;
         reply.Ok(std::move(result));
       }
     });

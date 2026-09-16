@@ -4,6 +4,7 @@
 #include "Scene/Components.h"
 #include "Scene/TerrainSystem.h"
 #include "Scene/CollisionQueryService.h"
+#include "Scene/SequencePlayer.h"
 #include "Assets/Handle.h"
 #include "GameComponents.h"
 #include "SparkPool.h"
@@ -52,7 +53,33 @@ public:
   void Update(double deltaTime) override;
 
 private:
+  struct BodyPart
+  {
+    YAEngine::Entity entity = entt::null;
+    YAEngine::LocalTransform base;
+  };
+
+  struct WheelSpin
+  {
+    YAEngine::Entity entity = entt::null;
+    double spinAngle = 0.0;
+  };
+
   void ResolveAxleGeometry(const glm::dvec3& forwardXZ, const glm::dvec3& carPos);
+
+  // Poses the car from its motion path at the timeline time; false when this frame belongs to
+  // the input drive instead
+  bool DriveAlongPath(double dt);
+  void ReleasePathDrive();
+  void CaptureBody(YAEngine::SequencePlayer& player);
+  void ApplyBodyLean(const YAEngine::MotionPathPose& pose);
+
+  glm::dvec3 SnapToGround(glm::dvec3 p) const;
+  glm::dquat TerrainTilt(const glm::dvec3& position) const;
+  void UpdateFollowCamera(double dt, const glm::dvec3& position, const glm::dquat& yawRot,
+    const VehicleComponent& vehicle);
+  void UpdateWheels(double dt, const VehicleComponent& vehicle, double pathDistance, bool fromPath);
+  void UpdateSparks(double dt);
 
   YAEngine::TerrainSystem* m_TerrainSystem = nullptr;
   YAEngine::CollisionQueryService* m_CollisionService = nullptr;
@@ -63,6 +90,16 @@ private:
   double m_WheelBase = 2.5;
   double m_RearAxleOffset = -1.2;
   bool b_AxleGeometryResolved = false;
+
+  // Path drive state, captured on its first frame and dropped when the session ends
+  bool b_PathDriven = false;
+  bool b_BodyCaptured = false;
+  std::vector<BodyPart> m_BodyParts;
+  std::vector<WheelSpin> m_WheelSpins;
+  // Rotation of the body parts' parent relative to the car root, and the axle centre in that
+  // parent's space
+  glm::quat m_BodyFrame { 1.0f, 0.0f, 0.0f, 0.0f };
+  glm::vec3 m_BodyPivot { 0.0f };
 
   SparkPool m_SparkPool;
   YAEngine::TextureHandle m_SparkTexture;

@@ -4,6 +4,29 @@
 #include "Assets/AssetManager.h"
 #include "Utils/Log.h"
 
+namespace
+{
+  // Body lean along a motion path, per m/s^2 of acceleration, and its limits. A sports car on
+  // stiff springs: a hard corner leans a few degrees at most.
+  const double kRollPerAccel = glm::radians(0.55);
+  const double kMaxRoll = glm::radians(3.5);
+  const double kPitchPerAccel = glm::radians(0.45);
+  const double kMaxPitch = glm::radians(2.0);
+
+  // Rotation of a world matrix with the scale divided out; model nodes are often scaled
+  glm::quat WorldRotation(const glm::mat4& world)
+  {
+    glm::mat3 basis(world);
+    for (int i = 0; i < 3; i++)
+    {
+      float length = glm::length(basis[i]);
+      if (length > 1e-6f)
+        basis[i] /= length;
+    }
+    return glm::normalize(glm::quat_cast(basis));
+  }
+}
+
 void ControlsLayer::Update(double dt)
 {
   if (m_Car == entt::null) return;
@@ -51,6 +74,10 @@ void ControlsLayer::Update(double dt)
     glm::dquat currentYawRot = glm::angleAxis(vehicle->yaw, glm::dvec3(0, 1, 0));
     ResolveAxleGeometry(currentYawRot * glm::dvec3(0, 0, 1), position);
   }
+
+  // While a timeline session runs, a car with a motion path follows it instead of the input
+  if (DriveAlongPath(dt))
+    return;
 
   bool arrowLeft  = m_InputOverride.active ? m_InputOverride.left  : input.IsKeyDown(YAEngine::Key::Left);
   bool arrowRight = m_InputOverride.active ? m_InputOverride.right : input.IsKeyDown(YAEngine::Key::Right);
@@ -104,19 +131,7 @@ void ControlsLayer::Update(double dt)
   glm::dvec3 deltaXZ = rearAxle - forward * m_RearAxleOffset - prevPosition;
   deltaXZ.y = 0.0;
 
-  bool hasTerrainCache = (m_TerrainEntity != entt::null
-    && m_TerrainSystem->HasCachedHeight(static_cast<uint32_t>(m_TerrainEntity)));
-
-  auto snapY = [&](glm::dvec3 p) -> glm::dvec3
-  {
-    if (hasTerrainCache)
-      p.y = static_cast<double>(m_TerrainSystem->SampleCachedHeight(
-        static_cast<uint32_t>(m_TerrainEntity),
-        static_cast<float>(p.x), static_cast<float>(p.z)));
-    else if (b_FixedGround)
-      p.y = m_GroundY;
-    return p;
-  };
+  auto snapY = [this](glm::dvec3 p) -> glm::dvec3 { return SnapToGround(p); };
 
   bool hasCollider = GetScene().HasComponent<YAEngine::ColliderComponent>(car);
 
@@ -280,8 +295,255 @@ void ControlsLayer::Update(double dt)
   }
   vehicle->wasInContact = inContact;
 
+  glm::dquat targetTilt = TerrainTilt(position);
+
+  double tiltSmooth = 1.0 - std::exp(-10.0 * dt);
+  vehicle->tilt = glm::slerp(vehicle->tilt, targetTilt, tiltSmooth);
+
+  glm::dquat rotation = vehicle->tilt * yawRot;
+
+  // The terrain lift keeps the body clear of the sampled heightfield; a fixed plane needs no slack
+  GetScene().GetTransform(car).position = position + glm::dvec3(0, b_FixedGround ? 0.0 : 0.05, 0);
+  GetScene().GetTransform(car).rotation = rotation;
+  GetScene().MarkDirty(car);
+
+  UpdateFollowCamera(dt, position, yawRot, *vehicle);
+  UpdateWheels(dt, *vehicle, 0.0, false);
+  UpdateSparks(dt);
+}
+
+void ControlsLayer::ResolveAxleGeometry(const glm::dvec3& forwardXZ, const glm::dvec3& carPos)
+{
+  glm::dvec3 frontSum(0.0);
+  glm::dvec3 rearSum(0.0);
+  int frontCount = 0;
+  int rearCount = 0;
+
+  auto wheelView = GetScene().GetView<WheelComponent, YAEngine::WorldTransform>();
+  for (auto wheelEntity : wheelView)
+  {
+    auto& wc = GetScene().GetComponent<WheelComponent>(wheelEntity);
+    auto& wt = GetScene().GetComponent<YAEngine::WorldTransform>(wheelEntity);
+    glm::dvec3 wheelPos = glm::dvec3(glm::vec3(wt.world[3]));
+
+    if (wc.isFront) { frontSum += wheelPos; frontCount++; }
+    else            { rearSum  += wheelPos; rearCount++; }
+  }
+
+  if (frontCount == 0 || rearCount == 0) return;
+
+  glm::dvec3 frontMid = frontSum / static_cast<double>(frontCount);
+  glm::dvec3 rearMid = rearSum / static_cast<double>(rearCount);
+
+  double wheelBase = glm::dot(frontMid - rearMid, forwardXZ);
+  // World transforms are still identity until the hierarchy is first evaluated
+  if (wheelBase < 0.1) return;
+
+  m_WheelBase = wheelBase;
+  m_RearAxleOffset = glm::dot(rearMid - carPos, forwardXZ);
+  b_AxleGeometryResolved = true;
+
+  YA_LOG_INFO("Physics", "Car axle geometry resolved: wheelBase=%.3f rearAxleOffset=%.3f",
+    m_WheelBase, m_RearAxleOffset);
+}
+
+bool ControlsLayer::DriveAlongPath(double dt)
+{
+  auto& scene = GetScene();
+  auto& player = m_Registry->Get<YAEngine::SequencePlayer>();
+
+  auto* path = scene.GetRegistry().try_get<YAEngine::MotionPathComponent>(m_Car);
+  // The player leaves the car to this layer, which also has the wheels and the body to move
+  if (path != nullptr)
+    path->externallyDriven = true;
+
+  if (path == nullptr || path->points.size() < 2 || !player.IsActive())
+  {
+    if (b_PathDriven)
+      ReleasePathDrive();
+    return false;
+  }
+
+  b_PathDriven = true;
+
+  auto& vehicle = scene.GetComponent<VehicleComponent>(m_Car);
+  const YAEngine::MotionPathPose pose = YAEngine::EvaluateMotionPath(
+    path->GetTable(), path->speedKeys, float(player.GetTime()));
+
+  glm::dvec3 forward(pose.forward);
+  glm::dquat yawRot = glm::angleAxis(double(pose.yaw), glm::dvec3(0, 1, 0));
+  // The curve is the rear axle's: that is the point the kinematic model rolls without slip
+  glm::dvec3 position = SnapToGround(glm::dvec3(pose.position) - forward * m_RearAxleOffset);
+
+  // Same bicycle model as the input drive, solved for the steering the curve asks for
+  vehicle.yaw = double(pose.yaw);
+  vehicle.yawInitialized = true;
+  vehicle.speed = double(pose.speed);
+  vehicle.wheelsSteer = glm::clamp(std::atan(m_WheelBase * double(pose.curvature)),
+    -vehicle.maxSteerAngle, vehicle.maxSteerAngle);
+  vehicle.tilt = TerrainTilt(position);
+  vehicle.wasInContact = false;
+
+  auto& transform = scene.GetTransform(m_Car);
+  transform.position = position + glm::dvec3(0, b_FixedGround ? 0.0 : 0.05, 0);
+  transform.rotation = vehicle.tilt * yawRot;
+  scene.MarkDirty(m_Car);
+
+  CaptureBody(player);
+  ApplyBodyLean(pose);
+
+  UpdateFollowCamera(dt, position, yawRot, vehicle);
+  UpdateWheels(dt, vehicle, double(pose.distance), true);
+  UpdateSparks(dt);
+  return true;
+}
+
+void ControlsLayer::ReleasePathDrive()
+{
+  b_PathDriven = false;
+  b_BodyCaptured = false;
+  m_BodyParts.clear();
+
+  auto& scene = GetScene();
+  // The session has put every transform back; the input model restarts from them
+  for (const auto& wheel : m_WheelSpins)
+  {
+    if (scene.GetRegistry().valid(wheel.entity) && scene.HasComponent<WheelComponent>(wheel.entity))
+      scene.GetComponent<WheelComponent>(wheel.entity).spinAngle = wheel.spinAngle;
+  }
+  m_WheelSpins.clear();
+
+  if (m_Car == entt::null || !scene.HasComponent<VehicleComponent>(m_Car))
+    return;
+
+  auto& vehicle = scene.GetComponent<VehicleComponent>(m_Car);
+  // The input drive runs later in this same frame and writes its heading back, so it has to
+  // start from the restored one right away
+  glm::dvec3 forward = glm::dquat(scene.GetTransform(m_Car).rotation) * glm::dvec3(0, 0, 1);
+  vehicle.yaw = std::atan2(forward.x, forward.z);
+  vehicle.yawInitialized = true;
+  vehicle.speed = 0.0;
+  vehicle.wheelsSteer = 0.0;
+  vehicle.tilt = glm::dquat(1, 0, 0, 0);
+}
+
+void ControlsLayer::CaptureBody(YAEngine::SequencePlayer& player)
+{
+  auto& scene = GetScene();
+
+  if (!b_BodyCaptured)
+  {
+    b_BodyCaptured = true;
+    m_BodyParts.clear();
+    m_WheelSpins.clear();
+
+    YAEngine::Entity bodyParent = entt::null;
+    bool sharedParent = true;
+    glm::vec3 pivotSum(0.0f);
+    for (auto [wheel, wc] : scene.GetView<WheelComponent>().each())
+    {
+      m_WheelSpins.push_back({ .entity = wheel, .spinAngle = wc.spinAngle });
+      YAEngine::Entity parent = scene.GetHierarchy(wheel).parent;
+      if (bodyParent == entt::null)
+        bodyParent = parent;
+      else if (parent != bodyParent)
+        sharedParent = false;
+      pivotSum += scene.GetTransform(wheel).position;
+    }
+
+    // Leaning the whole car would lift the wheels off the road; the body is every sibling of
+    // the wheels, leaned around the axles
+    if (!m_WheelSpins.empty() && sharedParent && bodyParent != entt::null
+      && scene.HasComponent<YAEngine::WorldTransform>(bodyParent)
+      && scene.HasComponent<YAEngine::WorldTransform>(m_Car))
+    {
+      m_BodyPivot = pivotSum / float(m_WheelSpins.size());
+      // Fixed inside the model, so matrices from the previous frame give the same answer
+      glm::quat carRotation = WorldRotation(scene.GetComponent<YAEngine::WorldTransform>(m_Car).world);
+      glm::quat parentRotation = WorldRotation(scene.GetComponent<YAEngine::WorldTransform>(bodyParent).world);
+      m_BodyFrame = glm::normalize(glm::inverse(carRotation) * parentRotation);
+
+      for (YAEngine::Entity child = scene.GetHierarchy(bodyParent).firstChild; child != entt::null;
+        child = scene.GetHierarchy(child).nextSibling)
+      {
+        // Brake callipers sit on the hubs next to the wheels ("mycar-wheelbrake...") and would
+        // swing into the rims if they leaned with the body
+        const std::string& name = scene.GetName(child);
+        if (!scene.HasComponent<WheelComponent>(child) && name.find("wheel") == std::string::npos)
+          m_BodyParts.push_back({ .entity = child, .base = scene.GetTransform(child) });
+      }
+    }
+    else if (!m_WheelSpins.empty())
+    {
+      YA_LOG_WARN("Physics", "Car wheels do not share one parent, the body will not lean");
+    }
+  }
+
+  // Every frame: a session restarted by Play or F9 begins with an empty restore list
+  for (const auto& wheel : m_WheelSpins)
+    player.ProtectTransform(scene, wheel.entity);
+  for (const auto& part : m_BodyParts)
+    player.ProtectTransform(scene, part.entity);
+}
+
+void ControlsLayer::ApplyBodyLean(const YAEngine::MotionPathPose& pose)
+{
+  if (m_BodyParts.empty())
+    return;
+
+  auto& scene = GetScene();
+
+  // In the car's own frame +X is the side the car turns toward while its yaw grows and +Z is
+  // forward. The body leans away from the turn centre and dives under braking: its up axis
+  // tips toward this horizontal vector, by the vector's length.
+  double lateral = double(pose.speed) * double(pose.speed) * double(pose.curvature);
+  double roll = glm::clamp(lateral * kRollPerAccel, -kMaxRoll, kMaxRoll);
+  double pitch = glm::clamp(-double(pose.acceleration) * kPitchPerAccel, -kMaxPitch, kMaxPitch);
+  glm::dvec3 lean(-roll, 0.0, pitch);
+
+  glm::quat carLean(1.0f, 0.0f, 0.0f, 0.0f);
+  double angle = glm::length(lean);
+  if (angle > 1e-6)
+  {
+    glm::dvec3 axis = glm::normalize(glm::cross(glm::dvec3(0.0, 1.0, 0.0), lean / angle));
+    carLean = glm::quat(glm::angleAxis(angle, axis));
+  }
+
+  // The same rotation in the space the body parts live in
+  glm::quat localLean = glm::normalize(glm::inverse(m_BodyFrame) * carLean * m_BodyFrame);
+
+  for (const auto& part : m_BodyParts)
+  {
+    if (!scene.GetRegistry().valid(part.entity))
+      continue;
+    auto& transform = scene.GetTransform(part.entity);
+    transform.position = m_BodyPivot + localLean * (part.base.position - m_BodyPivot);
+    transform.rotation = glm::normalize(localLean * part.base.rotation);
+    transform.scale = part.base.scale;
+    scene.MarkDirty(part.entity);
+  }
+}
+
+glm::dvec3 ControlsLayer::SnapToGround(glm::dvec3 p) const
+{
+  if (m_TerrainSystem != nullptr && m_TerrainEntity != entt::null
+    && m_TerrainSystem->HasCachedHeight(static_cast<uint32_t>(m_TerrainEntity)))
+  {
+    p.y = static_cast<double>(m_TerrainSystem->SampleCachedHeight(
+      static_cast<uint32_t>(m_TerrainEntity),
+      static_cast<float>(p.x), static_cast<float>(p.z)));
+  }
+  else if (b_FixedGround)
+  {
+    p.y = m_GroundY;
+  }
+  return p;
+}
+
+glm::dquat ControlsLayer::TerrainTilt(const glm::dvec3& position) const
+{
   glm::dquat targetTilt { 1, 0, 0, 0 };
-  if (m_TerrainEntity != entt::null
+  if (m_TerrainSystem != nullptr && m_TerrainEntity != entt::null
     && m_TerrainSystem->HasCachedHeight(static_cast<uint32_t>(m_TerrainEntity)))
   {
     uint32_t tid = static_cast<uint32_t>(m_TerrainEntity);
@@ -306,16 +568,12 @@ void ControlsLayer::Update(double dt)
     }
   }
 
-  double tiltSmooth = 1.0 - std::exp(-10.0 * dt);
-  vehicle->tilt = glm::slerp(vehicle->tilt, targetTilt, tiltSmooth);
+  return targetTilt;
+}
 
-  glm::dquat rotation = vehicle->tilt * yawRot;
-
-  // The terrain lift keeps the body clear of the sampled heightfield; a fixed plane needs no slack
-  GetScene().GetTransform(car).position = position + glm::dvec3(0, b_FixedGround ? 0.0 : 0.05, 0);
-  GetScene().GetTransform(car).rotation = rotation;
-  GetScene().MarkDirty(car);
-
+void ControlsLayer::UpdateFollowCamera(double dt, const glm::dvec3& position, const glm::dquat& yawRot,
+  const VehicleComponent& vehicle)
+{
   if (m_Camera != entt::null && GetScene().HasComponent<FollowCameraComponent>(m_Camera))
   {
     auto& follow = GetScene().GetComponent<FollowCameraComponent>(m_Camera);
@@ -361,7 +619,7 @@ void ControlsLayer::Update(double dt)
       camRot = glm::slerp(camRot, targetRot, t);
       camTc.rotation = camRot;
 
-      double normSpeed = 0;//glm::clamp(vehicle->speed / vehicle->maxSpeed, 0.0, 1.0);
+      double normSpeed = 0;//glm::clamp(vehicle.speed / vehicle.maxSpeed, 0.0, 1.0);
       double backFactor = glm::smoothstep(0.5, 1.0, normSpeed);
 
       glm::dvec3 dynamicOffset = follow.offset;
@@ -373,9 +631,9 @@ void ControlsLayer::Update(double dt)
       camPos = glm::mix(camPos, targetPos, t);
       camTc.position = camPos;
 
-      if (vehicle->speed > .01)
+      if (vehicle.speed > .01)
       {
-        double speedNorm = glm::clamp(vehicle->speed / vehicle->maxSpeed, 0.0, 1.0);
+        double speedNorm = glm::clamp(vehicle.speed / vehicle.maxSpeed, 0.0, 1.0);
         double factor = glm::smoothstep(0.0, 1.0, speedNorm);
         double targetFov = glm::mix(follow.baseFov, follow.maxFov, factor);
 
@@ -384,7 +642,10 @@ void ControlsLayer::Update(double dt)
       }
     }
   }
+}
 
+void ControlsLayer::UpdateWheels(double dt, const VehicleComponent& vehicle, double pathDistance, bool fromPath)
+{
   auto wheelView = GetScene().GetView<WheelComponent, YAEngine::LocalTransform>();
 
   for (auto wheelEntity : wheelView)
@@ -392,19 +653,26 @@ void ControlsLayer::Update(double dt)
     auto& wc = GetScene().GetComponent<WheelComponent>(wheelEntity);
     auto& tc = GetScene().GetTransform(wheelEntity);
 
-    wc.spinAngle += (vehicle->speed / wc.radius) * dt;
+    // Along a path the spin is a function of the distance, so scrubbing back turns the wheels back
+    if (fromPath)
+      wc.spinAngle = pathDistance / wc.radius;
+    else
+      wc.spinAngle += (vehicle.speed / wc.radius) * dt;
 
     glm::quat steerRot = glm::identity<glm::quat>();
     if (wc.isFront)
     {
-      steerRot = glm::angleAxis(vehicle->wheelsSteer, glm::dvec3(0,0,1));
+      steerRot = glm::angleAxis(vehicle.wheelsSteer, glm::dvec3(0,0,1));
     }
 
     glm::quat spinRot = glm::angleAxis(wc.spinAngle, glm::dvec3(1,0,0));
 
     tc.rotation = steerRot * glm::quat(wc.baseRot) * spinRot;
   }
+}
 
+void ControlsLayer::UpdateSparks(double dt)
+{
   m_SparkPool.Update(dt);
   if (m_SparkPool.HasAliveSparks() && m_SparkTexture)
   {
@@ -413,39 +681,4 @@ void ControlsLayer::Update(double dt)
     if (!m_SparkInstances.empty())
       GetRender().SubmitParticles(m_SparkInstances, m_SparkTexture);
   }
-}
-
-void ControlsLayer::ResolveAxleGeometry(const glm::dvec3& forwardXZ, const glm::dvec3& carPos)
-{
-  glm::dvec3 frontSum(0.0);
-  glm::dvec3 rearSum(0.0);
-  int frontCount = 0;
-  int rearCount = 0;
-
-  auto wheelView = GetScene().GetView<WheelComponent, YAEngine::WorldTransform>();
-  for (auto wheelEntity : wheelView)
-  {
-    auto& wc = GetScene().GetComponent<WheelComponent>(wheelEntity);
-    auto& wt = GetScene().GetComponent<YAEngine::WorldTransform>(wheelEntity);
-    glm::dvec3 wheelPos = glm::dvec3(glm::vec3(wt.world[3]));
-
-    if (wc.isFront) { frontSum += wheelPos; frontCount++; }
-    else            { rearSum  += wheelPos; rearCount++; }
-  }
-
-  if (frontCount == 0 || rearCount == 0) return;
-
-  glm::dvec3 frontMid = frontSum / static_cast<double>(frontCount);
-  glm::dvec3 rearMid = rearSum / static_cast<double>(rearCount);
-
-  double wheelBase = glm::dot(frontMid - rearMid, forwardXZ);
-  // World transforms are still identity until the hierarchy is first evaluated
-  if (wheelBase < 0.1) return;
-
-  m_WheelBase = wheelBase;
-  m_RearAxleOffset = glm::dot(rearMid - carPos, forwardXZ);
-  b_AxleGeometryResolved = true;
-
-  YA_LOG_INFO("Physics", "Car axle geometry resolved: wheelBase=%.3f rearAxleOffset=%.3f",
-    m_WheelBase, m_RearAxleOffset);
 }

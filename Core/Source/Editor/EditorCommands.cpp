@@ -4,7 +4,7 @@
 #include "Editor/EditorContext.h"
 #include "Editor/Utils/EditorIcons.h"
 #include "Render/Render.h"
-#include "Scene/CameraTrackPlayer.h"
+#include "Scene/SequencePlayer.h"
 #include "Scene/Components.h"
 #include "Utils/Log.h"
 
@@ -69,6 +69,18 @@ namespace YAEngine::EditorCommands
           return scene.HasComponent<CameraComponent>(entity) ? "The entity already has a Camera" : nullptr;
         },
         .add = [](Scene& scene, AssetManager&, Entity entity) { scene.AddComponent<CameraComponent>(entity); },
+      },
+      {
+        .label = "Motion Path", .icon = ICON_LC_SPLINE,
+        .tooltip = "Timed drive along a curve, played on the Sequencer timeline; its points and speed keys are edited there",
+        .unavailableReason = [](Scene& scene, Entity entity) -> const char* {
+          if (scene.HasComponent<MotionPathComponent>(entity))
+            return "The entity already has a Motion Path";
+          if (scene.HasComponent<CameraTrackComponent>(entity))
+            return "A Camera Track already drives this entity";
+          return nullptr;
+        },
+        .add = [](Scene& scene, AssetManager&, Entity entity) { scene.AddComponent<MotionPathComponent>(entity); },
       },
       {
         .label = "Reflection Probe", .icon = ICON_LC_GLOBE, .tooltip = "Baked specular reflections for the surfaces inside its volume",
@@ -387,23 +399,16 @@ namespace YAEngine::EditorCommands
     return nullptr;
   }
 
-  bool PlayCameraTrack(CameraTrackPlayer& player, Scene& scene, Entity track)
+  bool PlaySequence(SequencePlayer& player, Scene& scene, Entity cameraTrack)
   {
-    const auto& keys = scene.GetComponent<CameraTrackComponent>(track).keys;
-    float duration = keys.empty() ? 0.0f : keys.back().time;
-
-    bool active = player.IsPlaying() && player.GetTrackEntity() == track;
-    // Resuming exactly at the end would stop again on the next tick
-    bool resumable = active && player.GetElapsed() < double(duration) - 1e-4;
-    if (resumable)
+    // A paused or scrubbed session of the same shot carries on from its playhead
+    if (player.IsPaused() && player.GetCameraTrack() == cameraTrack)
     {
-      player.Resume();
+      player.Resume(scene);
       return true;
     }
 
-    if (active)
-      player.Stop(scene);
-    player.Start(scene, track);
+    player.Play(scene, cameraTrack);
     return false;
   }
 }

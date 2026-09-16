@@ -12,7 +12,7 @@
 #include "Scene/Components.h"
 #include "Scene/SceneSerializer.h"
 #include "Scene/ComponentRegistry.h"
-#include "Scene/CameraTrackPlayer.h"
+#include "Scene/SequencePlayer.h"
 #include "Utils/ThreadPool.h"
 #include "Utils/Log.h"
 #include "Render/Render.h"
@@ -199,34 +199,58 @@ public:
   }
 
 private:
+  // Each press plays the next shot, in the order the shots start on the timeline, so every
+  // shot can be recorded as its own take. A press during playback stops it instead. A scene
+  // with motion paths but no camera track plays the whole timeline through the active camera.
   void ToggleCameraTrackPlayback()
   {
-    auto& player = m_Registry->Get<YAEngine::CameraTrackPlayer>();
+    auto& player = m_Registry->Get<YAEngine::SequencePlayer>();
 
-    if (player.IsPlaying())
+    if (player.IsActive())
     {
       player.Stop(GetScene());
-      YA_LOG_INFO("Render", "Camera track playback stopped");
+      YA_LOG_INFO("Render", "Sequence playback stopped");
       return;
     }
 
-    YAEngine::Entity track = entt::null;
-    for (auto e : GetScene().GetView<YAEngine::CameraTrackComponent>())
+    std::vector<YAEngine::Entity> shots;
+    for (auto [e, track] : GetScene().GetView<YAEngine::CameraTrackComponent>().each())
     {
-      track = e;
-      break;
+      if (!track.keys.empty() && GetScene().HasComponent<YAEngine::CameraComponent>(e))
+        shots.push_back(e);
     }
 
-    if (track == entt::null)
+    std::sort(shots.begin(), shots.end(), [this](YAEngine::Entity a, YAEngine::Entity b) {
+      float startA = YAEngine::SequencePlayer::ShotStart(GetScene().GetComponent<YAEngine::CameraTrackComponent>(a));
+      float startB = YAEngine::SequencePlayer::ShotStart(GetScene().GetComponent<YAEngine::CameraTrackComponent>(b));
+      if (startA != startB)
+        return startA < startB;
+      return GetScene().GetName(a) < GetScene().GetName(b);
+    });
+
+    if (shots.empty())
     {
-      YA_LOG_INFO("Render", "No entity with a camera track in the scene");
+      if (GetScene().GetView<YAEngine::MotionPathComponent>().empty())
+      {
+        YA_LOG_INFO("Render", "No camera track or motion path in the scene");
+        return;
+      }
+
+      player.Play(GetScene(), entt::null);
+      YA_LOG_INFO("Render", "Timeline playback started through the active camera, %.2f s",
+        player.GetEndTime());
       return;
     }
 
-    YA_LOG_INFO("Render", "Camera track playback started on '%s'",
-      GetScene().GetName(track).c_str());
-    player.Start(GetScene(), track);
+    m_NextShot %= shots.size();
+    YAEngine::Entity shot = shots[m_NextShot];
+    player.Play(GetScene(), shot);
+    YA_LOG_INFO("Render", "Shot %zu/%zu '%s' started, %.2f - %.2f s",
+      m_NextShot + 1, shots.size(), GetScene().GetName(shot).c_str(), player.GetStartTime(), player.GetEndTime());
+    m_NextShot++;
   }
+
+  size_t m_NextShot = 0;
 
 #ifdef BISTRO_RACING
   // No terrain in BistroExterior, so the car rides a constant plane; kAsphaltY is the roadway level (pavement sits at 0.37), offset by the wheel's lowest point (0.0039 model space) so tires land on it.

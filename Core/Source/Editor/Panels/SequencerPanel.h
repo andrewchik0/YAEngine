@@ -6,9 +6,9 @@
 
 namespace YAEngine
 {
-  // Authoring front end for CameraTrackComponent: keyframe lane, transport and scrubbing.
-  // Playback goes through the engine CameraTrackPlayer, so what the editor shows is what a
-  // game build plays.
+  // Authoring front end for the scene timeline: a camera track (a shot) and a motion path on one
+  // time axis, with transport and scrubbing. Playback goes through the engine SequencePlayer, so
+  // what the editor shows is what a game build plays.
   class SequencerPanel : public IEditorPanel
   {
   public:
@@ -21,23 +21,36 @@ namespace YAEngine
 
   private:
 
-    enum class DragKind : uint8_t { None, Key, Scrub, Pan };
+    enum class DragKind : uint8_t { None, CameraKey, SpeedKey, Scrub, Pan };
     enum class KeyAction : uint8_t { None, UpdateFromView, Duplicate, Delete };
+    enum class PointAction : uint8_t { None, InsertAfter, Delete };
 
     void ResolveBinding(EditorContext& context);
     void DrawBindingRow(EditorContext& context);
-    void DrawTransportRow(EditorContext& context, CameraTrackComponent& track);
-    void DrawTimeline(EditorContext& context, CameraTrackComponent& track);
+    void DrawTransportRow(EditorContext& context, CameraTrackComponent* track, MotionPathComponent* path);
+    void DrawTimeline(EditorContext& context, CameraTrackComponent* track, MotionPathComponent* path);
     void DrawKeyInspector(EditorContext& context, CameraTrackComponent& track);
     void DrawSettings(EditorContext& context, CameraTrackComponent& track);
+    void DrawSpeedKeyInspector(EditorContext& context, MotionPathComponent& path);
+    void DrawPathSettings(EditorContext& context, MotionPathComponent& path);
 
     void AddKeyFromView(EditorContext& context, CameraTrackComponent& track);
-    void SetPlayhead(EditorContext& context, CameraTrackComponent& track, float time);
+    void AddSpeedKey(EditorContext& context, MotionPathComponent& path);
+    void AddPoint(EditorContext& context, MotionPathComponent& path, const glm::vec3& position);
+    // Moves the playhead and poses the whole timeline there
+    void SetPlayhead(EditorContext& context, float time);
+    float TimelineEnd(EditorContext& context) const;
+    // The camera track Play and scrubbing go through: the bound one while it has keys
+    Entity PlayableTrack(EditorContext& context) const;
 
     Entity m_Track { entt::null };
-    // Track the visible range was last fitted to; rebinding reframes the timeline
+    Entity m_Path { entt::null };
+    // Bindings the visible range was last fitted to; rebinding reframes the timeline
     Entity m_FramedTrack { entt::null };
+    Entity m_FramedPath { entt::null };
     int m_SelectedKey = -1;
+    int m_SelectedSpeedKey = -1;
+    int m_SelectedPoint = -1;
     float m_Playhead = 0.0f;
 
     // Rotation angles as last shown for key m_EulerKey of m_EulerTrack. Converting the quaternion

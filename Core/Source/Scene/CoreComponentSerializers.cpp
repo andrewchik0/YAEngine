@@ -119,6 +119,60 @@ namespace YAEngine
       }
     );
 
+    registry.Register<MotionPathComponent>("motionPath",
+      [](const entt::registry& reg, entt::entity e) -> YAML::Node {
+        auto& path = reg.get<MotionPathComponent>(e);
+        YAML::Node n;
+        // Unconditional, for the same reason as the camera track: a new empty path must survive
+        n["minTurnRadius"] = path.minTurnRadius;
+        n["curvatureSmoothing"] = path.curvatureSmoothing;
+
+        YAML::Node pointsNode;
+        for (const auto& point : path.points)
+          pointsNode.push_back(SerializeVec3(point));
+        if (!path.points.empty())
+          n["points"] = pointsNode;
+
+        YAML::Node keysNode;
+        for (const auto& key : path.speedKeys)
+        {
+          YAML::Node keyNode;
+          keyNode["time"] = key.time;
+          keyNode["speed"] = key.speed;
+          keyNode.SetStyle(YAML::EmitterStyle::Flow);
+          keysNode.push_back(keyNode);
+        }
+        if (!path.speedKeys.empty())
+          n["speedKeys"] = keysNode;
+        return n;
+      },
+      [](entt::registry& reg, entt::entity e, const YAML::Node& n) {
+        MotionPathComponent path;
+        if (n["minTurnRadius"]) path.minTurnRadius = std::max(n["minTurnRadius"].as<float>(), 0.1f);
+        if (n["curvatureSmoothing"]) path.curvatureSmoothing = std::max(n["curvatureSmoothing"].as<float>(), 0.0f);
+        if (n["points"])
+        {
+          for (size_t i = 0; i < n["points"].size(); i++)
+            path.points.push_back(DeserializeVec3(n["points"][i]));
+        }
+        if (n["speedKeys"])
+        {
+          for (size_t i = 0; i < n["speedKeys"].size(); i++)
+          {
+            auto keyNode = n["speedKeys"][i];
+            MotionSpeedKey key;
+            if (keyNode["time"]) key.time = keyNode["time"].as<float>();
+            if (keyNode["speed"]) key.speed = std::max(keyNode["speed"].as<float>(), 0.0f);
+            path.speedKeys.push_back(key);
+          }
+          // The timing evaluator assumes ascending times; a hand-edited scene must not break it
+          std::sort(path.speedKeys.begin(), path.speedKeys.end(),
+            [](const MotionSpeedKey& a, const MotionSpeedKey& b) { return a.time < b.time; });
+        }
+        reg.emplace_or_replace<MotionPathComponent>(e, std::move(path));
+      }
+    );
+
     registry.Register<LightComponent>("light",
       [](const entt::registry& reg, entt::entity e) -> YAML::Node {
         auto& l = reg.get<LightComponent>(e);

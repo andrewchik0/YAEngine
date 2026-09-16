@@ -43,6 +43,7 @@ namespace YAEngine
     void DrawLightSection(EditorContext& context, Entity entity);
     void DrawCameraSection(EditorContext& context, Entity entity);
     void DrawCameraTrackSection(EditorContext& context, Entity entity);
+    void DrawMotionPathSection(EditorContext& context, Entity entity);
     void DrawReflectionProbeSection(EditorContext& context, Entity entity);
     void DrawIrradianceVolumeSection(EditorContext& context, Entity entity);
     void DrawBakeInclusionSection(EditorContext& context, Entity entity);

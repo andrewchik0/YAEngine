@@ -61,6 +61,7 @@ namespace YAEngine
     void DebugDrawIrradianceVolumeBricks();
     void DebugDrawSceneCameras();
     void DebugDrawCameraTrack();
+    void DebugDrawMotionPath();
 
     // EditorLayer.Actions.cpp: the editor operations agents run through actions.run
     void RegisterBridgeActions();
@@ -83,6 +84,13 @@ namespace YAEngine
     CameraTrackKey* ActiveSequencerKey();
     void DragSequencerKey(const glm::vec3& delta, const glm::vec3& currentHit);
     bool PickTrackKey(const Ray& ray, Entity& outTrack, int& outKey);
+    // The same for the control points of the motion path the sequencer has bound; a point only
+    // ever moves, so it takes the translate gizmo alone
+    glm::vec3* ActivePathPoint();
+    void DragPathPoint(const glm::vec3& delta);
+    bool PickPathPoint(const Ray& ray, Entity& outPath, int& outPoint);
+    // The motion path the viewport shows: the sequencer's binding, else the selected entity's
+    Entity VisibleMotionPath();
 
     EditorContext m_Context;
     std::string m_CurrentScenePath;
@@ -127,6 +135,7 @@ namespace YAEngine
 
     bool b_DragActive = false;
     bool b_DragTargetKey = false;
+    bool b_DragTargetPoint = false;
     GizmoAxis m_DragAxis {};
     GizmoMode m_DragMode {};
     LocalTransform m_DragStartLocalTransform;

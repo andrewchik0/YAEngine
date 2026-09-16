@@ -3,6 +3,7 @@
 #include "Assets/MaterialManager.h"
 #include "Assets/MeshManager.h"
 #include "Utils/CameraTrack.h"
+#include "Utils/MotionPath.h"
 
 namespace YAEngine
 {
@@ -77,7 +78,7 @@ namespace YAEngine
     }
   };
 
-  // Authored camera move, played back by CameraTrackPlayer. Lives next to a
+  // Authored camera move, played back by SequencePlayer. Lives next to a
   // CameraComponent on the same entity - playback drives that entity's transform.
   struct CameraTrackComponent
   {
@@ -97,6 +98,36 @@ namespace YAEngine
     // A move that starts from a completely different viewpoint carries over a history
     // and an exposure that belong to the old one.
     bool resetPostFXOnStart = true;
+  };
+
+  // Authored drive along a curve through world-space points, played on the SequencePlayer
+  // timeline. For a car the curve traces the rear axle.
+  struct MotionPathComponent
+  {
+    std::vector<glm::vec3> points;
+    // Invariant: sorted by ascending time, speeds never negative
+    std::vector<MotionSpeedKey> speedKeys;
+    // Bends tighter than this are flagged in the editor; the curve itself is never altered
+    float minTurnRadius = 5.0f;
+    // Along-path window the curvature is averaged over, about one wheelbase: steering then
+    // turns smoothly through the control points instead of snapping at them
+    float curvatureSmoothing = 2.5f;
+
+    // Runtime only. Gameplay code that poses the entity itself (a car also moves its wheels
+    // and body) sets this every frame, and the SequencePlayer then leaves the transform alone.
+    bool externallyDriven = false;
+
+    // Rebuilt on first use after any change to the inputs, whoever made it - an editor drag,
+    // a bridge patch or a scene load
+    const MotionPathTable& GetTable() const
+    {
+      if (!IsMotionPathTableCurrent(m_Table, points, curvatureSmoothing))
+        BuildMotionPathTable(points, curvatureSmoothing, m_Table);
+      return m_Table;
+    }
+
+  private:
+    mutable MotionPathTable m_Table;
   };
 
   struct MeshComponent

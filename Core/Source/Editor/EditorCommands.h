@@ -8,7 +8,7 @@ namespace YAEngine
 {
   struct EditorContext;
   class AssetManager;
-  class CameraTrackPlayer;
+  class SequencePlayer;
   class Render;
 
   // Editor operations shared by the panels and the agent bridge actions, so both go through the
@@ -41,7 +41,7 @@ namespace YAEngine
       void (*add)(Scene& scene, AssetManager& assets, Entity entity) = nullptr;
     };
 
-    // Point, Spot and Directional Light, Camera, Reflection Probe, Irradiance Volume, Terrain, Road,
+    // Point, Spot and Directional Light, Camera, Motion Path, Reflection Probe, Irradiance Volume, Terrain, Road,
     // Scatter and Collider, in menu order.
     std::span<const AddableComponent> GetAddableComponents();
     // Null when the component can be added to the entity, otherwise why it cannot. Runtime scatter output
@@ -111,8 +111,9 @@ namespace YAEngine
     // Why the renderer cannot show a debug view right now, or nullptr when it can.
     const char* GetDebugViewUnavailableReason(Render& render, int view);
 
-    // The Sequencer Play button: resumes a paused session of this track, otherwise plays the
-    // track from its start. Returns true when it resumed.
-    bool PlayCameraTrack(CameraTrackPlayer& player, Scene& scene, Entity track);
+    // The Sequencer Play button: resumes a paused or scrubbed session of this shot, otherwise
+    // plays the shot from its start. A null track plays the whole timeline through the active
+    // camera. Returns true when it resumed.
+    bool PlaySequence(SequencePlayer& player, Scene& scene, Entity cameraTrack);
   }
 }

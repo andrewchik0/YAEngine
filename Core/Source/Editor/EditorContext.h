@@ -10,7 +10,7 @@ namespace YAEngine
   class Timer;
   class EditorTextureCache;
   class ComponentRegistry;
-  class CameraTrackPlayer;
+  class SequencePlayer;
   struct FrameCaptureSessionResult;
   struct BridgeCaptureStatus;
 
@@ -25,7 +25,7 @@ namespace YAEngine
     ComponentRegistry* componentRegistry = nullptr;
     EditorTextureCache* textureCache = nullptr;
     // The engine's player, so editor playback is the same code path as F9 in a game build
-    CameraTrackPlayer* cameraTrackPlayer = nullptr;
+    SequencePlayer* sequencePlayer = nullptr;
     // Capture work that owns Render's single capture request while it runs: a --capture session
     // and an agent bridge shot
     const FrameCaptureSessionResult* captureSession = nullptr;
@@ -53,6 +53,10 @@ namespace YAEngine
     int sequencerKeyPickRequest = -1;
     // Playhead time requested from outside the panel (viewport key drag); negative = none
     float sequencerScrubRequest = -1.0f;
+    // The same for the motion path the sequencer has bound, with its selected control point
+    Entity sequencerPath = entt::null;
+    int sequencerSelectedPoint = -1;
+    int sequencerPointPickRequest = -1;
 
     // Volume bakes asked for by a panel. The panels are drawn while the frame is being recorded,
     // and a bake re-uploads the volume textures that frame has already bound, so EditorLayer

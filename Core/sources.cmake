@@ -233,9 +233,10 @@ set(SOURCE_FILES
   Source/Scene/ModelColliderSystem.cpp
   Source/Scene/CollisionQueryService.h
   Source/Scene/CollisionQueryService.cpp
-  Source/Scene/CameraTrackPlayer.h
-  Source/Scene/CameraTrackPlayer.cpp
+  Source/Scene/SequencePlayer.h
+  Source/Scene/SequencePlayer.cpp
   Source/Utils/CameraTrack.h
+  Source/Utils/MotionPath.h
 )
 
 if(YA_EDITOR)

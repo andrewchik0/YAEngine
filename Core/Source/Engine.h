@@ -14,7 +14,7 @@
 #include "Scene/SystemScheduler.h"
 #include "Scene/ComponentRegistry.h"
 #include "Scene/CollisionQueryService.h"
-#include "Scene/CameraTrackPlayer.h"
+#include "Scene/SequencePlayer.h"
 #include "Utils/Timer.h"
 #include "Utils/ThreadPool.h"
 #include "Utils/MainThreadDispatcher.h"
@@ -87,7 +87,7 @@ namespace YAEngine
     ThreadPool& GetThreadPool() { return m_ThreadPool; }
     MainThreadDispatcher& GetDispatcher() { return m_Dispatcher; }
     ComponentRegistry& GetComponentRegistry() { return m_ComponentRegistry; }
-    CameraTrackPlayer& GetCameraTrackPlayer() { return m_CameraTrackPlayer; }
+    SequencePlayer& GetSequencePlayer() { return m_SequencePlayer; }
     // What main returns: zero unless a capture session reported partial or failed shots.
     int GetExitCode() const { return m_CaptureSessionResult.exitCode; }
 
@@ -112,7 +112,7 @@ namespace YAEngine
     AssetManager m_AssetManager;
     Scene m_Scene;
     CollisionQueryService m_CollisionQueryService { m_Scene };
-    CameraTrackPlayer m_CameraTrackPlayer { m_Render };
+    SequencePlayer m_SequencePlayer { m_Render };
     SystemScheduler m_Scheduler;
     ComponentRegistry m_ComponentRegistry;
     LayerManager m_LayerManager;

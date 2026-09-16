@@ -8,7 +8,7 @@
 #include "Editor/Utils/EditorIcons.h"
 #include "Editor/Utils/EditorStyle.h"
 #include "Editor/Utils/EditorWidgets.h"
-#include "Scene/CameraTrackPlayer.h"
+#include "Scene/SequencePlayer.h"
 #include "Utils/CameraOrientation.h"
 
 namespace YAEngine
@@ -17,10 +17,15 @@ namespace YAEngine
 
   namespace
   {
-    // Two keys at the same time make a zero-length segment the evaluator cannot use
+    // Two keys at the same time make a zero-length segment the evaluators cannot use
     constexpr float MIN_KEY_GAP = 0.01f;
     constexpr float RULER_HEIGHT = 22.0f;
     constexpr float LANE_HEIGHT = 34.0f;
+    // Tall enough to read the speed curve drawn across it
+    constexpr float SPEED_LANE_HEIGHT = 56.0f;
+    constexpr float SPEED_CURVE_MARGIN = 8.0f;
+    constexpr float SPEED_CURVE_STEP_PX = 3.0f;
+    constexpr float LANE_LABEL_INSET = 4.0f;
     constexpr float KEY_HALF_SIZE = 6.0f;
     constexpr float KEY_GRAB_PX = 9.0f;
     // Time maps inside this margin at both ends, so a key diamond or tick label at either end of the view
@@ -35,15 +40,34 @@ namespace YAEngine
     constexpr float MAX_FOV_DEGREES = 120.0f;
     constexpr float ROTATION_EPSILON = 1e-6f;
 
+    constexpr float MAX_SPEED = 100.0f;
+    constexpr float DEFAULT_SPEED = 10.0f;
+    constexpr float MS_TO_KMH = 3.6f;
+    constexpr float MIN_TURN_RADIUS = 0.5f;
+    constexpr float MAX_TURN_RADIUS = 100.0f;
+    constexpr float DEFAULT_TURN_RADIUS = 5.0f;
+    constexpr float MAX_STEERING_SMOOTHING = 20.0f;
+    constexpr float DEFAULT_STEERING_SMOOTHING = 2.5f;
+    // A drive ending faster than this stops visibly dead at the end of its path
+    constexpr float STOP_SPEED_WARNING = 0.5f;
+    // Where a point appended past the end of the path lands, and how far the view ray may reach
+    constexpr float APPEND_SPACING = 5.0f;
+    constexpr float MAX_VIEW_POINT_DISTANCE = 500.0f;
+
     constexpr EnumOption ROTATION_MODES[] = {
       { .label = "Keyframed", .tooltip = "The camera takes the rotation stored in the keys" },
       { .label = "Aim At Entity", .tooltip = "The camera turns toward the Aim Target; the keyed rotation is used while no "
                                              "entity has that name" },
     };
 
-    float TrackDuration(const CameraTrackComponent& track)
+    bool HasTrack(Scene& scene, Entity e)
     {
-      return track.keys.empty() ? 0.0f : track.keys.back().time;
+      return e != entt::null && scene.GetRegistry().valid(e) && scene.HasComponent<CameraTrackComponent>(e);
+    }
+
+    bool HasPath(Scene& scene, Entity e)
+    {
+      return e != entt::null && scene.GetRegistry().valid(e) && scene.HasComponent<MotionPathComponent>(e);
     }
 
     // Next 1/2/5 * 10^n above the spacing the canvas can actually fit a label into
@@ -94,23 +118,52 @@ namespace YAEngine
       return index;
     }
 
-    float LowerBoundTime(const CameraTrackComponent& track, int index)
+    int InsertSpeedKey(MotionPathComponent& path, const MotionSpeedKey& key)
     {
-      return index > 0 ? track.keys[index - 1].time + MIN_KEY_GAP : 0.0f;
+      auto it = std::upper_bound(path.speedKeys.begin(), path.speedKeys.end(), key.time,
+        [](float time, const MotionSpeedKey& other) { return time < other.time; });
+      int index = int(it - path.speedKeys.begin());
+      path.speedKeys.insert(it, key);
+      return index;
     }
 
-    float UpperBoundTime(const CameraTrackComponent& track, int index)
+    // Bounds that keep a dragged key between its neighbours, so the sorted invariant holds
+    // without resorting
+    template<typename Key>
+    float KeyLowerBound(const std::vector<Key>& keys, int index)
     {
-      float lower = LowerBoundTime(track, index);
-      if (index + 1 >= int(track.keys.size()))
-        return std::max(lower, track.keys[index].time + MAX_VIEW_SPAN);
-      return std::max(lower, track.keys[index + 1].time - MIN_KEY_GAP);
+      return index > 0 ? keys[index - 1].time + MIN_KEY_GAP : 0.0f;
+    }
+
+    template<typename Key>
+    float KeyUpperBound(const std::vector<Key>& keys, int index)
+    {
+      float lower = KeyLowerBound(keys, index);
+      if (index + 1 >= int(keys.size()))
+        return std::max(lower, keys[index].time + MAX_VIEW_SPAN);
+      return std::max(lower, keys[index + 1].time - MIN_KEY_GAP);
     }
 
     bool SameRotation(const glm::quat& a, const glm::quat& b)
     {
       return std::abs(a.x - b.x) <= ROTATION_EPSILON && std::abs(a.y - b.y) <= ROTATION_EPSILON
         && std::abs(a.z - b.z) <= ROTATION_EPSILON && std::abs(a.w - b.w) <= ROTATION_EPSILON;
+    }
+
+    // Stretches of the path bending tighter than the turn radius
+    int CountTightBends(const MotionPathTable& table, float minTurnRadius)
+    {
+      float limit = 1.0f / std::max(minTurnRadius, 0.01f);
+      int count = 0;
+      bool inside = false;
+      for (float curvature : table.curvature)
+      {
+        bool tight = std::abs(curvature) > limit;
+        if (tight && !inside)
+          count++;
+        inside = tight;
+      }
+      return count;
     }
 
     // Width of an InlineButton showing both the icon and the label
@@ -133,8 +186,12 @@ namespace YAEngine
   void SequencerPanel::OnSceneReady(EditorContext& context)
   {
     m_Track = entt::null;
+    m_Path = entt::null;
     m_FramedTrack = entt::null;
+    m_FramedPath = entt::null;
     m_SelectedKey = -1;
+    m_SelectedSpeedKey = -1;
+    m_SelectedPoint = -1;
     m_Playhead = 0.0f;
     m_Drag = DragKind::None;
     m_DragKey = -1;
@@ -144,6 +201,9 @@ namespace YAEngine
     context.sequencerSelectedKey = -1;
     context.sequencerKeyPickRequest = -1;
     context.sequencerScrubRequest = -1.0f;
+    context.sequencerPath = entt::null;
+    context.sequencerSelectedPoint = -1;
+    context.sequencerPointPickRequest = -1;
   }
 
   void SequencerPanel::OnRender(EditorContext& context)
@@ -164,50 +224,76 @@ namespace YAEngine
     ResolveBinding(context);
     DrawBindingRow(context);
 
-    if (m_Track == entt::null || !context.scene->HasComponent<CameraTrackComponent>(m_Track))
+    Scene& scene = *context.scene;
+    CameraTrackComponent* track = HasTrack(scene, m_Track) ? &scene.GetComponent<CameraTrackComponent>(m_Track) : nullptr;
+    MotionPathComponent* path = HasPath(scene, m_Path) ? &scene.GetComponent<MotionPathComponent>(m_Path) : nullptr;
+
+    if (track == nullptr && path == nullptr)
     {
       context.sequencerTrack = entt::null;
       context.sequencerSelectedKey = -1;
+      context.sequencerPath = entt::null;
+      context.sequencerSelectedPoint = -1;
       ImGui::End();
       return;
     }
 
-    auto& track = context.scene->GetComponent<CameraTrackComponent>(m_Track);
-
-    if (m_FramedTrack != m_Track)
+    if (m_FramedTrack != m_Track || m_FramedPath != m_Path)
     {
       m_FramedTrack = m_Track;
+      m_FramedPath = m_Path;
       m_SelectedKey = -1;
-      m_Playhead = 0.0f;
+      m_SelectedSpeedKey = -1;
+      m_SelectedPoint = -1;
       m_ViewStart = 0.0f;
-      m_ViewEnd = std::max(TrackDuration(track) * 1.1f, 5.0f);
+      m_ViewEnd = std::max(TimelineEnd(context) * 1.1f, 5.0f);
     }
 
-    if (m_SelectedKey >= int(track.keys.size()))
+    if (track == nullptr || m_SelectedKey >= int(track->keys.size()))
       m_SelectedKey = -1;
+    if (path == nullptr || m_SelectedSpeedKey >= int(path->speedKeys.size()))
+      m_SelectedSpeedKey = -1;
+    if (path == nullptr || m_SelectedPoint >= int(path->points.size()))
+      m_SelectedPoint = -1;
 
-    // A key clicked in the viewport; adopted here because the panel republishes its own
+    // Picks made in the viewport; adopted here because the panel republishes its own
     // selection into the context at the end of every render
     if (context.sequencerKeyPickRequest >= 0)
     {
-      m_SelectedKey = std::min(context.sequencerKeyPickRequest, int(track.keys.size()) - 1);
+      if (track != nullptr && !track->keys.empty())
+        m_SelectedKey = std::min(context.sequencerKeyPickRequest, int(track->keys.size()) - 1);
       context.sequencerKeyPickRequest = -1;
+    }
+    if (context.sequencerPointPickRequest >= 0)
+    {
+      if (path != nullptr && !path->points.empty())
+        m_SelectedPoint = std::min(context.sequencerPointPickRequest, int(path->points.size()) - 1);
+      context.sequencerPointPickRequest = -1;
     }
 
     // A viewport key drag already posed the camera; this keeps the playhead in step
     if (context.sequencerScrubRequest >= 0.0f)
     {
-      SetPlayhead(context, track, context.sequencerScrubRequest);
+      m_Playhead = context.sequencerScrubRequest;
       context.sequencerScrubRequest = -1.0f;
     }
 
-    DrawTransportRow(context, track);
-    DrawTimeline(context, track);
-    DrawKeyInspector(context, track);
-    DrawSettings(context, track);
+    DrawTransportRow(context, track, path);
+    DrawTimeline(context, track, path);
+    if (track != nullptr)
+      DrawKeyInspector(context, *track);
+    if (path != nullptr)
+    {
+      DrawSpeedKeyInspector(context, *path);
+      DrawPathSettings(context, *path);
+    }
+    if (track != nullptr)
+      DrawSettings(context, *track);
 
-    context.sequencerTrack = m_Track;
+    context.sequencerTrack = track != nullptr ? m_Track : Entity(entt::null);
     context.sequencerSelectedKey = m_SelectedKey;
+    context.sequencerPath = path != nullptr ? m_Path : Entity(entt::null);
+    context.sequencerSelectedPoint = m_SelectedPoint;
 
     ImGui::End();
   }
@@ -216,20 +302,31 @@ namespace YAEngine
   {
     Scene& scene = *context.scene;
 
-    auto hasTrack = [&scene](Entity e) {
-      return e != entt::null && scene.GetRegistry().valid(e)
-        && scene.HasComponent<CameraTrackComponent>(e);
-    };
-
-    // Selecting a track entity binds it, but the binding then sticks: selecting the aim
-    // target or a light to check something must not empty the panel mid-session.
-    if (hasTrack(context.selectedEntity))
+    // Selecting a track or path entity binds it, but the binding then sticks: selecting the
+    // aim target or a light to check something must not empty the panel mid-session.
+    if (HasTrack(scene, context.selectedEntity))
       m_Track = context.selectedEntity;
-    else if (!hasTrack(m_Track))
+    else if (!HasTrack(scene, m_Track))
       m_Track = entt::null;
 
-    if (m_Track == entt::null)
-      m_SelectedKey = -1;
+    if (HasPath(scene, context.selectedEntity))
+      m_Path = context.selectedEntity;
+    else if (!HasPath(scene, m_Path))
+      m_Path = entt::null;
+
+    // The only motion path binds itself: the car belongs on every shot being authored
+    if (m_Path == entt::null)
+    {
+      Entity only = entt::null;
+      int count = 0;
+      for (Entity candidate : scene.GetView<MotionPathComponent>())
+      {
+        only = candidate;
+        count++;
+      }
+      if (count == 1)
+        m_Path = only;
+    }
   }
 
   void SequencerPanel::DrawBindingRow(EditorContext& context)
@@ -237,36 +334,61 @@ namespace YAEngine
     Scene& scene = *context.scene;
     entt::registry& registry = scene.GetRegistry();
 
-    bool hasTracks = false;
-    for (Entity candidate : scene.GetView<CameraTrackComponent>())
-    {
-      hasTracks = candidate != entt::null;
-      break;
-    }
+    const bool hasTracks = !scene.GetView<CameraTrackComponent>().empty();
+    const bool hasPaths = !scene.GetView<MotionPathComponent>().empty();
 
     BeginPropertyScope();
-    Entity picked = m_Track;
-    const PropertyEdit trackEdit = PropertyEntity("Track", picked, scene, {
-      .allowNone = false,
+    Entity pickedTrack = m_Track;
+    const PropertyEdit trackEdit = PropertyEntity("Camera Track", pickedTrack, scene, {
+      .allowNone = true,
       .filter = [&registry](Entity candidate) { return registry.all_of<CameraTrackComponent>(candidate); },
-      .tooltip = "Camera whose Camera Track the panel edits. Selecting a camera that has a track binds it as well.",
+      .tooltip = "Camera whose track is the shot being authored. None plays the whole timeline through the active "
+                 "camera. Selecting a camera that has a track binds it as well.",
       .disabledReason = hasTracks ? nullptr : "No camera in the scene has a Camera Track" });
+
+    Entity pickedPath = m_Path;
+    const PropertyEdit pathEdit = PropertyEntity("Motion Path", pickedPath, scene, {
+      .allowNone = true,
+      .filter = [&registry](Entity candidate) { return registry.all_of<MotionPathComponent>(candidate); },
+      .tooltip = "Entity whose timed drive is shown on the Speed lane and in the viewport. Every motion path plays "
+                 "on the same timeline whichever one is bound here.",
+      .disabledReason = hasPaths ? nullptr : "No entity in the scene has a Motion Path" });
     EndPropertyScope();
 
-    if (trackEdit.changed && picked != entt::null && picked != m_Track)
+    if (trackEdit.changed && pickedTrack != m_Track)
     {
-      m_Track = picked;
+      // A selected track entity would bind itself again on the next frame
+      if (pickedTrack == entt::null && context.selectedEntity == m_Track)
+        context.ClearSelection();
+      m_Track = pickedTrack;
       m_SelectedKey = -1;
-      context.SelectEntity(picked);
+      if (pickedTrack != entt::null)
+        context.SelectEntity(pickedTrack);
+    }
+
+    if (pathEdit.changed && pickedPath != m_Path)
+    {
+      if (pickedPath == entt::null && context.selectedEntity == m_Path)
+        context.ClearSelection();
+      m_Path = pickedPath;
+      m_SelectedSpeedKey = -1;
+      m_SelectedPoint = -1;
+      if (pickedPath != entt::null)
+        context.SelectEntity(pickedPath);
     }
 
     Entity selected = context.selectedEntity;
-    const bool canCreate = selected != entt::null && registry.valid(selected)
+    const bool selectable = selected != entt::null && registry.valid(selected)
+      && !scene.HasComponent<EditorOnlyTag>(selected);
+    const bool canCreateTrack = selectable
       && scene.HasComponent<CameraComponent>(selected)
       && !scene.HasComponent<CameraTrackComponent>(selected)
-      && !scene.HasComponent<EditorOnlyTag>(selected);
+      && !scene.HasComponent<MotionPathComponent>(selected);
+    const bool canCreatePath = selectable
+      && !scene.HasComponent<MotionPathComponent>(selected)
+      && !scene.HasComponent<CameraTrackComponent>(selected);
 
-    if (canCreate && InlineButton("Create Camera Track", {
+    if (canCreateTrack && InlineButton("Create Camera Track", {
       .icon = ICON_LC_CIRCLE_PLUS,
       .tooltip = "Adds a Camera Track to the selected camera and binds it" }))
     {
@@ -275,20 +397,36 @@ namespace YAEngine
       m_SelectedKey = -1;
     }
 
-    if (m_Track == entt::null && !canCreate)
-      ImGui::TextDisabled("Select a camera entity to author a flythrough track.");
+    if (canCreatePath)
+    {
+      if (canCreateTrack)
+        SameLineIfFits(ButtonWidth("Create Motion Path", ICON_LC_SPLINE));
+      if (InlineButton("Create Motion Path", {
+        .icon = ICON_LC_SPLINE,
+        .tooltip = "Adds a Motion Path to the selected entity and binds it. For a car the curve traces the rear axle." }))
+      {
+        scene.AddComponent<MotionPathComponent>(selected);
+        m_Path = selected;
+        m_SelectedSpeedKey = -1;
+        m_SelectedPoint = -1;
+      }
+    }
+
+    if (m_Track == entt::null && m_Path == entt::null && !canCreateTrack && !canCreatePath)
+      ImGui::TextDisabled("Select a camera to author a shot, or any entity to give it a motion path.");
   }
 
-  void SequencerPanel::DrawTransportRow(EditorContext& context, CameraTrackComponent& track)
+  void SequencerPanel::DrawTransportRow(EditorContext& context, CameraTrackComponent* track, MotionPathComponent* path)
   {
     Scene& scene = *context.scene;
-    CameraTrackPlayer* player = context.cameraTrackPlayer;
-    float duration = TrackDuration(track);
+    SequencePlayer* player = context.sequencePlayer;
+    Entity playTrack = PlayableTrack(context);
 
-    bool active = player != nullptr && player->IsPlaying() && player->GetTrackEntity() == m_Track;
-    bool advancing = active && !player->IsPaused();
+    const bool active = player != nullptr && player->IsActive();
+    const bool advancing = player != nullptr && player->IsAdvancing();
+    // One timeline: whatever started the session, the playhead shows its time
     if (advancing)
-      m_Playhead = float(player->GetElapsed());
+      m_Playhead = float(player->GetTime());
 
     if (advancing)
     {
@@ -297,53 +435,77 @@ namespace YAEngine
     }
     else
     {
-      const char* playReason = player == nullptr ? "The editor has no camera track player"
-        : track.keys.empty() ? "The track has no keys" : nullptr;
+      const bool drivable = path != nullptr && path->points.size() >= 2;
+      const char* playReason = player == nullptr ? "The editor has no sequence player"
+        : playTrack != entt::null || drivable ? nullptr
+        : track != nullptr ? "The camera track has no keys"
+        : "The motion path needs at least two points";
       if (InlineButton("Play", {
         .icon = ICON_LC_PLAY,
-        .tooltip = "Play from the start; Pause + scrub + Play to preview a segment",
+        .tooltip = "Plays the camera track's shot, or the whole timeline when no track is bound. After a scrub it "
+                   "starts from the playhead; Stop and Play to start over.",
         .disabledReason = playReason }))
       {
-        if (!EditorCommands::PlayCameraTrack(*player, scene, m_Track))
-          m_Playhead = 0.0f;
+        if (!EditorCommands::PlaySequence(*player, scene, playTrack))
+          m_Playhead = float(player->GetTime());
       }
     }
 
     SameLineIfFits(ButtonWidth("Stop", ICON_LC_SQUARE));
-    if (InlineButton("Stop", { .icon = ICON_LC_SQUARE, .disabledReason = active ? nullptr : "The track is not playing" }))
+    if (InlineButton("Stop", {
+      .icon = ICON_LC_SQUARE,
+      .tooltip = "Ends the session and puts back everything it moved",
+      .disabledReason = active ? nullptr : "Nothing is playing or being scrubbed" }))
+    {
       player->Stop(scene);
-
-    // Playback already hands the viewport to the track camera, so the two must not both
-    // fight over the active camera
-    const char* previewReason = active ? "Playback already shows the track camera" : nullptr;
-    if (context.previewCamera == m_Track)
-    {
-      SameLineIfFits(ButtonWidth("Stop Preview", ICON_LC_X));
-      if (InlineButton("Stop Preview", { .icon = ICON_LC_X, .disabledReason = previewReason }))
-        context.StopCameraPreview();
     }
-    else
+
+    if (track != nullptr)
     {
-      SameLineIfFits(ButtonWidth("Preview", ICON_LC_VIDEO));
-      if (InlineButton("Preview", {
-        .icon = ICON_LC_VIDEO,
-        .tooltip = "Looks through the track camera in the viewport",
-        .disabledReason = previewReason }))
+      // Playback already hands the viewport to the track camera, so the two must not both
+      // fight over the active camera
+      const bool shown = active && player->HoldsCamera() && player->GetCameraTrack() == m_Track;
+      const char* previewReason = shown ? "Playback already shows the track camera" : nullptr;
+      if (context.previewCamera == m_Track)
       {
-        context.StartCameraPreview(m_Track);
+        SameLineIfFits(ButtonWidth("Stop Preview", ICON_LC_X));
+        if (InlineButton("Stop Preview", { .icon = ICON_LC_X, .disabledReason = previewReason }))
+          context.StopCameraPreview();
+      }
+      else
+      {
+        SameLineIfFits(ButtonWidth("Preview", ICON_LC_VIDEO));
+        if (InlineButton("Preview", {
+          .icon = ICON_LC_VIDEO,
+          .tooltip = "Looks through the track camera in the viewport",
+          .disabledReason = previewReason }))
+        {
+          context.StartCameraPreview(m_Track);
+        }
+      }
+
+      SameLineIfFits(ButtonWidth("Add Key", ICON_LC_CIRCLE_PLUS));
+      if (InlineButton("Add Key", {
+        .icon = ICON_LC_CIRCLE_PLUS,
+        .tooltip = "Captures the editor camera pose at the playhead, with the track camera fov" }))
+      {
+        AddKeyFromView(context, *track);
       }
     }
 
-    SameLineIfFits(ButtonWidth("Add Key", ICON_LC_CIRCLE_PLUS));
-    if (InlineButton("Add Key", {
-      .icon = ICON_LC_CIRCLE_PLUS,
-      .tooltip = "Captures the editor camera pose at the playhead, with the track camera fov" }))
+    if (path != nullptr)
     {
-      AddKeyFromView(context, track);
+      SameLineIfFits(ButtonWidth("Add Speed Key", ICON_LC_GAUGE));
+      if (InlineButton("Add Speed Key", {
+        .icon = ICON_LC_GAUGE,
+        .tooltip = "Adds a speed key at the playhead, holding the speed the drive already has there" }))
+      {
+        AddSpeedKey(context, *path);
+      }
     }
 
     char status[64];
-    std::snprintf(status, sizeof(status), "%.2f / %.2f s  (%d keys)", m_Playhead, duration, int(track.keys.size()));
+    std::snprintf(status, sizeof(status), "%.2f / %.2f s", m_Playhead, TimelineEnd(context));
     EditorFonts::Push(EditorFontRole::Mono);
     SameLineIfFits(ImGui::CalcTextSize(status).x);
     ImGui::AlignTextToFramePadding();
@@ -351,12 +513,16 @@ namespace YAEngine
     EditorFonts::Pop();
   }
 
-  void SequencerPanel::DrawTimeline(EditorContext& context, CameraTrackComponent& track)
+  void SequencerPanel::DrawTimeline(EditorContext& context, CameraTrackComponent* track, MotionPathComponent* path)
   {
     ImDrawList* draw = ImGui::GetWindowDrawList();
     ImVec2 origin = ImGui::GetCursorScreenPos();
     float width = std::max(ImGui::GetContentRegionAvail().x, 64.0f);
-    float height = RULER_HEIGHT + LANE_HEIGHT;
+    float cameraLaneTop = origin.y + RULER_HEIGHT;
+    float cameraLaneHeight = track != nullptr ? LANE_HEIGHT : 0.0f;
+    float speedLaneTop = cameraLaneTop + cameraLaneHeight;
+    float speedLaneHeight = path != nullptr ? SPEED_LANE_HEIGHT : 0.0f;
+    float height = RULER_HEIGHT + cameraLaneHeight + speedLaneHeight;
     ImVec2 canvasEnd(origin.x + width, origin.y + height);
     float timeStartX = origin.x + TIMELINE_PADDING_X;
     float timeWidth = width - 2.0f * TIMELINE_PADDING_X;
@@ -372,6 +538,17 @@ namespace YAEngine
     auto xToTime = [this, timeStartX, timeWidth](float x) {
       float span = std::max(m_ViewEnd - m_ViewStart, 1e-4f);
       return m_ViewStart + (x - timeStartX) / timeWidth * span;
+    };
+
+    float maxSpeed = 1.0f;
+    if (path != nullptr)
+    {
+      for (const MotionSpeedKey& key : path->speedKeys)
+        maxSpeed = std::max(maxSpeed, key.speed);
+    }
+    auto speedToY = [speedLaneTop, speedLaneHeight, maxSpeed](float speed) {
+      float usable = speedLaneHeight - 2.0f * SPEED_CURVE_MARGIN;
+      return speedLaneTop + speedLaneHeight - SPEED_CURVE_MARGIN - speed / maxSpeed * usable;
     };
 
     if (ImGui::IsItemHovered())
@@ -398,30 +575,42 @@ namespace YAEngine
       }
       else
       {
-        int hit = -1;
-        float best = KEY_GRAB_PX;
-        if (mouse.y >= origin.y + RULER_HEIGHT)
-        {
-          for (size_t i = 0; i < track.keys.size(); i++)
+        // The key nearest in time within grab range, on the lane under the mouse
+        auto nearestKey = [&timeToX, mouse](const auto& keys) {
+          int hit = -1;
+          float best = KEY_GRAB_PX;
+          for (size_t i = 0; i < keys.size(); i++)
           {
-            float distance = std::abs(timeToX(track.keys[i].time) - mouse.x);
+            float distance = std::abs(timeToX(keys[i].time) - mouse.x);
             if (distance <= best)
             {
               best = distance;
               hit = int(i);
             }
           }
-        }
+          return hit;
+        };
 
-        if (hit >= 0)
+        m_Drag = DragKind::Scrub;
+        if (track != nullptr && mouse.y >= cameraLaneTop && mouse.y < cameraLaneTop + cameraLaneHeight)
         {
-          m_SelectedKey = hit;
-          m_DragKey = hit;
-          m_Drag = DragKind::Key;
+          int hit = nearestKey(track->keys);
+          if (hit >= 0)
+          {
+            m_SelectedKey = hit;
+            m_DragKey = hit;
+            m_Drag = DragKind::CameraKey;
+          }
         }
-        else
+        else if (path != nullptr && mouse.y >= speedLaneTop && mouse.y < speedLaneTop + speedLaneHeight)
         {
-          m_Drag = DragKind::Scrub;
+          int hit = nearestKey(path->speedKeys);
+          if (hit >= 0)
+          {
+            m_SelectedSpeedKey = hit;
+            m_DragKey = hit;
+            m_Drag = DragKind::SpeedKey;
+          }
         }
       }
     }
@@ -442,16 +631,23 @@ namespace YAEngine
           m_ViewStart = m_PanAnchorTime - (mouse.x - timeStartX) / timeWidth * span;
           m_ViewEnd = m_ViewStart + span;
         }
-        else if (m_Drag == DragKind::Key && m_DragKey >= 0 && m_DragKey < int(track.keys.size()))
+        else if (m_Drag == DragKind::CameraKey && track != nullptr
+          && m_DragKey >= 0 && m_DragKey < int(track->keys.size()))
         {
-          // Clamped between the neighbours, so the sorted invariant holds without resorting
-          track.keys[m_DragKey].time = glm::clamp(xToTime(mouse.x),
-            LowerBoundTime(track, m_DragKey), UpperBoundTime(track, m_DragKey));
-          SetPlayhead(context, track, track.keys[m_DragKey].time);
+          track->keys[m_DragKey].time = glm::clamp(xToTime(mouse.x),
+            KeyLowerBound(track->keys, m_DragKey), KeyUpperBound(track->keys, m_DragKey));
+          SetPlayhead(context, track->keys[m_DragKey].time);
+        }
+        else if (m_Drag == DragKind::SpeedKey && path != nullptr
+          && m_DragKey >= 0 && m_DragKey < int(path->speedKeys.size()))
+        {
+          path->speedKeys[m_DragKey].time = glm::clamp(xToTime(mouse.x),
+            KeyLowerBound(path->speedKeys, m_DragKey), KeyUpperBound(path->speedKeys, m_DragKey));
+          SetPlayhead(context, path->speedKeys[m_DragKey].time);
         }
         else if (m_Drag == DragKind::Scrub)
         {
-          SetPlayhead(context, track, xToTime(mouse.x));
+          SetPlayhead(context, xToTime(mouse.x));
         }
       }
     }
@@ -463,13 +659,6 @@ namespace YAEngine
 
     draw->AddRectFilled(origin, canvasEnd, themeColor(theme.appBackground));
     draw->AddRectFilled(origin, ImVec2(canvasEnd.x, origin.y + RULER_HEIGHT), themeColor(theme.panel));
-
-    float duration = TrackDuration(track);
-    if (duration > 0.0f)
-    {
-      draw->AddRectFilled(ImVec2(timeToX(0.0f), origin.y + RULER_HEIGHT + 4.0f),
-        ImVec2(timeToX(duration), canvasEnd.y - 4.0f), themeColor(theme.accentMuted));
-    }
 
     float step = NiceTickStep(m_ViewEnd - m_ViewStart, timeWidth);
     // Panning past the start would otherwise label negative seconds
@@ -488,17 +677,64 @@ namespace YAEngine
         draw->AddText(ImVec2(x + 3.0f, origin.y + 3.0f), themeColor(theme.textSecondary), label);
     }
 
-    float laneY = origin.y + RULER_HEIGHT + LANE_HEIGHT * 0.5f;
-    for (size_t i = 0; i < track.keys.size(); i++)
-    {
-      float x = timeToX(track.keys[i].time);
-      bool selected = int(i) == m_SelectedKey;
+    auto drawKey = [&](float x, float y, bool selected) {
       ImVec2 points[4] = {
-        ImVec2(x, laneY - KEY_HALF_SIZE), ImVec2(x + KEY_HALF_SIZE, laneY),
-        ImVec2(x, laneY + KEY_HALF_SIZE), ImVec2(x - KEY_HALF_SIZE, laneY)
+        ImVec2(x, y - KEY_HALF_SIZE), ImVec2(x + KEY_HALF_SIZE, y),
+        ImVec2(x, y + KEY_HALF_SIZE), ImVec2(x - KEY_HALF_SIZE, y)
       };
       draw->AddConvexPolyFilled(points, 4, themeColor(selected ? theme.warning : theme.accent));
       draw->AddPolyline(points, 4, themeColor(theme.appBackground), ImDrawFlags_Closed, 1.5f);
+    };
+
+    if (track != nullptr)
+    {
+      if (!track->keys.empty())
+      {
+        draw->AddRectFilled(ImVec2(timeToX(SequencePlayer::ShotStart(*track)), cameraLaneTop + 4.0f),
+          ImVec2(timeToX(SequencePlayer::ShotEnd(*track)), cameraLaneTop + cameraLaneHeight - 4.0f),
+          themeColor(theme.accentMuted));
+      }
+      draw->AddText(ImVec2(origin.x + LANE_LABEL_INSET, cameraLaneTop + 2.0f), themeColor(theme.textDisabled), "Camera");
+
+      float laneY = cameraLaneTop + cameraLaneHeight * 0.5f;
+      for (size_t i = 0; i < track->keys.size(); i++)
+        drawKey(timeToX(track->keys[i].time), laneY, int(i) == m_SelectedKey);
+    }
+
+    if (path != nullptr)
+    {
+      draw->AddLine(ImVec2(origin.x, speedLaneTop), ImVec2(canvasEnd.x, speedLaneTop), themeColor(theme.borderSubtle));
+
+      const MotionPathTable& table = path->GetTable();
+      if (!path->speedKeys.empty() && path->points.size() >= 2)
+      {
+        float driveEnd = MotionPathDuration(table, path->speedKeys);
+        draw->AddRectFilled(ImVec2(timeToX(path->speedKeys.front().time), speedLaneTop + 4.0f),
+          ImVec2(timeToX(driveEnd), speedLaneTop + speedLaneHeight - 4.0f), themeColor(theme.accentMuted));
+      }
+
+      char label[48];
+      std::snprintf(label, sizeof(label), "Speed  %.0f m/s", maxSpeed);
+      draw->AddText(ImVec2(origin.x + LANE_LABEL_INSET, speedLaneTop + 2.0f), themeColor(theme.textDisabled), label);
+
+      if (!path->speedKeys.empty())
+      {
+        // The speed the drive really has, so the stop at the end of the path shows too
+        std::vector<ImVec2> curve;
+        for (float x = timeStartX; x <= timeStartX + timeWidth; x += SPEED_CURVE_STEP_PX)
+        {
+          float speed = EvaluateMotionPath(table, path->speedKeys, xToTime(x)).speed;
+          curve.push_back(ImVec2(x, speedToY(speed)));
+        }
+        if (curve.size() >= 2)
+          draw->AddPolyline(curve.data(), int(curve.size()), themeColor(theme.accent), ImDrawFlags_None, 1.5f);
+      }
+
+      for (size_t i = 0; i < path->speedKeys.size(); i++)
+      {
+        const MotionSpeedKey& key = path->speedKeys[i];
+        drawKey(timeToX(key.time), speedToY(key.speed), int(i) == m_SelectedSpeedKey);
+      }
     }
 
     float playheadX = timeToX(m_Playhead);
@@ -510,19 +746,19 @@ namespace YAEngine
 
   void SequencerPanel::DrawKeyInspector(EditorContext& context, CameraTrackComponent& track)
   {
-    if (!BeginPropertyGroup("Key", { .icon = ICON_LC_KEY, .tooltip = "The key selected in the timeline or in the viewport" }))
+    if (!BeginPropertyGroup("Camera Key", { .icon = ICON_LC_KEY, .tooltip = "The camera key selected in the timeline or in the viewport" }))
       return;
 
     if (m_SelectedKey < 0 || m_SelectedKey >= int(track.keys.size()))
     {
-      PropertyStatus(nullptr, "Click a key in the timeline to edit it. Wheel zooms, Ctrl-drag pans.");
+      PropertyStatus(nullptr, "Click a key on the Camera lane to edit it. Wheel zooms, Ctrl-drag pans.");
       EndPropertyGroup();
       return;
     }
 
     int index = m_SelectedKey;
-    float lower = LowerBoundTime(track, index);
-    float upper = UpperBoundTime(track, index);
+    float lower = KeyLowerBound(track.keys, index);
+    float upper = KeyUpperBound(track.keys, index);
     KeyAction action = KeyAction::None;
 
     {
@@ -535,12 +771,12 @@ namespace YAEngine
       float time = key.time;
       if (PropertyFloat("Time", time, {
         .min = lower, .max = upper, .speed = 0.02f, .format = "%.3f", .unit = "s",
-        .tooltip = "Seconds from the start of the track. Kept between the neighbouring keys, so the key order never "
-                   "changes." }).changed)
+        .tooltip = "Seconds on the timeline. Kept between the neighbouring keys, so the key order never changes. The "
+                   "shot runs from the first key to the last." }).changed)
       {
         // Explicit, since bounds that meet leave the row unclamped
         key.time = glm::clamp(time, lower, upper);
-        SetPlayhead(context, track, key.time);
+        SetPlayhead(context, key.time);
       }
 
       float fovDegrees = glm::degrees(key.fov);
@@ -549,14 +785,14 @@ namespace YAEngine
         .tooltip = "Vertical field of view at this key, eased toward the neighbouring keys in between." }).changed)
       {
         key.fov = glm::radians(glm::clamp(fovDegrees, MIN_FOV_DEGREES, MAX_FOV_DEGREES));
-        SetPlayhead(context, track, m_Playhead);
+        SetPlayhead(context, m_Playhead);
       }
 
       if (PropertyVec3("Position", key.position, {
         .speed = 0.05f, .format = "%.2f", .unit = "m",
         .tooltip = "World-space camera position at this key." }).changed)
       {
-        SetPlayhead(context, track, m_Playhead);
+        SetPlayhead(context, m_Playhead);
       }
 
       const bool cached = m_EulerTrack == m_Track && m_EulerKey == index && SameRotation(m_EulerRotation, key.rotation);
@@ -567,7 +803,7 @@ namespace YAEngine
                    "direction. With Rotation Mode Aim At Entity it is used only while the Aim Target matches no entity." }).changed)
       {
         key.rotation = MakeYawPitchRollRotation(glm::radians(angles));
-        SetPlayhead(context, track, m_Playhead);
+        SetPlayhead(context, m_Playhead);
       }
       m_EulerTrack = m_Track;
       m_EulerKey = index;
@@ -598,7 +834,7 @@ namespace YAEngine
         if (CaptureViewPose(context, m_Track, updated))
         {
           track.keys[index] = updated;
-          SetPlayhead(context, track, m_Playhead);
+          SetPlayhead(context, m_Playhead);
         }
         break;
       }
@@ -610,14 +846,14 @@ namespace YAEngine
           offset = std::min(offset, (track.keys[index + 1].time - copy.time) * 0.5f);
         copy.time += std::max(offset, MIN_KEY_GAP);
         m_SelectedKey = InsertKey(track, copy);
-        SetPlayhead(context, track, copy.time);
+        SetPlayhead(context, copy.time);
         break;
       }
       case KeyAction::Delete:
       {
         track.keys.erase(track.keys.begin() + index);
         m_SelectedKey = -1;
-        SetPlayhead(context, track, m_Playhead);
+        SetPlayhead(context, m_Playhead);
         break;
       }
       case KeyAction::None:
@@ -680,6 +916,254 @@ namespace YAEngine
     EndPropertyGroup();
   }
 
+  void SequencerPanel::DrawSpeedKeyInspector(EditorContext& context, MotionPathComponent& path)
+  {
+    if (!BeginPropertyGroup("Speed Key", { .icon = ICON_LC_GAUGE, .tooltip = "The speed key selected on the Speed lane" }))
+      return;
+
+    if (m_SelectedSpeedKey < 0 || m_SelectedSpeedKey >= int(path.speedKeys.size()))
+    {
+      PropertyStatus(nullptr, "Click a key on the Speed lane to edit it. Add Speed Key places one at the playhead.");
+      EndPropertyGroup();
+      return;
+    }
+
+    int index = m_SelectedSpeedKey;
+    float lower = KeyLowerBound(path.speedKeys, index);
+    float upper = KeyUpperBound(path.speedKeys, index);
+    bool erase = false;
+
+    {
+      MotionSpeedKey& key = path.speedKeys[index];
+
+      char position[32];
+      std::snprintf(position, sizeof(position), "%d of %d", index + 1, int(path.speedKeys.size()));
+      PropertyReadOnly("Index", position, { .mono = true, .tooltip = "Position of the key on the lane, counted from 1" });
+
+      float time = key.time;
+      if (PropertyFloat("Time", time, {
+        .min = lower, .max = upper, .speed = 0.02f, .format = "%.3f", .unit = "s",
+        .tooltip = "Seconds on the timeline. Kept between the neighbouring keys. Before the first key the entity waits "
+                   "at the start of the path." }).changed)
+      {
+        key.time = glm::clamp(time, lower, upper);
+        SetPlayhead(context, key.time);
+      }
+
+      float speed = key.speed;
+      if (PropertyFloat("Speed", speed, {
+        .min = 0.0f, .max = MAX_SPEED, .speed = 0.05f, .format = "%.2f", .unit = "m/s",
+        .tooltip = "Speed at this key, eased toward the neighbouring keys in between. After the last key it holds. A "
+                   "drive never goes backwards." }).changed)
+      {
+        key.speed = glm::clamp(speed, 0.0f, MAX_SPEED);
+        SetPlayhead(context, m_Playhead);
+      }
+
+      char kmh[32];
+      std::snprintf(kmh, sizeof(kmh), "%.1f km/h", key.speed * MS_TO_KMH);
+      PropertyReadOnly("In km/h", kmh, { .mono = true });
+
+      char distance[32];
+      std::snprintf(distance, sizeof(distance), "%.2f m", EvaluateMotionTiming(path.speedKeys, key.time).distance);
+      PropertyReadOnly("Distance", distance, { .mono = true, .tooltip = "How far along the path the entity is at this key" });
+
+      SuspendPropertyGrid();
+      if (InlineButton("Delete", { .icon = ICON_LC_TRASH_2 }))
+        erase = true;
+    }
+
+    if (erase)
+    {
+      path.speedKeys.erase(path.speedKeys.begin() + index);
+      m_SelectedSpeedKey = -1;
+      SetPlayhead(context, m_Playhead);
+    }
+
+    EndPropertyGroup();
+  }
+
+  void SequencerPanel::DrawPathSettings(EditorContext& context, MotionPathComponent& path)
+  {
+    if (!BeginPropertyGroup("Motion Path", { .icon = ICON_LC_SPLINE, .tooltip = "The curve the bound entity drives along" }))
+      return;
+
+    Scene& scene = *context.scene;
+    SequencePlayer* player = context.sequencePlayer;
+    const bool sessionActive = player != nullptr && player->IsActive();
+    // Only a running session is re-posed by curve edits: a stopped one must not start just
+    // because a point moved
+    auto repose = [this, &context, sessionActive]() {
+      if (sessionActive)
+        SetPlayhead(context, m_Playhead);
+    };
+
+    {
+      const MotionPathTable& table = path.GetTable();
+
+      char summary[64];
+      std::snprintf(summary, sizeof(summary), "%zu points, %.1f m", path.points.size(), table.length);
+      PropertyReadOnly("Curve", summary, { .mono = true, .tooltip = "Control points and the length of the curve through them" });
+
+      char duration[32];
+      std::snprintf(duration, sizeof(duration), "%.2f s", MotionPathDuration(table, path.speedKeys));
+      PropertyReadOnly("Drive Ends", duration, { .mono = true,
+        .tooltip = "Timeline time the drive is over: the end of the path or the last speed key, whichever comes later" });
+
+      if (path.points.size() < 2)
+      {
+        PropertyStatus(nullptr, "Add at least two points: the entity drives only along a curve", StatusKind::Warning);
+      }
+      else
+      {
+        int tight = CountTightBends(table, path.minTurnRadius);
+        if (tight > 0)
+        {
+          char text[96];
+          std::snprintf(text, sizeof(text), "%d %s tighter than %.1f m", tight, tight == 1 ? "bend" : "bends",
+            path.minTurnRadius);
+          PropertyStatus(nullptr, text, StatusKind::Warning,
+            "Drawn red in the viewport. A car steers no further than its maximum steering angle, so its front wheels "
+            "stop matching the curve there.");
+        }
+
+        if (path.speedKeys.empty())
+        {
+          PropertyStatus(nullptr, "Add speed keys: without them the entity waits at the start", StatusKind::Info);
+        }
+        else
+        {
+          float end = MotionTimeAtDistance(path.speedKeys, table.length);
+          float speedAtEnd = std::isfinite(end) ? EvaluateMotionTiming(path.speedKeys, end).speed : 0.0f;
+          if (!std::isfinite(end))
+          {
+            PropertyStatus(nullptr, "The drive stops before the end of the path", StatusKind::Info);
+          }
+          else if (speedAtEnd > STOP_SPEED_WARNING)
+          {
+            char text[128];
+            std::snprintf(text, sizeof(text), "The path ends at %.2f s at %.1f m/s", end, speedAtEnd);
+            PropertyStatus(nullptr, text, StatusKind::Warning,
+              "The entity stops dead there. Slow it down with a speed key before the end, or extend the path.");
+          }
+        }
+      }
+    }
+
+    if (PropertyFloat("Min Turn Radius", path.minTurnRadius, {
+      .min = MIN_TURN_RADIUS, .max = MAX_TURN_RADIUS, .speed = 0.05f, .format = "%.1f", .unit = "m",
+      .defaultValue = DEFAULT_TURN_RADIUS,
+      .tooltip = "Bends tighter than this are drawn red in the viewport. Only a warning: the curve is never changed." }).changed)
+    {
+      path.minTurnRadius = glm::clamp(path.minTurnRadius, MIN_TURN_RADIUS, MAX_TURN_RADIUS);
+    }
+
+    if (PropertyFloat("Steering Smoothing", path.curvatureSmoothing, {
+      .min = 0.0f, .max = MAX_STEERING_SMOOTHING, .speed = 0.05f, .format = "%.1f", .unit = "m",
+      .defaultValue = DEFAULT_STEERING_SMOOTHING,
+      .tooltip = "Length along the path the curvature is averaged over, about one wheelbase. Keeps the front wheels "
+                 "from snapping at every point." }).changed)
+    {
+      path.curvatureSmoothing = glm::clamp(path.curvatureSmoothing, 0.0f, MAX_STEERING_SMOOTHING);
+      repose();
+    }
+
+    PropertySubHeading("Points");
+
+    int32_t pointNumber = m_SelectedPoint + 1;
+    if (PropertyInt("Selected Point", pointNumber, {
+      .min = 0, .max = int32_t(path.points.size()), .speed = 0.05f,
+      .tooltip = "Point edited below, counted from 1; 0 selects none. Points can also be clicked in the viewport, "
+                 "where the gizmo moves the selected one." }).changed)
+    {
+      m_SelectedPoint = glm::clamp(pointNumber, 0, int32_t(path.points.size())) - 1;
+    }
+
+    PointAction action = PointAction::None;
+    if (m_SelectedPoint >= 0 && m_SelectedPoint < int(path.points.size()))
+    {
+      if (PropertyVec3("Position", path.points[m_SelectedPoint], {
+        .speed = 0.05f, .format = "%.2f", .unit = "m",
+        .tooltip = "World-space position of the point" }).changed)
+      {
+        repose();
+      }
+
+      SuspendPropertyGrid();
+      if (InlineButton("Insert After", {
+        .icon = ICON_LC_PLUS,
+        .tooltip = "Adds a point halfway to the next one, or further along past the end of the path" }))
+      {
+        action = PointAction::InsertAfter;
+      }
+      SameLineIfFits(ButtonWidth("Delete Point", ICON_LC_TRASH_2));
+      if (InlineButton("Delete Point", { .icon = ICON_LC_TRASH_2 }))
+        action = PointAction::Delete;
+    }
+
+    // Applied here, after the Position row: inserting or erasing reallocates
+    int selected = m_SelectedPoint;
+    if (action == PointAction::InsertAfter)
+    {
+      glm::vec3 point = path.points[selected];
+      if (selected + 1 < int(path.points.size()))
+      {
+        point = 0.5f * (path.points[selected] + path.points[selected + 1]);
+      }
+      else
+      {
+        glm::vec3 direction = selected > 0 ? path.points[selected] - path.points[selected - 1] : glm::vec3(0.0f, 0.0f, 1.0f);
+        direction.y = 0.0f;
+        float length = glm::length(direction);
+        point += (length > 1e-4f ? direction / length : glm::vec3(0.0f, 0.0f, 1.0f)) * APPEND_SPACING;
+      }
+      path.points.insert(path.points.begin() + selected + 1, point);
+      m_SelectedPoint = selected + 1;
+      repose();
+    }
+    else if (action == PointAction::Delete)
+    {
+      path.points.erase(path.points.begin() + selected);
+      m_SelectedPoint = std::min(selected, int(path.points.size()) - 1);
+      repose();
+    }
+
+    SuspendPropertyGrid();
+    if (InlineButton("Add Point At Entity", {
+      .icon = ICON_LC_MAP_PIN_PLUS,
+      .tooltip = "Appends a point where the bound entity stands now. Drive the car there with the arrow keys first.",
+      .disabledReason = sessionActive ? "A timeline session is posing the entity: Stop first" : nullptr }))
+    {
+      if (scene.HasComponent<WorldTransform>(m_Path))
+        AddPoint(context, path, glm::vec3(scene.GetComponent<WorldTransform>(m_Path).world[3]));
+    }
+
+    SameLineIfFits(ButtonWidth("Add Point At View", ICON_LC_CROSSHAIR));
+    if (InlineButton("Add Point At View", {
+      .icon = ICON_LC_CROSSHAIR,
+      .tooltip = "Appends a point where the centre of the editor view meets the ground, at the height of the last point" }))
+    {
+      Entity camera = FindEditorCamera(scene);
+      if (camera != entt::null)
+      {
+        const LocalTransform& view = scene.GetTransform(camera);
+        glm::vec3 forward = glm::normalize(view.rotation * glm::vec3(0.0f, 0.0f, -1.0f));
+        float groundY = !path.points.empty() ? path.points.back().y
+          : scene.HasComponent<WorldTransform>(m_Path) ? scene.GetComponent<WorldTransform>(m_Path).world[3].y
+          : 0.0f;
+
+        float distance = std::abs(forward.y) > 1e-4f ? (groundY - view.position.y) / forward.y : -1.0f;
+        if (distance > 0.0f && distance < MAX_VIEW_POINT_DISTANCE)
+          AddPoint(context, path, view.position + forward * distance);
+        else
+          YA_LOG_WARN("Scene", "Sequencer: the view does not meet the ground at y = %.2f within %.0f m",
+            groundY, MAX_VIEW_POINT_DISTANCE);
+      }
+    }
+
+    EndPropertyGroup();
+  }
+
   void SequencerPanel::AddKeyFromView(EditorContext& context, CameraTrackComponent& track)
   {
     CameraTrackKey key;
@@ -704,27 +1188,66 @@ namespace YAEngine
     key.time = time;
     m_SelectedKey = InsertKey(track, key);
 
-    float duration = TrackDuration(track);
-    if (duration > m_ViewEnd)
-      m_ViewEnd = duration * 1.1f;
+    float end = TimelineEnd(context);
+    if (end > m_ViewEnd)
+      m_ViewEnd = end * 1.1f;
 
-    SetPlayhead(context, track, key.time);
+    SetPlayhead(context, key.time);
   }
 
-  void SequencerPanel::SetPlayhead(EditorContext& context, CameraTrackComponent& track, float time)
+  void SequencerPanel::AddSpeedKey(EditorContext& context, MotionPathComponent& path)
   {
-    m_Playhead = glm::clamp(time, 0.0f, TrackDuration(track));
+    MotionSpeedKey key;
+    key.time = m_Playhead;
+    key.speed = path.speedKeys.empty() ? DEFAULT_SPEED : EvaluateMotionTiming(path.speedKeys, m_Playhead).speed;
 
-    CameraTrackPlayer* player = context.cameraTrackPlayer;
-    if (player != nullptr && player->IsPlaying() && player->GetTrackEntity() == m_Track)
+    for (const auto& existing : path.speedKeys)
     {
-      player->SetElapsed(*context.scene, double(m_Playhead));
-      return;
+      if (std::abs(existing.time - key.time) < MIN_KEY_GAP)
+      {
+        key.time = path.speedKeys.back().time + 1.0f;
+        break;
+      }
     }
 
-    // Stopped: the camera entity moves but the viewport does not follow it, so the frustum
-    // and path gizmos show the result from wherever the editor camera is.
-    if (!track.keys.empty())
-      CameraTrackPlayer::ApplyTrackPose(*context.scene, m_Track, m_Playhead);
+    m_SelectedSpeedKey = InsertSpeedKey(path, key);
+
+    float end = TimelineEnd(context);
+    if (end > m_ViewEnd)
+      m_ViewEnd = end * 1.1f;
+
+    SetPlayhead(context, key.time);
+  }
+
+  void SequencerPanel::AddPoint(EditorContext& context, MotionPathComponent& path, const glm::vec3& position)
+  {
+    path.points.push_back(position);
+    m_SelectedPoint = int(path.points.size()) - 1;
+
+    if (context.sequencePlayer != nullptr && context.sequencePlayer->IsActive())
+      SetPlayhead(context, m_Playhead);
+  }
+
+  void SequencerPanel::SetPlayhead(EditorContext& context, float time)
+  {
+    m_Playhead = glm::clamp(time, 0.0f, TimelineEnd(context));
+
+    // Scrubbing poses the whole timeline. Without a session it opens a preview that leaves the
+    // viewport where it is, so the frustum and path gizmos show the result from the editor camera.
+    if (context.sequencePlayer != nullptr)
+      context.sequencePlayer->Scrub(*context.scene, PlayableTrack(context), double(m_Playhead));
+  }
+
+  float SequencerPanel::TimelineEnd(EditorContext& context) const
+  {
+    return float(SequencePlayer::TimelineDuration(*context.scene));
+  }
+
+  Entity SequencerPanel::PlayableTrack(EditorContext& context) const
+  {
+    Scene& scene = *context.scene;
+    if (!HasTrack(scene, m_Track) || !scene.HasComponent<CameraComponent>(m_Track))
+      return entt::null;
+    return scene.GetComponent<CameraTrackComponent>(m_Track).keys.empty() ? Entity(entt::null) : m_Track;
   }
 }

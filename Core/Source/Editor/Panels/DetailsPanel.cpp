@@ -15,6 +15,7 @@
 #include "Scene/BakeExclusion.h"
 #include "Scene/Components.h"
 #include "Scene/ModelOverrides.h"
+#include "Scene/SequencePlayer.h"
 #include "Scene/Scene.h"
 #include "Assets/AssetManager.h"
 #include "Render/BakeLimits.h"
@@ -784,6 +785,8 @@ namespace YAEngine
       .draw = &DetailsPanel::DrawCameraSection },
     { .present = [](Scene& scene, Entity entity) { return scene.HasComponent<CameraTrackComponent>(entity); },
       .draw = &DetailsPanel::DrawCameraTrackSection },
+    { .present = [](Scene& scene, Entity entity) { return scene.HasComponent<MotionPathComponent>(entity); },
+      .draw = &DetailsPanel::DrawMotionPathSection },
     { .present = [](Scene& scene, Entity entity) { return scene.HasComponent<ReflectionProbeComponent>(entity); },
       .draw = &DetailsPanel::DrawReflectionProbeSection },
     { .present = [](Scene& scene, Entity entity) { return scene.HasComponent<IrradianceVolumeComponent>(entity); },
@@ -1187,6 +1190,44 @@ namespace YAEngine
 
     if (remove)
       scene.RemoveComponent<CameraTrackComponent>(entity);
+  }
+
+  void DetailsPanel::DrawMotionPathSection(EditorContext& context, Entity entity)
+  {
+    Scene& scene = *context.scene;
+    bool remove = false;
+    if (BeginSection("Motion Path", ICON_LC_SPLINE, "Timed drive along a curve; its points and speed keys are edited in the Sequencer", &remove))
+    {
+      const MotionPathComponent& path = scene.GetComponent<MotionPathComponent>(entity);
+      const MotionPathTable& table = path.GetTable();
+
+      char curve[64];
+      std::snprintf(curve, sizeof(curve), "%zu points, %.1f m", path.points.size(), table.length);
+      PropertyReadOnly("Curve", curve, { .mono = true, .tooltip = "Control points and the length of the curve through them" });
+
+      char drive[64];
+      std::snprintf(drive, sizeof(drive), "%zu keys, ends at %.2f s", path.speedKeys.size(),
+        MotionPathDuration(table, path.speedKeys));
+      PropertyReadOnly("Speed", drive, { .mono = true, .tooltip = "Speed keys and the timeline time the drive ends at" });
+
+      if (PropertyButton("Open in Sequencer", {
+        .icon = ICON_LC_CLAPPERBOARD,
+        .tooltip = "Opens the Sequencer on this path",
+        .disabledReason = m_Sequencer != nullptr && m_ShowPanel ? nullptr : "The Sequencer is not available" }))
+      {
+        m_ShowPanel(*m_Sequencer);
+      }
+
+      EndPropertyGroup();
+    }
+
+    if (remove)
+    {
+      // A session has the entity posed along the path; its own transform comes back first
+      if (context.sequencePlayer != nullptr)
+        context.sequencePlayer->Stop(scene);
+      scene.RemoveComponent<MotionPathComponent>(entity);
+    }
   }
 
   void DetailsPanel::DrawReflectionProbeSection(EditorContext& context, Entity entity)

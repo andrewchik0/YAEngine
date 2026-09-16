@@ -26,7 +26,7 @@
 #include "Render/Render.h"
 #include "Utils/Projection.h"
 #include "Scene/SceneSerializer.h"
-#include "Scene/CameraTrackPlayer.h"
+#include "Scene/SequencePlayer.h"
 #include "Scene/ComponentRegistry.h"
 #include "Utils/ServiceRegistry.h"
 #include "Utils/ThreadPool.h"
@@ -106,7 +106,7 @@ namespace YAEngine
     m_Context.render = &GetRender();
     m_Context.timer = &GetTimer();
     m_Context.componentRegistry = &m_Registry->Get<ComponentRegistry>();
-    m_Context.cameraTrackPlayer = &m_Registry->Get<CameraTrackPlayer>();
+    m_Context.sequencePlayer = &m_Registry->Get<SequencePlayer>();
     m_Context.captureSession = &m_Registry->Get<FrameCaptureSessionResult>();
     m_Context.bridgeCapture = &m_Registry->Get<BridgeCaptureStatus>();
 
@@ -289,6 +289,7 @@ namespace YAEngine
       {
         b_DragActive = false;
         b_DragTargetKey = false;
+        b_DragTargetPoint = false;
         gizmo.SetDraggedAxis(GizmoAxis::None);
         input.SetGizmoDragging(false);
       }
@@ -303,6 +304,10 @@ namespace YAEngine
           if (b_DragTargetKey)
           {
             DragSequencerKey(delta, currentHit);
+          }
+          else if (b_DragTargetPoint)
+          {
+            DragPathPoint(delta);
           }
           else
           {
@@ -393,11 +398,13 @@ namespace YAEngine
           auto& scene = *m_Context.scene;
           GizmoMode mode = m_Context.render->GetGizmoMode();
 
-          // Scale has no meaning for a track key; the click is swallowed rather than
-          // scaling the entity under a key-anchored gizmo
+          // Scale has no meaning for a track key, and only translation for a path point; the
+          // click is swallowed rather than transforming the entity under a sub-object gizmo
           CameraTrackKey* key = ActiveSequencerKey();
+          glm::vec3* point = key == nullptr ? ActivePathPoint() : nullptr;
           bool scaleOnKey = key != nullptr && mode == GizmoMode::Scale;
-          if (!scaleOnKey)
+          bool turnOnPoint = point != nullptr && mode != GizmoMode::Translate;
+          if (!scaleOnKey && !turnOnPoint)
           {
             glm::vec3 gizmoPos;
             if (key != nullptr)
@@ -407,6 +414,12 @@ namespace YAEngine
               m_DragStartLocalTransform.position = key->position;
               m_DragStartLocalTransform.rotation = key->rotation;
             }
+            else if (point != nullptr)
+            {
+              gizmoPos = *point;
+              m_DragStartLocalTransform = LocalTransform {};
+              m_DragStartLocalTransform.position = *point;
+            }
             else
             {
               auto& wt = scene.GetComponent<WorldTransform>(entity);
@@ -415,6 +428,7 @@ namespace YAEngine
             }
 
             b_DragTargetKey = key != nullptr;
+            b_DragTargetPoint = point != nullptr;
             m_DragAxis = hoveredAxis;
             m_DragMode = mode;
             m_DragStartWorldPos = gizmoPos;
@@ -455,6 +469,8 @@ namespace YAEngine
           // entity, with no root walk.
           Entity keyTrack = entt::null;
           int keyIndex = -1;
+          Entity pointPath = entt::null;
+          int pointIndex = -1;
           Entity icon = entt::null;
           if (PickTrackKey(viewportRay, keyTrack, keyIndex))
           {
@@ -463,6 +479,14 @@ namespace YAEngine
             m_Context.sequencerTrack = keyTrack;
             m_Context.sequencerSelectedKey = keyIndex;
             m_Context.sequencerKeyPickRequest = keyIndex;
+          }
+          else if (PickPathPoint(viewportRay, pointPath, pointIndex))
+          {
+            b_PickRequestActive = false;
+            m_Context.SelectEntity(pointPath);
+            m_Context.sequencerPath = pointPath;
+            m_Context.sequencerSelectedPoint = pointIndex;
+            m_Context.sequencerPointPickRequest = pointIndex;
           }
           else if ((icon = PickIconEntity(viewportRay, viewportView, viewportProj)) != entt::null)
           {
@@ -489,6 +513,10 @@ namespace YAEngine
     if (CameraTrackKey* anchorKey = ActiveSequencerKey())
     {
       m_Context.render->SetSelectedEntityPosition(anchorKey->position);
+    }
+    else if (glm::vec3* anchorPoint = ActivePathPoint())
+    {
+      m_Context.render->SetSelectedEntityPosition(*anchorPoint);
     }
     else if (m_Context.selectedEntity != entt::null && m_Context.scene->HasComponent<WorldTransform>(m_Context.selectedEntity))
     {
@@ -1208,6 +1236,19 @@ namespace YAEngine
     // Slightly padded relative to the drawn sphere so the small targets are comfortable to hit
     constexpr float TRACK_KEY_PICK_RADIUS = 0.18f;
 
+    const glm::vec4 kMotionPathColor(0.95f, 0.75f, 0.3f, 0.85f);
+    const glm::vec4 kMotionPathTightColor(1.0f, 0.25f, 0.2f, 0.95f);
+    const glm::vec4 kMotionPathTickColor(0.95f, 0.95f, 0.95f, 0.8f);
+    const glm::vec4 kMotionPathPointColor(0.95f, 0.75f, 0.3f, 0.7f);
+    // Table samples per drawn segment: 10 * 5 cm draws the curve every half metre
+    constexpr size_t MOTION_PATH_DRAW_STRIDE = 10;
+    // Lifted off the road the curve usually lies on, so the depth test does not eat it
+    constexpr float MOTION_PATH_DRAW_LIFT = 0.05f;
+    constexpr float MOTION_PATH_TICK_HEIGHT = 0.6f;
+    constexpr int MOTION_PATH_MAX_TICKS = 600;
+    constexpr float MOTION_PATH_POINT_RADIUS = 0.2f;
+    constexpr float MOTION_PATH_POINT_PICK_RADIUS = 0.3f;
+
     // World matrix with the scale divided out: the frustum shape comes from fov and the
     // plane distances, so a scaled camera entity must not stretch it into something the
     // renderer would never produce.
@@ -1352,8 +1393,8 @@ namespace YAEngine
 
     // The camera entity follows the dragged key, exactly like a scrub to its time; the
     // panel is asked to move its playhead there so the two stay in step
-    CameraTrackPlayer::ApplyTrackPose(*m_Context.scene, m_Context.sequencerTrack, key->time);
-    m_Context.sequencerScrubRequest = key->time;
+    m_Context.sequencePlayer->Scrub(*m_Context.scene, m_Context.sequencerTrack, key->time);
+    m_Context.sequencerScrubRequest = float(m_Context.sequencePlayer->GetTime());
   }
 
   bool EditorLayer::PickTrackKey(const Ray& ray, Entity& outTrack, int& outKey)
@@ -1395,6 +1436,129 @@ namespace YAEngine
     return true;
   }
 
+  Entity EditorLayer::VisibleMotionPath()
+  {
+    auto hasPath = [this](Entity e) {
+      return e != entt::null && GetScene().GetRegistry().valid(e)
+        && GetScene().HasComponent<MotionPathComponent>(e);
+    };
+
+    if (hasPath(m_Context.sequencerPath))
+      return m_Context.sequencerPath;
+    return hasPath(m_Context.selectedEntity) ? m_Context.selectedEntity : Entity(entt::null);
+  }
+
+  void EditorLayer::DebugDrawMotionPath()
+  {
+    if (!m_Context.render)
+      return;
+
+    Entity pathEntity = VisibleMotionPath();
+    if (pathEntity == entt::null)
+      return;
+
+    const auto& path = GetScene().GetComponent<MotionPathComponent>(pathEntity);
+    if (path.points.empty())
+      return;
+
+    auto& gizmo = m_Context.render->GetGizmoRenderer();
+    const MotionPathTable& table = path.GetTable();
+    const glm::vec3 lift(0.0f, MOTION_PATH_DRAW_LIFT, 0.0f);
+    const float tightLimit = 1.0f / std::max(path.minTurnRadius, 0.01f);
+
+    const size_t sampleCount = table.positions.size();
+    for (size_t i = 0; i + 1 < sampleCount; i += MOTION_PATH_DRAW_STRIDE)
+    {
+      size_t j = std::min(i + MOTION_PATH_DRAW_STRIDE, sampleCount - 1);
+      bool tight = std::abs(table.curvature[i]) > tightLimit || std::abs(table.curvature[j]) > tightLimit;
+      gizmo.DrawLine(table.positions[i] + lift, table.positions[j] + lift,
+        tight ? kMotionPathTightColor : kMotionPathColor);
+    }
+
+    // Where the entity is at every whole second of its drive, so the timing reads in space
+    if (!path.speedKeys.empty() && path.points.size() >= 2)
+    {
+      float end = MotionPathDuration(table, path.speedKeys);
+      int first = int(std::ceil(path.speedKeys.front().time));
+      int last = std::min(int(std::floor(end)), first + MOTION_PATH_MAX_TICKS);
+      for (int second = first; second <= last; second++)
+      {
+        glm::vec3 position = EvaluateMotionPath(table, path.speedKeys, float(second)).position + lift;
+        gizmo.DrawLine(position, position + glm::vec3(0.0f, MOTION_PATH_TICK_HEIGHT, 0.0f), kMotionPathTickColor);
+      }
+    }
+
+    int selectedPoint = pathEntity == m_Context.sequencerPath ? m_Context.sequencerSelectedPoint : -1;
+    for (size_t i = 0; i < path.points.size(); i++)
+    {
+      gizmo.DrawWireSphereDepthTested(path.points[i], MOTION_PATH_POINT_RADIUS,
+        int(i) == selectedPoint ? kCameraFrustumSelectedColor : kMotionPathPointColor);
+    }
+  }
+
+  glm::vec3* EditorLayer::ActivePathPoint()
+  {
+    Entity pathEntity = m_Context.sequencerPath;
+    int index = m_Context.sequencerSelectedPoint;
+    // Only while the path entity itself is selected: any other selection keeps the regular
+    // entity gizmo
+    if (pathEntity == entt::null || index < 0 || m_Context.selectedEntity != pathEntity)
+      return nullptr;
+    if (!GetScene().GetRegistry().valid(pathEntity) || !GetScene().HasComponent<MotionPathComponent>(pathEntity))
+      return nullptr;
+
+    auto& path = GetScene().GetComponent<MotionPathComponent>(pathEntity);
+    if (index >= int(path.points.size()))
+      return nullptr;
+    return &path.points[index];
+  }
+
+  void EditorLayer::DragPathPoint(const glm::vec3& delta)
+  {
+    glm::vec3* point = ActivePathPoint();
+    if (point == nullptr || m_DragMode != GizmoMode::Translate)
+      return;
+
+    // Points live in world space, so no parent conversion is involved
+    *point = m_DragStartWorldPos + glm::dot(delta, m_DragAxisDir) * m_DragAxisDir;
+
+    // A running session re-poses right away; a stopped one is not started by a drag
+    SequencePlayer* player = m_Context.sequencePlayer;
+    if (player != nullptr && player->IsActive())
+      player->Scrub(*m_Context.scene, player->GetCameraTrack(), player->GetTime());
+  }
+
+  bool EditorLayer::PickPathPoint(const Ray& ray, Entity& outPath, int& outPoint)
+  {
+    if (!m_Context.render || !m_Context.render->GetGizmosEnabled())
+      return false;
+
+    // Clickable exactly when visible
+    Entity pathEntity = VisibleMotionPath();
+    if (pathEntity == entt::null)
+      return false;
+
+    const auto& path = GetScene().GetComponent<MotionPathComponent>(pathEntity);
+    float closestDist = std::numeric_limits<float>::max();
+    int closest = -1;
+    for (size_t i = 0; i < path.points.size(); i++)
+    {
+      auto hit = RaySphereIntersect(ray, path.points[i], MOTION_PATH_POINT_PICK_RADIUS);
+      if (hit && *hit < closestDist)
+      {
+        closestDist = *hit;
+        closest = int(i);
+      }
+    }
+
+    if (closest < 0)
+      return false;
+
+    outPath = pathEntity;
+    outPoint = closest;
+    return true;
+  }
+
   void EditorLayer::DebugDrawGizmos()
   {
     DebugDrawIrradianceVolumeNodes();
@@ -1413,6 +1577,7 @@ namespace YAEngine
 
     DebugDrawSceneCameras();
     DebugDrawCameraTrack();
+    DebugDrawMotionPath();
 
     if (!m_Context.render || !m_Context.render->GetCollidersVisible())
       return;
@@ -1497,6 +1662,7 @@ namespace YAEngine
 
   void EditorLayer::NewScene()
   {
+    m_Registry->Get<SequencePlayer>().Stop(GetScene());
     m_Context.StopCameraPreview();
     m_Context.ClearSelection();
     m_Context.ClearMaterialSelection();
@@ -1561,6 +1727,8 @@ namespace YAEngine
   {
     EnsureBasePath(path);
     SyncEditorCameraState();
+    // A timeline session has entities posed away from where they belong; the file gets the originals
+    m_Registry->Get<SequencePlayer>().Stop(GetScene());
     if (!SceneSerializer::Save(path, GetScene(), GetAssets(), *m_Context.componentRegistry, GetRender()))
       return false;
 
@@ -1581,6 +1749,7 @@ namespace YAEngine
 
   void EditorLayer::LoadSceneDeferred(const std::string& path)
   {
+    m_Registry->Get<SequencePlayer>().Stop(GetScene());
     m_Context.StopCameraPreview();
     m_Context.ClearSelection();
     m_Context.ClearMaterialSelection();
