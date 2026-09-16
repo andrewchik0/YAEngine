@@ -1,0 +1,25 @@
+{
+  "name": "yaengine-showcase",
+  "private": true,
+  "version": "0.1.0",
+  "description": "Portfolio demo video for YAEngine, edited in code with Remotion",
+  "scripts": {
+    "dev": "remotion studio",
+    "render": "remotion render Showcase out/showcase.mp4",
+    "still": "remotion still Showcase",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.525",
+    "@remotion/google-fonts": "4.0.525",
+    "@remotion/studio": "4.0.525",
+    "@remotion/transitions": "4.0.525",
+    "react": "19.2.8",
+    "react-dom": "19.2.8",
+    "remotion": "4.0.525"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "typescript": "5.9.3"
+  }
+}

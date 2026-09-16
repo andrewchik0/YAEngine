@@ -1,0 +1,6 @@
+node_modules/
+out/
+public/footage/*
+public/stills/*
+!public/footage/.gitkeep
+!public/stills/.gitkeep
