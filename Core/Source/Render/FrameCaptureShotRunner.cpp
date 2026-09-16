@@ -29,6 +29,8 @@ namespace YAEngine
     snapshot.autoExposure = render.GetAutoExposureEnabled();
     snapshot.tonemapMode = render.GetTonemapMode();
     snapshot.bloom = render.GetBloomEnabled();
+    // Ray reconstruction frames leave the running mean alone; a session may wait on it or dump it.
+    render.SetPathTraceAccumulationHeld(true);
 #ifdef YA_EDITOR
     snapshot.viewportWidth = render.GetViewportWidth();
     snapshot.viewportHeight = render.GetViewportHeight();
@@ -63,6 +65,7 @@ namespace YAEngine
     render.GetAutoExposureEnabled() = snapshot.autoExposure;
     render.GetTonemapMode() = snapshot.tonemapMode;
     render.GetBloomEnabled() = snapshot.bloom;
+    render.SetPathTraceAccumulationHeld(false);
 #ifdef YA_EDITOR
     render.GetGizmosEnabled() = snapshot.gizmos;
     if (restoreViewport && snapshot.viewportWidth > 0)

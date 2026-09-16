@@ -32,6 +32,20 @@ namespace YAEngine {
 #define PT_MIN_GLASS_REFLECTION_BOUNCES 0
 #define PT_DEFAULT_GLASS_REFLECTION_BOUNCES 1
 
+// Bounces of the reflection layer's mirror path off an opaque G-buffer vertex - a delta clear coat or
+// a smooth dielectric - counted past the reflected surface as the glass knob above counts them: zero
+// is that surface's emission and next event estimation. Capped one below PT_MAX_BOUNCES because the
+// G-buffer vertex itself is bounce zero of that path.
+#define PT_MIN_LAYER_REFLECTION_BOUNCES 0
+#define PT_MAX_LAYER_REFLECTION_BOUNCES (PT_MAX_BOUNCES - 1)
+#define PT_DEFAULT_LAYER_REFLECTION_BOUNCES 1
+
+// Roughness above which a G-buffer vertex traces no specular hit distance probe: its ray
+// reconstruction specular guides then place the reflection on the surface itself (hit distance 0,
+// specular motion = surface motion). A lobe that wide blurs the reflected image past the point where
+// its parallax is worth a ray per pixel. Mirrors and reflection layer vertices always trace it.
+#define PT_DEFAULT_SPECULAR_GUIDE_MAX_ROUGHNESS 0.5f
+
 // Range of the firefly clamp, shared by the editor slider, the scene save and the scene load.
 // One definition because there used to be three disagreeing ones: the slider dragged to 100
 // but let Ctrl+Click type past it, the save wrote whatever the field held, and the load clamped
@@ -170,6 +184,13 @@ struct PathTraceConstants
   // pt_path.glsl. Empty where no light is one, which skips that test entirely.
   int sphereLightBegin;
   int sphereLightEnd;
+  // PT_MIN_LAYER_REFLECTION_BOUNCES..PT_MAX_LAYER_REFLECTION_BOUNCES.
+  int layerReflectionBounces;
+  // See PT_DEFAULT_SPECULAR_GUIDE_MAX_ROUGHNESS.
+  float specularGuideMaxRoughness;
+  // Nonzero: some opaque TLAS instance moved since the previous frame (RT_MASK_MOVING), so the
+  // reflector lookup has something to find. Zero skips it - every reflector is static.
+  int reflectorLookup;
 };
 
 #ifdef __cplusplus

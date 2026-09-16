@@ -625,6 +625,10 @@ namespace YAEngine
         pc.mirrorSun = b_PathTraceMirrorSun ? 1 : 0;
         pc.sphereLightBegin = m_PathTraceSphereLights.begin;
         pc.sphereLightEnd = m_PathTraceSphereLights.end;
+        pc.layerReflectionBounces = std::clamp(m_PathTraceLayerReflectionBounces,
+          PT_MIN_LAYER_REFLECTION_BOUNCES, PT_MAX_LAYER_REFLECTION_BOUNCES);
+        pc.specularGuideMaxRoughness = std::clamp(m_PathTraceSpecularGuideMaxRoughness, 0.0f, 1.0f);
+        pc.reflectorLookup = m_TlasBuilder.HasMovingInstances(currentFrame) ? 1 : 0;
         pipeline.PushConstants(ctx.cmd, &pc);
 
         // One invocation per pixel exactly, not a rounded-up tile count: a trace launch is

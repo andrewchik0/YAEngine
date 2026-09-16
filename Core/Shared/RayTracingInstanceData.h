@@ -5,18 +5,19 @@
 namespace YAEngine {
 #endif
 
-// Ray mask bits. An instance is added to exactly one of them, and a trace only sees the
+// Ray mask bits. An instance is added to exactly one of the first three, and a trace only sees the
 // instances whose mask it shares a bit with. The two glass bits hold only the transparent surfaces
 // whose material is PT-transmissive, split by what the path tracer may do with them: Sheet and
 // ThinWalled never bend and sit in RT_MASK_GLASS_STRAIGHT, Solid can refract and sits in
 // RT_MASK_GLASS_REFRACTIVE, so one trace can leave out exactly the classes a segment crosses
-// straight. A transparent material without transmission is raster-only and sits in
-// RT_MASK_RASTER_ONLY, which no ray traces - it is kept in the TLAS so its instance record still
-// serves the emissive light table.
+// straight. A transparent material without transmission is raster-only and has no TLAS instance at
+// all - only its instance record, which the emissive light table may name.
+// RT_MASK_MOVING is added on top of RT_MASK_OPAQUE for an opaque instance whose transform changed since
+// the previous frame, so the reflector lookup can trace the moving instances alone.
 #define RT_MASK_OPAQUE           0x01u
 #define RT_MASK_GLASS_STRAIGHT   0x02u
-#define RT_MASK_RASTER_ONLY      0x04u
 #define RT_MASK_GLASS_REFRACTIVE 0x08u
+#define RT_MASK_MOVING           0x10u
 #define RT_MASK_GLASS (RT_MASK_GLASS_STRAIGHT | RT_MASK_GLASS_REFRACTIVE)
 // What path and shadow rays trace.
 #define RT_MASK_PATH (RT_MASK_OPAQUE | RT_MASK_GLASS)

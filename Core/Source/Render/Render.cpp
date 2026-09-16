@@ -406,7 +406,14 @@ namespace YAEngine
 
     // Ahead of everything that binds the resolved image or renders the shadow atlas, which both
     // depend on it.
-    b_PathTraceTransparencyActive = IsPathTracingActive() && HasPathTraceRasterTransparency(frame);
+    const bool transparency = IsPathTracingActive() && HasPathTraceRasterTransparency(frame);
+    if (transparency)
+      m_PathTraceTransparencyHoldFrames = PT_TRANSPARENCY_HOLD_FRAMES;
+    else if (m_PathTraceTransparencyHoldFrames > 0 && IsPathTracingActive())
+      m_PathTraceTransparencyHoldFrames--;
+    else
+      m_PathTraceTransparencyHoldFrames = 0;
+    b_PathTraceTransparencyActive = transparency || m_PathTraceTransparencyHoldFrames > 0;
 
 #ifdef YA_EDITOR
     // Handle deferred viewport resize BEFORE acquiring the frame -

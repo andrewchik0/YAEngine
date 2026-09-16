@@ -137,9 +137,12 @@ void main()
 
   // A coat texel's GBuffer1 already holds the coat's normal and roughness; what reflects there is the
   // coat.
-  vec3 F0 = decodeShadingModel(gb1.a) == SHADING_CLEAR_COAT
+  bool coated = decodeShadingModel(gb1.a) == SHADING_CLEAR_COAT;
+  vec3 F0 = coated
     ? vec3(CLEAR_COAT_F0 * texelFetch(gbuffer2Texture, ivec2(gl_FragCoord.xy), 0).r)
     : mix(vec3(0.04), albedo, metallic);
+  // The fade deferred lighting gave the probe reflection, or a hit on the road would bring it back.
+  float groundOcclusion = coated ? clearCoatGroundOcclusion(worldNormal) : 1.0;
   float NdotV = clamp(dot(-viewDir, viewNormal), 0.01, 1.0);
   vec3 F = fresnelSchlickRoughness(NdotV, F0, roughness);
   float roughnessFade = 1.0 - smoothstep(0.0, MAX_ROUGHNESS, roughness);
@@ -147,7 +150,7 @@ void main()
   // Upper bound of the blend weight this reflection could reach. On this scene's terrain
   // (uniform roughness ~0.4) most of the frame traces rays whose result is invisible; the
   // profile showed ~70-90% of all traversal iterations spent under a few percent of weight.
-  float contribution = max(max(F.r, F.g), F.b) * roughnessFade * u_Frame.ssrIntensity;
+  float contribution = max(max(F.r, F.g), F.b) * roughnessFade * u_Frame.ssrIntensity * groundOcclusion;
   if (contribution < MIN_CONTRIBUTION)
   {
     outColor = vec4(originalColor, 1.0);
@@ -213,7 +216,7 @@ void main()
   float backfaceFade = 1.0 - smoothstep(-0.17, 0.0, dot(reflectDirWorld, hitNormal));
 
   vec3 ssrMask = clamp(F * edgeFade * distanceFade * backwardFade * roughnessFade * silhouetteFade * contactFade * backfaceFade
-                       * gateFade * u_Frame.ssrIntensity, vec3(0.0), vec3(1.0));
+                       * gateFade * u_Frame.ssrIntensity * groundOcclusion, vec3(0.0), vec3(1.0));
 
   outColor = vec4(originalColor * (1.0 - ssrMask) + reflectedColor * ssrMask, 1.0);
 }

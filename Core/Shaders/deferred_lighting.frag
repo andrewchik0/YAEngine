@@ -148,6 +148,9 @@ void main()
   {
     coatSpecular = computeClearCoatIBL(probes, worldPos, viewVec, coat);
     attenuateAmbientUnderClearCoat(coat, ambientDiffuse, ambientSpecular);
+    float groundOcclusion = clearCoatGroundOcclusion(coat.normal);
+    ambientSpecular *= groundOcclusion;
+    coatSpecular *= groundOcclusion;
     ambient = ambientDiffuse + ambientSpecular + coatSpecular;
   }
 

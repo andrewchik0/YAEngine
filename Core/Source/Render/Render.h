@@ -406,10 +406,16 @@ namespace YAEngine
     PathTraceGlassHandling& GetPathTraceSecondaryGlass() { return m_PathTraceSecondaryGlass; }
     int& GetPathTraceGlassReflectionBounces() { return m_PathTraceGlassReflectionBounces; }
     PathTraceGlassHandling& GetPathTraceGlassReflectionGlass() { return m_PathTraceGlassReflectionGlass; }
+    int& GetPathTraceLayerReflectionBounces() { return m_PathTraceLayerReflectionBounces; }
+    float& GetPathTraceSpecularGuideMaxRoughness() { return m_PathTraceSpecularGuideMaxRoughness; }
     // How many samples the PT Reference image has averaged since its last reset. Zero means
     // the next frame rewrites it.
     int GetPathTraceSampleCount() const { return m_PathTraceSampleIndex; }
     void ResetPathTraceAccumulation() { b_PathTraceResetPending = true; }
+    // Keeps the running mean updated while ray reconstruction resolves the frame, which otherwise
+    // leaves it alone. Frame capture holds it for the length of a session, so accum waits and the
+    // pt_accum target work whatever the resolve.
+    void SetPathTraceAccumulationHeld(bool held) { b_PathTraceAccumulationHeld = held; }
 
     // FrameCapture. Draw services a request at the end of the frame it is already
     // recording, which is the only point where "the frame that just finished" is
@@ -617,6 +623,10 @@ namespace YAEngine
     PathTraceGlassHandling m_PathTraceSecondaryGlass = PathTraceGlassHandling::Straight;
     int m_PathTraceGlassReflectionBounces = PT_DEFAULT_GLASS_REFLECTION_BOUNCES;
     PathTraceGlassHandling m_PathTraceGlassReflectionGlass = PathTraceGlassHandling::Straight;
+    // See PT_DEFAULT_LAYER_REFLECTION_BOUNCES and PT_DEFAULT_SPECULAR_GUIDE_MAX_ROUGHNESS.
+    int m_PathTraceLayerReflectionBounces = PT_DEFAULT_LAYER_REFLECTION_BOUNCES;
+    float m_PathTraceSpecularGuideMaxRoughness = PT_DEFAULT_SPECULAR_GUIDE_MAX_ROUGHNESS;
+    bool b_PathTraceAccumulationHeld = false;
     // Index of the sample the next PT frame contributes to the running mean. Zero rewrites
     // the accumulation image, which is how a reset is expressed - nothing clears it.
     int m_PathTraceSampleIndex = 0;
@@ -649,11 +659,12 @@ namespace YAEngine
     void RenderShadowMaps(FrameContext& frame, VkCommandBuffer cmd,
       uint32_t frameIndex, const glm::vec3* probeCenter = nullptr);
     void SetUpCamera(FrameContext& frame);
-    // Every glass setting the path traced image depends on, and the mirror sun switch, packed so one
-    // compare spots a change.
+    // Every glass setting the path traced image depends on, the mirror sun switch and the layer
+    // reflection bounces, packed so one compare spots a change. The transmission depth fits in 16 bits.
     uint64_t GetPathTraceGlassKey() const
     {
-      return uint64_t(uint32_t(m_PathTraceMaxTransmissionDepth))
+      return uint64_t(uint16_t(m_PathTraceMaxTransmissionDepth))
+        | (uint64_t(uint16_t(m_PathTraceLayerReflectionBounces)) << 16)
         | (uint64_t(m_PathTraceGlassOverflow) << 32)
         | (uint64_t(m_PathTraceSecondaryGlass) << 36)
         | (uint64_t(m_PathTraceGlassReflectionGlass) << 40)
@@ -665,6 +676,11 @@ namespace YAEngine
     // surfaces the tracer does not trace, or particles. The forward transparent layer draws them, and
     // the light culling and shadow atlas it shades with run, exactly then.
     bool b_PathTraceTransparencyActive = false;
+    // Frames the flag above stays raised after the last one with such a surface in view. Dropping it
+    // switches the shadow atlas off, which invalidates its cache, so a camera sweeping back and forth
+    // across a window would otherwise redraw every shadow tile each time it came back.
+    static constexpr uint32_t PT_TRANSPARENCY_HOLD_FRAMES = 120;
+    uint32_t m_PathTraceTransparencyHoldFrames = 0;
     bool HasPathTraceRasterTransparency(FrameContext& frame) const;
     // The frames the forward transparent layer is drawn on, and the tracer lays it into its sample: every
     // frame ray reconstruction resolves, whose input carries it whether anything draws or not, and the
@@ -797,9 +813,9 @@ namespace YAEngine
         && m_TlasBuilder.IsValid(m_Backend.GetCurrentFrameIndex())
         && m_MaterialTable.IsValid(m_Backend.GetCurrentFrameIndex());
     }
-    // Whether this frame extends the running mean. The render path always does - the mean
-    // IS the image it presents - and in raster mode only the reference view does, which is
-    // the one that displays it.
+    // Whether this frame extends the running mean: whenever something reads it - the reference
+    // view, the developer resolve, whose image the mean is, or a frame capture holding it. Under ray
+    // reconstruction nothing else does, and the full-screen read-modify-write is skipped.
     bool IsPathTraceAccumulating() const
     {
       // A diagnostic frame contributes no radiance sample, so it must not advance the mean
@@ -807,7 +823,10 @@ namespace YAEngine
       if (IsPathTraceDebugView())
         return false;
 
-      return IsPathTracingActive() || m_CurrentTexture == DEBUG_VIEW_PT_REFERENCE;
+      if (m_CurrentTexture == DEBUG_VIEW_PT_REFERENCE)
+        return true;
+
+      return IsPathTracingActive() && (!IsRayReconstructionResolve() || b_PathTraceAccumulationHeld);
     }
 
     void CaptureFrame();

@@ -45,11 +45,13 @@ namespace YAEngine
     }
 
     // RayTracingInstanceRecord::worldToPrevWorld for one object. Identity for a singular
-    // transform rather than the inf or NaN its inverse would put into the motion vectors.
+    // transform rather than the inf or NaN its inverse would put into the motion vectors, and
+    // exactly identity for one that did not move, which is nearly every object of a frame.
     void WriteWorldToPrevWorld(const RenderObject& object, glm::vec4 rows[3])
     {
       glm::mat4 delta(1.0f);
-      if (std::abs(glm::determinant(glm::mat3(object.worldTransform))) > 0.0f)
+      if (object.prevWorldTransform != object.worldTransform
+        && std::abs(glm::determinant(glm::mat3(object.worldTransform))) > 0.0f)
         delta = object.prevWorldTransform * glm::affineInverse(object.worldTransform);
 
       WriteRows(delta, rows);
@@ -98,7 +100,7 @@ namespace YAEngine
     m_Slots.clear();
   }
 
-  const VulkanVertexBuffer* TlasBuilder::ResolveGeometry(const RenderObject& object,
+  VulkanVertexBuffer* TlasBuilder::ResolveGeometry(const RenderObject& object,
     MeshManager& meshes, MaterialManager& materials)
   {
     // The snapshot was taken before this frame started and an asset can have been
@@ -106,7 +108,7 @@ namespace YAEngine
     if (!meshes.Has(object.mesh) || !materials.Has(object.material))
       return nullptr;
 
-    const VulkanVertexBuffer& vertexBuffer = meshes.GetVertexBuffer(object.mesh);
+    VulkanVertexBuffer& vertexBuffer = meshes.GetVertexBuffer(object.mesh);
     if (!vertexBuffer.HasBottomLevel())
       return nullptr;
 
@@ -272,6 +274,7 @@ namespace YAEngine
     // Cleared up front so every early return below leaves the slot marked untraceable,
     // which is what a consumer tests.
     slot.instanceCount = 0;
+    slot.hasMovingInstances = false;
     slot.built = false;
 
     // Emptied up front for the same reason: the table stays a valid binding either way.
@@ -321,9 +324,12 @@ namespace YAEngine
     auto* records = static_cast<RayTracingInstanceRecord*>(slot.records.GetMapped());
 
     uint32_t cursor = 0;
+    // Records are indexed by cursor, which every instance advances. Structure instances are
+    // counted apart: a raster-only surface keeps its record and gets no instance.
+    uint32_t tlasCount = 0;
     for (const RenderObject& object : snapshot.objects)
     {
-      const VulkanVertexBuffer* vertexBuffer = ResolveGeometry(object, meshes, materials);
+      VulkanVertexBuffer* vertexBuffer = ResolveGeometry(object, meshes, materials);
       if (vertexBuffer == nullptr)
         continue;
 
@@ -379,14 +385,30 @@ namespace YAEngine
       // the static instance offset down to prevWorld * inverse(world).
       WriteWorldToPrevWorld(object, record.worldToPrevWorld);
 
-      const VkDeviceAddress bottomLevel = vertexBuffer->GetBottomLevel().GetDeviceAddress();
-      // A raster-only transparent surface stays in the structure for its record, which the
-      // emissive light table below may name, under a mask no ray traces. Glass that can refract is
-      // kept apart from glass that never does, so a trace can leave out either.
-      const uint32_t mask = !object.isTransparent ? RT_MASK_OPAQUE
-        : !dielectric ? RT_MASK_RASTER_ONLY
+      // A raster-only transparent surface keeps its record, which the emissive light table below
+      // may name, but no ray may see it, so it gets no structure instance at all. Glass that can
+      // refract is kept apart from glass that never does, so a trace can leave out either, and a
+      // moving opaque surface is marked for the reflector lookup.
+      const bool rasterOnly = object.isTransparent && !dielectric;
+      const bool moving = !object.isTransparent && object.prevWorldTransform != object.worldTransform;
+      const uint32_t mask = !object.isTransparent ? (moving ? RT_MASK_OPAQUE | RT_MASK_MOVING : RT_MASK_OPAQUE)
         : material.transmissionMode == TransmissionMode::Solid ? RT_MASK_GLASS_REFRACTIVE
         : RT_MASK_GLASS_STRAIGHT;
+      slot.hasMovingInstances = slot.hasMovingInstances || moving;
+
+      // An instance whose any-hit runs - the non-opaque ones below - references the structure that
+      // reports each triangle to it once (VulkanVertexBuffer::GetSingleAnyHitBottomLevel); FORCE_OPAQUE
+      // geometry keeps the faster one.
+      const bool anyHit = object.isAlphaTest || dielectric;
+      VkDeviceAddress bottomLevel = 0;
+      if (!rasterOnly)
+      {
+        const VulkanAccelerationStructure* structure = anyHit
+          ? vertexBuffer->GetSingleAnyHitBottomLevel(ctx) : &vertexBuffer->GetBottomLevel();
+        if (structure == nullptr)
+          continue;
+        bottomLevel = structure->GetDeviceAddress();
+      }
 
       // Whether the object's instances enter the emissive light table is the material's call, so
       // it is made once; only the transform the selection weight scales with differs per instance.
@@ -453,8 +475,8 @@ namespace YAEngine
             EmissiveLightRecord light {
               .instanceIndex = cursor,
               .triangleCount = triangleCount,
-              // Raster-only transparent instances sit in RT_MASK_RASTER_ONLY, which no ray traces.
-              .flags = object.isTransparent && !dielectric ? EMISSIVE_LIGHT_NEE_ONLY : 0u,
+              // Raster-only transparent instances have no structure instance for a ray to hit.
+              .flags = rasterOnly ? EMISSIVE_LIGHT_NEE_ONLY : 0u,
               .pmf = 0.0f,
               .aliasThreshold = 0.0f,
               .aliasIndex = 0,
@@ -468,7 +490,8 @@ namespace YAEngine
           }
         }
 
-        instances[cursor] = instance;
+        if (!rasterOnly)
+          instances[tlasCount++] = instance;
         records[cursor] = instanceRecord;
         cursor++;
       }
@@ -477,7 +500,7 @@ namespace YAEngine
     slot.instanceCount = cursor;
     UploadEmissiveTable(ctx, slot);
 
-    if (cursor == 0)
+    if (tlasCount == 0)
       return;
 
     // Sized for the whole instance capacity, not for this frame's count, so the structure
@@ -514,7 +537,7 @@ namespace YAEngine
       VK_PIPELINE_STAGE_ACCELERATION_STRUCTURE_BUILD_BIT_KHR | traceStages,
       0, 1, &hostBarrier, 0, nullptr, 0, nullptr);
 
-    slot.structure.CmdBuildTopLevel(ctx, cmd, slot.instanceAddress, cursor,
+    slot.structure.CmdBuildTopLevel(ctx, cmd, slot.instanceAddress, tlasCount,
       slot.scratch.deviceAddress);
 
     // The build writes the structure; what traces it is a pass later in the same command
@@ -533,8 +556,8 @@ namespace YAEngine
     {
       b_FirstBuildLogged = true;
       YA_LOG_INFO("Render",
-        "TLAS built: %u instances over %zu objects, %u emissive, %llu record bytes, %llu structure bytes",
-        slot.instanceCount, snapshot.objects.size(), slot.emissiveCount,
+        "TLAS built: %u instances (%u records) over %zu objects, %u emissive, %llu record bytes, %llu structure bytes",
+        tlasCount, slot.instanceCount, snapshot.objects.size(), slot.emissiveCount,
         (unsigned long long)(slot.instanceCount * sizeof(RayTracingInstanceRecord)),
         (unsigned long long)slot.structure.GetSize());
     }
@@ -563,6 +586,11 @@ namespace YAEngine
   uint32_t TlasBuilder::GetInstanceCount(uint32_t frameIndex) const
   {
     return frameIndex < m_Slots.size() ? m_Slots[frameIndex].instanceCount : 0;
+  }
+
+  bool TlasBuilder::HasMovingInstances(uint32_t frameIndex) const
+  {
+    return frameIndex < m_Slots.size() && m_Slots[frameIndex].hasMovingInstances;
   }
 
   VkBuffer TlasBuilder::GetEmissiveBuffer(uint32_t frameIndex) const

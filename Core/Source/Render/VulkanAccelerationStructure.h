@@ -18,6 +18,11 @@ namespace YAEngine
     uint32_t maxVertex = 0;
     VkDeviceAddress indexAddress = 0;
     uint32_t indexCount = 0;
+    // Promise the any-hit shader each triangle at most once. The glass transmittance in pt_shadow.rahit
+    // needs it, and without it an alpha cutout can run its texture fetch several times per triangle. The
+    // promise can cost the build the spatial splits that make traversal fast, so geometry no any-hit
+    // runs on goes without.
+    bool noDuplicateAnyHit = false;
   };
 
   // Scratch memory for one acceleration structure build. What

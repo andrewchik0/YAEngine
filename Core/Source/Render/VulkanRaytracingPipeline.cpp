@@ -128,6 +128,8 @@ namespace YAEngine
 
     VkRayTracingPipelineCreateInfoKHR pipelineInfo {
       .sType = VK_STRUCTURE_TYPE_RAY_TRACING_PIPELINE_CREATE_INFO_KHR,
+      // Every bottom level structure the engine builds holds triangles, never AABBs.
+      .flags = VK_PIPELINE_CREATE_RAY_TRACING_SKIP_AABBS_BIT_KHR,
       .stageCount = static_cast<uint32_t>(stages.size()),
       .pStages = stages.data(),
       .groupCount = static_cast<uint32_t>(groups.size()),

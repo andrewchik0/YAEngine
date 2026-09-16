@@ -40,6 +40,21 @@ float clearCoatAverageFresnel(float weight)
   return weight * (CLEAR_COAT_F0 + (1.0 - CLEAR_COAT_F0) / 21.0);
 }
 
+// Raster only, and a deliberate hack: a coat is car paint and nothing else. A car is left out of every
+// probe bake, so a panel facing the road reflects it lit, where the car's own body darkens it; the path
+// tracer measured the underside of the parked car 9 to 18 times darker. What deferred lighting and SSR
+// reflect on a coat texel therefore fades out as the coat normal turns toward the ground, down to the
+// floor. Fitted against the path tracer on that car.
+const float CLEAR_COAT_GROUND_FADE_START = 0.0;
+const float CLEAR_COAT_GROUND_FADE_END = -0.5;
+const float CLEAR_COAT_GROUND_FLOOR = 0.05;
+
+float clearCoatGroundOcclusion(vec3 coatNormal)
+{
+  return mix(CLEAR_COAT_GROUND_FLOOR, 1.0,
+    smoothstep(CLEAR_COAT_GROUND_FADE_END, CLEAR_COAT_GROUND_FADE_START, coatNormal.y));
+}
+
 // An orthonormal basis around the unit vector n (Duff et al., "Building an Orthonormal Basis,
 // Revisited", JCGT 2017). Deterministic in n, so the encoder and the decoders build the same basis
 // from the same normal.

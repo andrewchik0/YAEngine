@@ -6,7 +6,7 @@ namespace YAEngine {
 #endif
 
 // EmissiveLightRecord::flags. The instance is transparent but not glass to the path tracer - no
-// transmission mode, or the PT Glass switch off - and sits in RT_MASK_RASTER_ONLY, which no ray traces,
+// transmission mode, or the PT Glass switch off - and has no TLAS instance, only its instance record,
 // so a BSDF sample can never reach it and next event estimation is its only strategy: MIS weight one.
 // Glass a bounce ray would cross straight is the same case, decided per vertex in estimateDirectLight.
 #define EMISSIVE_LIGHT_NEE_ONLY 0x01u
@@ -14,7 +14,7 @@ namespace YAEngine {
 // The emissive light table next event estimation samples emitting geometry from. TlasBuilder rebuilds
 // it every frame, in the same pass and from the same snapshot transforms as the instance records,
 // which is what lets a moving emitter light the scene where it is now. One std430 buffer: the header,
-// then one record per emissive TLAS instance, addressed by RayTracingInstanceRecord::emissiveIndex.
+// then one record per emissive instance record, addressed by RayTracingInstanceRecord::emissiveIndex.
 //
 // std430 layout, identical on both sides:
 //  - the header holds four scalars, aligns to 4 and is 16 bytes, so the record array - whose element

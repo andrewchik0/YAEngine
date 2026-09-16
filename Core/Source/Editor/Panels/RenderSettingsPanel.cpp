@@ -511,6 +511,18 @@ namespace YAEngine
         .min = PT_MIN_FIREFLY_CLAMP, .max = PT_MAX_FIREFLY_CLAMP, .speed = 0.1f, .format = "%.1f", .defaultValue = 10.0f,
         .tooltip = "Ceiling on the radiance one bounce may add. 0 switches it off, which is the unbiased setting - and the "
                    "one to compare against when a converged image looks too dark." });
+      PropertyInt("PT Layer Reflection Bounces", render.GetPathTraceLayerReflectionBounces(), {
+        .min = PT_MIN_LAYER_REFLECTION_BOUNCES, .max = PT_MAX_LAYER_REFLECTION_BOUNCES, .speed = 0.05f,
+        .defaultValue = PT_DEFAULT_LAYER_REFLECTION_BOUNCES,
+        .tooltip = "Bounces of the mirror reflection on clear coat and smooth dielectrics (car paint), past the reflected "
+                   "surface. Those pixels trace a second path for the reflection; 0 lights the reflected surface with direct "
+                   "light only, every bounce adds a trace and a shadow ray per such pixel." });
+      PropertyFloat("PT Specular Guide Roughness", render.GetPathTraceSpecularGuideMaxRoughness(), {
+        .min = 0.0f, .max = 1.0f, .speed = 0.005f, .format = "%.2f",
+        .defaultValue = PT_DEFAULT_SPECULAR_GUIDE_MAX_ROUGHNESS,
+        .tooltip = "Rougher surfaces trace no ray for the Ray Reconstruction specular guides and report their reflection on "
+                   "the surface itself. 1 traces it on every pixel; lower saves a ray per rough pixel. Mirrors, clear coat "
+                   "and smooth dielectrics always trace it." });
       PopDependency();
 
       PropertyBool("PT Mirror Sun", render.GetPathTraceMirrorSun(), {

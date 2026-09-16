@@ -86,6 +86,12 @@ namespace YAEngine
     const VulkanAccelerationStructure& GetBottomLevel() const { return m_BottomLevel; }
     bool HasBottomLevel() const { return m_BottomLevel.IsValid(); }
 
+    // The same geometry built with AccelerationStructureGeometry::noDuplicateAnyHit, for instances whose
+    // any-hit shaders run. Built on the first call, blocking like the one above, and kept next to it for
+    // the buffer's lifetime: a frame still in flight may be tracing either. Null when HasBottomLevel() is
+    // false or the build failed; a failed build is not retried.
+    const VulkanAccelerationStructure* GetSingleAnyHitBottomLevel(const RenderContext& ctx);
+
     // Addresses of the interleaved streams the structure above was built over, cached at
     // build time. A hit resolves geometry through these, once per instance per frame, so
     // asking the device for them again every frame would repeat work the build already
@@ -127,6 +133,10 @@ namespace YAEngine
     VulkanAccelerationStructure m_BottomLevel;
     VkDeviceAddress m_VertexAddress = 0;
     VkDeviceAddress m_IndexAddress = 0;
+    // What m_BottomLevel was built over, kept for the single any-hit variant.
+    AccelerationStructureGeometry m_BottomLevelGeometry {};
+    VulkanAccelerationStructure m_SingleAnyHitBottomLevel;
+    bool b_SingleAnyHitBottomLevelFailed = false;
 
     // Position-only stream with duplicate positions removed. Depth prepass and
     // shadow passes fetch this instead of the interleaved stream, which carries

@@ -62,12 +62,15 @@ namespace YAEngine
 
     VkAccelerationStructureKHR Get(uint32_t frameIndex) const;
 
-    // One RayTracingInstanceRecord per TLAS instance, indexed by the instance's
-    // instanceCustomIndex.
+    // One RayTracingInstanceRecord per scene instance, indexed by a TLAS instance's
+    // instanceCustomIndex. Raster-only surfaces have a record and no TLAS instance.
     VkBuffer GetRecordBuffer(uint32_t frameIndex) const;
     VkDeviceSize GetRecordBufferSize(uint32_t frameIndex) const;
 
     uint32_t GetInstanceCount(uint32_t frameIndex) const;
+
+    // Whether the last Build put any instance under RT_MASK_MOVING.
+    bool HasMovingInstances(uint32_t frameIndex) const;
 
     // An EmissiveLightTableHeader followed by one EmissiveLightRecord per instance whose material
     // can produce an emissive texel, written by the same Build as the records. Always a bindable
@@ -101,14 +104,15 @@ namespace YAEngine
 
     struct FrameSlot
     {
-      // Build input, written straight through its host mapping in TLAS instance order.
+      // Build input, written straight through its host mapping in TLAS instance order. Holds no
+      // raster-only surface, so it can be shorter than the records.
       VulkanBuffer instances;
       // Cached with the buffer: the build wants an address, and it has to be 16-byte
       // aligned, which is a property of the allocation and so is checked once per one
       // rather than trusted or re-tested every frame.
       VkDeviceAddress instanceAddress = 0;
       bool addressUsable = false;
-      // One record per instance above, at the same index.
+      // One record per instance, raster-only surfaces included, at the instance's custom index.
       VulkanBuffer records;
       // The emissive light table header and records, host mapped like the records.
       VulkanBuffer emissive;
@@ -120,7 +124,9 @@ namespace YAEngine
       // Instance capacity the structure and the scratch were sized for. Capacity only
       // grows, so this is also the test for whether they have to be recreated.
       uint32_t sizedForCount = 0;
+      // Records written, which bounds the structure instances.
       uint32_t instanceCount = 0;
+      bool hasMovingInstances = false;
       bool built = false;
     };
 
@@ -138,8 +144,9 @@ namespace YAEngine
     void BuildEmissiveAliasTable();
 
     // The mesh an object contributes geometry with, or null when it contributes none:
-    // a stale mesh or material handle, or a mesh with no bottom level structure.
-    static const VulkanVertexBuffer* ResolveGeometry(const RenderObject& object,
+    // a stale mesh or material handle, or a mesh with no bottom level structure. Mutable because
+    // glass builds its own structure variant on first use.
+    static VulkanVertexBuffer* ResolveGeometry(const RenderObject& object,
       MeshManager& meshes, MaterialManager& materials);
 
     std::vector<FrameSlot> m_Slots;

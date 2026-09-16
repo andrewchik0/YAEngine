@@ -116,9 +116,30 @@ namespace YAEngine
     // without a device call per instance per frame.
     m_VertexAddress = geometry.vertexAddress;
     m_IndexAddress = geometry.indexAddress;
+    m_BottomLevelGeometry = geometry;
 
     YA_LOG_VERBOSE("Vulkan", "Built a bottom level acceleration structure: %zu triangles, %llu bytes",
       m_IndicesCount / 3, static_cast<unsigned long long>(m_BottomLevel.GetSize()));
+  }
+
+  const VulkanAccelerationStructure* VulkanVertexBuffer::GetSingleAnyHitBottomLevel(const RenderContext& ctx)
+  {
+    if (m_SingleAnyHitBottomLevel.IsValid())
+      return &m_SingleAnyHitBottomLevel;
+    if (!m_BottomLevel.IsValid() || b_SingleAnyHitBottomLevelFailed)
+      return nullptr;
+
+    AccelerationStructureGeometry geometry = m_BottomLevelGeometry;
+    geometry.noDuplicateAnyHit = true;
+    if (!m_SingleAnyHitBottomLevel.BuildBottomLevel(ctx, geometry))
+    {
+      b_SingleAnyHitBottomLevelFailed = true;
+      return nullptr;
+    }
+
+    YA_LOG_VERBOSE("Vulkan", "Built a single any-hit bottom level acceleration structure: %zu triangles, %llu bytes",
+      m_IndicesCount / 3, static_cast<unsigned long long>(m_SingleAnyHitBottomLevel.GetSize()));
+    return &m_SingleAnyHitBottomLevel;
   }
 
   void VulkanVertexBuffer::CreateWeldedPositions(const RenderContext& ctx,
@@ -214,6 +235,8 @@ namespace YAEngine
     // Ahead of the buffers it was built from, and it releases its own storage buffer only
     // after the structure handle. A no-op when nothing was built.
     m_BottomLevel.Destroy(ctx);
+    m_SingleAnyHitBottomLevel.Destroy(ctx);
+    b_SingleAnyHitBottomLevelFailed = false;
     m_VertexAddress = 0;
     m_IndexAddress = 0;
 

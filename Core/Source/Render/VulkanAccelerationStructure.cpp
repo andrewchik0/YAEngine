@@ -48,11 +48,9 @@ namespace YAEngine
       return VkAccelerationStructureBuildGeometryInfoKHR {
         .sType = VK_STRUCTURE_TYPE_ACCELERATION_STRUCTURE_BUILD_GEOMETRY_INFO_KHR,
         .type = VK_ACCELERATION_STRUCTURE_TYPE_TOP_LEVEL_KHR,
-        // The structure is rebuilt whole every frame, so build cost is what matters and
-        // FAST_TRACE would be paid on every one of them. A digest-keyed refit would go
-        // here: ALLOW_UPDATE plus MODE_UPDATE on frames the snapshot's transform digest
-        // says nothing moved.
-        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_BUILD_BIT_KHR,
+        // Rebuilt whole every frame, but over a few thousand instances that build is cheap next
+        // to the several rays per pixel that traverse the result, so trace quality wins.
+        .flags = VK_BUILD_ACCELERATION_STRUCTURE_PREFER_FAST_TRACE_BIT_KHR,
         .mode = VK_BUILD_ACCELERATION_STRUCTURE_MODE_BUILD_KHR,
         .geometryCount = 1,
         .pGeometries = geometry,
@@ -115,9 +113,9 @@ namespace YAEngine
       // Deliberately not VK_GEOMETRY_OPAQUE_BIT_KHR. Whether a surface is alpha tested or a
       // dielectric is a property of the material an instance carries, so it belongs to the TLAS
       // instance flags; marking the geometry opaque here would skip the any-hit shader for every
-      // instance built from the same mesh. No duplicate any-hit calls: the shadow any-hit
-      // multiplies a transmittance in per call, and a triangle reported twice would count twice.
-      .flags = VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR,
+      // instance built from the same mesh.
+      .flags = geometry.noDuplicateAnyHit
+        ? VkGeometryFlagsKHR(VK_GEOMETRY_NO_DUPLICATE_ANY_HIT_INVOCATION_BIT_KHR) : VkGeometryFlagsKHR(0),
     };
 
     VkAccelerationStructureBuildGeometryInfoKHR buildInfo {

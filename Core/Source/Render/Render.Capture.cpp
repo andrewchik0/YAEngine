@@ -498,6 +498,8 @@ namespace YAEngine
       PathTraceGlassHandling pathTraceSecondaryGlass = PathTraceGlassHandling::Straight;
       int pathTraceGlassReflectionBounces = 0;
       PathTraceGlassHandling pathTraceGlassReflectionGlass = PathTraceGlassHandling::Straight;
+      int pathTraceLayerReflectionBounces = 0;
+      float pathTraceSpecularGuideMaxRoughness = 0.0f;
       int pathTraceSampleCount = 0;
       int pathTraceDebugMode = 0;
       // Null unless the targets were copied right after this pass instead of at the frame end.
@@ -599,6 +601,8 @@ namespace YAEngine
       out << "      \"glassReflectionBounces\": " << mc.pathTraceGlassReflectionBounces << ",\n";
       out << "      \"glassReflectionGlass\": \""
           << (mc.pathTraceGlassReflectionGlass == PathTraceGlassHandling::Straight ? "straight" : "refract") << "\",\n";
+      out << "      \"layerReflectionBounces\": " << mc.pathTraceLayerReflectionBounces << ",\n";
+      out << "      \"specularGuideMaxRoughness\": " << JsonNumber(mc.pathTraceSpecularGuideMaxRoughness) << ",\n";
       out << "      \"sampleCount\": " << mc.pathTraceSampleCount << ",\n";
       out << "      \"requestedSampleCount\": " << request.accumSamples << ",\n";
       out << "      \"debugMode\": { \"value\": " << mc.pathTraceDebugMode
@@ -1240,6 +1244,8 @@ namespace YAEngine
       .pathTraceSecondaryGlass = m_PathTraceSecondaryGlass,
       .pathTraceGlassReflectionBounces = m_PathTraceGlassReflectionBounces,
       .pathTraceGlassReflectionGlass = m_PathTraceGlassReflectionGlass,
+      .pathTraceLayerReflectionBounces = m_PathTraceLayerReflectionBounces,
+      .pathTraceSpecularGuideMaxRoughness = m_PathTraceSpecularGuideMaxRoughness,
       .pathTraceSampleCount = m_PathTraceSampleIndex,
       .pathTraceDebugMode = GetPathTraceDebugMode(),
       // As requested, which may be the alt name

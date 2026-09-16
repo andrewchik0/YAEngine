@@ -570,16 +570,13 @@ bool evaluateLightCandidate(int candidate, vec3 worldPos,
 // light dominates the point, which is the normal case in a lit interior. The estimator
 // divides by the resulting pdf, so a bad weight costs variance and never bias.
 //
-// TWO passes and ONE uniform, rather than the one pass and one-uniform-per-candidate that
-// weighted reservoir sampling needs. The distribution is identical; what the single uniform
-// buys is that it can come from the low-discrepancy stream, and a reservoir's per-candidate
-// stream cannot - it consumes an unpredictable number of dimensions. The second pass stops as
-// soon as the cumulative weight crosses the target, so it walks half the candidates on
-// average, and the first one does no shadow ray and no BRDF work.
+// One pass of weighted reservoir sampling: every candidate is evaluated once, and each one with
+// a positive weight replaces the pick with probability weight / running total, one uniform per
+// such candidate off the white noise stream. The first positive candidate is always taken.
 //
 // Everything written here describes the light's centre; sampleAnalyticLightDirection turns the
 // direction and the shadow distance into a point on the emitter afterwards.
-bool selectLight(vec3 worldPos, float lightSelector, out PathLightSample result)
+bool selectLight(vec3 worldPos, inout uint rngState, out PathLightSample result)
 {
   int candidateCount = 1
     + min(u_Lights.pointLightCount, MAX_POINT_LIGHTS)
@@ -592,24 +589,7 @@ bool selectLight(vec3 worldPos, float lightSelector, out PathLightSample result)
   result.candidate = 0;
 
   float totalWeight = 0.0;
-  for (int candidate = 0; candidate < candidateCount; candidate++)
-  {
-    vec3 L;
-    float lightDistance;
-    vec3 radiance;
-    if (!evaluateLightCandidate(candidate, worldPos, L, lightDistance, radiance))
-      continue;
-
-    totalWeight += max(luminance(radiance), 0.0);
-  }
-
-  if (totalWeight <= 0.0)
-    return false;
-
-  float target = lightSelector * totalWeight;
-  float cumulative = 0.0;
   float chosenWeight = 0.0;
-
   for (int candidate = 0; candidate < candidateCount; candidate++)
   {
     vec3 L;
@@ -622,19 +602,19 @@ bool selectLight(vec3 worldPos, float lightSelector, out PathLightSample result)
     if (weight <= 0.0)
       continue;
 
-    // Written for every positive candidate rather than only for the crossing one, so a
-    // selector that rounds up to the total still leaves the last valid candidate here
-    // instead of nothing at all.
-    result.direction = L;
-    result.radiance = radiance;
-    result.lightDistance = lightDistance;
-    result.candidate = candidate;
-    chosenWeight = weight;
-
-    cumulative += weight;
-    if (cumulative > target)
-      break;
+    totalWeight += weight;
+    if (randomFloat(rngState) * totalWeight < weight)
+    {
+      result.direction = L;
+      result.radiance = radiance;
+      result.lightDistance = lightDistance;
+      result.candidate = candidate;
+      chosenWeight = weight;
+    }
   }
+
+  if (totalWeight <= 0.0)
+    return false;
 
   result.selectionPdf = chosenWeight / totalWeight;
   return true;
@@ -1005,12 +985,22 @@ float pathSmithK(float alpha)
   return alpha * 0.5;
 }
 
+// Keeps a lobe probability away from zero and one, since dividing by it is what would blow up
+// otherwise - but only as far as the other lobe carries energy: a probability that already follows
+// the lobes' estimated energies bounds the estimate by itself, and forcing a tenth of the samples onto
+// a lobe worth a hundredth of the response only moves variance onto the lobe that matters. otherShare
+// is the complementary lobe's share of that estimate.
+float clampLobeProbability(float probability, float otherShare)
+{
+  return clamp(probability, PT_MIN_LOBE_PROBABILITY, 1.0 - min(PT_MIN_LOBE_PROBABILITY, otherShare));
+}
+
 // How much of the surface response is specular, which is what decides how often the
 // specular lobe is sampled. Fresnel at normal incidence against the diffuse albedo is the
 // cheapest estimate that gets metal (no diffuse lobe at all) and a dielectric (mostly
-// diffuse) both right. A surface with a diffuse lobe keeps the probability away from zero
-// and one, since dividing by it is what would blow up otherwise; a metal is left at exactly
-// one because its diffuse lobe carries no energy to lose.
+// diffuse) both right. A surface with a diffuse lobe keeps the probability inside
+// clampLobeProbability's bounds; a metal is left at exactly one because its diffuse lobe
+// carries no energy to lose.
 float specularLobeProbability(vec3 albedo, vec3 f0, float metallic, float roughness)
 {
   float diffuseWeight = luminance(albedo) * (1.0 - metallic);
@@ -1020,6 +1010,7 @@ float specularLobeProbability(vec3 albedo, vec3 f0, float metallic, float roughn
     return 1.0;
 
   float probability = specularWeight / max(specularWeight + diffuseWeight, 1e-5);
+  float diffuseShare = 1.0 - probability;
 
   // Fresnel at normal incidence is the right measure on a rough surface and badly wrong on a
   // smooth dark dielectric. Bistro's exterior glass is the case that exposed it: F0 is 0.04
@@ -1039,7 +1030,7 @@ float specularLobeProbability(vec3 albedo, vec3 f0, float metallic, float roughn
     smoothstep(PT_LOBE_FLOOR_ROUGHNESS_MIN, PT_LOBE_FLOOR_ROUGHNESS_MAX, roughness));
   probability = max(probability, smoothFloor);
 
-  return clamp(probability, PT_MIN_LOBE_PROBABILITY, 1.0 - PT_MIN_LOBE_PROBABILITY);
+  return clampLobeProbability(probability, diffuseShare);
 }
 
 // What the starting vertex samples. A reflection layer pixel runs the path twice from the same
@@ -1118,11 +1109,12 @@ float coatLobeProbability(PathBsdf bsdf, vec3 f0, float coatViewTransmission)
     return 1.0;
 
   float probability = coatWeight / max(coatWeight + surfaceWeight, 1e-5);
+  float surfaceShare = 1.0 - probability;
   float smoothFloor = mix(PT_SMOOTH_LOBE_FLOOR, 0.0,
     smoothstep(PT_LOBE_FLOOR_ROUGHNESS_MIN, PT_LOBE_FLOOR_ROUGHNESS_MAX, bsdf.coatRoughness));
   probability = max(probability, smoothFloor);
 
-  return clamp(probability, PT_MIN_LOBE_PROBABILITY, 1.0 - PT_MIN_LOBE_PROBABILITY);
+  return clampLobeProbability(probability, surfaceShare);
 }
 
 // The lobe mixture lobeMode samples. The coin picks the coat first and runs the surface's own coin on
@@ -1434,10 +1426,9 @@ vec3 estimateDirectLight(vec3 worldPos, PathBsdf bsdf, PathVertexTerms terms, ve
   float chosenShadowDistance = 0.0;
   EmissiveLightSample chosenEmitter;
 
-  float lightSelector = randomFloat(rngState);
   vec2 lightXi = randomFloat2(rngState);
   PathLightSample light;
-  if (selectLight(worldPos, lightSelector, light))
+  if (selectLight(worldPos, rngState, light))
   {
     float shadowDistance;
     sampleAnalyticLightDirection(light, worldPos, lightXi, shadowDistance);

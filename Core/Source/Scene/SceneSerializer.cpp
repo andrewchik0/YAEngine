@@ -186,6 +186,9 @@ namespace YAEngine
       PT_MIN_GLASS_REFLECTION_BOUNCES, PT_MAX_BOUNCES);
     settings["ptGlassReflectionGlass"] = std::clamp(int(render.GetPathTraceGlassReflectionGlass()),
       PT_GLASS_REFRACT, PT_GLASS_STRAIGHT);
+    settings["ptLayerReflectionBounces"] = std::clamp(render.GetPathTraceLayerReflectionBounces(),
+      PT_MIN_LAYER_REFLECTION_BOUNCES, PT_MAX_LAYER_REFLECTION_BOUNCES);
+    settings["ptSpecularGuideMaxRoughness"] = std::clamp(render.GetPathTraceSpecularGuideMaxRoughness(), 0.0f, 1.0f);
     // Clamped on the way out as well as on the way in, so what the file says is what the
     // next load will actually apply.
     settings["ptFireflyClamp"] = std::clamp(render.GetPathTraceFireflyClamp(),
@@ -377,6 +380,16 @@ namespace YAEngine
     {
       render.GetPathTraceGlassReflectionGlass() = PathTraceGlassHandling(std::clamp(
         settings["ptGlassReflectionGlass"].as<int>(), PT_GLASS_REFRACT, PT_GLASS_STRAIGHT));
+    }
+    if (settings["ptLayerReflectionBounces"])
+    {
+      render.GetPathTraceLayerReflectionBounces() = std::clamp(settings["ptLayerReflectionBounces"].as<int>(),
+        PT_MIN_LAYER_REFLECTION_BOUNCES, PT_MAX_LAYER_REFLECTION_BOUNCES);
+    }
+    if (settings["ptSpecularGuideMaxRoughness"])
+    {
+      render.GetPathTraceSpecularGuideMaxRoughness() = std::clamp(
+        settings["ptSpecularGuideMaxRoughness"].as<float>(), 0.0f, 1.0f);
     }
     if (settings["ptFireflyClamp"])
     {

@@ -20,7 +20,7 @@ hitAttributeEXT vec2 hitBarycentrics;
 // leaves non-opaque, so it reaches here for every interface on its span. The alpha cutout ignores the
 // texels it removes, and a dielectric is always ignored
 // once it has attenuated the ray: nothing depends on the order candidates arrive in, and
-// NO_DUPLICATE_ANY_HIT_INVOCATION on the bottom levels reports each triangle once.
+// NO_DUPLICATE_ANY_HIT_INVOCATION on the bottom levels non-opaque instances reference reports each triangle once.
 //
 // Every class is crossed straight here: a Sheet as a slab, a ThinWalled wall and a Solid boundary as
 // one interface. For a Solid that is a deliberate approximation - the ray is not refracted, so solid
