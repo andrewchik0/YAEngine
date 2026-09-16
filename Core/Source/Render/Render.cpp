@@ -771,7 +771,13 @@ namespace YAEngine
     // It also has to precede the graph because the compute passes that trace the
     // structure live inside it. The instance list comes from the snapshot rather than
     // from the collected draw commands, so it does not wait on them.
-    if (m_Backend.GetContext().raytracingSupported)
+    //
+    // Only a frame the path tracer serves builds it; the raster path reads neither. A skipped
+    // frame leaves its slot as an older build left it, and IsPathTracePassEnabled never reads
+    // that slot then, because its first two terms are this same condition.
+    if (m_Backend.GetContext().raytracingSupported
+      && (IsPathTracingActive() || IsPathTraceView())
+      && IsPathTracerAvailable())
     {
       YA_PROFILE_CPU("BuildTlas");
 #ifdef YA_EDITOR
