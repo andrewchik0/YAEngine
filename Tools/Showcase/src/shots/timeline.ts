@@ -134,8 +134,8 @@ export const rasterVsPathTracing = {
 // no tone map, so the grade arriving with Post is part of what the last step visibly adds;
 // stage 6 is the engine's own final image. See docs/frame-capture.md for the capture recipe.
 export const breakdownSweep = {
-  holdSeconds: 2.4,
-  sweepSeconds: 1.8,
+  holdSeconds: 2,
+  sweepSeconds: 2.6,
   stages: [
     { mode: { title: 'Baked Volumes', detail: 'indirect diffuse' }, src: 'stills/breakdown/bd1_volumes.png' },
     { mode: { title: 'SSGI', detail: 'indirect diffuse' }, src: 'stills/breakdown/bd2_ssgi.png' },

@@ -5,11 +5,16 @@
 
 // CONFIG
 
-#define EMA_IIR_INVERSE_CUTOFF_FREQUENCY        (0.97)      // 0.0 - 0.999
+#define EMA_IIR_INVERSE_CUTOFF_FREQUENCY        (0.99)      // 0.0 - 0.999
 // Blackman-Harris approximation used to resolve the jittered sample back onto the pixel
 // centre. More negative = tighter filter, sharper image, less flicker suppression.
 #define RECONSTRUCTION_FILTER_FALLOFF           (-2.29)
 // Box width lives in u_Frame.taaClampSigma - runtime tunable per scene.
+// A pixel that does not move reprojects onto the texel centre its history was written at, so
+// there is nothing left for the box to catch but shading noise. These widen it there and fade
+// the bonus out by the time the pixel travels CLAMP_WIDENING_FADE_SPEED pixels per frame.
+#define CLAMP_WIDENING_AT_REST                  (3.0)
+#define CLAMP_WIDENING_FADE_SPEED               (2.0)
 
 // ------------------------------------------------------------------------- //
 
@@ -86,3 +91,4 @@ void getVarianceClippingBounds(vec3 color, sampler2D colorSampler, ivec2 screenS
   colorMin = min(colorMin, tm);
   colorMax = max(colorMax, tm);
 }
+
