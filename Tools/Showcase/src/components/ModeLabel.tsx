@@ -1,41 +1,53 @@
 import React from 'react';
 import { useCurrentFrame } from 'remotion';
-import { enterStyle } from '../design/animate';
+import { progress } from '../design/animate';
 import { fonts } from '../design/fonts';
 import { colors, layout, type } from '../design/tokens';
 import type { Mode } from '../shots/timeline';
 
-type ModeLabelProps = {
-  mode: Mode;
-  align?: 'left' | 'right';
-  delay?: number;
-};
+// Renderer + AA label. It runs off the left edge of the frame and is closed by a lavender
+// block; the caller places it with ModeLabelAnchor.
+export const ModeLabel: React.FC<{ mode: Mode }> = ({ mode }) => (
+  <div
+    style={{
+      gridArea: '1 / 1',
+      display: 'flex',
+      alignItems: 'center',
+      height: layout.labelHeight,
+      background: colors.labelPlate,
+      paddingLeft: layout.labelTextInset,
+      whiteSpace: 'nowrap',
+    }}
+  >
+    <div style={{ fontFamily: fonts.sans, fontSize: type.heading, color: colors.textPrimary }}>{mode.title}</div>
+    <div
+      style={{ fontFamily: fonts.sans, fontSize: type.label, color: colors.textSecondary, marginLeft: 22, marginRight: 38 }}
+    >
+      {mode.detail}
+    </div>
+    {/* Pushed to the end of the plate, so it holds still while the line swaps the text */}
+    <div style={{ width: layout.accentBarWidth, alignSelf: 'stretch', background: colors.accent, marginLeft: 'auto' }} />
+  </div>
+);
 
-// Renderer + AA mode badge, sits in the header next to the PresentMon overlay
-export const ModeLabel: React.FC<ModeLabelProps> = ({ mode, align = 'left', delay = 0 }) => {
+// Holds the labels against the bottom left corner. They are stacked in one grid cell, so every
+// label is as wide as the widest of them and the plate and the lavender block stay put while
+// the sweep line swaps the text under itself. The top-left corner is left to the PresentMon
+// overlay burned into the footage.
+export const ModeLabelAnchor: React.FC<{ children: React.ReactNode; delay?: number }> = ({ children, delay = 0 }) => {
   const frame = useCurrentFrame();
   return (
     <div
       style={{
         position: 'absolute',
-        top: layout.safeY,
-        [align]: layout.safeX,
-        display: 'flex',
-        alignItems: 'center',
-        gap: 14,
-        padding: '12px 18px',
-        borderRadius: 10,
-        background: 'rgba(7, 8, 10, 0.62)',
-        border: `1px solid ${colors.border}`,
-        backdropFilter: 'blur(12px)',
-        ...enterStyle(frame, delay),
+        left: 0,
+        bottom: layout.labelBottom,
+        display: 'grid',
+        justifyContent: 'start',
+        opacity: progress(frame, delay, 12),
       }}
     >
-      <div style={{ width: 10, height: 10, borderRadius: 2, background: colors.accent }} />
-      <div style={{ fontFamily: fonts.sans, fontWeight: 500, fontSize: type.label + 2, color: colors.textPrimary }}>
-        {mode.title}
-      </div>
-      <div style={{ fontFamily: fonts.mono, fontSize: type.caption, color: colors.textSecondary }}>{mode.detail}</div>
+      {children}
     </div>
   );
 };

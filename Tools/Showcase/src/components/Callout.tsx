@@ -1,5 +1,5 @@
 import React from 'react';
-import { AbsoluteFill, spring, useCurrentFrame, useVideoConfig } from 'remotion';
+import { AbsoluteFill, useCurrentFrame } from 'remotion';
 import { enterStyle, exitStyle, progress } from '../design/animate';
 import { fonts } from '../design/fonts';
 import { colors, motion, type, VIDEO } from '../design/tokens';
@@ -18,7 +18,6 @@ const LABEL_OFFSET = { x: -300, y: -170 };
 // Curved arrow from a label to a point in the frame, with a ring around the point
 export const Callout: React.FC<CalloutProps> = ({ x, y, title, detail, durationInFrames }) => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
 
   const start = { x: x + LABEL_OFFSET.x + 40, y: y + LABEL_OFFSET.y + 20 };
   const control = { x: x - 40, y: y + LABEL_OFFSET.y - 10 };
@@ -30,7 +29,7 @@ export const Callout: React.FC<CalloutProps> = ({ x, y, title, detail, durationI
   };
   const headAngle = (Math.atan2(end.y - control.y, end.x - control.x) * 180) / Math.PI;
 
-  const ring = spring({ frame, fps, config: { damping: 12, stiffness: 180 } });
+  const ring = progress(frame, 0, motion.base);
   const draw = progress(frame, motion.fast, motion.slow);
   const headVisible = draw > 0.95 ? 1 : 0;
   const exitStart = durationInFrames - motion.base;

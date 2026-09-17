@@ -1,10 +1,6 @@
-import { loadFont as loadInter } from '@remotion/google-fonts/Inter';
-import { loadFont as loadJetBrainsMono } from '@remotion/google-fonts/JetBrainsMono';
-
-const inter = loadInter('normal', { weights: ['400', '500', '700'], subsets: ['latin'] });
-const mono = loadJetBrainsMono('normal', { weights: ['400', '700'], subsets: ['latin'] });
-
+// System fonts on purpose: a webfont makes the video look authored, and rendering stops
+// needing network access.
 export const fonts = {
-  sans: inter.fontFamily,
-  mono: mono.fontFamily,
+  sans: 'Arial, Helvetica, sans-serif',
+  mono: "Consolas, 'Courier New', monospace",
 } as const;

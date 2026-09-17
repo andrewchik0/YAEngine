@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "remotion studio",
     "render": "remotion render Showcase out/showcase.mp4",
+    "render:preview": "remotion render Preview out/preview.mp4",
     "still": "remotion still Showcase",
     "typecheck": "tsc --noEmit"
   },

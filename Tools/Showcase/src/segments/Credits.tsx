@@ -33,7 +33,7 @@ export const Credits: React.FC = () => {
         <div
           style={{
             fontFamily: fonts.sans,
-            fontWeight: 700,
+            fontWeight: 'bold',
             fontSize: type.title + 16,
             color: colors.textPrimary,
             ...enterStyle(frame, stagger(0)),
@@ -41,26 +41,14 @@ export const Credits: React.FC = () => {
         >
           {credits.name}
         </div>
-        <div style={{ width: 120, height: 4, background: colors.accent, margin: '20px 0 28px', ...enterStyle(frame, stagger(1)) }} />
         {credits.links.map((link, i) => (
           <div
             key={link}
-            style={{ fontFamily: fonts.mono, fontSize: type.body, marginBottom: 10, ...enterStyle(frame, stagger(2 + i)) }}
+            style={{ fontFamily: fonts.mono, fontSize: type.body, marginTop: 14, ...enterStyle(frame, stagger(2 + i)) }}
           >
-            <Checked text={link} color={colors.textPrimary} />
+            <Checked text={link} color={colors.accent} />
           </div>
         ))}
-        <div
-          style={{
-            fontFamily: fonts.sans,
-            fontSize: type.label,
-            color: colors.textTertiary,
-            marginTop: 36,
-            ...enterStyle(frame, stagger(4)),
-          }}
-        >
-          {credits.tech}
-        </div>
       </div>
 
       <div style={{ flex: 1 }}>
@@ -68,8 +56,6 @@ export const Credits: React.FC = () => {
           style={{
             fontFamily: fonts.mono,
             fontSize: type.caption,
-            letterSpacing: 2,
-            textTransform: 'uppercase',
             color: colors.textTertiary,
             marginBottom: 22,
             ...enterStyle(frame, stagger(2)),

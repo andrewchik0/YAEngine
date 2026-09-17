@@ -25,11 +25,11 @@ export const EditorTour: React.FC = () => {
   const frame = useCurrentFrame();
   const terminal = useMemo(() => compileTerminal(editorTourScript, 'editor-tour'), []);
   const splitAt = terminal.submitAt + sec(0.25);
-  const dock = progress(frame, splitAt, motion.slow, motion.inOut);
+  const dock = progress(frame, splitAt, motion.slow);
   const footageIn = progress(frame, splitAt + motion.fast, motion.slow);
 
   return (
-    <AbsoluteFill style={{ background: `radial-gradient(ellipse at 50% 40%, #12151b 0%, ${colors.background} 70%)` }}>
+    <AbsoluteFill style={{ background: colors.background }}>
       <div
         style={{
           position: 'absolute',
@@ -48,10 +48,8 @@ export const EditorTour: React.FC = () => {
           top: PANEL_Y,
           width: FOOTAGE_W,
           height: PANEL_H,
-          borderRadius: layout.radius,
           overflow: 'hidden',
-          border: `1px solid ${colors.borderStrong}`,
-          boxShadow: '0 30px 80px rgba(0, 0, 0, 0.5)',
+          border: `1px solid ${colors.border}`,
           opacity: footageIn,
           transform: `translateX(${mix(80, 0, footageIn)}px)`,
         }}

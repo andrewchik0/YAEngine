@@ -29,53 +29,121 @@ export const TODO = 'TODO';
 
 export const DOT = ' \u00b7 ';
 
+// fps is not repeated here: the PresentMon overlay is burned into every recording
 export const MODES = {
-  raster: { title: 'Rasterizer', detail: `TAA${DOT}1080p` },
-  pathTracer: { title: 'Path tracer', detail: `DLSS Balanced${DOT}1080p` },
+  raster: { title: 'Rasterizer', detail: 'TAA' },
+  pathTracer: { title: 'Path tracer', detail: 'DLSS Balanced' },
+  pathTracerGlass: { title: 'Path tracer + glass', detail: 'DLSS Balanced' },
 } satisfies Record<string, Mode>;
 
 export const intro = {
   seconds: 4,
   title: 'YAEngine',
-  author: 'made by Andrei Vasilev',
-  capture: `Captured in real time on an RTX 4060 Ti 8GB${DOT}1080p`,
+  author: 'Andrei Vasilev',
+  capture: 'captured on an RTX 4060 Ti 8GB in 1080p',
 };
+
+export type TitleCardSpec = {
+  seconds: number;
+  title: string;
+  detail?: string;
+};
+
+// Statements between the parts, set like the opening card
+export const titleCards = {
+  pathTracing: {
+    seconds: 3.5,
+    title: 'It path traces, too!',
+  },
+  breakdown: {
+    seconds: 3.5,
+    title: 'How each frame is composed',
+    detail: 'render pipeline, layer by layer',
+  },
+  editor: {
+    seconds: 3.5,
+    title: 'It has an editor',
+    detail: 'The tour is driven by an AI agent over MCP',
+  },
+} satisfies Record<string, TitleCardSpec>;
 
 export const flythrough = {
   mode: MODES.raster,
-  clips: [{ src: 'footage/flythrough.mp4', seconds: 20, label: 'Release flythrough + PresentMon' }] as Clip[],
+  // The recording opens with a false start and a three second pause; the good take runs
+  // 11.6s to 35.6s, and the camera jumps to the next sequencer shot at 35.5s - stop short
+  // of it or the cut into the next card catches the teleport
+  clips: [{ src: 'footage/intro_new.mp4', seconds: 23.2, trimBeforeSeconds: 11.6 }] as Clip[],
+};
+
+// One rendering mode of one locked-off shot
+export type Stage = {
+  mode: Mode;
+  src: MediaPath;
+  // Into the recording. Every clip is a static camera, so the window is picked by how steady
+  // and how high the burned-in fps reads. A still has none.
+  trimBeforeSeconds?: number;
+};
+
+export type Comparison = {
+  name: string;
+  stages: Stage[];
+  // Drawn over the sweep; its time is counted from the start of the comparison
+  callout?: CalloutSpec;
 };
 
 export const rasterVsPathTracing = {
+  // Each mode stands still this long, then the line crosses the frame in this long
+  holdSeconds: 2.6,
+  sweepSeconds: 2.6,
   comparisons: [
     {
-      name: 'Exterior',
-      seconds: 5.5,
-      raster: 'footage/exterior_raster.mp4',
-      pathTraced: 'footage/exterior_pt.mp4',
+      name: 'Exterior, rear',
+      stages: [
+        { mode: MODES.raster, src: 'footage/raster_0.mp4', trimBeforeSeconds: 4.5 },
+        { mode: MODES.pathTracer, src: 'footage/pt_0.mp4', trimBeforeSeconds: 1 },
+      ],
       callout: {
-        atSeconds: 2.2,
+        atSeconds: 4.2,
         seconds: 3,
         x: 1180,
         y: 640,
         title: 'Clear coat',
         detail: 'two-layer material',
-      } as CalloutSpec | undefined,
+      },
+    },
+    {
+      name: 'Exterior, front',
+      stages: [
+        { mode: MODES.raster, src: 'footage/raster_1.mp4', trimBeforeSeconds: 14.5 },
+        { mode: MODES.pathTracer, src: 'footage/pt_1.mp4', trimBeforeSeconds: 10 },
+      ],
     },
     {
       name: 'Interior',
-      seconds: 5.5,
-      raster: 'footage/interior_raster.mp4',
-      pathTraced: 'footage/interior_pt.mp4',
-      callout: undefined as CalloutSpec | undefined,
+      stages: [
+        { mode: MODES.raster, src: 'footage/raster_2.mp4', trimBeforeSeconds: 14.5 },
+        { mode: MODES.pathTracer, src: 'footage/pt_2.mp4', trimBeforeSeconds: 3 },
+        { mode: MODES.pathTracerGlass, src: 'footage/pt_2_real_glass.mp4', trimBeforeSeconds: 2 },
+      ],
     },
-  ],
-  glass: {
-    seconds: 4,
-    still: 'stills/glass_pt.png',
-    title: 'Refractive glass',
-    aside: 'not real-time though :(',
-  },
+  ] as Comparison[],
+};
+
+// One shot lit up layer by layer, swept with the same line the mode comparison uses.
+// Stages 1-5 are the renderer's linear HDR buffer with exposure and the sRGB encode only,
+// no tone map, so the grade arriving with Post is part of what the last step visibly adds;
+// stage 6 is the engine's own final image. See docs/frame-capture.md for the capture recipe.
+export const breakdownSweep = {
+  holdSeconds: 2.4,
+  sweepSeconds: 1.8,
+  stages: [
+    { mode: { title: 'Baked Volumes', detail: 'indirect diffuse' }, src: 'stills/breakdown/bd1_volumes.png' },
+    { mode: { title: 'SSGI', detail: 'indirect diffuse' }, src: 'stills/breakdown/bd2_ssgi.png' },
+    { mode: { title: 'Reflection Probes', detail: 'indirect specular' }, src: 'stills/breakdown/bd3_probes.png' },
+    { mode: { title: 'SSR', detail: 'indirect specular' }, src: 'stills/breakdown/bd4_ssr.png' },
+    { mode: { title: 'Direct Light', detail: 'analytic lights + shadows' }, src: 'stills/breakdown/bd5_direct.png' },
+    { mode: { title: 'Post', detail: 'tonemap, bloom, fog' }, src: 'stills/breakdown/bd6_post.png' },
+  ] as Stage[],
 };
 
 export type BreakdownLayer = {
@@ -162,13 +230,12 @@ export type Attribution = {
 export const credits = {
   seconds: 6,
   name: 'Andrei Vasilev',
-  links: [`github.com/${TODO}`, `linkedin.com/in/${TODO}`],
-  tech: `C++23${DOT}Vulkan${DOT}GLSL${DOT}DLSS Ray Reconstruction`,
+  links: ['github.com/andrewchik0', 'linkedin.com/in/andrei-vasilev0'],
   // Every third-party asset visible in the video must be listed with its license
   attributions: [
-    { what: 'Bistro scene', credit: 'Amazon Lumberyard, NVIDIA ORCA', license: 'CC BY 4.0 (verify)' },
-    { what: 'Car model', credit: TODO, license: TODO },
-    { what: 'HDRI', credit: TODO, license: TODO },
+    { what: 'Bistro scene', credit: 'Amazon Lumberyard, NVIDIA ORCA', license: 'CC BY 4.0' },
+    { what: 'Car model', credit: 'Ruf RWB "MAKKO" [33] by TRINIKZ, Sketchfab', license: 'CC BY-NC 4.0' },
+    { what: 'HDRI', credit: 'Belfast Sunset (Pure Sky), Poly Haven', license: 'CC0' },
     { what: 'Music', credit: TODO, license: TODO },
   ] as Attribution[],
 };

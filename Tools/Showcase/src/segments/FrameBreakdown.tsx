@@ -80,7 +80,7 @@ const frameLayers = (frame: number): FrameLayer[] => {
   const final = { src: frameBreakdown.final, label: 'Final frame', brightness: 0.75 };
 
   if (frame < LAYERS_START) {
-    const fade = progress(frame, Math.round(STRIP * 0.3), Math.round(STRIP * 0.5), motion.inOut);
+    const fade = progress(frame, Math.round(STRIP * 0.3), Math.round(STRIP * 0.5));
     return [
       { ...final, reveal: 1, opacity: 1, align: 'center' },
       { ...direct, reveal: 1, opacity: fade, align: 'center' },
@@ -95,7 +95,7 @@ const frameLayers = (frame: number): FrameLayer[] => {
       index === 0
         ? direct
         : { src: layers[index - 1].result, label: layers[index - 1].title, brightness: layerBrightness(index - 1) };
-    const wipe = progress(local, Math.round(PER_LAYER * 0.3), Math.round(PER_LAYER * 0.25), motion.inOut);
+    const wipe = progress(local, Math.round(PER_LAYER * 0.3), Math.round(PER_LAYER * 0.25));
     return [
       { ...previous, reveal: 1, opacity: 1, align: 'right' },
       {
@@ -115,7 +115,7 @@ const frameLayers = (frame: number): FrameLayer[] => {
 
   const tonemapFrames = sec(phases.tonemap);
   const local = frame - TONEMAP_START;
-  const wipe = progress(local, Math.round(tonemapFrames * 0.3), Math.round(tonemapFrames * 0.3), motion.inOut);
+  const wipe = progress(local, Math.round(tonemapFrames * 0.3), Math.round(tonemapFrames * 0.3));
   return [
     {
       src: frameBreakdown.tonemap.linear,
@@ -132,7 +132,7 @@ const frameLayers = (frame: number): FrameLayer[] => {
 // Real diff images are tinted with the accent; without one, a soft glow marks the moment
 const DiffFlash: React.FC<{ src: MediaPath; local: number }> = ({ src, local }) => {
   const up = progress(local, 0, Math.round(PER_LAYER * 0.1));
-  const down = progress(local, Math.round(PER_LAYER * 0.12), Math.round(PER_LAYER * 0.2), motion.inOut);
+  const down = progress(local, Math.round(PER_LAYER * 0.12), Math.round(PER_LAYER * 0.2));
   return (
     <AbsoluteFill style={{ opacity: up * (1 - down), mixBlendMode: 'screen' }}>
       {hasStaticFile(src) ? (
@@ -241,8 +241,8 @@ const StepTitle: React.FC<{ frame: number }> = ({ frame }) => {
 export const FrameBreakdown: React.FC = () => {
   const frame = useCurrentFrame();
 
-  const dock = progress(frame, STRIP, LAYOUT, motion.inOut);
-  const undock = progress(frame, LAYERS_END, COLLAPSE, motion.inOut);
+  const dock = progress(frame, STRIP, LAYOUT);
+  const undock = progress(frame, LAYERS_END, COLLAPSE);
   const frameRect = mixRect(FULL, DOCKED, dock * (1 - undock));
   const matrixVisible = frame >= STRIP && frame < LAYERS_END + COLLAPSE;
   const matrixOpacity = 1 - undock;
@@ -299,7 +299,7 @@ export const FrameBreakdown: React.FC = () => {
 // The technique's debug view leaves its cell and dissolves into the frame
 const FlyingThumbnail: React.FC<{ index: number; local: number }> = ({ index, local }) => {
   const layer = layers[index];
-  const t = progress(local, Math.round(PER_LAYER * 0.1), Math.round(PER_LAYER * 0.3), motion.inOut);
+  const t = progress(local, Math.round(PER_LAYER * 0.1), Math.round(PER_LAYER * 0.3));
   if (t <= 0 || t >= 1) return null;
   const rect = mixRect(cellRect(layer.row, layer.column), DOCKED, t);
   return (

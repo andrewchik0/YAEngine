@@ -18,11 +18,12 @@ const fluid = (min: number, max: number) => `clamp(${min}px, ${(max / 19.2).toFi
 
 // Stand-in for footage or stills that have not been captured yet
 export const Slate: React.FC<SlateProps> = ({ title, detail, brightness = 0.15, align = 'center', style }) => {
-  const glow = Math.round(18 + brightness * 60);
+  // Brightness is kept in the token so a stack of placeholders still reads as "more light"
+  const tint = Math.round(brightness * 22);
   return (
     <AbsoluteFill
       style={{
-        background: `radial-gradient(ellipse at 50% 60%, hsl(24 40% ${glow}%) 0%, ${colors.surface} 75%)`,
+        background: colors.surface,
         flexDirection: 'row',
         justifyContent: align === 'left' ? 'flex-start' : align === 'right' ? 'flex-end' : 'center',
         alignItems: 'center',
@@ -33,8 +34,7 @@ export const Slate: React.FC<SlateProps> = ({ title, detail, brightness = 0.15, 
     >
       <AbsoluteFill
         style={{
-          backgroundImage:
-            'repeating-linear-gradient(135deg, rgba(255,255,255,0.035) 0 2px, transparent 2px 28px)',
+          background: `rgba(255, 255, 255, ${(tint / 255).toFixed(3)})`,
         }}
       />
       <div

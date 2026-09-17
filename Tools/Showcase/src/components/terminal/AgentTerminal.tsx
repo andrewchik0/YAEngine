@@ -1,6 +1,6 @@
 import React from 'react';
 import { fonts } from '../../design/fonts';
-import { colors, layout, VIDEO } from '../../design/tokens';
+import { colors, VIDEO } from '../../design/tokens';
 import type { CompiledTerminal, TerminalBlock } from './compile';
 
 // Terminal UIs redraw in discrete steps: nothing in here is eased, only counted in frames
@@ -31,7 +31,7 @@ const Block: React.FC<{ block: TerminalBlock; frame: number }> = ({ block, frame
   switch (block.kind) {
     case 'user':
       return (
-        <Line style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '6px 10px', borderRadius: 6 }}>
+        <Line style={{ background: 'rgba(255, 255, 255, 0.05)', padding: '6px 10px' }}>
           <span style={{ color: colors.textTertiary }}>{'> '}</span>
           <span style={{ color: colors.textPrimary }}>{block.text}</span>
         </Line>
@@ -99,9 +99,7 @@ export const AgentTerminal: React.FC<AgentTerminalProps> = ({ terminal, frame, w
         flexDirection: 'column',
         background: colors.surface,
         border: `1px solid ${colors.borderStrong}`,
-        borderRadius: layout.radius,
         overflow: 'hidden',
-        boxShadow: '0 30px 80px rgba(0, 0, 0, 0.5)',
         fontFamily: fonts.mono,
         fontSize: FONT_SIZE,
         lineHeight: LINE_HEIGHT,
@@ -150,7 +148,6 @@ export const AgentTerminal: React.FC<AgentTerminalProps> = ({ terminal, frame, w
         <div
           style={{
             border: `1px solid ${colors.borderStrong}`,
-            borderRadius: 10,
             padding: '10px 14px',
             minHeight: FONT_SIZE * LINE_HEIGHT,
             whiteSpace: 'pre-wrap',

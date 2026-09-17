@@ -1,7 +1,8 @@
 import React from 'react';
 import { Composition, Folder } from 'remotion';
+import { FrameBreakdown, frameBreakdownFrames } from './segments/FrameBreakdown';
 import { VIDEO } from './design/tokens';
-import { SEGMENTS, Showcase, SHOWCASE_FRAMES } from './Showcase';
+import { PREVIEW_FRAMES, SEGMENTS, Showcase, ShowcasePreview, SHOWCASE_FRAMES } from './Showcase';
 import { pendingTodos } from './shots/timeline';
 
 const todos = pendingTodos();
@@ -12,6 +13,8 @@ if (todos.length > 0) {
 export const RemotionRoot: React.FC = () => (
   <>
     <Composition id="Showcase" component={Showcase} durationInFrames={SHOWCASE_FRAMES} {...VIDEO} />
+    <Composition id="Preview" component={ShowcasePreview} durationInFrames={PREVIEW_FRAMES} {...VIDEO} />
+    <Composition id="FrameBreakdown" component={FrameBreakdown} durationInFrames={frameBreakdownFrames} {...VIDEO} />
     <Folder name="Segments">
       {SEGMENTS.map(({ id, frames, Component }) => (
         <Composition key={id} id={id} component={Component} durationInFrames={frames} {...VIDEO} />
