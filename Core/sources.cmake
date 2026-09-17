@@ -260,6 +260,8 @@ if(YA_EDITOR)
     Source/Editor/EditorCommands.cpp
     Source/Editor/IEditorPanel.h
     Source/Editor/EditorContext.h
+    Source/Editor/SequencerEditing.h
+    Source/Editor/SequencerEditing.cpp
     Source/Editor/Utils/EditorStyle.cpp
     Source/Editor/Utils/EditorStyle.h
     Source/Editor/Utils/EditorTheme.cpp
@@ -284,6 +286,8 @@ if(YA_EDITOR)
     Source/Editor/Panels/MaterialInspectorPanel.cpp
     Source/Editor/Panels/SequencerPanel.h
     Source/Editor/Panels/SequencerPanel.cpp
+    Source/Editor/Panels/ShotInspectorPanel.h
+    Source/Editor/Panels/ShotInspectorPanel.cpp
     Source/Editor/Utils/EditorIcons.h
     Source/Editor/Utils/EditorTextureCache.h
     Source/Editor/Utils/EditorTextureCache.cpp
@@ -293,6 +297,11 @@ if(YA_EDITOR)
     Source/Editor/Utils/CurveEditor.cpp
     Source/Editor/Utils/SplinePathEditor.h
     Source/Editor/Utils/SplinePathEditor.cpp
+    Source/Editor/Utils/ShotTemplates.h
+    Source/Editor/Utils/ShotTemplates.cpp
+    Source/Editor/Utils/CameraKeyRetime.h
+    Source/Editor/Utils/KeyRangeTiming.h
+    Source/Editor/Utils/SpeedKeyTiming.h
     Source/Editor/EditorCameraLayer.h
     Source/Editor/EditorCameraLayer.cpp
     Source/Editor/GizmoRenderer.h

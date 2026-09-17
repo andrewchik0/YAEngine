@@ -46,6 +46,29 @@ namespace YAEngine::EditorCommands
       return nullptr;
     }
 
+    // The Sequencer's minimum key spacing: a replaced range never leaves an old key right next to a new one
+    constexpr float SHOT_KEY_GAP = 0.01f;
+
+    Name MakeShotName(Scene& scene)
+    {
+      std::unordered_set<std::string_view> taken;
+      for (auto [entity, name] : scene.GetRegistry().view<Name>().each())
+        taken.insert(name);
+
+      for (uint32_t index = 1;; index++)
+      {
+        Name candidate = "Shot " + std::to_string(index);
+        if (!taken.contains(candidate))
+          return candidate;
+      }
+    }
+
+    CameraTrackComponent::FollowRotation ToFollowRotation(ShotFollow follow)
+    {
+      return follow == ShotFollow::Smoothed ? CameraTrackComponent::FollowRotation::Smoothed
+        : CameraTrackComponent::FollowRotation::Full;
+    }
+
     const AddableComponent ADDABLE_COMPONENTS[] = {
       {
         .label = "Point Light", .icon = ICON_LC_LIGHTBULB, .tooltip = "Shines in every direction from the entity",
@@ -410,5 +433,161 @@ namespace YAEngine::EditorCommands
 
     player.Play(scene, cameraTrack);
     return false;
+  }
+
+  AddShotResult AddShot(Scene& scene, ShotTemplate shot, const ShotTemplateParams& params, Entity target,
+    Entity camera, const ShotViewPoses& views)
+  {
+    AddShotResult result;
+    entt::registry& registry = scene.GetRegistry();
+    const ShotTemplateInfo& info = ShotTemplates::GetInfo(shot);
+
+    GeneratedShot generated = ShotTemplates::Generate(shot, params, views);
+    if (generated.error != nullptr)
+    {
+      result.error = generated.error;
+      return result;
+    }
+
+    std::string targetName;
+    if (info.needsTarget)
+    {
+      if (target == entt::null || !registry.valid(target))
+      {
+        result.error = std::string(info.name) + " needs a target entity to follow or aim at";
+        return result;
+      }
+
+      const Name* name = registry.try_get<Name>(target);
+      if (name == nullptr || name->empty())
+      {
+        result.error = "The target needs a name: a camera track refers to its target by name";
+        return result;
+      }
+
+      EntityNameLookup lookup;
+      lookup.Resolve(scene, *name);
+      if (lookup.GetMatchCount() > 1)
+      {
+        result.error = "'" + *name + "' names " + std::to_string(lookup.GetMatchCount())
+          + " entities, so the track could follow any of them: give the target a unique name first";
+        return result;
+      }
+
+      if (target == camera)
+      {
+        result.error = "A camera cannot follow itself";
+        return result;
+      }
+      targetName = *name;
+    }
+
+    if (camera != entt::null)
+    {
+      if (!registry.valid(camera))
+      {
+        result.error = "The shot's camera no longer exists";
+        return result;
+      }
+      if (!scene.HasComponent<CameraComponent>(camera))
+      {
+        result.error = GetEntityDisplayName(registry, camera) + " is not a camera";
+        return result;
+      }
+      if (scene.HasComponent<EditorOnlyTag>(camera))
+      {
+        result.error = "The editor camera cannot hold a shot";
+        return result;
+      }
+      if (scene.HasComponent<MotionPathComponent>(camera))
+      {
+        result.error = "A Motion Path already drives " + GetEntityDisplayName(registry, camera);
+        return result;
+      }
+    }
+
+    const float start = params.start;
+    const float end = params.start + params.duration;
+    auto replaced = [start, end](const CameraTrackKey& key) {
+      return key.time > start - SHOT_KEY_GAP && key.time < end + SHOT_KEY_GAP;
+    };
+
+    const ShotTrackSettings& settings = generated.track;
+    bool othersRemain = false;
+    if (const CameraTrackComponent* existing = camera != entt::null ? registry.try_get<CameraTrackComponent>(camera) : nullptr)
+    {
+      bool otherTargetKeys = false;
+      for (const CameraTrackKey& key : existing->keys)
+      {
+        if (replaced(key))
+          continue;
+        othersRemain = true;
+        otherTargetKeys |= key.space == CameraKeySpace::Target;
+      }
+
+      // One track follows one target: re-pointing it would move the keys of the other shots onto this target
+      if (settings.apply && settings.follow != ShotFollow::None && otherTargetKeys
+        && !existing->followTargetName.empty() && existing->followTargetName != targetName)
+      {
+        result.error = GetEntityDisplayName(registry, camera) + " follows '" + existing->followTargetName
+          + "' in its other shots; add this shot to a new camera";
+        return result;
+      }
+    }
+
+    const bool created = camera == entt::null;
+    if (created)
+    {
+      camera = scene.CreateEntity(MakeShotName(scene));
+      scene.AddComponent<CameraComponent>(camera).fov = generated.keys.front().fov;
+    }
+
+    auto& track = scene.AddComponent<CameraTrackComponent>(camera);
+
+    if (settings.apply)
+    {
+      bool sharedChange = false;
+      if (settings.follow != ShotFollow::None)
+      {
+        const auto rotation = ToFollowRotation(settings.follow);
+        sharedChange |= track.followTargetName != targetName || track.followRotation != rotation;
+        track.followTargetName = targetName;
+        track.followRotation = rotation;
+        if (settings.follow == ShotFollow::Smoothed)
+          track.followSmoothing = settings.followSmoothing;
+      }
+
+      const auto mode = settings.aimAtTarget ? CameraTrackComponent::RotationMode::AimAt
+        : CameraTrackComponent::RotationMode::Keyframed;
+      sharedChange |= track.rotationMode != mode;
+      track.rotationMode = mode;
+      if (settings.aimAtTarget)
+      {
+        sharedChange |= track.aimTargetName != targetName;
+        track.aimTargetName = targetName;
+        track.aimOffset = settings.aimOffset;
+        track.aimScreenOffset = settings.aimScreenOffset;
+        track.aimSmoothing = settings.aimSmoothing;
+      }
+
+      if (sharedChange && othersRemain)
+      {
+        result.warning = "The track's follow and aim settings changed; its keys outside this shot use them too, "
+                         "so check the other shots on " + GetEntityDisplayName(registry, camera);
+      }
+    }
+
+    std::erase_if(track.keys, replaced);
+    auto at = std::upper_bound(track.keys.begin(), track.keys.end(), start,
+      [](float time, const CameraTrackKey& key) { return time < key.time; });
+    result.firstKey = int32_t(at - track.keys.begin());
+    result.keyCount = int32_t(generated.keys.size());
+    track.keys.insert(at, generated.keys.begin(), generated.keys.end());
+    result.camera = camera;
+
+    if (created)
+      SequencePlayer::ApplyTrackPose(scene, camera, start);
+
+    return result;
   }
 }

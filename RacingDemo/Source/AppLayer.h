@@ -6,6 +6,7 @@
 #include "Input/InputSystem.h"
 #include "ControlsLayer.h"
 #include "ReelPlaybackLayer.h"
+#include "CameraDirectorLayer.h"
 #include "GameComponents.h"
 #include "GameComponentSerializers.h"
 #include "Scene/Scene.h"
@@ -35,9 +36,11 @@ public:
   {
     GetWindow().Maximize();
 #if defined(BISTRO_RACING)
+    PushCameraDirector();
     GetLayerManager().PushLayer<ControlsLayer>();
 #elif !defined(TEST) && !defined(BISTRO)
     GetLayerManager().PushLayer<ReelPlaybackLayer>();
+    PushCameraDirector();
     GetLayerManager().PushLayer<ControlsLayer>();
 #endif
   }
@@ -146,8 +149,10 @@ public:
     if (altDown && GetInput().IsKeyPressed(YAEngine::Key::Enter))
       GetWindow().ToggleBorderlessFullscreen();
 
+#ifdef YA_EDITOR
     if (GetInput().IsKeyPressed(YAEngine::Key::F9))
       ToggleCameraTrackPlayback();
+#endif
 
 #ifdef TEST
     if (m_TestSparkEmitter != entt::null)
@@ -199,6 +204,16 @@ public:
   }
 
 private:
+  // Pushed ahead of ControlsLayer, so the car sees a session started this frame. The editor has
+  // its own camera and sequencer, and its 1-3 keys switch gizmo modes.
+  void PushCameraDirector()
+  {
+#ifndef YA_EDITOR
+    GetLayerManager().PushLayer<CameraDirectorLayer>();
+#endif
+  }
+
+#ifdef YA_EDITOR
   // Each press plays the next shot, in the order the shots start on the timeline, so every
   // shot can be recorded as its own take. A press during playback stops it instead. A scene
   // with motion paths but no camera track plays the whole timeline through the active camera.
@@ -251,6 +266,7 @@ private:
   }
 
   size_t m_NextShot = 0;
+#endif
 
 #ifdef BISTRO_RACING
   // No terrain in BistroExterior, so the car rides a constant plane; kAsphaltY is the roadway level (pavement sits at 0.37), offset by the wheel's lowest point (0.0039 model space) so tires land on it.

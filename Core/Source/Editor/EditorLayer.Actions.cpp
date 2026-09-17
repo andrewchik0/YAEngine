@@ -5,6 +5,7 @@
 #include "Editor/Bridge/BridgeTypes.h"
 #include "Editor/EditorCameraLayer.h"
 #include "Editor/EditorCommands.h"
+#include "Editor/SequencerEditing.h"
 #include "LayerManager.h"
 #include "Render/Render.h"
 #include "Scene/SequencePlayer.h"
@@ -374,7 +375,8 @@ namespace YAEngine
     actions.Register({
       .name = "camera.set",
       .description = "Move the editor camera, as flying it there would. Give a position, a yaw and/or pitch, or a "
-        "lookAt point; what is not given stays as it is. Returns the pose afterwards, as camera.get does.",
+        "lookAt point; what is not given stays as it is. While piloting (sequencer.pilot) the move counts as flying. "
+        "Returns the pose afterwards, as camera.get does.",
       .params = {
         OptionalParam("position", ParamType::Vec3, "World position [x, y, z]."),
         OptionalParam("yaw", ParamType::Number, "Degrees about world up; 0 looks down -Z, 90 down -X."),
@@ -426,6 +428,7 @@ namespace YAEngine
         }
 
         camera->SetPose(position, yaw, pitch);
+        SequencerEditing::NotifyEditorCameraFlown(m_Context);
         reply.Ok(cameraPose(*camera));
       }
     });
@@ -1048,7 +1051,7 @@ namespace YAEngine
       .name = "sequencer.setTime",
       .description = "Pose the timeline at a time, as scrubbing the Sequencer does. Without a running session this "
         "opens a paused preview that leaves the active camera alone; the transforms it moves are restored by "
-        "sequencer.stop. Returns {active, playing, time, start, end}.",
+        "sequencer.stop. A pilot is put back on its track pose at the new time. Returns {active, playing, time, start, end}.",
       .params = {
         RequiredParam("time", ParamType::Number, "Seconds on the timeline, clamped to its length."),
         OptionalParam("entity", ParamType::Entity, "Camera track to pose along. Default: the session's track, else "
@@ -1091,6 +1094,700 @@ namespace YAEngine
         Json result = Json::object();
         result["wasActive"] = wasActive;
         reply.Ok(std::move(result));
+      }
+    });
+
+    RegisterPilotActions(actions);
+    RegisterShotActions(actions);
+  }
+
+  void EditorLayer::RegisterPilotActions(BridgeActions& actions)
+  {
+    auto pilotResult = [this]() {
+      Scene& scene = GetScene();
+      Json result = Json::object();
+      const bool piloting = m_Context.IsPiloting();
+      result["piloting"] = piloting;
+      result["entity"] = piloting ? Json(entt::to_integral(m_Context.pilotTrack)) : Json(nullptr);
+      result["name"] = piloting ? Json(scene.GetName(m_Context.pilotTrack)) : Json(nullptr);
+      result["modified"] = m_Context.pilotModified;
+      result["time"] = m_Context.sequencerPlayhead;
+      return result;
+    };
+
+    actions.Register({
+      .name = "sequencer.pilot",
+      .description = "Enter or leave pilot mode, as the Pilot and Exit Pilot buttons of the Sequencer do. Piloting puts "
+        "the editor camera on the camera track's pose and fov at the playhead (roll dropped); it can then be moved "
+        "with camera.set, sequencer.setTime puts it back on the track, and sequencer.setKey writes its pose as the "
+        "key at the playhead. Playback makes it follow the shot. The viewport keeps looking through the editor camera "
+        "with the 16:9 output framed. Leaving puts the editor camera pose and fov back; the pilot also ends on a "
+        "camera preview, a scene save or load, and when the track is deleted or unbound. Returns {piloting, entity, "
+        "name, modified, time}; entity and name are null while not piloting.",
+      .params = {
+        RequiredParam("enabled", ParamType::Bool, "True enters pilot mode, false leaves it."),
+        OptionalParam("entity", ParamType::Entity, "Entity with a cameraTrack and a camera component; it gets bound in "
+          "the Sequencer. Default: the track bound in the Sequencer, else the only camera track of the scene. "
+          "Ignored when leaving.") },
+      .refusedWhileCapturing = true,
+      .handler = [this, pilotResult](const BridgeActionArgs& args, const BridgeReply& reply) {
+        Scene& scene = GetScene();
+        if (!args.GetBool("enabled"))
+        {
+          SequencerEditing::StopPilot(m_Context);
+          reply.Ok(pilotResult());
+          return;
+        }
+
+        Entity track = entt::null;
+        if (args.Has("entity"))
+        {
+          track = args.GetEntity("entity");
+          if (!scene.HasComponent<CameraTrackComponent>(track))
+          {
+            reply.Fail(BridgeErrorCode::NOT_FOUND, "entity " + std::to_string(entt::to_integral(track))
+              + " has no 'cameraTrack' component");
+            return;
+          }
+        }
+        else if (SequencerEditing::GetBoundTrack(m_Context) != nullptr)
+        {
+          track = m_Context.sequencerTrack;
+        }
+        else
+        {
+          std::vector<Entity> tracks = CollectEntitiesWith<CameraTrackComponent>(scene);
+          if (tracks.size() != 1)
+          {
+            reply.Fail(tracks.empty() ? BridgeErrorCode::NOT_FOUND : BridgeErrorCode::INVALID_PARAMS,
+              tracks.empty() ? std::string("the scene has no camera track")
+                : "the scene has " + std::to_string(tracks.size()) + " camera tracks; give the 'entity' to pilot");
+            return;
+          }
+          track = tracks.front();
+        }
+
+        if (const char* reason = SequencerEditing::GetPilotUnavailableReason(m_Context, track))
+        {
+          reply.Fail(BridgeErrorCode::FAILED, reason);
+          return;
+        }
+
+        SequencerEditing::StartPilot(m_Context, track);
+        YA_LOG_INFO("Bridge", "Action sequencer.pilot: piloting '%s' (%u)", scene.GetName(track).c_str(),
+          EntityIdForLog(track));
+        reply.Ok(pilotResult());
+      }
+    });
+
+    actions.Register({
+      .name = "sequencer.setKey",
+      .description = "Press K in the Sequencer. While piloting, writes the editor camera pose and the track fov as the "
+        "camera key at the playhead; a key already within 10 ms of it keeps its time and roll. Otherwise adds a key "
+        "from the editor camera at the playhead, unless one is already there, which is then only selected. Refused "
+        "while a piloted shot is playing. Returns {entity, name, key, keyCount, time, created, piloting}; key is the "
+        "selected key index (-1 when none), created whether the key count grew.",
+      .refusedWhileCapturing = true,
+      .handler = [this](const BridgeActionArgs&, const BridgeReply& reply) {
+        Scene& scene = GetScene();
+        SequencerEditing::ResolveBinding(m_Context);
+        CameraTrackComponent* track = SequencerEditing::GetBoundTrack(m_Context);
+        if (track == nullptr)
+        {
+          reply.Fail(BridgeErrorCode::FAILED, "no camera track is bound in the Sequencer; select a camera with a track "
+            "or call sequencer.pilot with its entity");
+          return;
+        }
+
+        const Entity trackEntity = m_Context.sequencerTrack;
+        const size_t keysBefore = track->keys.size();
+        const bool pilotPlaying = m_Context.pilotTrack == trackEntity
+          && m_Registry->Get<SequencePlayer>().IsAdvancing();
+        if (pilotPlaying)
+        {
+          reply.Fail(BridgeErrorCode::FAILED, "the piloted shot is playing; pause it first");
+          return;
+        }
+
+        SequencerEditing::SetKey(m_Context);
+
+        const int key = m_Context.sequencerSelectedKey;
+        Json result = EntityResult(scene, trackEntity);
+        result["key"] = key;
+        result["keyCount"] = track->keys.size();
+        result["time"] = key >= 0 && key < int(track->keys.size()) ? track->keys[key].time : m_Context.sequencerPlayhead;
+        result["created"] = track->keys.size() > keysBefore;
+        result["piloting"] = m_Context.pilotTrack == trackEntity;
+        reply.Ok(std::move(result));
+      }
+    });
+  }
+
+  void EditorLayer::RegisterShotActions(BridgeActions& actions)
+  {
+    std::string templateNames;
+    for (size_t i = 0; i < size_t(ShotTemplate::Count); i++)
+    {
+      if (i > 0)
+        templateNames += ", ";
+      for (const char* c = ShotTemplates::GetInfo(ShotTemplate(i)).name; *c != '\0'; c++)
+      {
+        if (*c != ' ' && *c != '-')
+          templateNames += *c;
+      }
+    }
+
+    actions.Register({
+      .name = "sequencer.addShot",
+      .description = "Add a ready-made camera move, as Add Shot in the Sequencer does. The template becomes ordinary camera "
+        "keys (relative to the target for the moves that follow it) plus the track settings the move needs; the camera's "
+        "keys inside [start, start + duration] are replaced, so running it again over the same range redoes the shot. On "
+        "success the camera is bound in the Sequencer, the shot's first key selected and the playhead moved to the start. "
+        "StaticFollow stands at the editor camera; FlyTo flies from the editor camera to the pose the Sequencer's bound "
+        "track has at start (5 m ahead of the editor camera when that track has no keys). Returns {entity, name, "
+        "template, created, firstKey, keyCount, start, end, warning, ignored}; warning is empty unless a track-wide setting "
+        "changed that other keys of that camera use too, ignored lists the given params the template does not read.",
+      .params = {
+        RequiredParam("template", ParamType::String, "One of " + templateNames + "; case, spaces and hyphens are ignored."),
+        OptionalParam("start", ParamType::Number, "Timeline seconds the shot begins at. Default: the Sequencer playhead."),
+        OptionalParam("duration", ParamType::Number, "Seconds. Default: the template's."),
+        OptionalParam("target", ParamType::Entity, "Entity to follow or aim at; its name must be unique. Default: the "
+          "motion path bound in the Sequencer, else the only motion path of the scene. Ignored by FlyTo."),
+        OptionalParam("camera", ParamType::Entity, "Camera entity that gets the shot. Default: the camera track bound in "
+          "the Sequencer, else a new root camera 'Shot N'."),
+        OptionalParam("newCamera", ParamType::Bool, "True always creates a new camera 'Shot N'; do not give camera then. "
+          "Default false."),
+        OptionalParam("distance", ParamType::Number, "Metres from the target's body centre along the ground at the first "
+          "key (wheel close-ups: ahead of the wheel). The end distance keeps the template's ratio to it."),
+        OptionalParam("height", ParamType::Number, "Metres above the target frame origin (the ground under the car)."),
+        OptionalParam("side", ParamType::String, "left or right (SideTracking)."),
+        OptionalParam("fov", ParamType::Number, "Vertical field of view in degrees.") },
+      .refusedWhileCapturing = true,
+      .handler = [this, templateNames](const BridgeActionArgs& args, const BridgeReply& reply) {
+        Scene& scene = GetScene();
+        const std::string templateName = args.GetString("template");
+        ShotTemplate shot = ShotTemplate::Chase;
+        if (!ShotTemplates::FindByName(templateName, shot))
+        {
+          reply.Fail(BridgeErrorCode::INVALID_PARAMS, "unknown template '" + templateName + "'; use one of "
+            + templateNames);
+          return;
+        }
+
+        const ShotTemplateInfo& info = ShotTemplates::GetInfo(shot);
+        SequencerEditing::ResolveBinding(m_Context);
+
+        ShotTemplateParams params = info.defaults;
+        params.start = args.Has("start") ? float(args.GetNumber("start")) : m_Context.sequencerPlayhead;
+        if (args.Has("duration"))
+          params.duration = float(args.GetNumber("duration"));
+
+        Json ignored = Json::array();
+        auto reads = [&info, &ignored, &args](const char* name, uint32_t bit) {
+          if (!args.Has(name))
+            return false;
+          if ((info.params & bit) != 0)
+            return true;
+          ignored.push_back(name);
+          return false;
+        };
+
+        if (reads("distance", ShotParam::Distance))
+        {
+          const float distance = float(args.GetNumber("distance"));
+          params.endDistance = params.distance > 0.0f ? params.endDistance * distance / params.distance : distance;
+          params.distance = distance;
+        }
+        if (reads("height", ShotParam::Height))
+          params.height = float(args.GetNumber("height"));
+        if (reads("fov", ShotParam::Fov))
+          params.fovDegrees = float(args.GetNumber("fov"));
+        if (reads("side", ShotParam::Side))
+        {
+          std::string side = args.GetString("side");
+          std::transform(side.begin(), side.end(), side.begin(),
+            [](char c) { return c >= 'A' && c <= 'Z' ? char(c - 'A' + 'a') : c; });
+          if (side != "left" && side != "right")
+          {
+            reply.Fail(BridgeErrorCode::INVALID_PARAMS, "'side' must be left or right");
+            return;
+          }
+          params.side = side == "left" ? ShotSide::Left : ShotSide::Right;
+        }
+
+        Entity target = entt::null;
+        if (!info.needsTarget)
+        {
+          if (args.Has("target"))
+            ignored.push_back("target");
+        }
+        else if (args.Has("target"))
+        {
+          target = args.GetEntity("target");
+        }
+        else if (SequencerEditing::GetBoundPath(m_Context) != nullptr)
+        {
+          target = m_Context.sequencerPath;
+        }
+        else
+        {
+          std::vector<Entity> paths = CollectEntitiesWith<MotionPathComponent>(scene);
+          if (paths.size() != 1)
+          {
+            reply.Fail(BridgeErrorCode::INVALID_PARAMS, paths.empty()
+              ? std::string("the scene has no motion path to follow; give the 'target'")
+              : "the scene has " + std::to_string(paths.size()) + " motion paths; give the 'target'");
+            return;
+          }
+          target = paths.front();
+        }
+
+        const bool newCamera = args.Has("newCamera") && args.GetBool("newCamera");
+        Entity camera = entt::null;
+        if (args.Has("camera"))
+        {
+          if (newCamera)
+          {
+            reply.Fail(BridgeErrorCode::INVALID_PARAMS, "give either 'camera' or newCamera: true, not both");
+            return;
+          }
+          camera = args.GetEntity("camera");
+        }
+        else if (!newCamera && SequencerEditing::GetBoundTrack(m_Context) != nullptr
+          && scene.HasComponent<CameraComponent>(m_Context.sequencerTrack))
+        {
+          camera = m_Context.sequencerTrack;
+        }
+
+        const EditorCommands::AddShotResult result = SequencerEditing::AddShot(m_Context, shot, params, target, camera);
+        if (!result.error.empty())
+        {
+          reply.Fail(BridgeErrorCode::FAILED, result.error);
+          return;
+        }
+
+        YA_LOG_INFO("Bridge", "Action sequencer.addShot: %s on '%s' (%u) at %.2f s", info.name,
+          EditorCommands::GetEntityDisplayName(scene.GetRegistry(), result.camera).c_str(),
+          EntityIdForLog(result.camera), params.start);
+
+        Json out = EntityResult(scene, result.camera);
+        out["template"] = info.name;
+        out["created"] = camera == entt::null;
+        out["firstKey"] = result.firstKey;
+        out["keyCount"] = result.keyCount;
+        out["start"] = params.start;
+        out["end"] = params.start + params.duration;
+        out["warning"] = result.warning;
+        out["ignored"] = std::move(ignored);
+        reply.Ok(std::move(out));
+      }
+    });
+
+    // The track a key edit works on: the given entity, else the one bound in the Sequencer, else the only one of
+    // the scene. It gets bound. False once the reply has failed.
+    auto bindEditedTrack = [this](const BridgeActionArgs& args, const BridgeReply& reply, Entity& track) {
+      Scene& scene = GetScene();
+      SequencerEditing::ResolveBinding(m_Context);
+
+      track = entt::null;
+      if (args.Has("entity"))
+      {
+        track = args.GetEntity("entity");
+        if (!scene.HasComponent<CameraTrackComponent>(track))
+        {
+          reply.Fail(BridgeErrorCode::NOT_FOUND, "entity " + std::to_string(entt::to_integral(track))
+            + " has no 'cameraTrack' component");
+          return false;
+        }
+      }
+      else if (SequencerEditing::GetBoundTrack(m_Context) != nullptr)
+      {
+        track = m_Context.sequencerTrack;
+      }
+      else
+      {
+        std::vector<Entity> tracks = CollectEntitiesWith<CameraTrackComponent>(scene);
+        if (tracks.size() != 1)
+        {
+          reply.Fail(tracks.empty() ? BridgeErrorCode::NOT_FOUND : BridgeErrorCode::INVALID_PARAMS,
+            tracks.empty() ? std::string("the scene has no camera track")
+              : "the scene has " + std::to_string(tracks.size()) + " camera tracks; give the 'entity'");
+          return false;
+        }
+        track = tracks.front();
+      }
+
+      if (track != m_Context.sequencerTrack)
+      {
+        SequencerEditing::BindTrack(m_Context, track);
+        // A selected entity with another track would take the binding back on the next frame
+        Entity selected = m_Context.selectedEntity;
+        if (selected != track && scene.GetRegistry().valid(selected)
+          && scene.HasComponent<CameraTrackComponent>(selected))
+        {
+          m_Context.SelectEntity(track);
+        }
+      }
+      return true;
+    };
+
+    using SequencerEditing::RetimePace;
+    auto registerRetime = [this, &actions, bindEditedTrack](const char* name, RetimePace pace, const char* summary) {
+      actions.Register({
+        .name = name,
+        .description = std::string(summary) + " Retimes the camera keys strictly between first and last; those two "
+          "keep their times and so do Hold segments. Camera travel is the arc length of the evaluated curve: between "
+          "two keys relative to the follow target it is measured around the target, elsewhere in the world. The track "
+          "gets bound in the Sequencer. Returns {entity, name, first, last, keyTimesBefore, keyTimesAfter, mode, "
+          "iterations, settled, shift}: the key times of first..last, mode target, world or mixed (where the travel "
+          "was measured), iterations the retime passes run (up to 32; they stop once a further pass would move no "
+          "key by 1 ms). settled false means that did not happen: shift is the largest key move of the applied "
+          "pass, about what running the action again may still move a key by.",
+        .params = {
+          OptionalParam("first", ParamType::Integer, "0-based index of the first key of the range. Default: 0 when "
+            "last is given, else the key range selected in the Sequencer (Shift+click), else the whole track."),
+          OptionalParam("last", ParamType::Integer, "0-based index of the last key, at least first + 2. Default: the "
+            "last key when first is given, else as for first."),
+          OptionalParam("entity", ParamType::Entity, "Entity with a cameraTrack component. Default: the track bound in "
+            "the Sequencer, else the only camera track of the scene.") },
+        .refusedWhileCapturing = true,
+        .handler = [this, name, pace, bindEditedTrack](const BridgeActionArgs& args, const BridgeReply& reply) {
+          Scene& scene = GetScene();
+          Entity track = entt::null;
+          if (!bindEditedTrack(args, reply, track))
+            return;
+
+          int first = -1;
+          int last = -1;
+          if (args.Has("first") || args.Has("last"))
+          {
+            const int64_t count = int64_t(scene.GetComponent<CameraTrackComponent>(track).keys.size());
+            const int64_t from = args.Has("first") ? args.GetInteger("first") : 0;
+            const int64_t to = args.Has("last") ? args.GetInteger("last") : count - 1;
+            if (from < 0 || to >= count || to - from < 2)
+            {
+              reply.Fail(BridgeErrorCode::INVALID_PARAMS, "'first' and 'last' must be key indices in 0.."
+                + std::to_string(count - 1) + " with last >= first + 2 (the track has " + std::to_string(count)
+                + " keys)");
+              return;
+            }
+            first = int(from);
+            last = int(to);
+          }
+
+          const SequencerEditing::RetimeResult result = SequencerEditing::RetimeKeys(m_Context, pace, first, last);
+          if (!result.error.empty())
+          {
+            reply.Fail(BridgeErrorCode::FAILED, result.error);
+            return;
+          }
+
+          YA_LOG_INFO("Bridge", "Action %s: keys %d-%d of '%s' (%u), %s, %d passes", name, result.first, result.last,
+            scene.GetName(track).c_str(), EntityIdForLog(track), result.mode, int(result.iterations));
+
+          Json out = EntityResult(scene, track);
+          out["first"] = result.first;
+          out["last"] = result.last;
+          out["keyTimesBefore"] = result.keyTimesBefore;
+          out["keyTimesAfter"] = result.keyTimesAfter;
+          out["mode"] = result.mode;
+          out["iterations"] = result.iterations;
+          out["settled"] = result.settled;
+          out["shift"] = result.shift;
+          reply.Ok(std::move(out));
+        }
+      });
+    };
+
+    registerRetime("sequencer.evenOutSpeed", RetimePace::Steady, "Even Out Speed in the Shot Inspector: the camera "
+      "moves at a steady pace between the keys; relative keys are measured around the car, so the car's own braking "
+      "is kept.");
+    registerRetime("sequencer.matchCarPace", RetimePace::Car, "Match Car Pace in the Shot Inspector: the camera speeds "
+      "up and slows down together with the car between the keys - each inner key gets the time at which the car has "
+      "covered the same share of its distance between the first and the last key as the camera has of its travel. "
+      "The car is the follow target when it drives along a motion path, else the motion path bound in the Sequencer; "
+      "fails when there is none or it does not move in the range.");
+
+    // Runs a timing edit over the key range first..last of the track and replies with the times before and after.
+    // A range drag rewrites the key times every frame, so an edit during any timeline drag is refused.
+    auto editKeyRange = [this, bindEditedTrack](const char* name, const BridgeActionArgs& args, const BridgeReply& reply,
+      const auto& edit) {
+      if (m_Context.sequencerDragActive)
+      {
+        reply.Fail(BridgeErrorCode::FAILED, "a Sequencer timeline drag is in progress; try again after it ends");
+        return;
+      }
+
+      Scene& scene = GetScene();
+      Entity track = entt::null;
+      if (!bindEditedTrack(args, reply, track))
+        return;
+
+      std::vector<CameraTrackKey>& keys = scene.GetComponent<CameraTrackComponent>(track).keys;
+      const int64_t count = int64_t(keys.size());
+      const int64_t from = args.GetInteger("first");
+      const int64_t to = args.GetInteger("last");
+      if (from < 0 || to >= count || to <= from)
+      {
+        reply.Fail(BridgeErrorCode::INVALID_PARAMS, "'first' and 'last' must be key indices in 0.."
+          + std::to_string(count - 1) + " with last > first (the track has " + std::to_string(count) + " keys)");
+        return;
+      }
+      const int first = int(from);
+      const int last = int(to);
+
+      std::vector<float> before;
+      for (int i = first; i <= last; i++)
+        before.push_back(keys[size_t(i)].time);
+      const float applied = edit(keys, first, last);
+      std::vector<float> after;
+      for (int i = first; i <= last; i++)
+        after.push_back(keys[size_t(i)].time);
+      SequencerEditing::Repose(m_Context);
+
+      YA_LOG_INFO("Bridge", "Action %s: keys %d-%d of '%s' (%u), applied %.3f s", name, first, last,
+        scene.GetName(track).c_str(), EntityIdForLog(track), applied);
+
+      Json out = EntityResult(scene, track);
+      out["first"] = first;
+      out["last"] = last;
+      out["keyTimesBefore"] = before;
+      out["keyTimesAfter"] = after;
+      out["applied"] = applied;
+      reply.Ok(std::move(out));
+    };
+
+    const char* entityDescription = "Entity with a cameraTrack component. Default: the track bound in the Sequencer, "
+      "else the only camera track of the scene.";
+
+    actions.Register({
+      .name = "sequencer.moveKeys",
+      .description = "Move a camera key range in time, as dragging inside the key range band on the Sequencer's Camera "
+        "lane does. The keys keep their spacing and every other key stays where it is, so the range is clamped between "
+        "its neighbours (10 ms gap) and never starts below 0. Poses and blend settings are untouched. The track gets "
+        "bound in the Sequencer; refused during a timeline drag. Returns {entity, name, first, last, keyTimesBefore, "
+        "keyTimesAfter, applied}: the key times of first..last and the delta in seconds applied after clamping.",
+      .params = {
+        RequiredParam("first", ParamType::Integer, "0-based index of the first key of the range."),
+        RequiredParam("last", ParamType::Integer, "0-based index of the last key, greater than first."),
+        RequiredParam("delta", ParamType::Number, "Seconds to move the range by; negative moves it earlier."),
+        OptionalParam("entity", ParamType::Entity, entityDescription) },
+      .refusedWhileCapturing = true,
+      .handler = [editKeyRange](const BridgeActionArgs& args, const BridgeReply& reply) {
+        const float delta = float(args.GetNumber("delta"));
+        editKeyRange("sequencer.moveKeys", args, reply, [delta](std::vector<CameraTrackKey>& keys, int first, int last) {
+          return SequencerEditing::MoveKeyRange(keys, first, last, delta);
+        });
+      }
+    });
+
+    actions.Register({
+      .name = "sequencer.stretchKeys",
+      .description = "Stretch or shrink a camera key range in time, as dragging an edge of the key range band on the "
+        "Sequencer's Camera lane does. The inner keys keep their relative spacing, so the camera flies the same path "
+        "slower (longer) or faster (shorter). Anchor start (the right edge) keeps the first key and shifts every key "
+        "after the range by the change of the last key's time. Anchor end (the left edge) keeps the last key and every "
+        "key before the range; the first key stops 10 ms after the key before it (at 0 without one). No two keys of the "
+        "range get closer than 10 ms, which limits shrinking. Poses and blend settings are untouched. The track gets "
+        "bound in the Sequencer; refused during a timeline drag. Returns {entity, name, first, last, keyTimesBefore, "
+        "keyTimesAfter, applied}: the key times of first..last and the duration in seconds applied after clamping.",
+      .params = {
+        RequiredParam("first", ParamType::Integer, "0-based index of the first key of the range."),
+        RequiredParam("last", ParamType::Integer, "0-based index of the last key, greater than first."),
+        RequiredParam("duration", ParamType::Number, "Seconds from the first to the last key of the range after the edit."),
+        OptionalParam("anchor", ParamType::String, "start (default: the right edge moves, with ripple) or end (the left "
+          "edge moves)."),
+        OptionalParam("entity", ParamType::Entity, entityDescription) },
+      .refusedWhileCapturing = true,
+      .handler = [editKeyRange](const BridgeActionArgs& args, const BridgeReply& reply) {
+        using KeyRangeTiming::StretchAnchor;
+        StretchAnchor anchor = StretchAnchor::Start;
+        if (args.Has("anchor"))
+        {
+          const std::string value = args.GetString("anchor");
+          if (value != "start" && value != "end")
+          {
+            reply.Fail(BridgeErrorCode::INVALID_PARAMS, "'anchor' must be start or end");
+            return;
+          }
+          anchor = value == "end" ? StretchAnchor::End : StretchAnchor::Start;
+        }
+
+        const float duration = float(args.GetNumber("duration"));
+        editKeyRange("sequencer.stretchKeys", args, reply,
+          [duration, anchor](std::vector<CameraTrackKey>& keys, int first, int last) {
+            return SequencerEditing::StretchKeyRange(keys, first, last, duration, anchor);
+          });
+      }
+    });
+
+    // The path a speed key edit works on: the given entity, else the one bound in the Sequencer, else the only one of
+    // the scene. It gets bound. False once the reply has failed.
+    auto bindEditedPath = [this](const BridgeActionArgs& args, const BridgeReply& reply, Entity& path) {
+      Scene& scene = GetScene();
+      SequencerEditing::ResolveBinding(m_Context);
+
+      path = entt::null;
+      if (args.Has("entity"))
+      {
+        path = args.GetEntity("entity");
+        if (!scene.HasComponent<MotionPathComponent>(path))
+        {
+          reply.Fail(BridgeErrorCode::NOT_FOUND, "entity " + std::to_string(entt::to_integral(path))
+            + " has no 'motionPath' component");
+          return false;
+        }
+      }
+      else if (SequencerEditing::GetBoundPath(m_Context) != nullptr)
+      {
+        path = m_Context.sequencerPath;
+      }
+      else
+      {
+        std::vector<Entity> paths = CollectEntitiesWith<MotionPathComponent>(scene);
+        if (paths.size() != 1)
+        {
+          reply.Fail(paths.empty() ? BridgeErrorCode::NOT_FOUND : BridgeErrorCode::INVALID_PARAMS,
+            paths.empty() ? std::string("the scene has no motion path")
+              : "the scene has " + std::to_string(paths.size()) + " motion paths; give the 'entity'");
+          return false;
+        }
+        path = paths.front();
+      }
+
+      if (path != m_Context.sequencerPath)
+      {
+        SequencerEditing::BindPath(m_Context, path);
+        Entity selected = m_Context.selectedEntity;
+        if (selected != path && scene.GetRegistry().valid(selected)
+          && scene.HasComponent<MotionPathComponent>(selected))
+        {
+          m_Context.SelectEntity(path);
+        }
+      }
+      return true;
+    };
+
+    // Runs a timing edit over the speed key range first..last and replies with the times and speeds before and after
+    auto editSpeedKeyRange = [this, bindEditedPath](const char* name, const BridgeActionArgs& args,
+      const BridgeReply& reply, const auto& edit) {
+      if (m_Context.sequencerDragActive)
+      {
+        reply.Fail(BridgeErrorCode::FAILED, "a Sequencer timeline drag is in progress; try again after it ends");
+        return;
+      }
+
+      Scene& scene = GetScene();
+      Entity pathEntity = entt::null;
+      if (!bindEditedPath(args, reply, pathEntity))
+        return;
+
+      std::vector<MotionSpeedKey>& keys = scene.GetComponent<MotionPathComponent>(pathEntity).speedKeys;
+      const int64_t count = int64_t(keys.size());
+      const int64_t from = args.GetInteger("first");
+      const int64_t to = args.GetInteger("last");
+      if (from < 0 || to >= count || to <= from)
+      {
+        reply.Fail(BridgeErrorCode::INVALID_PARAMS, "'first' and 'last' must be speed key indices in 0.."
+          + std::to_string(count - 1) + " with last > first (the path has " + std::to_string(count) + " speed keys)");
+        return;
+      }
+
+      auto collect = [&keys](std::vector<float>& times, std::vector<float>& speeds) {
+        for (const MotionSpeedKey& key : keys)
+        {
+          times.push_back(key.time);
+          speeds.push_back(key.speed);
+        }
+      };
+      std::vector<float> timesBefore;
+      std::vector<float> speedsBefore;
+      collect(timesBefore, speedsBefore);
+      const SpeedKeyTiming::Result result = edit(keys, int(from), int(to));
+      std::vector<float> timesAfter;
+      std::vector<float> speedsAfter;
+      collect(timesAfter, speedsAfter);
+      SequencerEditing::Repose(m_Context);
+
+      YA_LOG_INFO("Bridge", "Action %s: speed keys %d-%d of '%s' (%u), applied %.3f s, speeds x%.3f", name, int(from),
+        int(to), scene.GetName(pathEntity).c_str(), EntityIdForLog(pathEntity), result.applied, result.speedScale);
+
+      Json out = EntityResult(scene, pathEntity);
+      out["first"] = from;
+      out["last"] = to;
+      out["keyTimesBefore"] = timesBefore;
+      out["keyTimesAfter"] = timesAfter;
+      out["speedsBefore"] = speedsBefore;
+      out["speedsAfter"] = speedsAfter;
+      out["applied"] = result.applied;
+      out["speedScale"] = result.speedScale;
+      reply.Ok(std::move(out));
+    };
+
+    const char* pathDescription = "Entity with a motionPath component. Default: the path bound in the Sequencer, else "
+      "the only motion path of the scene.";
+    const char* speedResult = "Returns {entity, name, first, last, keyTimesBefore, keyTimesAfter, speedsBefore, "
+      "speedsAfter, applied, speedScale}: every speed key's time and speed, the value applied after clamping and the "
+      "factor the rescaled speeds got.";
+
+    actions.Register({
+      .name = "sequencer.moveSpeedKeys",
+      .description = std::string("Move a speed key range in time, as dragging inside the speed key range band on the "
+        "Sequencer's Speed lane does. The range is clamped between its neighbours (10 ms gap) and never starts below "
+        "0; its speeds are rescaled so the drive covers the same road from the key before the range to the key after "
+        "it, and a move they cannot absorb is shortened. The path gets bound in the Sequencer; refused during a "
+        "timeline drag. ") + speedResult,
+      .params = {
+        RequiredParam("first", ParamType::Integer, "0-based index of the first speed key of the range."),
+        RequiredParam("last", ParamType::Integer, "0-based index of the last speed key, greater than first."),
+        RequiredParam("delta", ParamType::Number, "Seconds to move the range by; negative moves it earlier."),
+        OptionalParam("entity", ParamType::Entity, pathDescription) },
+      .refusedWhileCapturing = true,
+      .handler = [editSpeedKeyRange](const BridgeActionArgs& args, const BridgeReply& reply) {
+        const float delta = float(args.GetNumber("delta"));
+        editSpeedKeyRange("sequencer.moveSpeedKeys", args, reply,
+          [delta](std::vector<MotionSpeedKey>& keys, int first, int last) {
+            return SequencerEditing::MoveSpeedKeyRange(keys, first, last, delta);
+          });
+      }
+    });
+
+    actions.Register({
+      .name = "sequencer.stretchSpeedKeys",
+      .description = std::string("Slow down or speed up a stretch of the drive, as dragging an edge of the speed key "
+        "range band on the Sequencer's Speed lane does: the range is scaled in time and its speeds rescaled so the car "
+        "drives the same road, and the drive outside plays as before, only shifted. Anchor start (the right edge) keeps "
+        "the drive up to the range's first key and shifts every later key by the change of the last key's time; anchor "
+        "end (the left edge) keeps the drive from the range's last key on, and the first key stops 10 ms after the key "
+        "before it. Speeds stay within 5% of their old value and 100 m/s, which can shorten the stretch. The path gets "
+        "bound in the Sequencer; refused during a timeline drag. ") + speedResult,
+      .params = {
+        RequiredParam("first", ParamType::Integer, "0-based index of the first speed key of the range."),
+        RequiredParam("last", ParamType::Integer, "0-based index of the last speed key, greater than first."),
+        RequiredParam("duration", ParamType::Number, "Seconds from the first to the last key of the range after the edit."),
+        OptionalParam("anchor", ParamType::String, "start (default: the right edge moves, with ripple) or end (the left "
+          "edge moves)."),
+        OptionalParam("entity", ParamType::Entity, pathDescription) },
+      .refusedWhileCapturing = true,
+      .handler = [editSpeedKeyRange](const BridgeActionArgs& args, const BridgeReply& reply) {
+        using KeyRangeTiming::StretchAnchor;
+        StretchAnchor anchor = StretchAnchor::Start;
+        if (args.Has("anchor"))
+        {
+          const std::string value = args.GetString("anchor");
+          if (value != "start" && value != "end")
+          {
+            reply.Fail(BridgeErrorCode::INVALID_PARAMS, "'anchor' must be start or end");
+            return;
+          }
+          anchor = value == "end" ? StretchAnchor::End : StretchAnchor::Start;
+        }
+
+        const float duration = float(args.GetNumber("duration"));
+        editSpeedKeyRange("sequencer.stretchSpeedKeys", args, reply,
+          [duration, anchor](std::vector<MotionSpeedKey>& keys, int first, int last) {
+            return SequencerEditing::StretchSpeedKeyRange(keys, first, last, duration, anchor);
+          });
       }
     });
   }

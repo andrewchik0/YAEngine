@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Assets/Handle.h"
+#include "Editor/Utils/ShotTemplates.h"
 #include "Scene/Scene.h"
 #include "Utils/PrimitiveMeshFactory.h"
 
@@ -115,5 +116,25 @@ namespace YAEngine
     // plays the shot from its start. A null track plays the whole timeline through the active
     // camera. Returns true when it resumed.
     bool PlaySequence(SequencePlayer& player, Scene& scene, Entity cameraTrack);
+
+    struct AddShotResult
+    {
+      // The camera passed in, or the one created for the shot
+      Entity camera = entt::null;
+      // The shot's keys are [firstKey, firstKey + keyCount) of the camera's track
+      int32_t firstKey = -1;
+      int32_t keyCount = 0;
+      // Empty on success; on failure nothing was changed
+      std::string error;
+      // Set on success when a track-wide setting changed that the track's keys outside the shot use too
+      std::string warning;
+    };
+
+    // Applies a shot template. A null camera gets a new root "Shot N" entity with a Camera and a Camera Track,
+    // posed at the shot's start. The track's keys inside [start, start + duration] are replaced, so a template
+    // can be applied again over the same range. target: the entity the shot follows or aims at; it must have a
+    // unique name, since the track refers to it by name. Fly To ignores it.
+    AddShotResult AddShot(Scene& scene, ShotTemplate shot, const ShotTemplateParams& params, Entity target,
+      Entity camera, const ShotViewPoses& views);
   }
 }

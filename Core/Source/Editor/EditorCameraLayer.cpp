@@ -23,6 +23,8 @@ namespace YAEngine
     GetScene().AddComponent<EditorOnlyTag>(m_Camera);
     m_Pitch = camState.pitch;
     m_Yaw = camState.yaw;
+    b_InputLocked = false;
+    b_Flown = false;
     GetScene().GetTransform(m_Camera).position = camState.position;
     GetScene().SetActiveCamera(m_Camera);
 
@@ -47,6 +49,33 @@ namespace YAEngine
     ApplyRotation();
   }
 
+  void EditorCameraLayer::SetPoseFromRotation(const glm::vec3& position, const glm::quat& rotation)
+  {
+    const glm::vec3 angles = YawPitchRollFromRotation(rotation);
+    SetPose(position, angles.x, angles.y);
+  }
+
+  float EditorCameraLayer::GetFov()
+  {
+    if (m_Camera == entt::null || !GetScene().HasComponent<CameraComponent>(m_Camera))
+      return CameraComponent {}.fov;
+    return GetScene().GetComponent<CameraComponent>(m_Camera).fov;
+  }
+
+  void EditorCameraLayer::SetFov(float radians)
+  {
+    if (m_Camera == entt::null || !GetScene().HasComponent<CameraComponent>(m_Camera) || !std::isfinite(radians))
+      return;
+    GetScene().GetComponent<CameraComponent>(m_Camera).fov = radians;
+  }
+
+  bool EditorCameraLayer::ConsumeFlown()
+  {
+    bool flown = b_Flown;
+    b_Flown = false;
+    return flown;
+  }
+
   void EditorCameraLayer::ApplyRotation()
   {
     GetScene().GetTransform(m_Camera).rotation = MakeYawPitchRotation(m_Yaw, m_Pitch);
@@ -66,6 +95,16 @@ namespace YAEngine
     if (!input.IsViewportHovered() || input.IsGizmoDragging())
       return;
 
+    float scrollY = input.GetScrollDelta().y;
+    if (scrollY != 0.0f)
+      SetSpeed(m_Speed * (scrollY > 0.0f ? 1.1f : 0.9f));
+
+    if (!b_InputLocked)
+      Fly(input, float(deltaTime));
+  }
+
+  void EditorCameraLayer::Fly(InputSystem& input, float deltaTime)
+  {
     if (input.IsMouseDown(MouseButton::Right))
     {
       input.SetMouseCaptured(true);
@@ -75,6 +114,7 @@ namespace YAEngine
       m_Yaw   -= delta.x * .0015f;
       m_Pitch -= delta.y * .0015f;
       m_Pitch = ClampPitch(m_Pitch);
+      b_Flown |= delta != glm::vec2(0.0f);
 
       ApplyRotation();
     }
@@ -90,6 +130,7 @@ namespace YAEngine
       float panSpeed = 0.003f;
       GetScene().GetTransform(m_Camera).position -= right * delta.x * panSpeed;
       GetScene().GetTransform(m_Camera).position += up * delta.y * panSpeed;
+      b_Flown |= delta != glm::vec2(0.0f);
     }
 
     glm::vec3 velocity(0.0f);
@@ -98,13 +139,10 @@ namespace YAEngine
 
     if (velocity != glm::vec3(0.0f))
     {
-      velocity = glm::normalize(velocity) * (float)deltaTime * m_Speed;
+      velocity = glm::normalize(velocity) * deltaTime * m_Speed;
       GetScene().GetTransform(m_Camera).position += velocity;
+      b_Flown = true;
     }
-
-    float scrollY = input.GetScrollDelta().y;
-    if (scrollY != 0.0f)
-      SetSpeed(m_Speed * (scrollY > 0.0f ? 1.1f : 0.9f));
   }
 
   void EditorCameraLayer::SetSpeed(float metersPerSecond)

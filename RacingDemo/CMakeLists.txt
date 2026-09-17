@@ -10,6 +10,8 @@ set(SOURCES
   Source/ReelFormat.cpp
   Source/ReelPlaybackLayer.h
   Source/ReelPlaybackLayer.cpp
+  Source/CameraDirectorLayer.h
+  Source/CameraDirectorLayer.cpp
 )
 
 add_executable(RacingDemo)

@@ -8,6 +8,7 @@ namespace YAEngine
 {
   class MaterialInspectorPanel;
   class SequencerPanel;
+  class ShotInspectorPanel;
   struct RoadComponent;
 
   class DetailsPanel : public IEditorPanel
@@ -22,8 +23,9 @@ namespace YAEngine
     const EditorPanelDescriptor& GetDescriptor() const override { return DESCRIPTOR; }
     void OnRender(EditorContext& context) override;
 
-    // The panels section buttons open: Material > Edit and Camera Track > Open in Sequencer
-    void LinkPanels(MaterialInspectorPanel& materialInspector, SequencerPanel& sequencer, ShowPanelFunction showPanel);
+    // The panels section buttons open: Material > Edit, and Open in Sequencer in Camera Track and Motion Path
+    void LinkPanels(MaterialInspectorPanel& materialInspector, SequencerPanel& sequencer,
+      ShotInspectorPanel& shotInspector, ShowPanelFunction showPanel);
 
   private:
 
@@ -55,9 +57,11 @@ namespace YAEngine
     void DrawScatterSection(EditorContext& context, Entity entity);
     void DrawColliderSection(EditorContext& context, Entity entity);
     void DrawAddComponent(EditorContext& context, Entity entity);
+    void OpenInSequencer();
 
     MaterialInspectorPanel* m_MaterialInspector = nullptr;
     SequencerPanel* m_Sequencer = nullptr;
+    ShotInspectorPanel* m_ShotInspector = nullptr;
     ShowPanelFunction m_ShowPanel;
 
     // The name is typed into this buffer and applied on commit, only to the entity the edit started on

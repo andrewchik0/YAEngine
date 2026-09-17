@@ -7,10 +7,12 @@
 #include "Editor/EditorCommands.h"
 #include "Editor/EditorContext.h"
 #include "Editor/EditorPreferences.h"
+#include "Editor/SequencerEditing.h"
 #include "Editor/Utils/EditorIcons.h"
 #include "Editor/Utils/EditorStyle.h"
 #include "Editor/Utils/EditorWidgets.h"
 #include "Render/Render.h"
+#include "Scene/SequencePlayer.h"
 #include "Utils/DebugViews.h"
 #include "Utils/Log.h"
 
@@ -84,6 +86,10 @@ namespace YAEngine
     // Popups over the image stay readable against a busy frame
     constexpr float OVERLAY_POPUP_MIN_ALPHA = 0.85f;
     constexpr double CAMERA_SPEED_SAVE_DELAY = 1.0;
+    // Plain black and white: the matte and the guides must read the same under every theme
+    constexpr ImU32 PILOT_MATTE_COLOR = IM_COL32(0, 0, 0, 150);
+    constexpr ImU32 PILOT_GUIDE_COLOR = IM_COL32(255, 255, 255, 50);
+    constexpr ImU32 PILOT_FRAME_COLOR = IM_COL32(255, 255, 255, 120);
 
     constexpr const char* GIZMOS_OFF_REASON = "Hidden while Gizmos is off.";
     constexpr const char* VOLUME_NODES_OFF_REASON = "Needs Volume Nodes.";
@@ -211,7 +217,9 @@ namespace YAEngine
     // Popped right after Begin, which is where the window reads it: the toolbar popups need the
     // regular padding
     ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
-    const bool open = BeginPanel(ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse);
+    // A focused viewport hands the keys to the game, so ImGui navigation must not walk the toolbar with
+    // them. This also keeps io.NavActive off, which lets the game read keys with the cursor elsewhere.
+    const bool open = BeginPanel(ImGuiWindowFlags_NoScrollbar | ImGuiWindowFlags_NoScrollWithMouse | ImGuiWindowFlags_NoNavInputs);
     ImGui::PopStyleVar();
 
     if (open)
@@ -242,10 +250,14 @@ namespace YAEngine
 
         ImGui::Image(context.render->GetSceneTextureID(), size);
         m_ImageBottom = vpMin.y + size.y;
+        DrawPilotFrame(context, vpMin, size);
 
         const float stripHeight = DrawToolbar(context, vpMin, size.x);
         DrawPreviewOverlay(context, ImVec2(vpMin.x, vpMin.y + stripHeight));
+        DrawPilotOverlay(context, ImVec2(vpMin.x, vpMin.y + stripHeight));
       }
+
+      SequencerEditing::HandleViewportHotkeys(context);
     }
     else
     {
@@ -595,6 +607,99 @@ namespace YAEngine
       context.StopCameraPreview();
 
     // The click that leaves the preview must not also fire a viewport pick
+    if (ImGui::IsItemHovered())
+      context.mouseInViewportValid = false;
+
+    ImGui::EndChild();
+    ImGui::PopStyleColor();
+  }
+
+  void ViewportPanel::DrawPilotFrame(EditorContext& context, const ImVec2& imageMin, const ImVec2& imageSize)
+  {
+    if (!context.IsPiloting())
+      return;
+
+    float x = 0.0f;
+    float y = 0.0f;
+    float width = 0.0f;
+    float height = 0.0f;
+    SequencerEditing::GetPilotOutputFrame(imageSize.x, imageSize.y, x, y, width, height);
+
+    const ImVec2 imageMax(imageMin.x + imageSize.x, imageMin.y + imageSize.y);
+    const ImVec2 frameMin(std::floor(imageMin.x + x), std::floor(imageMin.y + y));
+    const ImVec2 frameMax(frameMin.x + std::round(width), frameMin.y + std::round(height));
+    ImDrawList* draw = ImGui::GetWindowDrawList();
+
+    if (frameMin.y > imageMin.y)
+    {
+      draw->AddRectFilled(imageMin, ImVec2(imageMax.x, frameMin.y), PILOT_MATTE_COLOR);
+      draw->AddRectFilled(ImVec2(imageMin.x, frameMax.y), imageMax, PILOT_MATTE_COLOR);
+    }
+    if (frameMin.x > imageMin.x)
+    {
+      draw->AddRectFilled(ImVec2(imageMin.x, frameMin.y), ImVec2(frameMin.x, frameMax.y), PILOT_MATTE_COLOR);
+      draw->AddRectFilled(ImVec2(frameMax.x, frameMin.y), ImVec2(imageMax.x, frameMax.y), PILOT_MATTE_COLOR);
+    }
+
+    for (int i = 1; i <= 2; i++)
+    {
+      const float gx = std::floor(frameMin.x + width * float(i) / 3.0f) + 0.5f;
+      const float gy = std::floor(frameMin.y + height * float(i) / 3.0f) + 0.5f;
+      draw->AddLine(ImVec2(gx, frameMin.y), ImVec2(gx, frameMax.y), PILOT_GUIDE_COLOR);
+      draw->AddLine(ImVec2(frameMin.x, gy), ImVec2(frameMax.x, gy), PILOT_GUIDE_COLOR);
+    }
+    draw->AddRect(frameMin, frameMax, PILOT_FRAME_COLOR);
+  }
+
+  void ViewportPanel::DrawPilotOverlay(EditorContext& context, const ImVec2& origin)
+  {
+    if (!context.IsPiloting() || context.scene == nullptr)
+      return;
+    Scene& scene = *context.scene;
+    if (!scene.GetRegistry().valid(context.pilotTrack) || !scene.HasComponent<CameraTrackComponent>(context.pilotTrack))
+      return;
+
+    const EditorTheme& theme = EditorStyle::GetTheme();
+    const float margin = PREVIEW_BANNER_MARGIN * EditorStyle::GetContentScale();
+    ImGui::SetCursorScreenPos(ImVec2(origin.x + margin, origin.y + margin));
+
+    ImGui::PushStyleColor(ImGuiCol_ChildBg, ToImGuiColor(theme.overlay));
+    ImGui::BeginChild("PilotOverlay", ImVec2(0, 0),
+      ImGuiChildFlags_AutoResizeX | ImGuiChildFlags_AutoResizeY | ImGuiChildFlags_Borders);
+
+    ImGui::PushStyleColor(ImGuiCol_Text, ToImGuiColor(theme.accent));
+    ImGui::TextUnformatted(ICON_LC_DRONE " Pilot:");
+    ImGui::PopStyleColor();
+    ImGui::SameLine();
+    ImGui::TextUnformatted(scene.GetName(context.pilotTrack).c_str());
+
+    char time[48];
+    std::snprintf(time, sizeof(time), "| t = %.2f s", context.sequencerPlayhead);
+    ImGui::SameLine();
+    ImGui::TextUnformatted(time);
+
+    const SequencePlayer* player = context.sequencePlayer;
+    const bool following = player != nullptr && player->IsAdvancing() && player->GetCameraTrack() == context.pilotTrack;
+    const bool noKeys = scene.GetComponent<CameraTrackComponent>(context.pilotTrack).keys.empty();
+    const char* state = following ? "| following the shot"
+      : noKeys ? "| no keys - K adds the first, P exits"
+      : context.pilotModified ? "| modified - K to set key, P exits"
+      : "| P exits";
+    if (state != nullptr)
+    {
+      ImGui::SameLine();
+      ImGui::PushStyleColor(ImGuiCol_Text, ToImGuiColor(context.pilotModified && !following ? theme.warning : theme.textSecondary));
+      ImGui::TextUnformatted(state);
+      ImGui::PopStyleColor();
+    }
+
+    ImGui::SameLine();
+    if (ImGui::SmallButton("Exit Pilot"))
+      SequencerEditing::StopPilot(context);
+    ImGui::SetItemTooltip("Puts the editor camera back where it was before the pilot. P does the same here, and so "
+      "does Esc with the Sequencer or the Shot Inspector focused.");
+
+    // The click that leaves the pilot must not also fire a viewport pick
     if (ImGui::IsItemHovered())
       context.mouseInViewportValid = false;
 

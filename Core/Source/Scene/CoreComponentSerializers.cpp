@@ -77,6 +77,22 @@ namespace YAEngine
         n["resetPostFXOnStart"] = t.resetPostFXOnStart;
         if (!t.aimTargetName.empty())
           n["aimTarget"] = t.aimTargetName;
+        // Everything newer is written only when it differs from the default, so scenes that
+        // do not use it resave byte-identical
+        if (!t.followTargetName.empty())
+          n["followTarget"] = t.followTargetName;
+        if (t.followRotation == CameraTrackComponent::FollowRotation::Smoothed)
+          n["followRotation"] = "smoothed";
+        else if (t.followRotation == CameraTrackComponent::FollowRotation::PositionOnly)
+          n["followRotation"] = "position";
+        if (t.followSmoothing != 0.5f)
+          n["followSmoothing"] = t.followSmoothing;
+        if (t.aimOffset != glm::vec3(0.0f))
+          n["aimOffset"] = SerializeVec3(t.aimOffset);
+        if (t.aimScreenOffset != glm::vec2(0.0f))
+          n["aimScreenOffset"] = SerializeVec2(t.aimScreenOffset);
+        if (t.aimSmoothing != 0.0f)
+          n["aimSmoothing"] = t.aimSmoothing;
 
         YAML::Node keysNode;
         for (auto& key : t.keys)
@@ -86,6 +102,18 @@ namespace YAEngine
           keyNode["position"] = SerializeVec3(key.position);
           keyNode["rotation"] = SerializeQuat(key.rotation);
           keyNode["fov"] = key.fov;
+          if (key.space == CameraKeySpace::Target)
+            keyNode["space"] = "target";
+          if (key.interpOut == CameraKeyInterp::Linear)
+            keyNode["interp"] = "linear";
+          else if (key.interpOut == CameraKeyInterp::Hold)
+            keyNode["interp"] = "hold";
+          else if (key.interpOut == CameraKeyInterp::Orbit)
+            keyNode["interp"] = "orbit";
+          if (key.easeIn != 1.0f)
+            keyNode["easeIn"] = key.easeIn;
+          if (key.easeOut != 1.0f)
+            keyNode["easeOut"] = key.easeOut;
           keysNode.push_back(keyNode);
         }
         if (!t.keys.empty())
@@ -98,6 +126,21 @@ namespace YAEngine
           t.rotationMode = CameraTrackComponent::RotationMode::AimAt;
         if (n["resetPostFXOnStart"]) t.resetPostFXOnStart = n["resetPostFXOnStart"].as<bool>();
         if (n["aimTarget"]) t.aimTargetName = n["aimTarget"].as<std::string>();
+        if (n["followTarget"]) t.followTargetName = n["followTarget"].as<std::string>();
+        if (n["followRotation"])
+        {
+          const auto value = n["followRotation"].as<std::string>();
+          if (value == "smoothed")
+            t.followRotation = CameraTrackComponent::FollowRotation::Smoothed;
+          else if (value == "position")
+            t.followRotation = CameraTrackComponent::FollowRotation::PositionOnly;
+          else if (value != "full")
+            YA_LOG_WARN("Scene", "Unknown camera track followRotation '%s', loaded as full", value.c_str());
+        }
+        if (n["followSmoothing"]) t.followSmoothing = std::max(n["followSmoothing"].as<float>(), 0.0f);
+        if (n["aimOffset"]) t.aimOffset = DeserializeVec3(n["aimOffset"]);
+        if (n["aimScreenOffset"]) t.aimScreenOffset = DeserializeVec2(n["aimScreenOffset"]);
+        if (n["aimSmoothing"]) t.aimSmoothing = std::max(n["aimSmoothing"].as<float>(), 0.0f);
         if (n["keys"])
         {
           for (size_t i = 0; i < n["keys"].size(); i++)
@@ -108,6 +151,28 @@ namespace YAEngine
             if (keyNode["position"]) key.position = DeserializeVec3(keyNode["position"]);
             if (keyNode["rotation"]) key.rotation = DeserializeQuat(keyNode["rotation"]);
             if (keyNode["fov"]) key.fov = keyNode["fov"].as<float>();
+            if (keyNode["space"])
+            {
+              const auto value = keyNode["space"].as<std::string>();
+              if (value == "target")
+                key.space = CameraKeySpace::Target;
+              else if (value != "world")
+                YA_LOG_WARN("Scene", "Unknown camera key space '%s', loaded as world", value.c_str());
+            }
+            if (keyNode["interp"])
+            {
+              const auto value = keyNode["interp"].as<std::string>();
+              if (value == "linear")
+                key.interpOut = CameraKeyInterp::Linear;
+              else if (value == "hold")
+                key.interpOut = CameraKeyInterp::Hold;
+              else if (value == "orbit")
+                key.interpOut = CameraKeyInterp::Orbit;
+              else if (value != "smooth")
+                YA_LOG_WARN("Scene", "Unknown camera key interp '%s', loaded as smooth", value.c_str());
+            }
+            if (keyNode["easeIn"]) key.easeIn = std::max(keyNode["easeIn"].as<float>(), 0.0f);
+            if (keyNode["easeOut"]) key.easeOut = std::max(keyNode["easeOut"].as<float>(), 0.0f);
             t.keys.push_back(key);
           }
           // The evaluator assumes ascending times; a hand-edited scene must not be able

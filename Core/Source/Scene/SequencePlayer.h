@@ -58,6 +58,38 @@ namespace YAEngine
     // playback state
     static void ApplyTrackPose(Scene& scene, Entity trackEntity, float time);
 
+    // Frame of the track's follow target at a timeline time: the motion path point with its
+    // heading when the target has a drivable path, its world transform otherwise. False
+    // when there is no follow target to resolve.
+    static bool ResolveTargetFrame(Scene& scene, const CameraTrackComponent& track, float time,
+      CameraTargetFrame& out);
+    // World pose the track holds at a time, aim included. Writes nothing; false when the
+    // entity has no track with keys.
+    static bool EvaluateTrackPose(Scene& scene, Entity trackEntity, float time, CameraTrackPose& out);
+    // A key at time holding a world pose. A Target key is expressed in the follow target's
+    // frame at that time; without a resolvable target the key stays World.
+    static CameraTrackKey KeyFromWorldPose(Scene& scene, Entity trackEntity, const CameraTrackPose& world,
+      CameraKeySpace space, float time);
+    // Where a key puts the camera with the follow target as it is at time (no aim)
+    static CameraTrackPose KeyToWorldPose(Scene& scene, Entity trackEntity, const CameraTrackKey& key,
+      float time);
+
+    // The follow and aim target entities of a track, looked up by name once. The overloads below
+    // give the same results as the ones above for callers that evaluate one track many times in a
+    // row (the editor draws and samples whole shots), where a name lookup per call adds up.
+    struct TrackTargets
+    {
+      Entity follow { entt::null };
+      Entity aim { entt::null };
+    };
+    static TrackTargets FindTrackTargets(Scene& scene, Entity trackEntity);
+    static bool ResolveTargetFrame(Scene& scene, Entity trackEntity, const TrackTargets& targets, float time,
+      CameraTargetFrame& out);
+    static bool EvaluateTrackPose(Scene& scene, Entity trackEntity, const TrackTargets& targets, float time,
+      CameraTrackPose& out);
+    static CameraTrackPose KeyToWorldPose(Scene& scene, Entity trackEntity, const TrackTargets& targets,
+      const CameraTrackKey& key, float time);
+
     // Shot range of a camera track: its first and last key
     static float ShotStart(const CameraTrackComponent& track);
     static float ShotEnd(const CameraTrackComponent& track);

@@ -16,6 +16,7 @@ namespace YAEngine
   enum class GizmoAxis : uint8_t;
   enum class GizmoMode : uint8_t;
   struct CameraTrackKey;
+  struct CameraTrackPose;
   class BridgeActions;
   class ViewportPanel;
   class OutlinerPanel;
@@ -37,6 +38,9 @@ namespace YAEngine
   private:
 
     void BuildDefaultLayout(uint32_t dockspaceId);
+    // A panel added after this imgui.ini was written has no settings in it and would open floating over
+    // the viewport; it joins the dock node of its default neighbour instead
+    void DockPanelsMissingFromLayout();
     // Appends a panel with the visibility stored in the preferences
     template<typename TPanel, typename... TArgs>
     TPanel& AddPanel(TArgs&&... args);
@@ -71,6 +75,8 @@ namespace YAEngine
     void RegisterSceneActions(BridgeActions& actions);
     void RegisterRenderActions(BridgeActions& actions);
     void RegisterPlaybackActions(BridgeActions& actions);
+    void RegisterPilotActions(BridgeActions& actions);
+    void RegisterShotActions(BridgeActions& actions);
 
     // Picking, most specific first: overlay icons, then the entity id the renderer
     // rasterized into the clicked pixel, then the ray test for what has no geometry.
@@ -82,8 +88,12 @@ namespace YAEngine
     // Sequencer key manipulation: while the track entity itself is selected and the
     // sequencer has a selected key, the viewport gizmo grabs that key instead
     CameraTrackKey* ActiveSequencerKey();
+    // Where a key of the bound track puts the camera at the key's own time
+    CameraTrackPose SequencerKeyWorldPose(const CameraTrackKey& key);
     void DragSequencerKey(const glm::vec3& delta, const glm::vec3& currentHit);
     bool PickTrackKey(const Ray& ray, Entity& outTrack, int& outKey);
+    // Piloting puts the editor camera on the track, where a key sphere around the eye would fill the view
+    bool IsAtPilotEye(Entity trackEntity, const glm::vec3& keyPosition);
     // The same for the control points of the motion path the sequencer has bound; a point only
     // ever moves, so it takes the translate gizmo alone
     glm::vec3* ActivePathPoint();

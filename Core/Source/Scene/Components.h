@@ -88,6 +88,16 @@ namespace YAEngine
       AimAt
     };
 
+    // Rotation of the follow target's frame
+    enum class FollowRotation : uint8_t
+    {
+      Full,
+      // Heading averaged over followSmoothing seconds
+      Smoothed,
+      // Identity: Target keys keep their world orientation and only move with the target
+      PositionOnly
+    };
+
     // Invariant: sorted by ascending time. The evaluator and every editor tool that
     // inserts a key rely on it; an unsorted list silently produces garbage segments.
     std::vector<CameraTrackKey> keys;
@@ -98,6 +108,19 @@ namespace YAEngine
     // A move that starts from a completely different viewpoint carries over a history
     // and an exposure that belong to the old one.
     bool resetPostFXOnStart = true;
+
+    // Entity the Target keys are relative to; empty means they are read as World. For an
+    // entity with a motion path the frame is the curve point heading along the path (a car's
+    // rear axle), not its transform: that one lags a frame and carries the body lean.
+    std::string followTargetName;
+    FollowRotation followRotation = FollowRotation::Full;
+    float followSmoothing = 0.5f;
+    // AimAt: the aim point in the aim target's frame, resolved like the follow target's
+    glm::vec3 aimOffset { 0.0f };
+    // AimAt: where the aim point sits in the image, -1..1, x right, y up
+    glm::vec2 aimScreenOffset { 0.0f };
+    // AimAt: seconds the aim point is averaged over
+    float aimSmoothing = 0.0f;
   };
 
   // Authored drive along a curve through world-space points, played on the SequencePlayer

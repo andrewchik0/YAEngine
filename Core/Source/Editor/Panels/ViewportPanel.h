@@ -41,6 +41,9 @@ namespace YAEngine
     void DrawNodeColorMenu(Render& render, const char* disabledReason);
     void DrawCameraSpeed(float rightEdge);
     static void DrawPreviewOverlay(EditorContext& context, const ImVec2& origin);
+    // The 16:9 output frame of the piloted shot: the image outside it darkened, thirds inside
+    static void DrawPilotFrame(EditorContext& context, const ImVec2& imageMin, const ImVec2& imageSize);
+    static void DrawPilotOverlay(EditorContext& context, const ImVec2& origin);
 
     void StoreShowFlag(size_t index, bool value);
     // Wheel steps arrive every frame while scrolling, so a change is saved once it settles

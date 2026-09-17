@@ -17,9 +17,11 @@
 #include "Editor/Panels/MaterialBrowserPanel.h"
 #include "Editor/Panels/MaterialInspectorPanel.h"
 #include "Editor/Panels/SequencerPanel.h"
+#include "Editor/Panels/ShotInspectorPanel.h"
 #include "Editor/Panels/AgentPanel.h"
 #include "Editor/Panels/DeveloperPanel.h"
 #include "Editor/EditorCameraLayer.h"
+#include "Editor/SequencerEditing.h"
 #include "Editor/Utils/FileDialog.h"
 
 #include "Assets/AssetManager.h"
@@ -80,19 +82,21 @@ namespace YAEngine
     RegisterBridgeActions();
 
     GetLayerManager().PushLayer<EditorCameraLayer>();
+    m_Context.editorCamera = GetLayerManager().GetLayer<EditorCameraLayer>();
     // Also the order of the View menu entries and of the tabs that share a dock node
-    m_ViewportPanel = &AddPanel<ViewportPanel>(m_Preferences, GetLayerManager().GetLayer<EditorCameraLayer>());
+    m_ViewportPanel = &AddPanel<ViewportPanel>(m_Preferences, m_Context.editorCamera);
     m_OutlinerPanel = &AddPanel<OutlinerPanel>();
     m_DetailsPanel = &AddPanel<DetailsPanel>();
     AddPanel<RenderSettingsPanel>();
     AddPanel<MaterialBrowserPanel>();
     MaterialInspectorPanel& materialInspector = AddPanel<MaterialInspectorPanel>();
     SequencerPanel& sequencer = AddPanel<SequencerPanel>();
+    ShotInspectorPanel& shotInspector = AddPanel<ShotInspectorPanel>();
     AddPanel<PerformancePanel>();
     m_AgentPanel = &AddPanel<AgentPanel>(m_Bridge, m_Preferences, overrides.mcpEnabled);
     AddPanel<DeveloperPanel>(m_Preferences);
 
-    m_DetailsPanel->LinkPanels(materialInspector, sequencer, [this](IEditorPanel& panel)
+    m_DetailsPanel->LinkPanels(materialInspector, sequencer, shotInspector, [this](IEditorPanel& panel)
     {
       SetPanelVisible(panel, true);
       panel.RequestFocus();
@@ -202,6 +206,9 @@ namespace YAEngine
       m_Context.StopCameraPreview();
     }
 
+    // After the sequence player posed this frame and before EditorCameraLayer flies
+    SequencerEditing::UpdatePilot(m_Context);
+
     // Entities die through the outliner, the bridge and model reloads alike, so previews of
     // gone ones are dropped here rather than on each of those paths.
     GetRender().PruneIrradianceVolumePlacementPreviews(GetScene());
@@ -226,6 +233,13 @@ namespace YAEngine
       io.ConfigFlags |= ImGuiConfigFlags_NoMouse;
     else
       io.ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
+
+    // The game reads the keys while the mouse is over the viewport, even with another panel focused.
+    // ImGui navigation would walk that panel's widgets and tabs with the same arrows.
+    if (input.IsViewportHovered())
+      io.ConfigFlags &= ~ImGuiConfigFlags_NavEnableKeyboard;
+    else
+      io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 
     auto& gizmo = m_Context.render->GetGizmoRenderer();
     gizmo.SetSpriteMaxPixels(GizmoRenderer::SPRITE_MAX_PIXELS * m_ContentScale);
@@ -409,10 +423,12 @@ namespace YAEngine
             glm::vec3 gizmoPos;
             if (key != nullptr)
             {
-              gizmoPos = key->position;
+              // The gizmo works in the world; a key relative to the target is converted at its own time
+              const CameraTrackPose keyPose = SequencerKeyWorldPose(*key);
+              gizmoPos = keyPose.position;
               m_DragStartLocalTransform = LocalTransform {};
-              m_DragStartLocalTransform.position = key->position;
-              m_DragStartLocalTransform.rotation = key->rotation;
+              m_DragStartLocalTransform.position = keyPose.position;
+              m_DragStartLocalTransform.rotation = keyPose.rotation;
             }
             else if (point != nullptr)
             {
@@ -476,17 +492,15 @@ namespace YAEngine
           {
             b_PickRequestActive = false;
             m_Context.SelectEntity(keyTrack);
-            m_Context.sequencerTrack = keyTrack;
-            m_Context.sequencerSelectedKey = keyIndex;
-            m_Context.sequencerKeyPickRequest = keyIndex;
+            SequencerEditing::BindTrack(m_Context, keyTrack);
+            SequencerEditing::SelectKey(m_Context, keyIndex);
           }
           else if (PickPathPoint(viewportRay, pointPath, pointIndex))
           {
             b_PickRequestActive = false;
             m_Context.SelectEntity(pointPath);
-            m_Context.sequencerPath = pointPath;
+            SequencerEditing::BindPath(m_Context, pointPath);
             m_Context.sequencerSelectedPoint = pointIndex;
-            m_Context.sequencerPointPickRequest = pointIndex;
           }
           else if ((icon = PickIconEntity(viewportRay, viewportView, viewportProj)) != entt::null)
           {
@@ -512,7 +526,7 @@ namespace YAEngine
     // one, and to the selected entity otherwise
     if (CameraTrackKey* anchorKey = ActiveSequencerKey())
     {
-      m_Context.render->SetSelectedEntityPosition(anchorKey->position);
+      m_Context.render->SetSelectedEntityPosition(SequencerKeyWorldPose(*anchorKey).position);
     }
     else if (glm::vec3* anchorPoint = ActivePathPoint())
     {
@@ -733,6 +747,8 @@ namespace YAEngine
       auto* node = ImGui::DockBuilderGetNode(dockspaceId);
       if (outdated || node == nullptr || !node->IsSplitNode())
         BuildDefaultLayout(dockspaceId);
+      else
+        DockPanelsMissingFromLayout();
 
       if (outdated)
       {
@@ -823,6 +839,11 @@ namespace YAEngine
     if (m_Context.revealEntityRequest != entt::null)
       SetPanelVisible(*m_OutlinerPanel, true);
 
+    if (m_Context.editorCamera != nullptr && m_Context.editorCamera->ConsumeFlown())
+      SequencerEditing::NotifyEditorCameraFlown(m_Context);
+    // The sequencer state stays valid with both sequencer panels closed, which a pilot relies on
+    SequencerEditing::ResolveBinding(m_Context);
+
     for (auto& panel : m_Panels)
     {
       if (!panel->IsVisible())
@@ -836,6 +857,9 @@ namespace YAEngine
         m_Preferences.Save();
       }
     }
+
+    // Opened from the Sequencer or the Shot Inspector, but drawn once here so either may be closed
+    SequencerEditing::DrawAddShotWindow(m_Context);
 
     // A closed viewport no longer refreshes these, and stale values would keep viewport input live
     if (!m_ViewportPanel->IsVisible())
@@ -1230,11 +1254,17 @@ namespace YAEngine
     const glm::vec4 kTrackPathColor(0.35f, 0.75f, 0.95f, 0.8f);
     const glm::vec4 kTrackKeyColor(0.45f, 0.6f, 0.75f, 0.7f);
     // Enough to show the Hermite curvature between two keys without flooding the instance
-    // buffer on a long track
+    // buffer on a long track. A segment riding on a moving target bends with it, so long
+    // segments get more samples.
     constexpr uint32_t TRACK_SAMPLES_PER_SEGMENT = 16;
+    constexpr float TRACK_SAMPLES_PER_SECOND = 10.0f;
+    constexpr uint32_t TRACK_MAX_SAMPLES_PER_SEGMENT = 64;
+    constexpr uint32_t TRACK_MAX_SAMPLES = 400;
     constexpr float TRACK_KEY_RADIUS = 0.12f;
     // Slightly padded relative to the drawn sphere so the small targets are comfortable to hit
     constexpr float TRACK_KEY_PICK_RADIUS = 0.18f;
+    // Keys closer than this to a piloting editor camera are neither drawn nor picked
+    constexpr float PILOT_EYE_CLEARANCE = 0.5f;
 
     const glm::vec4 kMotionPathColor(0.95f, 0.75f, 0.3f, 0.85f);
     const glm::vec4 kMotionPathTightColor(1.0f, 0.25f, 0.2f, 0.95f);
@@ -1284,8 +1314,8 @@ namespace YAEngine
 
       if (!drawFrustums)
         continue;
-      // Previewing this camera puts the viewport inside its own frustum
-      if (m_Context.previewCamera == entity)
+      // Previewing or piloting this camera puts the viewport inside its own frustum
+      if (m_Context.previewCamera == entity || m_Context.pilotTrack == entity)
         continue;
 
       float farDist = std::min(camera.farPlane, CAMERA_FRUSTUM_VIS_FAR);
@@ -1318,29 +1348,56 @@ namespace YAEngine
     if (m_Context.previewCamera == trackEntity)
       return;
 
-    auto& track = GetScene().GetComponent<CameraTrackComponent>(trackEntity);
+    Scene& scene = GetScene();
+    auto& track = scene.GetComponent<CameraTrackComponent>(trackEntity);
     if (track.keys.empty())
       return;
 
     auto& gizmo = m_Context.render->GetGizmoRenderer();
+    // The world path the camera flies, following its target, looked up once for the whole draw
+    const SequencePlayer::TrackTargets targets = SequencePlayer::FindTrackTargets(scene, trackEntity);
 
-    glm::vec3 previous = track.keys.front().position;
-    for (size_t seg = 0; seg + 1 < track.keys.size(); seg++)
+    std::vector<uint32_t> segmentSamples(track.keys.size() - 1);
+    uint32_t totalSamples = 0;
+    for (size_t seg = 0; seg < segmentSamples.size(); seg++)
     {
-      for (uint32_t sample = 1; sample <= TRACK_SAMPLES_PER_SEGMENT; sample++)
+      const float span = track.keys[seg + 1].time - track.keys[seg].time;
+      segmentSamples[seg] = glm::clamp(uint32_t(std::ceil(span * TRACK_SAMPLES_PER_SECOND)),
+        TRACK_SAMPLES_PER_SEGMENT, TRACK_MAX_SAMPLES_PER_SEGMENT);
+      totalSamples += segmentSamples[seg];
+    }
+    if (totalSamples > TRACK_MAX_SAMPLES)
+    {
+      for (uint32_t& samples : segmentSamples)
+        samples = std::max(uint32_t(2), samples * TRACK_MAX_SAMPLES / totalSamples);
+    }
+
+    CameraTrackPose pose;
+    bool hasPrevious = SequencePlayer::EvaluateTrackPose(scene, trackEntity, targets, track.keys.front().time, pose);
+    glm::vec3 previous = pose.position;
+    for (size_t seg = 0; seg < segmentSamples.size(); seg++)
+    {
+      const uint32_t samples = segmentSamples[seg];
+      for (uint32_t sample = 1; sample <= samples; sample++)
       {
-        float t = glm::mix(track.keys[seg].time, track.keys[seg + 1].time,
-          float(sample) / float(TRACK_SAMPLES_PER_SEGMENT));
-        glm::vec3 point = EvaluateCameraTrack(track.keys, t).position;
-        gizmo.DrawLine(previous, point, kTrackPathColor);
-        previous = point;
+        float t = glm::mix(track.keys[seg].time, track.keys[seg + 1].time, float(sample) / float(samples));
+        if (!SequencePlayer::EvaluateTrackPose(scene, trackEntity, targets, t, pose))
+          continue;
+        if (hasPrevious)
+          gizmo.DrawLine(previous, pose.position, kTrackPathColor);
+        previous = pose.position;
+        hasPrevious = true;
       }
     }
 
     int selectedKey = trackEntity == m_Context.sequencerTrack ? m_Context.sequencerSelectedKey : -1;
     for (size_t i = 0; i < track.keys.size(); i++)
     {
-      gizmo.DrawWireSphereDepthTested(track.keys[i].position, TRACK_KEY_RADIUS,
+      const CameraTrackKey& key = track.keys[i];
+      const glm::vec3 position = SequencePlayer::KeyToWorldPose(scene, trackEntity, targets, key, key.time).position;
+      if (IsAtPilotEye(trackEntity, position))
+        continue;
+      gizmo.DrawWireSphereDepthTested(position, TRACK_KEY_RADIUS,
         int(i) == selectedKey ? kCameraFrustumSelectedColor : kTrackKeyColor);
     }
   }
@@ -1362,16 +1419,24 @@ namespace YAEngine
     return &trackComponent.keys[index];
   }
 
+  CameraTrackPose EditorLayer::SequencerKeyWorldPose(const CameraTrackKey& key)
+  {
+    return SequencePlayer::KeyToWorldPose(GetScene(), m_Context.sequencerTrack, key, key.time);
+  }
+
   void EditorLayer::DragSequencerKey(const glm::vec3& delta, const glm::vec3& currentHit)
   {
     CameraTrackKey* key = ActiveSequencerKey();
     if (key == nullptr)
       return;
 
+    // Edited as a world pose and written back in the key's own space at the key's time; a camera
+    // track never has a parent conversion to make
+    CameraTrackPose world = SequencerKeyWorldPose(*key);
+    const float keyTime = key->time;
     if (m_DragMode == GizmoMode::Translate)
     {
-      // Keys live in world space, so no parent conversion is involved
-      key->position = m_DragStartWorldPos + glm::dot(delta, m_DragAxisDir) * m_DragAxisDir;
+      world.position = m_DragStartWorldPos + glm::dot(delta, m_DragAxisDir) * m_DragAxisDir;
     }
     else if (m_DragMode == GizmoMode::Rotate)
     {
@@ -1386,15 +1451,17 @@ namespace YAEngine
         float cosAngle = glm::clamp(glm::dot(v1, v2), -1.0f, 1.0f);
         float sinAngle = glm::dot(glm::cross(v1, v2), m_DragAxisDir);
         float angle = std::atan2(sinAngle, cosAngle);
-        key->rotation = glm::normalize(
+        world.rotation = glm::normalize(
           glm::angleAxis(angle, m_DragAxisDir) * m_DragStartLocalTransform.rotation);
       }
     }
+    SequencerEditing::SetKeyWorldPose(m_Context, m_Context.sequencerSelectedKey, world);
 
-    // The camera entity follows the dragged key, exactly like a scrub to its time; the
-    // panel is asked to move its playhead there so the two stay in step
-    m_Context.sequencePlayer->Scrub(*m_Context.scene, m_Context.sequencerTrack, key->time);
-    m_Context.sequencerScrubRequest = float(m_Context.sequencePlayer->GetTime());
+    // The camera entity follows the dragged key, exactly like a scrub to its time, and the playhead
+    // goes with it. A pilot stays put: moving the view under the drag would move the drag plane.
+    m_Context.sequencePlayer->Scrub(*m_Context.scene, m_Context.sequencerTrack, keyTime);
+    m_Context.sequencerPlayhead = float(m_Context.sequencePlayer->GetTime());
+    SequencerEditing::NotifyEditorCameraFlown(m_Context);
   }
 
   bool EditorLayer::PickTrackKey(const Ray& ray, Entity& outTrack, int& outKey)
@@ -1415,12 +1482,18 @@ namespace YAEngine
     if (!hasTrack(trackEntity) || m_Context.previewCamera == trackEntity)
       return false;
 
-    auto& track = GetScene().GetComponent<CameraTrackComponent>(trackEntity);
+    Scene& scene = GetScene();
+    auto& track = scene.GetComponent<CameraTrackComponent>(trackEntity);
+    const SequencePlayer::TrackTargets targets = SequencePlayer::FindTrackTargets(scene, trackEntity);
     float closestDist = std::numeric_limits<float>::max();
     int closest = -1;
     for (size_t i = 0; i < track.keys.size(); i++)
     {
-      auto hit = RaySphereIntersect(ray, track.keys[i].position, TRACK_KEY_PICK_RADIUS);
+      const CameraTrackKey& key = track.keys[i];
+      const glm::vec3 position = SequencePlayer::KeyToWorldPose(scene, trackEntity, targets, key, key.time).position;
+      if (IsAtPilotEye(trackEntity, position))
+        continue;
+      auto hit = RaySphereIntersect(ray, position, TRACK_KEY_PICK_RADIUS);
       if (hit && *hit < closestDist)
       {
         closestDist = *hit;
@@ -1434,6 +1507,17 @@ namespace YAEngine
     outTrack = trackEntity;
     outKey = closest;
     return true;
+  }
+
+  bool EditorLayer::IsAtPilotEye(Entity trackEntity, const glm::vec3& keyPosition)
+  {
+    if (m_Context.pilotTrack != trackEntity || m_Context.editorCamera == nullptr)
+      return false;
+
+    Entity eye = m_Context.editorCamera->GetCameraEntity();
+    if (eye == entt::null || !GetScene().GetRegistry().valid(eye))
+      return false;
+    return glm::distance(GetScene().GetTransform(eye).position, keyPosition) < PILOT_EYE_CLEARANCE;
   }
 
   Entity EditorLayer::VisibleMotionPath()
@@ -1662,6 +1746,7 @@ namespace YAEngine
 
   void EditorLayer::NewScene()
   {
+    SequencerEditing::StopPilot(m_Context);
     m_Registry->Get<SequencePlayer>().Stop(GetScene());
     m_Context.StopCameraPreview();
     m_Context.ClearSelection();
@@ -1726,6 +1811,8 @@ namespace YAEngine
   bool EditorLayer::SaveSceneTo(const std::string& path)
   {
     EnsureBasePath(path);
+    // The file gets the editor camera pose from before the pilot
+    SequencerEditing::StopPilot(m_Context);
     SyncEditorCameraState();
     // A timeline session has entities posed away from where they belong; the file gets the originals
     m_Registry->Get<SequencePlayer>().Stop(GetScene());
@@ -1749,6 +1836,7 @@ namespace YAEngine
 
   void EditorLayer::LoadSceneDeferred(const std::string& path)
   {
+    SequencerEditing::StopPilot(m_Context);
     m_Registry->Get<SequencePlayer>().Stop(GetScene());
     m_Context.StopCameraPreview();
     m_Context.ClearSelection();
@@ -1786,6 +1874,34 @@ namespace YAEngine
 
     for (auto& panel : m_Panels)
       panel->OnSceneReady(m_Context);
+  }
+
+  void EditorLayer::DockPanelsMissingFromLayout()
+  {
+    struct Placement
+    {
+      const char* panel;
+      // Panel whose dock node the new one joins as a background tab
+      const char* neighbour;
+    };
+
+    static constexpr Placement PLACEMENTS[] = {
+      { .panel = ShotInspectorPanel::DESCRIPTOR.name, .neighbour = DetailsPanel::DESCRIPTOR.name },
+    };
+
+    for (const Placement& placement : PLACEMENTS)
+    {
+      if (ImGui::FindWindowSettingsByID(ImHashStr(placement.panel)) != nullptr)
+        continue;
+
+      const ImGuiWindowSettings* neighbour = ImGui::FindWindowSettingsByID(ImHashStr(placement.neighbour));
+      if (neighbour == nullptr || neighbour->DockId == 0 || ImGui::DockBuilderGetNode(neighbour->DockId) == nullptr)
+        continue;
+
+      // Every tab of the node appears on the same first frame, so the node keeps the tab it saved in front
+      ImGui::DockBuilderDockWindow(placement.panel, neighbour->DockId);
+      YA_LOG_INFO("Editor", "Docked the new '%s' panel next to '%s'", placement.panel, placement.neighbour);
+    }
   }
 
   void EditorLayer::BuildDefaultLayout(ImGuiID dockspaceId)
@@ -1835,6 +1951,7 @@ namespace YAEngine
     dock(MaterialInspectorPanel::DESCRIPTOR, dockRightTop);
     dock(RenderSettingsPanel::DESCRIPTOR, dockRightBottom);
     dock(DeveloperPanel::DESCRIPTOR, dockRightBottom);
+    dock(ShotInspectorPanel::DESCRIPTOR, dockRightTop);
     dock(SequencerPanel::DESCRIPTOR, dockBottom);
     dock(PerformancePanel::DESCRIPTOR, dockBottom);
     dock(AgentPanel::DESCRIPTOR, dockBottom);

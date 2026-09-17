@@ -7,6 +7,7 @@
 #include "Editor/EditorContext.h"
 #include "Editor/Panels/MaterialInspectorPanel.h"
 #include "Editor/Panels/SequencerPanel.h"
+#include "Editor/Panels/ShotInspectorPanel.h"
 #include "Editor/Utils/CurveEditor.h"
 #include "Editor/Utils/EditorIcons.h"
 #include "Editor/Utils/EditorWidgets.h"
@@ -805,11 +806,21 @@ namespace YAEngine
       .draw = &DetailsPanel::DrawColliderSection },
   };
 
-  void DetailsPanel::LinkPanels(MaterialInspectorPanel& materialInspector, SequencerPanel& sequencer, ShowPanelFunction showPanel)
+  void DetailsPanel::LinkPanels(MaterialInspectorPanel& materialInspector, SequencerPanel& sequencer,
+    ShotInspectorPanel& shotInspector, ShowPanelFunction showPanel)
   {
     m_MaterialInspector = &materialInspector;
     m_Sequencer = &sequencer;
+    m_ShotInspector = &shotInspector;
     m_ShowPanel = std::move(showPanel);
+  }
+
+  void DetailsPanel::OpenInSequencer()
+  {
+    // Focus requests are applied in drawing order, so the inspector, drawn after the Sequencer,
+    // ends up with the keyboard focus and the sequencer hotkeys work right away
+    m_ShowPanel(*m_Sequencer);
+    m_ShowPanel(*m_ShotInspector);
   }
 
   void DetailsPanel::DrawHeader(EditorContext& context, Entity entity)
@@ -1179,10 +1190,10 @@ namespace YAEngine
 
       if (PropertyButton("Open in Sequencer", {
         .icon = ICON_LC_CLAPPERBOARD,
-        .tooltip = "Opens the Sequencer on this track",
-        .disabledReason = m_Sequencer != nullptr && m_ShowPanel ? nullptr : "The Sequencer is not available" }))
+        .tooltip = "Opens the Sequencer and the Shot Inspector on this track",
+        .disabledReason = m_Sequencer != nullptr && m_ShotInspector != nullptr && m_ShowPanel ? nullptr : "The Sequencer is not available" }))
       {
-        m_ShowPanel(*m_Sequencer);
+        OpenInSequencer();
       }
 
       EndPropertyGroup();
@@ -1212,10 +1223,10 @@ namespace YAEngine
 
       if (PropertyButton("Open in Sequencer", {
         .icon = ICON_LC_CLAPPERBOARD,
-        .tooltip = "Opens the Sequencer on this path",
-        .disabledReason = m_Sequencer != nullptr && m_ShowPanel ? nullptr : "The Sequencer is not available" }))
+        .tooltip = "Opens the Sequencer and the Shot Inspector on this path",
+        .disabledReason = m_Sequencer != nullptr && m_ShotInspector != nullptr && m_ShowPanel ? nullptr : "The Sequencer is not available" }))
       {
-        m_ShowPanel(*m_Sequencer);
+        OpenInSequencer();
       }
 
       EndPropertyGroup();

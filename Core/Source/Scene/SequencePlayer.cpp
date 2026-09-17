@@ -3,6 +3,7 @@
 #include "Render/Render.h"
 #include "Utils/Log.h"
 
+#include <glm/gtc/constants.hpp>
 #include <glm/gtc/matrix_transform.hpp>
 
 namespace YAEngine
@@ -78,34 +79,293 @@ namespace YAEngine
     {
       return path.points.size() >= 2;
     }
+
+    bool HasDrivablePath(Scene& scene, Entity entity)
+    {
+      return entity != entt::null && scene.GetRegistry().valid(entity)
+        && scene.HasComponent<MotionPathComponent>(entity)
+        && IsDrivablePath(scene.GetComponent<MotionPathComponent>(entity));
+    }
+
+    const glm::vec3 WORLD_UP(0.0f, 1.0f, 0.0f);
+
+    // Smoothing is a centred window sampled at fixed offsets rather than a filter with
+    // state, so a pose stays a pure function of time and scrubbing stays exact
+    constexpr int WINDOW_SAMPLES = 9;
+
+    float WindowSampleTime(float time, float window, int index)
+    {
+      return time + window * (float(index) / float(WINDOW_SAMPLES - 1) - 0.5f);
+    }
+
+    bool ResolveEntityFrame(Scene& scene, Entity entity, float time,
+      CameraTrackComponent::FollowRotation rotation, float smoothing, CameraTargetFrame& out)
+    {
+      using FollowRotation = CameraTrackComponent::FollowRotation;
+
+      if (entity == entt::null || !scene.GetRegistry().valid(entity))
+        return false;
+
+      if (HasDrivablePath(scene, entity))
+      {
+        const auto& path = scene.GetComponent<MotionPathComponent>(entity);
+        const MotionPathTable& table = path.GetTable();
+        const MotionPathPose pose = EvaluateMotionPath(table, path.speedKeys, time);
+        out.position = pose.position;
+
+        float yaw = pose.yaw;
+        if (rotation == FollowRotation::Smoothed && smoothing > 0.0f)
+        {
+          float previous = EvaluateMotionPath(table, path.speedKeys, WindowSampleTime(time, smoothing, 0)).yaw;
+          float sum = previous;
+          for (int i = 1; i < WINDOW_SAMPLES; i++)
+          {
+            float sample = EvaluateMotionPath(table, path.speedKeys, WindowSampleTime(time, smoothing, i)).yaw;
+            sample = previous + std::remainder(sample - previous, glm::two_pi<float>());
+            sum += sample;
+            previous = sample;
+          }
+          yaw = sum / float(WINDOW_SAMPLES);
+        }
+
+        out.rotation = rotation == FollowRotation::PositionOnly ? glm::quat(1, 0, 0, 0)
+          : glm::angleAxis(yaw, WORLD_UP);
+        return true;
+      }
+
+      if (!scene.HasComponent<WorldTransform>(entity))
+        return false;
+
+      const glm::mat4& world = scene.GetComponent<WorldTransform>(entity).world;
+      out.position = glm::vec3(world[3]);
+      out.rotation = rotation == FollowRotation::PositionOnly ? glm::quat(1, 0, 0, 0) : WorldRotation(world);
+      return true;
+    }
+
+    bool ResolveAimPoint(Scene& scene, Entity target, const CameraTrackComponent& track, float time,
+      glm::vec3& out)
+    {
+      auto sample = [&](float at, glm::vec3& point)
+      {
+        CameraTargetFrame frame;
+        if (!ResolveEntityFrame(scene, target, at, track.followRotation, track.followSmoothing, frame))
+          return false;
+        point = frame.position + frame.rotation * track.aimOffset;
+        return true;
+      };
+
+      // A plain transform has no history to average
+      if (track.aimSmoothing <= 0.0f || !HasDrivablePath(scene, target))
+        return sample(time, out);
+
+      glm::vec3 sum(0.0f);
+      for (int i = 0; i < WINDOW_SAMPLES; i++)
+      {
+        glm::vec3 point;
+        if (!sample(WindowSampleTime(time, track.aimSmoothing, i), point))
+          return false;
+        sum += point;
+      }
+      out = sum / float(WINDOW_SAMPLES);
+      return true;
+    }
+
+    // Look-at that puts the aim point at a normalized image position instead of the centre.
+    // Solved directly for the yaw and pitch of a camera without roll, so the point lands
+    // exactly where asked at any pitch; rotating a centred look-at by the offset angles
+    // would drift off it as soon as the camera pitches.
+    glm::quat AimRotation(const glm::vec3& from, const glm::vec3& aimPoint, const glm::vec2& screenOffset,
+      float fov, float aspect)
+    {
+      glm::quat lookAt = LookAtRotation(from, aimPoint);
+      if (screenOffset == glm::vec2(0.0f))
+        return lookAt;
+
+      glm::vec3 toAim = aimPoint - from;
+      float distance = glm::length(toAim);
+      // Too close to vertical for a yaw: the look-at fallback basis stays
+      if (distance <= 1e-5f || std::abs(toAim.y / distance) > 0.999f)
+        return lookAt;
+      glm::vec3 direction = toAim / distance;
+
+      // View-space direction the aim point must have to project onto screenOffset
+      float tanHalf = std::tan(0.5f * fov);
+      glm::vec3 view = glm::normalize(glm::vec3(screenOffset.x * tanHalf * aspect, screenOffset.y * tanHalf, -1.0f));
+
+      // Yaw leaves heights alone, so the pitch alone brings the view direction to the height
+      // of the aim direction: view.y cos(p) - view.z sin(p) = direction.y
+      float reach = glm::length(glm::vec2(view.y, view.z));
+      float pitch = -std::atan2(view.z, view.y) - std::acos(glm::clamp(direction.y / reach, -1.0f, 1.0f));
+      glm::quat pitchRotation = glm::angleAxis(pitch, glm::vec3(1.0f, 0.0f, 0.0f));
+      glm::vec3 pitched = pitchRotation * view;
+      float yaw = std::atan2(direction.x, direction.z) - std::atan2(pitched.x, pitched.z);
+      return glm::normalize(glm::angleAxis(yaw, WORLD_UP) * pitchRotation);
+    }
+
+    // The follow frame of a track entity, or false with nothing to follow
+    bool ResolveTrackFrame(Scene& scene, Entity trackEntity, float time, CameraTargetFrame& out)
+    {
+      if (trackEntity == entt::null || !scene.GetRegistry().valid(trackEntity)
+        || !scene.HasComponent<CameraTrackComponent>(trackEntity))
+      {
+        return false;
+      }
+      return SequencePlayer::ResolveTargetFrame(scene, scene.GetComponent<CameraTrackComponent>(trackEntity),
+        time, out);
+    }
+  }
+
+  bool SequencePlayer::ResolveTargetFrame(Scene& scene, const CameraTrackComponent& track, float time,
+    CameraTargetFrame& out)
+  {
+    if (track.followTargetName.empty())
+      return false;
+
+    Entity target = FindEntityByName(scene.GetRegistry(), track.followTargetName);
+    // A camera following itself would read back its own last pose and run away
+    if (target != entt::null && scene.GetRegistry().valid(target)
+      && scene.HasComponent<CameraTrackComponent>(target)
+      && &scene.GetComponent<CameraTrackComponent>(target) == &track)
+    {
+      return false;
+    }
+
+    return ResolveEntityFrame(scene, target, time, track.followRotation, track.followSmoothing, out);
+  }
+
+  bool SequencePlayer::EvaluateTrackPose(Scene& scene, Entity trackEntity, float time, CameraTrackPose& out)
+  {
+    return EvaluateTrackPose(scene, trackEntity, FindTrackTargets(scene, trackEntity), time, out);
+  }
+
+  SequencePlayer::TrackTargets SequencePlayer::FindTrackTargets(Scene& scene, Entity trackEntity)
+  {
+    TrackTargets targets;
+    if (trackEntity == entt::null || !scene.GetRegistry().valid(trackEntity)
+      || !scene.HasComponent<CameraTrackComponent>(trackEntity))
+    {
+      return targets;
+    }
+
+    const auto& track = scene.GetComponent<CameraTrackComponent>(trackEntity);
+    if (!track.followTargetName.empty())
+    {
+      targets.follow = FindEntityByName(scene.GetRegistry(), track.followTargetName);
+      // The same guard as ResolveTargetFrame: a camera following itself would run away
+      if (targets.follow == trackEntity)
+        targets.follow = entt::null;
+    }
+    if (!track.aimTargetName.empty())
+      targets.aim = FindEntityByName(scene.GetRegistry(), track.aimTargetName);
+    return targets;
+  }
+
+  bool SequencePlayer::ResolveTargetFrame(Scene& scene, Entity trackEntity, const TrackTargets& targets, float time,
+    CameraTargetFrame& out)
+  {
+    if (trackEntity == entt::null || !scene.GetRegistry().valid(trackEntity)
+      || !scene.HasComponent<CameraTrackComponent>(trackEntity))
+    {
+      return false;
+    }
+
+    const auto& track = scene.GetComponent<CameraTrackComponent>(trackEntity);
+    return ResolveEntityFrame(scene, targets.follow, time, track.followRotation, track.followSmoothing, out);
+  }
+
+  bool SequencePlayer::EvaluateTrackPose(Scene& scene, Entity trackEntity, const TrackTargets& targets, float time,
+    CameraTrackPose& out)
+  {
+    if (trackEntity == entt::null || !scene.GetRegistry().valid(trackEntity))
+      return false;
+    if (!scene.HasComponent<CameraTrackComponent>(trackEntity))
+      return false;
+
+    const auto& track = scene.GetComponent<CameraTrackComponent>(trackEntity);
+    if (track.keys.empty())
+      return false;
+
+    CameraTargetFrame frame;
+    const bool following = ResolveEntityFrame(scene, targets.follow, time, track.followRotation,
+      track.followSmoothing, frame);
+    out = EvaluateCameraTrack(track.keys, time, following ? &frame : nullptr);
+
+    if (track.rotationMode == CameraTrackComponent::RotationMode::AimAt && !track.aimTargetName.empty())
+    {
+      glm::vec3 aimPoint;
+      if (ResolveAimPoint(scene, targets.aim, track, time, aimPoint))
+      {
+        float aspect = scene.HasComponent<CameraComponent>(trackEntity)
+          ? scene.GetComponent<CameraComponent>(trackEntity).aspectRatio
+          : CameraComponent {}.aspectRatio;
+        out.rotation = AimRotation(out.position, aimPoint, track.aimScreenOffset, out.fov, aspect);
+      }
+    }
+
+    return true;
+  }
+
+  CameraTrackKey SequencePlayer::KeyFromWorldPose(Scene& scene, Entity trackEntity, const CameraTrackPose& world,
+    CameraKeySpace space, float time)
+  {
+    CameraTrackKey key;
+    key.time = time;
+    key.position = world.position;
+    key.rotation = world.rotation;
+    key.fov = world.fov;
+
+    CameraTargetFrame frame;
+    if (space == CameraKeySpace::Target && ResolveTrackFrame(scene, trackEntity, time, frame))
+    {
+      glm::quat toFrame = glm::inverse(frame.rotation);
+      key.space = CameraKeySpace::Target;
+      key.position = toFrame * (world.position - frame.position);
+      key.rotation = glm::normalize(toFrame * world.rotation);
+    }
+    return key;
+  }
+
+  CameraTrackPose SequencePlayer::KeyToWorldPose(Scene& scene, Entity trackEntity, const CameraTrackKey& key,
+    float time)
+  {
+    CameraTrackPose pose { .position = key.position, .rotation = key.rotation, .fov = key.fov };
+
+    CameraTargetFrame frame;
+    if (key.space == CameraKeySpace::Target && ResolveTrackFrame(scene, trackEntity, time, frame))
+    {
+      pose.position = frame.rotation * key.position + frame.position;
+      pose.rotation = glm::normalize(frame.rotation * key.rotation);
+    }
+    return pose;
+  }
+
+  CameraTrackPose SequencePlayer::KeyToWorldPose(Scene& scene, Entity trackEntity, const TrackTargets& targets,
+    const CameraTrackKey& key, float time)
+  {
+    CameraTrackPose pose { .position = key.position, .rotation = key.rotation, .fov = key.fov };
+    if (key.space != CameraKeySpace::Target || trackEntity == entt::null || !scene.GetRegistry().valid(trackEntity)
+      || !scene.HasComponent<CameraTrackComponent>(trackEntity))
+    {
+      return pose;
+    }
+
+    const auto& track = scene.GetComponent<CameraTrackComponent>(trackEntity);
+    CameraTargetFrame frame;
+    if (ResolveEntityFrame(scene, targets.follow, time, track.followRotation, track.followSmoothing, frame))
+    {
+      pose.position = frame.rotation * key.position + frame.position;
+      pose.rotation = glm::normalize(frame.rotation * key.rotation);
+    }
+    return pose;
   }
 
   void SequencePlayer::ApplyTrackPose(Scene& scene, Entity trackEntity, float time)
   {
-    if (trackEntity == entt::null || !scene.GetRegistry().valid(trackEntity))
-      return;
-    if (!scene.HasComponent<CameraTrackComponent>(trackEntity))
-      return;
-
-    auto& track = scene.GetComponent<CameraTrackComponent>(trackEntity);
-    if (track.keys.empty())
+    CameraTrackPose pose;
+    if (!EvaluateTrackPose(scene, trackEntity, time, pose))
       return;
 
-    CameraTrackPose pose = EvaluateCameraTrack(track.keys, time);
-
-    glm::quat worldRotation = pose.rotation;
-    if (track.rotationMode == CameraTrackComponent::RotationMode::AimAt)
-    {
-      Entity target = track.aimTargetName.empty() ? Entity(entt::null)
-        : FindEntityByName(scene.GetRegistry(), track.aimTargetName);
-      if (target != entt::null && scene.HasComponent<WorldTransform>(target))
-      {
-        glm::vec3 targetPosition(scene.GetComponent<WorldTransform>(target).world[3]);
-        worldRotation = LookAtRotation(pose.position, targetPosition);
-      }
-    }
-
-    SetWorldPose(scene, trackEntity, pose.position, worldRotation);
+    SetWorldPose(scene, trackEntity, pose.position, pose.rotation);
 
     if (scene.HasComponent<CameraComponent>(trackEntity))
       scene.GetComponent<CameraComponent>(trackEntity).fov = pose.fov;
