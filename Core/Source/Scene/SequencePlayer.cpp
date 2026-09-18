@@ -552,6 +552,17 @@ namespace YAEngine
     m_Saved.push_back({ .entity = entity, .transform = scene.GetTransform(entity) });
   }
 
+  bool SequencePlayer::DrivesMotionPaths(Scene& scene) const
+  {
+    if (!b_Active)
+      return false;
+    if (m_CameraTrack == entt::null || !scene.GetRegistry().valid(m_CameraTrack))
+      return true;
+
+    const auto* track = scene.GetRegistry().try_get<CameraTrackComponent>(m_CameraTrack);
+    return track == nullptr || !track->cameraOnly;
+  }
+
   void SequencePlayer::Begin(Scene& scene, Entity cameraTrack)
   {
     b_Active = true;
@@ -598,6 +609,9 @@ namespace YAEngine
       ProtectTransform(scene, m_CameraTrack);
       ApplyTrackPose(scene, m_CameraTrack, time);
     }
+
+    if (!DrivesMotionPaths(scene))
+      return;
 
     // Collected first: posing marks entities dirty, which is no business of a live view
     std::vector<Entity> followers;

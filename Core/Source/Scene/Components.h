@@ -108,6 +108,9 @@ namespace YAEngine
     // A move that starts from a completely different viewpoint carries over a history
     // and an exposure that belong to the old one.
     bool resetPostFXOnStart = true;
+    // The shot moves its camera only: motion paths keep the poses the scene has, so a slow
+    // move over a composed frame is not crossed by a car driving its route
+    bool cameraOnly = false;
 
     // Entity the Target keys are relative to; empty means they are read as World. For an
     // entity with a motion path the frame is the curve point heading along the path (a car's

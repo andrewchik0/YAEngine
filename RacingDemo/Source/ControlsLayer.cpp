@@ -13,6 +13,65 @@ namespace
   const double kPitchPerAccel = glm::radians(0.45);
   const double kMaxPitch = glm::radians(2.0);
 
+  // After a corner the springs let the body down this many times slower than the curve unwinds
+  const double kRollReleaseSlowdown = 2.0;
+  // The lean is a pure function of timeline time, so the release is replayed every frame over
+  // this much of the past on a fixed step; long enough for any corner exit
+  const double kRollReleaseWindow = 6.0;
+  constexpr int kRollReleaseSteps = 360;
+
+  double TargetRoll(const YAEngine::MotionPathTable& table, const std::vector<YAEngine::MotionSpeedKey>& keys,
+    double time)
+  {
+    const YAEngine::MotionPathPose pose = YAEngine::EvaluateMotionPath(table, keys, float(time));
+    double lateral = double(pose.speed) * double(pose.speed) * double(pose.curvature);
+    return glm::clamp(lateral * kRollPerAccel, -kMaxRoll, kMaxRoll);
+  }
+
+  // Leaning into a corner follows the curve at once. Letting go replays the target's fall on a
+  // slowed clock, until the curve leans at least as far again. Each side is released on its own,
+  // so an S-bend hands the lean from one side to the other without a jump.
+  double SettledRoll(const YAEngine::MotionPathTable& table, const std::vector<YAEngine::MotionSpeedKey>& keys,
+    double time)
+  {
+    // The step grid is fixed in timeline time and the result interpolated between its two
+    // nearest points: a grid that slid with the time would restart each release up to half a
+    // step off and make the lean shiver
+    const double step = kRollReleaseWindow / kRollReleaseSteps;
+    const double last = std::ceil(time / step);
+    std::array<double, kRollReleaseSteps + 1> targets;
+    for (int i = 0; i <= kRollReleaseSteps; i++)
+      targets[i] = TargetRoll(table, keys, (last - kRollReleaseSteps + i) * step);
+
+    auto targetAt = [&targets](double clock) {
+      int i = std::min(int(clock), kRollReleaseSteps - 1);
+      return glm::mix(targets[i], targets[i + 1], clock - i);
+    };
+
+    double before = 0.0;
+    double after = 0.0;
+    for (double side : { 1.0, -1.0 })
+    {
+      // In steps of the window
+      double clock = 0.0;
+      double previous = 0.0;
+      double lean = std::max(side * targets[0], 0.0);
+      for (int i = 1; i <= kRollReleaseSteps; i++)
+      {
+        clock += 1.0 / kRollReleaseSlowdown;
+        double now = std::max(side * targets[i], 0.0);
+        double replay = std::max(side * targetAt(clock), 0.0);
+        if (now >= replay)
+          clock = i;
+        previous = lean;
+        lean = std::max(now, replay);
+      }
+      before += side * previous;
+      after += side * lean;
+    }
+    return glm::mix(before, after, glm::clamp(time / step - (last - 1.0), 0.0, 1.0));
+  }
+
   // Rotation of a world matrix with the scale divided out; model nodes are often scaled
   glm::quat WorldRotation(const glm::mat4& world)
   {
@@ -75,7 +134,8 @@ void ControlsLayer::Update(double dt)
     ResolveAxleGeometry(currentYawRot * glm::dvec3(0, 0, 1), position);
   }
 
-  // While a timeline session runs, a car with a motion path follows it instead of the input
+  // While a timeline session runs, a car with a motion path follows it instead of the input,
+  // unless the shot is camera-only
   if (DriveAlongPath(dt))
     return;
 
@@ -357,7 +417,7 @@ bool ControlsLayer::DriveAlongPath(double dt)
   if (path != nullptr)
     path->externallyDriven = true;
 
-  if (path == nullptr || path->points.size() < 2 || !player.IsActive())
+  if (path == nullptr || path->points.size() < 2 || !player.DrivesMotionPaths(scene))
   {
     if (b_PathDriven)
       ReleasePathDrive();
@@ -367,8 +427,9 @@ bool ControlsLayer::DriveAlongPath(double dt)
   b_PathDriven = true;
 
   auto& vehicle = scene.GetComponent<VehicleComponent>(m_Car);
+  const YAEngine::MotionPathTable& table = path->GetTable();
   const YAEngine::MotionPathPose pose = YAEngine::EvaluateMotionPath(
-    path->GetTable(), path->speedKeys, float(player.GetTime()));
+    table, path->speedKeys, float(player.GetTime()));
 
   glm::dvec3 forward(pose.forward);
   glm::dquat yawRot = glm::angleAxis(double(pose.yaw), glm::dvec3(0, 1, 0));
@@ -390,7 +451,7 @@ bool ControlsLayer::DriveAlongPath(double dt)
   scene.MarkDirty(m_Car);
 
   CaptureBody(player);
-  ApplyBodyLean(pose);
+  ApplyBodyLean(pose, SettledRoll(table, path->speedKeys, player.GetTime()));
 
   UpdateFollowCamera(dt, position, yawRot, vehicle);
   UpdateWheels(dt, vehicle, double(pose.distance), true);
@@ -486,7 +547,7 @@ void ControlsLayer::CaptureBody(YAEngine::SequencePlayer& player)
     player.ProtectTransform(scene, part.entity);
 }
 
-void ControlsLayer::ApplyBodyLean(const YAEngine::MotionPathPose& pose)
+void ControlsLayer::ApplyBodyLean(const YAEngine::MotionPathPose& pose, double roll)
 {
   if (m_BodyParts.empty())
     return;
@@ -496,8 +557,6 @@ void ControlsLayer::ApplyBodyLean(const YAEngine::MotionPathPose& pose)
   // In the car's own frame +X is the side the car turns toward while its yaw grows and +Z is
   // forward. The body leans away from the turn centre and dives under braking: its up axis
   // tips toward this horizontal vector, by the vector's length.
-  double lateral = double(pose.speed) * double(pose.speed) * double(pose.curvature);
-  double roll = glm::clamp(lateral * kRollPerAccel, -kMaxRoll, kMaxRoll);
   double pitch = glm::clamp(-double(pose.acceleration) * kPitchPerAccel, -kMaxPitch, kMaxPitch);
   glm::dvec3 lean(-roll, 0.0, pitch);
 

@@ -462,12 +462,6 @@ namespace YAEngine
     UpdateResolutionForMode(m_Backend.GetSwapChain().GetExt());
 #endif
 
-    if (b_ResetTAAPending)
-    {
-      vkDeviceWaitIdle(m_Backend.GetContext().device);
-      ClearHistoryBuffers();
-      b_ResetTAAPending = false;
-    }
     if (b_ResetAutoExposurePending)
     {
       float unity = 1.0f;
@@ -567,6 +561,17 @@ namespace YAEngine
     m_FrameUniformBuffer.uniforms.ssgiEnabled = (b_SSGIEnabled && b_AOEnabled) ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaEnabled = UsesTAAPass(m_EffectiveAntialiasingMode) ? 1 : 0;
     m_FrameUniformBuffer.uniforms.taaClampSigma = m_TAAClampSigma;
+
+    // A reset resolves one frame without history: the passthrough writes the current frame,
+    // which is all the next one blends against. A history cleared to black instead would sit
+    // inside the at-rest clamp box on textured surfaces and fade out over a second.
+    if (b_ResetTAAPending)
+    {
+      m_FrameUniformBuffer.uniforms.taaEnabled = 0;
+      // SSGI reprojects the previous resolved image, which belongs to the viewpoint left behind
+      b_SSGIInvalidatePending = true;
+      b_ResetTAAPending = false;
+    }
 
     // Indirect lighting debug views must reach the screen untouched: SSR/TAA already pass
     // through when disabled, so zeroing the flags here needs no extra plumbing. Camera

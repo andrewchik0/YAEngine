@@ -72,7 +72,8 @@ private:
   bool DriveAlongPath(double dt);
   void ReleasePathDrive();
   void CaptureBody(YAEngine::SequencePlayer& player);
-  void ApplyBodyLean(const YAEngine::MotionPathPose& pose);
+  // Roll comes in already settled over time; the pitch is taken from the pose
+  void ApplyBodyLean(const YAEngine::MotionPathPose& pose, double roll);
 
   glm::dvec3 SnapToGround(glm::dvec3 p) const;
   glm::dquat TerrainTilt(const glm::dvec3& position) const;

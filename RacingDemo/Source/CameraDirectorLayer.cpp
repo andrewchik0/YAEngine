@@ -26,6 +26,11 @@ namespace
   constexpr glm::vec3 kSpotCameraPosition { 36.315254f, 2.096710f, 29.087421f };
   constexpr float kSpotCameraYaw = -65.807625f;
   constexpr float kSpotCameraPitch = -15.156607f;
+  // The spot shot: a level push-in at a steady pace from kSpotShotStart to kSpotShotEnd metres
+  // along the view, passing the captured pose on the way
+  constexpr float kSpotShotDuration = 15.0f;
+  constexpr float kSpotShotStart = -1.0f;
+  constexpr float kSpotShotEnd = 0.5f;
 }
 
 void CameraDirectorLayer::Update(double deltaTime)
@@ -191,6 +196,19 @@ void CameraDirectorLayer::TeleportToSpot()
     camera.position = kSpotCameraPosition;
     camera.rotation = YAEngine::MakeYawPitchRotation(glm::radians(kSpotCameraYaw), glm::radians(kSpotCameraPitch));
     scene.MarkDirty(m_SpotCamera);
+
+    glm::vec3 forward = glm::angleAxis(glm::radians(kSpotCameraYaw), glm::vec3(0.0f, 1.0f, 0.0f))
+      * glm::vec3(0.0f, 0.0f, -1.0f);
+    auto& track = scene.AddComponent<YAEngine::CameraTrackComponent>(m_SpotCamera);
+    track.cameraOnly = true;
+    for (float offset : { kSpotShotStart, 0.0f, kSpotShotEnd })
+    {
+      track.keys.push_back({
+        .time = kSpotShotDuration * (offset - kSpotShotStart) / (kSpotShotEnd - kSpotShotStart),
+        .position = kSpotCameraPosition + forward * offset,
+        .rotation = camera.rotation,
+        .fov = scene.GetComponent<YAEngine::CameraComponent>(m_SpotCamera).fov });
+    }
   }
 
   auto cameras = CollectCameras();

@@ -79,6 +79,8 @@ namespace YAEngine
           n["aimTarget"] = t.aimTargetName;
         // Everything newer is written only when it differs from the default, so scenes that
         // do not use it resave byte-identical
+        if (t.cameraOnly)
+          n["cameraOnly"] = true;
         if (!t.followTargetName.empty())
           n["followTarget"] = t.followTargetName;
         if (t.followRotation == CameraTrackComponent::FollowRotation::Smoothed)
@@ -125,6 +127,7 @@ namespace YAEngine
         if (n["rotationMode"] && n["rotationMode"].as<std::string>() == "aimAt")
           t.rotationMode = CameraTrackComponent::RotationMode::AimAt;
         if (n["resetPostFXOnStart"]) t.resetPostFXOnStart = n["resetPostFXOnStart"].as<bool>();
+        if (n["cameraOnly"]) t.cameraOnly = n["cameraOnly"].as<bool>();
         if (n["aimTarget"]) t.aimTargetName = n["aimTarget"].as<std::string>();
         if (n["followTarget"]) t.followTargetName = n["followTarget"].as<std::string>();
         if (n["followRotation"])

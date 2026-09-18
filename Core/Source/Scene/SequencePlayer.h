@@ -49,6 +49,8 @@ namespace YAEngine
     bool IsAdvancing() const { return b_Active && b_Advancing; }
     bool IsPaused() const { return b_Active && !b_Advancing; }
     bool HoldsCamera() const { return b_HoldsCamera; }
+    // The session poses motion paths: false without a session and for a camera-only shot
+    bool DrivesMotionPaths(Scene& scene) const;
     double GetTime() const { return m_Time; }
     double GetStartTime() const { return m_StartTime; }
     double GetEndTime() const { return m_EndTime; }

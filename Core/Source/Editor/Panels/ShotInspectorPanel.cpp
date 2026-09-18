@@ -282,6 +282,10 @@ namespace YAEngine
       .defaultValue = true,
       .tooltip = "Clears the temporal history and the auto exposure when playback starts, so the shot does not inherit "
                  "them from the previous viewpoint" });
+    PropertyBool("Camera Only", track.cameraOnly, {
+      .defaultValue = false,
+      .tooltip = "Playback moves only this camera; motion paths keep the scene's poses instead of driving their "
+                 "routes" });
 
     EndPropertyGroup();
   }
