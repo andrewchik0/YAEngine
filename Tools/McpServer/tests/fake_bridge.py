@@ -449,6 +449,27 @@ class FakeBridge:
             self._tasks.add(task)
             task.add_done_callback(self._tasks.discard)
 
+    async def _m_batch_run(self, writer, request_id, params) -> None:
+        # Selection steps only, with $ref resolution and a stop at the first failure, like the engine
+        results = []
+        for index, step in enumerate(params.get("steps") or []):
+            step_params = dict(step.get("params") or {})
+            for key, value in step_params.items():
+                if isinstance(value, dict) and "$ref" in value:
+                    ref_step, ref_key = value["$ref"].split(".", 1)
+                    step_params[key] = results[int(ref_step)][ref_key]
+            entity = step_params.get("entity")
+            match = next((item for item in self.entities if item["id"] == entity), None)
+            if step.get("action") != "selection.set" or match is None:
+                await self._reply(writer, request_id, {
+                    "ok": False, "failedStep": index, "steps": results,
+                    "error": {"code": "not_found", "message": f"no entity with id {entity}"},
+                })
+                return
+            self.selection = entity
+            results.append({"entity": entity, "name": match["name"]})
+        await self._reply(writer, request_id, {"ok": True, "steps": results})
+
     async def _m_ui_windows(self, writer, request_id, params) -> None:
         await self._reply(writer, request_id, {"windows": [
             {"name": "Render Settings", "visible": True, "focused": True, "collapsed": False, "docked": True},

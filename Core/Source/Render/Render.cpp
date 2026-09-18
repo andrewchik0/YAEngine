@@ -48,7 +48,13 @@ namespace YAEngine
 
       auto cmd = m_Backend.GetCommandBuffer().BeginSingleTimeCommands();
       TransitionImageLayout(cmd, m_NoneCubeMap.GetImage(),
-        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
+      const VkClearColorValue black {};
+      const VkImageSubresourceRange range { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6 };
+      vkCmdClearColorImage(cmd, m_NoneCubeMap.GetImage(), VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
+      TransitionImageLayout(cmd, m_NoneCubeMap.GetImage(),
+        VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
       m_Backend.GetCommandBuffer().EndSingleTimeCommands(cmd);
       m_NoneCubeMap.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -623,7 +629,17 @@ namespace YAEngine
 
     // Update IBL when skybox changes: upload to atlas slot 0 + update display cubemap
     auto skybox = frame.snapshot.skybox;
-    if (skybox && skybox != m_BoundSkybox)
+    if (!skybox && m_BoundSkybox)
+    {
+      // Cleared: the old sky must stop lighting and reflecting in the scene
+      m_ProbeAtlas.ClearSkybox(m_Backend.GetContext());
+      for (auto& set : m_IBLDescriptorSets)
+        set.WriteCombinedImageSampler(3, m_NoneCubeMap.GetView(), m_NoneCubeMap.GetSampler());
+      m_SkyboxView = m_NoneCubeMap.GetView();
+      m_SkyboxSampler = m_NoneCubeMap.GetSampler();
+      m_BoundSkybox = {};
+    }
+    else if (skybox && skybox != m_BoundSkybox)
     {
       auto& cubeMap = frame.assets.CubeMaps().GetVulkanCubicTexture(skybox);
       m_ProbeAtlas.UploadSkybox(m_Backend.GetContext(), cubeMap);

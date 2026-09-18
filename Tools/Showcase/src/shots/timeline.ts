@@ -216,9 +216,15 @@ export const frameBreakdownSeconds = (() => {
   return p.strip + p.layout + p.perLayer * frameBreakdown.layers.length + p.collapse + p.tonemap;
 })();
 
+// OBS take of the whole screen with the editor window in its top-left corner, shown 1:1 so the
+// editor text stays sharp. The run starts 121.3s into the take; it is used from 122s (an empty
+// editor, after the setup clicks, 4s before the first batch lands) to frame 9389, the last frame
+// of the orbit shot: nothing after the sequence ends.
 export const editorTour = {
-  seconds: 21,
   footage: 'footage/editor_tour.mp4',
+  trimBeforeSeconds: 122,
+  footageFrames: 9389 - 7320 + 1,
+  crop: { sourceWidth: 1920, sourceHeight: 1080, x: 0, y: 0, width: 1247, height: 920 },
 };
 
 export type Attribution = {

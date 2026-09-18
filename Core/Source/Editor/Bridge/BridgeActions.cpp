@@ -139,6 +139,12 @@ namespace YAEngine
     m_Actions[name] = std::move(action);
   }
 
+  bool BridgeActions::CompletesLater(const std::string& name) const
+  {
+    auto it = m_Actions.find(name);
+    return it != m_Actions.end() && it->second.refusedWhileMinimized;
+  }
+
   void BridgeActions::Defer(BridgeReply reply, std::function<bool(const BridgeReply& reply)> poll)
   {
     m_Pending.push_back(PendingRun { .reply = std::move(reply), .poll = std::move(poll) });

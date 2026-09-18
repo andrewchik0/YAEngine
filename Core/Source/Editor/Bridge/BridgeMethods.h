@@ -29,8 +29,15 @@ namespace YAEngine
   class BridgeReply
   {
   public:
+    // Receives the outcome of a local reply; an empty code means success.
+    using Sink = std::function<void(std::string_view code, std::string_view message, Json result)>;
+
     BridgeReply() = default;
     explicit BridgeReply(BridgeReplyTarget target);
+
+    // Hands the outcome to sink on the completing thread instead of answering a client: batch.run
+    // runs each step's handler through one of these.
+    static BridgeReply Local(Sink sink);
 
     // The result has to be a JSON object.
     void Ok(Json result = Json::object()) const;
@@ -41,6 +48,8 @@ namespace YAEngine
     struct State;
 
     bool BeginCompletion() const;
+    // To the sink of a local reply, else to the client
+    void Complete(std::string_view code, std::string_view message, Json result) const;
 
     std::shared_ptr<State> m_State;
   };

@@ -73,6 +73,8 @@ namespace YAEngine
       std::function<bool()> isMinimized);
     // Registering a name again replaces the action.
     void Register(BridgeAction action);
+    // Whether the named action answers in a later frame (refusedWhileMinimized); false for an unknown name.
+    bool CompletesLater(const std::string& name) const;
     // For a run that finishes in a later frame: poll is called once per frame until it returns
     // true, and has completed the reply by then.
     void Defer(BridgeReply reply, std::function<bool(const BridgeReply& reply)> poll);

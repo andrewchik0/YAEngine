@@ -38,6 +38,15 @@ namespace YAEngine
     // in the scene. Public because the editor has to re-run it after a bake.
     static void LoadIrradianceVolumes(Scene& scene, AssetManager& assets, Render& render);
 
+    // Adds one entity of another scene file to the open scene, the way loading that file builds it:
+    // its model with the model overrides, its components and every entity parented under it. The
+    // root becomes a root of the open scene, renamed when its name is taken. Asset paths resolve
+    // against the open scene's asset base path. Returns the root's name, or an empty string with
+    // outError set.
+    static std::string LoadEntity(const std::string& path, const std::string& name,
+      Scene& scene, AssetManager& assets, const ComponentRegistry& registry, Render& render,
+      std::string& outError);
+
   private:
 
     static void LoadSync(const YAML::Node& root, const YAML::Node& entities,

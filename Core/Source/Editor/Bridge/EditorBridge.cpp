@@ -25,6 +25,81 @@ namespace YAEngine
     constexpr int64_t LOG_TAIL_MAX_COUNT = 2000;
     // Leaves room under the 4 MB message limit for JSON escaping of the texts
     constexpr size_t LOG_TAIL_BYTE_BUDGET = 3 * 1024 * 1024;
+    constexpr size_t BATCH_MAX_STEPS = 256;
+
+    // Methods a batch step may name besides actions: they answer before returning. Capture and ui
+    // requests finish in later frames and would break the one-frame promise.
+    constexpr std::string_view BATCH_METHODS[] = {
+      "scene.entities", "scene.componentGet", "scene.componentPatch", "render.settingsGet", "render.settingsPatch",
+    };
+
+    // Digits only, no sign
+    bool ParseBatchIndex(std::string_view text, size_t& out)
+    {
+      if (text.empty() || text.size() > 9)
+        return false;
+
+      out = 0;
+      for (char c : text)
+      {
+        if (c < '0' || c > '9')
+          return false;
+        out = out * 10 + size_t(c - '0');
+      }
+      return true;
+    }
+
+    // Replaces every {"$ref": "N.key.key"} inside value with that value of step N's result.
+    bool ResolveBatchRefs(Json& value, const std::vector<Json>& results, std::string& outError)
+    {
+      if (value.is_object() && value.size() == 1 && value.contains("$ref"))
+      {
+        const Json ref = value["$ref"];
+        const std::string text = ref.is_string() ? ref.get<std::string>() : std::string();
+        const size_t dot = text.find('.');
+        size_t step = 0;
+        if (!ParseBatchIndex(std::string_view(text).substr(0, dot), step) || step >= results.size())
+        {
+          outError = "'$ref' must be a string '<step>.<key>' naming an earlier step, such as \"0.entity\"; got "
+            + ref.dump();
+          return false;
+        }
+
+        const Json* node = &results[step];
+        std::string_view keys = dot == std::string::npos ? std::string_view() : std::string_view(text).substr(dot + 1);
+        while (!keys.empty())
+        {
+          const size_t next = keys.find('.');
+          const std::string key(keys.substr(0, next));
+          keys = next == std::string_view::npos ? std::string_view() : keys.substr(next + 1);
+
+          size_t index = 0;
+          if (node->is_object() && node->contains(key))
+            node = &(*node)[key];
+          else if (node->is_array() && ParseBatchIndex(key, index) && index < node->size())
+            node = &(*node)[index];
+          else
+          {
+            outError = "'$ref' " + ref.dump() + ": step " + std::to_string(step) + " has no '" + key
+              + "' in its result " + results[step].dump();
+            return false;
+          }
+        }
+
+        value = *node;
+        return true;
+      }
+
+      if (value.is_object() || value.is_array())
+      {
+        for (Json& child : value)
+        {
+          if (!ResolveBatchRefs(child, results, outError))
+            return false;
+        }
+      }
+      return true;
+    }
   }
 
   EditorBridge::EditorBridge()
@@ -231,6 +306,146 @@ namespace YAEngine
     b_LogCaptureInstalled = b_Enabled;
   }
 
+  // batch.run: every step between two frames, so the viewport never shows a half-applied batch
+  static void RunBatch(const BridgeMethodRegistry& methods, const BridgeActions& actions, const Json& params,
+    const BridgeReply& reply)
+  {
+    auto stepsIt = params.find("steps");
+    if (stepsIt == params.end() || !stepsIt->is_array() || stepsIt->empty() || stepsIt->size() > BATCH_MAX_STEPS)
+    {
+      reply.Fail(BridgeErrorCode::INVALID_PARAMS, "'steps' must be an array of 1 to "
+        + std::to_string(BATCH_MAX_STEPS) + " steps");
+      return;
+    }
+
+    std::vector<Json> results;
+    results.reserve(stepsIt->size());
+
+    // Stops at the first failing step; the steps before it stay applied
+    auto finish = [&](size_t failedStep, std::string_view code, const std::string& message) {
+      Json result = Json::object();
+      result["ok"] = false;
+      result["failedStep"] = failedStep;
+      result["error"] = Json { { "code", std::string(code) }, { "message", message } };
+      result["steps"] = results;
+      reply.Ok(std::move(result));
+    };
+
+    for (size_t i = 0; i < stepsIt->size(); i++)
+    {
+      const Json& step = (*stepsIt)[i];
+      if (!step.is_object())
+      {
+        finish(i, BridgeErrorCode::INVALID_PARAMS, "a step must be an object with 'action' or 'method' and 'params'");
+        return;
+      }
+
+      std::string action;
+      std::string method;
+      std::string error;
+      if (!ReadOptionalParam(step, "action", action, error) || !ReadOptionalParam(step, "method", method, error))
+      {
+        finish(i, BridgeErrorCode::INVALID_PARAMS, error);
+        return;
+      }
+      if (action.empty() == method.empty())
+      {
+        finish(i, BridgeErrorCode::INVALID_PARAMS, "a step names either an 'action' or a 'method'");
+        return;
+      }
+
+      Json stepParams = Json::object();
+      if (auto it = step.find("params"); it != step.end() && !it->is_null())
+      {
+        if (!it->is_object())
+        {
+          finish(i, BridgeErrorCode::INVALID_PARAMS, "'params' must be an object");
+          return;
+        }
+        stepParams = *it;
+      }
+
+      if (!ResolveBatchRefs(stepParams, results, error))
+      {
+        finish(i, BridgeErrorCode::INVALID_PARAMS, error);
+        return;
+      }
+
+      if (!action.empty())
+      {
+        if (actions.CompletesLater(action))
+        {
+          finish(i, BridgeErrorCode::INVALID_PARAMS, "'" + action + "' completes in a later frame, so it cannot "
+            "share a frame with other steps; run it on its own");
+          return;
+        }
+        method = "actions.run";
+        stepParams = Json { { "name", action }, { "params", std::move(stepParams) } };
+      }
+      else if (std::find(std::begin(BATCH_METHODS), std::end(BATCH_METHODS), method) == std::end(BATCH_METHODS))
+      {
+        std::string allowed;
+        for (std::string_view name : BATCH_METHODS)
+          allowed += (allowed.empty() ? "" : ", ") + std::string(name);
+        finish(i, BridgeErrorCode::INVALID_PARAMS, "'" + method + "' cannot run in a batch; methods: " + allowed
+          + ", or any action that answers at once");
+        return;
+      }
+
+      const BridgeHandler* handler = methods.Find(method);
+      if (handler == nullptr)
+      {
+        finish(i, BridgeErrorCode::UNKNOWN_METHOD, "no method '" + method + "'");
+        return;
+      }
+
+      // Shared with the sink, which a handler that answers late would still call after this returns
+      struct Outcome
+      {
+        bool done = false;
+        std::string code;
+        std::string message;
+        Json result;
+      };
+      auto outcome = std::make_shared<Outcome>();
+      BridgeReply stepReply = BridgeReply::Local(
+        [outcome](std::string_view code, std::string_view message, Json result) {
+          outcome->done = true;
+          outcome->code = code;
+          outcome->message = message;
+          outcome->result = std::move(result);
+        });
+
+      try
+      {
+        (*handler)(stepParams, stepReply);
+      }
+      catch (const std::exception& e)
+      {
+        YA_LOG_ERROR("Bridge", "Batch step %zu ('%s') threw: %s", i, method.c_str(), e.what());
+        stepReply.Fail(BridgeErrorCode::INTERNAL, e.what());
+      }
+
+      if (!outcome->done)
+      {
+        finish(i, BridgeErrorCode::INTERNAL, "'" + method + "' did not answer within the frame");
+        return;
+      }
+      if (!outcome->code.empty())
+      {
+        finish(i, outcome->code, outcome->message);
+        return;
+      }
+
+      results.push_back(std::move(outcome->result));
+    }
+
+    Json result = Json::object();
+    result["ok"] = true;
+    result["steps"] = std::move(results);
+    reply.Ok(std::move(result));
+  }
+
   void EditorBridge::RegisterBuiltinMethods()
   {
     m_Methods->Register("bridge.ping", [](const Json&, const BridgeReply& reply) {
@@ -255,6 +470,10 @@ namespace YAEngine
       result["clients"] = GetClientCount();
       result["captureBusy"] = m_Capture->IsBusy();
       reply.Ok(std::move(result));
+    });
+
+    m_Methods->Register("batch.run", [this](const Json& params, const BridgeReply& reply) {
+      RunBatch(*m_Methods, *m_Actions, params, reply);
     });
 
     m_Methods->Register("engine.quit", [this](const Json&, const BridgeReply& reply) {

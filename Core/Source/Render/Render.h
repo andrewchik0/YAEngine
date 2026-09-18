@@ -207,6 +207,8 @@ namespace YAEngine
     void ResetBoundState()
     {
       m_BoundSkybox = {};
+      // Slot 0 still holds the previous scene's sky, which would light the next one until it loads a skybox
+      m_ProbeAtlas.ClearSkybox(m_Backend.GetContext());
       for (auto& set : m_IBLDescriptorSets)
       {
         set.WriteCombinedImageSampler(0,

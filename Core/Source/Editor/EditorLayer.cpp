@@ -213,14 +213,18 @@ namespace YAEngine
     // gone ones are dropped here rather than on each of those paths.
     GetRender().PruneIrradianceVolumePlacementPreviews(GetScene());
 
+    // Every frame rather than on a size change: a camera created since (Add Shot, Create > Camera, a
+    // duplicate) would otherwise keep its default aspect and render stretched until the next resize
     uint32_t w = m_Context.viewportWidth;
     uint32_t h = m_Context.viewportHeight;
-    if (w > 0 && h > 0 && (w != m_LastViewportWidth || h != m_LastViewportHeight))
+    if (w > 0 && h > 0)
     {
-      m_LastViewportWidth = w;
-      m_LastViewportHeight = h;
+      const float aspect = float(w) / float(h);
       for (auto [entity, cam] : GetScene().GetView<CameraComponent>().each())
-        cam.Resize(float(w), float(h));
+      {
+        if (cam.aspectRatio != aspect)
+          cam.Resize(float(w), float(h));
+      }
     }
 
     auto& input = GetInput();
@@ -1767,9 +1771,6 @@ namespace YAEngine
     if (editorCam)
       editorCam->OnSceneReady();
 
-    m_LastViewportWidth = 0;
-    m_LastViewportHeight = 0;
-
     m_CurrentScenePath.clear();
     m_Bridge.SetScenePath(m_CurrentScenePath);
 
@@ -1864,10 +1865,6 @@ namespace YAEngine
     auto* editorCam = GetLayerManager().GetLayer<EditorCameraLayer>();
     if (editorCam)
       editorCam->OnSceneReady();
-
-    // Force camera resize on next frame
-    m_LastViewportWidth = 0;
-    m_LastViewportHeight = 0;
 
     m_CurrentScenePath = path;
     m_Bridge.SetScenePath(m_CurrentScenePath);

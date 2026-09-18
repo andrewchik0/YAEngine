@@ -62,16 +62,9 @@ namespace YAEngine
       m_Prefilter.Init(ctx, desc, &sampler);
     }
 
+    // Cleared, not just transitioned: a scene without a skybox samples slot 0 as its environment
     VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
-
-    TransitionImageLayout(cmd, m_Irradiance.GetImage(),
-      VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-      VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, 6);
-
-    TransitionImageLayout(cmd, m_Prefilter.GetImage(),
-      VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-      VK_IMAGE_ASPECT_COLOR_BIT, 0, PROBE_PREFILTER_MIP_LEVELS, 0, totalLayers);
-
+    ClearLayers(cmd, 6, totalLayers, true);
     ctx.commandBuffer->EndSingleTimeCommands(cmd);
 
     m_Irradiance.SetLayout(VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
@@ -171,6 +164,34 @@ namespace YAEngine
       VK_IMAGE_ASPECT_COLOR_BIT, 0, PROBE_PREFILTER_MIP_LEVELS, 0, 6);
 
     ctx.commandBuffer->EndSingleTimeCommands(cmd);
+  }
+
+  void ReflectionProbeAtlas::ClearSkybox(const RenderContext& ctx)
+  {
+    VkCommandBuffer cmd = ctx.commandBuffer->BeginSingleTimeCommands();
+    ClearLayers(cmd, 6, 6, false);
+    ctx.commandBuffer->EndSingleTimeCommands(cmd);
+  }
+
+  void ReflectionProbeAtlas::ClearLayers(VkCommandBuffer cmd, uint32_t irradianceLayers, uint32_t prefilterLayers,
+    bool fromUndefined)
+  {
+    const VkImageLayout from = fromUndefined ? VK_IMAGE_LAYOUT_UNDEFINED : VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+    const VkClearColorValue black {};
+
+    const std::pair<VkImage, VkImageSubresourceRange> targets[] = {
+      { m_Irradiance.GetImage(), { VK_IMAGE_ASPECT_COLOR_BIT, 0, 1, 0, irradianceLayers } },
+      { m_Prefilter.GetImage(), { VK_IMAGE_ASPECT_COLOR_BIT, 0, PROBE_PREFILTER_MIP_LEVELS, 0, prefilterLayers } },
+    };
+
+    for (const auto& [image, range] : targets)
+    {
+      TransitionImageLayout(cmd, image, from, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, range.levelCount, 0, range.layerCount);
+      vkCmdClearColorImage(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &black, 1, &range);
+      TransitionImageLayout(cmd, image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
+        VK_IMAGE_ASPECT_COLOR_BIT, 0, range.levelCount, 0, range.layerCount);
+    }
   }
 
   bool ReflectionProbeAtlas::UploadPrefilterFromData(const RenderContext& ctx, uint32_t slotIndex,

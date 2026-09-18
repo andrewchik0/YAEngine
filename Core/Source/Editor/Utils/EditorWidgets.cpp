@@ -754,7 +754,9 @@ namespace YAEngine::EditorWidgets
     if (showTooltip)
       DrawTooltip(nullptr, nullptr, spec.tooltip, nullptr);
 
-    if (visible && hasAction && DrawGroupAction(id, bb, spec.action) && spec.action.pressed != nullptr)
+    // Also while the header is scrolled out: ItemAdd still registers the action's id before it clips, which is
+    // how the bridge finds the button and scrolls to it, as it does for the header
+    if (hasAction && DrawGroupAction(id, bb, spec.action) && spec.action.pressed != nullptr)
       *spec.action.pressed = true;
 
     if (!open)

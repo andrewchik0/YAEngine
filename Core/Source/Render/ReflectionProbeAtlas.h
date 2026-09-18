@@ -32,6 +32,8 @@ namespace YAEngine
     // Slot 0 is the only slot that still carries an irradiance cubemap: it is the
     // diffuse fallback for pixels outside every irradiance volume.
     void UploadSkybox(const RenderContext& ctx, VulkanCubicTexture& skybox);
+    // Slot 0 back to black: a scene without a skybox has no environment light
+    void ClearSkybox(const RenderContext& ctx);
 
     VkImage GetIrradianceImage() const { return m_Irradiance.GetImage(); }
     VkImageView GetIrradianceView() const { return m_Irradiance.GetView(); }
@@ -61,6 +63,9 @@ namespace YAEngine
       VkImage dstImage, uint32_t slotIndex,
       uint32_t srcSize, uint32_t dstSize,
       uint32_t mipLevels);
+
+    // Expects both images in SHADER_READ_ONLY_OPTIMAL (or UNDEFINED with fromUndefined) and leaves them there
+    void ClearLayers(VkCommandBuffer cmd, uint32_t irradianceLayers, uint32_t prefilterLayers, bool fromUndefined);
 
     VulkanImage m_Irradiance;
     VulkanImage m_Prefilter;

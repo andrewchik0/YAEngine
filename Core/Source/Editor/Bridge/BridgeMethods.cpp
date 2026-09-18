@@ -17,6 +17,8 @@ namespace YAEngine
     ~State();
 
     BridgeReplyTarget target;
+    // Set for a local reply, which never reaches a client
+    Sink sink;
     std::atomic<bool> completed { false };
   };
 
@@ -55,7 +57,10 @@ namespace YAEngine
     try
     {
       YA_LOG_ERROR("Bridge", "Method '%s' released its reply without completing it", target.method.c_str());
-      DeliverReply(std::move(target), BridgeErrorCode::INTERNAL, "The handler finished without replying", Json());
+      if (sink)
+        sink(BridgeErrorCode::INTERNAL, "The handler finished without replying", Json());
+      else
+        DeliverReply(std::move(target), BridgeErrorCode::INTERNAL, "The handler finished without replying", Json());
     }
     catch (...)
     {
@@ -65,6 +70,15 @@ namespace YAEngine
   BridgeReply::BridgeReply(BridgeReplyTarget target)
     : m_State(std::make_shared<State>(std::move(target)))
   {
+  }
+
+  BridgeReply BridgeReply::Local(Sink sink)
+  {
+    BridgeReplyTarget target;
+    target.method = "batch step";
+    BridgeReply reply(std::move(target));
+    reply.m_State->sink = std::move(sink);
+    return reply;
   }
 
   bool BridgeReply::BeginCompletion() const
@@ -91,12 +105,11 @@ namespace YAEngine
     {
       YA_LOG_ERROR("Bridge", "Method '%s' produced a result that is not a JSON object",
         m_State->target.method.c_str());
-      DeliverReply(m_State->target, BridgeErrorCode::INTERNAL,
-        "The handler produced a result that is not a JSON object", Json());
+      Complete(BridgeErrorCode::INTERNAL, "The handler produced a result that is not a JSON object", Json());
       return;
     }
 
-    DeliverReply(m_State->target, std::string(), std::string(), std::move(result));
+    Complete(std::string_view(), std::string_view(), std::move(result));
   }
 
   void BridgeReply::Fail(std::string_view code, std::string_view message) const
@@ -104,7 +117,15 @@ namespace YAEngine
     if (!BeginCompletion())
       return;
 
-    DeliverReply(m_State->target, std::string(code), std::string(message), Json());
+    Complete(code, message, Json());
+  }
+
+  void BridgeReply::Complete(std::string_view code, std::string_view message, Json result) const
+  {
+    if (m_State->sink)
+      m_State->sink(code, message, std::move(result));
+    else
+      DeliverReply(m_State->target, std::string(code), std::string(message), std::move(result));
   }
 
   bool BridgeReply::IsCompleted() const

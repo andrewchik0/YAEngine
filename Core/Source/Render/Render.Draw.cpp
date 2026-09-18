@@ -733,8 +733,11 @@ namespace YAEngine
     VkExtent2D outputExtent = m_Graph.GetOutputExtent();
 
     // Jitter without a resolve just makes the image crawl, and the indirect debug
-    // views run with TAA forced off - see the matching block in Render::Draw.
-    if (IsTemporalAA(m_EffectiveAntialiasingMode) && !IS_INDIRECT_DEBUG_VIEW(m_CurrentTexture))
+    // views run with TAA forced off - see the matching block in Render::Draw. Every other
+    // debug view shows one buffer as it is, so it runs unjittered too; only the PT reference
+    // keeps it, since its accumulation is what anti-aliases it.
+    const bool jitteredView = m_CurrentTexture == 0 || m_CurrentTexture == DEBUG_VIEW_PT_REFERENCE;
+    if (IsTemporalAA(m_EffectiveAntialiasingMode) && jitteredView)
     {
       float upscaleRatio = float(outputExtent.width) / float(std::max(1u, renderExtent.width));
       JitterParameters jitterParams = GetJitterParameters(m_EffectiveAntialiasingMode, upscaleRatio,

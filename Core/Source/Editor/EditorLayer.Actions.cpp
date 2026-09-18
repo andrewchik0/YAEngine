@@ -11,6 +11,7 @@
 #include "Scene/SequencePlayer.h"
 #include "Scene/ComponentRegistry.h"
 #include "Scene/Components.h"
+#include "Scene/SceneSerializer.h"
 #include "Utils/CameraOrientation.h"
 #include "Utils/DebugViews.h"
 #include "Utils/FrameCaptureSpec.h"
@@ -336,6 +337,50 @@ namespace YAEngine
 
         YA_LOG_INFO("Bridge", "Action model.import: '%s' as '%s' (%u)", path.c_str(), scene.GetName(root).c_str(),
           EntityIdForLog(root));
+        Json result = EntityResult(scene, root);
+        result["path"] = path;
+        reply.Ok(std::move(result));
+      }
+    });
+
+    actions.Register({
+      .name = "entity.importFromScene",
+      .description = "Copy one entity of another scene file into the open scene, built exactly as loading that "
+        "scene builds it: its model with every model override (materials, node transforms, components on nodes), "
+        "its own components and every entity parented under it, baked probe and volume files included. Use it to "
+        "bring an authored object, such as the car of a finished scene, into a new one. The copy is a root of the "
+        "open scene, renamed when its name is taken, and selected. Model loads run on the editor's main thread. "
+        "Returns {entity, name, path}.",
+      .params = {
+        RequiredParam("path", ParamType::Path, std::string("Scene file (.scene) to copy from: ") + PATH_RULE
+          + ". Its asset paths resolve against the open scene's asset base path."),
+        RequiredParam("name", ParamType::String, "Name of the entity in that scene file."),
+      },
+      .handler = [this](const BridgeActionArgs& args, const BridgeReply& reply) {
+        AssetManager& assets = GetAssets();
+        std::string path = ResolveActionPath(assets, args.GetString("path"));
+        std::error_code ec;
+        if (!std::filesystem::is_regular_file(path, ec))
+        {
+          reply.Fail(BridgeErrorCode::NOT_FOUND, "no file '" + path + "'");
+          return;
+        }
+
+        Scene& scene = GetScene();
+        std::string error;
+        std::string name = SceneSerializer::LoadEntity(path, args.GetString("name"), scene, assets,
+          m_Registry->Get<ComponentRegistry>(), GetRender(), error);
+        Entity root = name.empty() ? Entity(entt::null) : FindEntityByName(scene.GetRegistry(), name);
+        if (root == entt::null)
+        {
+          reply.Fail(BridgeErrorCode::FAILED, error.empty() ? "the copy was not built; see log.tail" : error);
+          return;
+        }
+
+        m_Context.SelectEntity(root);
+
+        YA_LOG_INFO("Bridge", "Action entity.importFromScene: '%s' from '%s' as '%s' (%u)",
+          args.GetString("name").c_str(), path.c_str(), name.c_str(), EntityIdForLog(root));
         Json result = EntityResult(scene, root);
         result["path"] = path;
         reply.Ok(std::move(result));

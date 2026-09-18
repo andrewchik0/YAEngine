@@ -756,9 +756,144 @@ namespace YAEngine
     YA_LOG_INFO("Scene", "Scene loaded: %s", path.c_str());
   }
 
+  static std::unordered_map<std::string, Entity> BuildEntitiesSync(const YAML::Node& entities,
+    Scene& scene, AssetManager& assets, const ComponentRegistry& registry);
+
+  std::string SceneSerializer::LoadEntity(const std::string& path, const std::string& name,
+    Scene& scene, AssetManager& assets, const ComponentRegistry& registry, Render& render,
+    std::string& outError)
+  {
+    YAML::Node root;
+    try
+    {
+      root = YAML::LoadFile(path);
+    }
+    catch (const YAML::Exception& e)
+    {
+      outError = "cannot read '" + path + "': " + e.what();
+      YA_LOG_ERROR("Scene", "Failed to load scene '%s': %s", path.c_str(), e.what());
+      return {};
+    }
+
+    const YAML::Node entities = root["entities"];
+    if (!entities || !entities.IsSequence())
+    {
+      outError = "'" + path + "' has no entities";
+      return {};
+    }
+
+    // A parent reference into a model subtree ("Car::0/3") belongs to the model root
+    auto parentRoot = [](const YAML::Node& entityNode) {
+      std::string parent = entityNode["parent"] ? entityNode["parent"].as<std::string>() : std::string();
+      std::string rootName;
+      std::string nodePath;
+      return ModelOverrides::SplitEntityReference(parent, rootName, nodePath) ? rootName : parent;
+    };
+
+    size_t rootIndex = entities.size();
+    for (size_t i = 0; i < entities.size() && rootIndex == entities.size(); i++)
+    {
+      if (entities[i]["name"] && entities[i]["name"].as<std::string>() == name)
+        rootIndex = i;
+    }
+
+    if (rootIndex == entities.size())
+    {
+      outError = "'" + path + "' has no entity named '" + name + "'";
+      return {};
+    }
+
+    std::vector<bool> selected(entities.size(), false);
+    std::unordered_set<std::string> taken { name };
+    selected[rootIndex] = true;
+
+    // Children may come before their parent in a hand-edited file, so this runs until nothing joins
+    for (bool grew = true; grew;)
+    {
+      grew = false;
+      for (size_t i = 0; i < entities.size(); i++)
+      {
+        if (selected[i] || !entities[i]["name"] || !taken.contains(parentRoot(entities[i])))
+          continue;
+
+        selected[i] = true;
+        taken.insert(entities[i]["name"].as<std::string>());
+        grew = true;
+      }
+    }
+
+    // Parent references are names, so a root renamed to stay unique takes its references along
+    const std::string uniqueName = scene.MakeUniqueEntityName(name);
+    auto renameReference = [&](YAML::Node entityNode, const char* key) {
+      if (!entityNode[key])
+        return;
+
+      std::string reference = entityNode[key].as<std::string>();
+      std::string rootName;
+      std::string nodePath;
+      if (reference == name)
+        entityNode[key] = uniqueName;
+      else if (ModelOverrides::SplitEntityReference(reference, rootName, nodePath) && rootName == name)
+        entityNode[key] = uniqueName + reference.substr(name.size());
+    };
+
+    YAML::Node subset(YAML::NodeType::Sequence);
+    bool hasVolumes = false;
+    for (size_t i = 0; i < entities.size(); i++)
+    {
+      if (!selected[i])
+        continue;
+
+      YAML::Node entityNode = YAML::Clone(entities[i]);
+      if (i == rootIndex)
+      {
+        entityNode.remove("parent");
+        entityNode["name"] = uniqueName;
+      }
+      else if (uniqueName != name)
+      {
+        renameReference(entityNode, "parent");
+        renameReference(entityNode, "modelNodeClone");
+      }
+
+      hasVolumes = hasVolumes || entityNode["irradianceVolume"].IsDefined();
+      subset.push_back(entityNode);
+    }
+
+    auto nameMap = BuildEntitiesSync(subset, scene, assets, registry);
+    auto rootIt = nameMap.find(uniqueName);
+    if (rootIt == nameMap.end())
+    {
+      outError = "'" + name + "' could not be built; see the log";
+      return {};
+    }
+
+    // A model root is named by its model file when it is built, not by the scene entry
+    scene.SetName(rootIt->second, uniqueName);
+
+    // As in Load: the probe and volume passes read world transforms, and they upload every baked
+    // probe and volume of the scene again, the new ones included
+    TransformSystem transforms;
+    transforms.Update(scene.GetRegistry(), 0.0);
+    LoadReflectionProbes(scene, assets, render);
+    if (hasVolumes)
+      LoadIrradianceVolumes(scene, assets, render);
+
+    YA_LOG_INFO("Scene", "Loaded '%s' from %s as '%s' (%zu entities)", name.c_str(), path.c_str(),
+      uniqueName.c_str(), subset.size());
+    return uniqueName;
+  }
+
   void SceneSerializer::LoadSync(const YAML::Node& root, const YAML::Node& entities,
     Scene& scene, AssetManager& assets,
     const ComponentRegistry& registry, Render& render)
+  {
+    BuildEntitiesSync(entities, scene, assets, registry);
+  }
+
+  // Passes 1-4 on the calling thread. Returns every built entity by its scene file name.
+  static std::unordered_map<std::string, Entity> BuildEntitiesSync(const YAML::Node& entities,
+    Scene& scene, AssetManager& assets, const ComponentRegistry& registry)
   {
     std::unordered_map<std::string, Entity> nameMap;
     std::vector<std::pair<Entity, std::string>> parentRequests;
@@ -814,6 +949,7 @@ namespace YAEngine
     ResolveParentRequests(scene, assets, nameMap, parentRequests);
 
     ResolveCloneRequests(scene, assets, nameMap, cloneRequests);
+    return nameMap;
   }
 
   void SceneSerializer::LoadParallel(const YAML::Node& root, const YAML::Node& entities,

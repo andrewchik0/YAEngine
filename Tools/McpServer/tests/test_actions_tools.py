@@ -26,6 +26,8 @@ async def test_action_tools_are_registered(make_manager):
     assert not tools["editor_actions"].input_schema.get("properties")
     assert set(tools["editor_run"].input_schema["properties"]) == {"name", "params", "timeout_seconds"}
     assert tools["editor_run"].input_schema["required"] == ["name"]
+    assert set(tools["editor_batch"].input_schema["properties"]) == {"steps", "timeout_seconds"}
+    assert tools["editor_batch"].input_schema["required"] == ["steps"]
 
 
 async def test_editor_actions_lists_signatures_and_params(attached, fake_bridge):
@@ -76,6 +78,27 @@ async def test_editor_run_waits_for_a_deferred_action(attached):
 async def test_editor_run_errors_become_tool_errors(attached, arguments, message):
     with pytest.raises(ToolError, match=message):
         await attached.call_tool("editor_run", arguments)
+
+
+async def test_editor_batch_sends_the_steps_and_returns_every_result(attached, fake_bridge):
+    steps = [
+        {"action": "selection.set", "params": {"entity": 2}},
+        {"action": "selection.set", "params": {"entity": {"$ref": "0.entity"}}},
+    ]
+    result = json.loads(text(await attached.call_tool("editor_batch", {"steps": steps})))
+
+    assert fake_bridge.requests[-1]["method"] == "batch.run"
+    assert fake_bridge.requests[-1]["params"] == {"steps": steps}
+    assert result == [{"entity": 2, "name": "Car body"}, {"entity": 2, "name": "Car body"}]
+
+
+async def test_editor_batch_raises_the_failed_step_with_the_applied_results(attached):
+    steps = [
+        {"action": "selection.set", "params": {"entity": 2}},
+        {"action": "selection.set", "params": {"entity": 99}},
+    ]
+    with pytest.raises(ToolError, match=r"batch step 1 failed: not_found no entity with id 99; .*Car body"):
+        await attached.call_tool("editor_batch", {"steps": steps})
 
 
 async def test_editor_run_passes_its_timeout_to_the_request(tmp_path, fake_bridge, make_manager):

@@ -120,8 +120,6 @@ namespace YAEngine
     bool b_ResetLayout = false;
     // Window content scale the style was last applied at
     float m_ContentScale = 1.0f;
-    uint32_t m_LastViewportWidth = 0;
-    uint32_t m_LastViewportHeight = 0;
 
     // Parsed .yaiv of the selected volume, so the node gizmos never re-read the
     // file per frame

@@ -166,7 +166,7 @@ export const AgentTerminal: React.FC<AgentTerminalProps> = ({ terminal, frame, w
           />
         </div>
         <div style={{ marginTop: 8, fontSize: 14, color: colors.textTertiary, paddingLeft: 4 }}>
-          ReleaseEditor {'\u00b7'} 5 tool groups {'\u00b7'} scene cafe_merged
+          ReleaseEditor {'\u00b7'} 5 tool groups {'\u00b7'} new scene
         </div>
       </div>
     </div>

@@ -13,20 +13,42 @@ const isVideo = (path: MediaPath) => VIDEO_EXTENSIONS.some((ext) => path.toLower
 export const hasStaticFile = (path: MediaPath) =>
   getStaticFiles().some((file) => file.name.replaceAll('\\', '/') === path);
 
+// A rectangle of the source frame, in source pixels, shown instead of the whole frame. The box
+// the media fills must have the crop's aspect.
+export type MediaCrop = {
+  sourceWidth: number;
+  sourceHeight: number;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+};
+
 type MediaProps = {
   src: MediaPath;
   label?: string;
   trimBeforeSeconds?: number;
+  crop?: MediaCrop;
   placeholderBrightness?: number;
   placeholderAlign?: 'center' | 'left' | 'right';
   style?: React.CSSProperties;
 };
+
+const cropStyle = (crop: MediaCrop): React.CSSProperties => ({
+  position: 'absolute',
+  left: `${(-crop.x / crop.width) * 100}%`,
+  top: `${(-crop.y / crop.height) * 100}%`,
+  width: `${(crop.sourceWidth / crop.width) * 100}%`,
+  height: `${(crop.sourceHeight / crop.height) * 100}%`,
+  maxWidth: 'none',
+});
 
 // A video or a still from public/, or a labeled placeholder while the file does not exist yet
 export const Media: React.FC<MediaProps> = ({
   src,
   label,
   trimBeforeSeconds,
+  crop,
   placeholderBrightness,
   placeholderAlign,
   style,
@@ -43,9 +65,9 @@ export const Media: React.FC<MediaProps> = ({
     );
   }
 
-  const fill: React.CSSProperties = { width: '100%', height: '100%', objectFit: 'cover' };
+  const fill: React.CSSProperties = crop ? cropStyle(crop) : { width: '100%', height: '100%', objectFit: 'cover' };
   return (
-    <AbsoluteFill style={style}>
+    <AbsoluteFill style={{ overflow: 'hidden', ...style }}>
       {isVideo(src) ? (
         <OffthreadVideo
           src={staticFile(src)}

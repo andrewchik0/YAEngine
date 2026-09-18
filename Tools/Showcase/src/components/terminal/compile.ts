@@ -1,11 +1,14 @@
 import { random } from 'remotion';
-import { sec } from '../../design/tokens';
+import { sec, VIDEO } from '../../design/tokens';
 
+// `at` pins a step to a moment of the footage: seconds after the first step, which is when the
+// footage starts. The step waits for it, so a tool's result can land on the frame its effect
+// appears in; a step that would start later anyway ignores it.
 export type TerminalStep =
   | { kind: 'prompt'; text: string }
-  | { kind: 'thinking'; seconds: number }
-  | { kind: 'say'; text: string }
-  | { kind: 'tool'; name: string; detail: string; result: string; seconds: number };
+  | { kind: 'thinking'; seconds: number; at?: number }
+  | { kind: 'say'; text: string; at?: number }
+  | { kind: 'tool'; name: string; detail: string; result: string; seconds: number; at?: number };
 
 // Every block carries absolute frames, so rendering a frame is a pure lookup
 export type TerminalBlock =
@@ -19,6 +22,8 @@ export type CompiledTerminal = {
   // Frame at which each prompt character appears
   typedAt: number[];
   submitAt: number;
+  // The first step after the prompt, and what every `at` counts from
+  firstStepAt: number;
   blocks: TerminalBlock[];
   endAt: number;
 };
@@ -64,14 +69,23 @@ export const compileTerminal = (steps: TerminalStep[], seed = 'terminal'): Compi
   const typedAt = scheduleTyping(prompt, TYPING_LEAD_IN, seed);
   const submitAt = (typedAt[typedAt.length - 1] ?? TYPING_LEAD_IN) + SUBMIT_PAUSE;
 
+  const firstStepAt = submitAt + STEP_GAP;
   const blocks: TerminalBlock[] = [];
   let cursor = submitAt;
   let thinkingIndex = 0;
   steps.forEach((step, index) => {
+    if (step.kind !== 'prompt' && step.at !== undefined) {
+      const pinned = firstStepAt + sec(step.at);
+      if (pinned < cursor) {
+        console.warn(`${seed}: step ${index} is pinned to ${step.at}s but cannot start before ` +
+          `${((cursor - firstStepAt) / VIDEO.fps).toFixed(2)}s`);
+      }
+      cursor = Math.max(cursor, pinned);
+    }
     switch (step.kind) {
       case 'prompt':
         blocks.push({ kind: 'user', text: step.text, start: submitAt });
-        cursor = submitAt + STEP_GAP;
+        cursor = firstStepAt;
         break;
       case 'thinking': {
         const verb = THINKING_VERBS[thinkingIndex++ % THINKING_VERBS.length];
@@ -99,5 +113,5 @@ export const compileTerminal = (steps: TerminalStep[], seed = 'terminal'): Compi
     }
   });
 
-  return { prompt, typedAt, submitAt, blocks, endAt: cursor };
+  return { prompt, typedAt, submitAt, firstStepAt, blocks, endAt: cursor };
 };
