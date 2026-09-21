@@ -23,6 +23,8 @@ export const RasterVsPathTracing: React.FC = () => (
               y={callout.y}
               title={callout.title}
               detail={callout.detail}
+              label={callout.label}
+              bend={callout.bend}
               durationInFrames={sec(callout.seconds)}
             />
           </Sequence>

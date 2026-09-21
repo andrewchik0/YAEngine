@@ -4,23 +4,31 @@ import { enterStyle, exitStyle, progress } from '../design/animate';
 import { fonts } from '../design/fonts';
 import { colors, motion, type, VIDEO } from '../design/tokens';
 
+type Point = { x: number; y: number };
+
 type CalloutProps = {
   x: number;
   y: number;
   title: string;
   detail: string;
   durationInFrames: number;
+  // Top-right corner of the right-aligned text and the point the arrow bends towards; by
+  // default the text sits up and to the left of the target
+  label?: Point;
+  bend?: Point;
 };
 
 const RING_RADIUS = 22;
-const LABEL_OFFSET = { x: -300, y: -170 };
+const LABEL_WIDTH = 260;
 
 // Curved arrow from a label to a point in the frame, with a ring around the point
-export const Callout: React.FC<CalloutProps> = ({ x, y, title, detail, durationInFrames }) => {
+export const Callout: React.FC<CalloutProps> = ({ x, y, title, detail, durationInFrames, label, bend }) => {
   const frame = useCurrentFrame();
 
-  const start = { x: x + LABEL_OFFSET.x + 40, y: y + LABEL_OFFSET.y + 20 };
-  const control = { x: x - 40, y: y + LABEL_OFFSET.y - 10 };
+  const corner = label ?? { x: x - 260, y: y - 240 };
+  // The arrow leaves the text on the side that faces the target
+  const start = { x: corner.x, y: corner.y + (y < corner.y ? 20 : 90) };
+  const control = bend ?? { x: x - 40, y: y - 180 };
   const toTarget = { x: x - control.x, y: y - control.y };
   const toTargetLength = Math.hypot(toTarget.x, toTarget.y);
   const end = {
@@ -66,9 +74,9 @@ export const Callout: React.FC<CalloutProps> = ({ x, y, title, detail, durationI
       <div
         style={{
           position: 'absolute',
-          left: x + LABEL_OFFSET.x - 220,
-          top: y + LABEL_OFFSET.y - 70,
-          width: 260,
+          left: corner.x - LABEL_WIDTH,
+          top: corner.y,
+          width: LABEL_WIDTH,
           textAlign: 'right',
           ...enterStyle(frame, motion.base),
         }}

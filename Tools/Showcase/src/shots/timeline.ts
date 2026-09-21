@@ -15,6 +15,8 @@ export type Mode = {
   detail: string;
 };
 
+export type Point = { x: number; y: number };
+
 export type CalloutSpec = {
   atSeconds: number;
   seconds: number;
@@ -23,6 +25,10 @@ export type CalloutSpec = {
   y: number;
   title: string;
   detail: string;
+  // Top-right corner of the text and the arrow's bend, when up and to the left of the target
+  // is not a dark enough place for the text
+  label?: Point;
+  bend?: Point;
 };
 
 export const TODO = 'TODO';
@@ -58,7 +64,7 @@ export const titleCards = {
   breakdown: {
     seconds: 3.5,
     title: 'How each frame is composed',
-    detail: 'render pipeline, layer by layer',
+    detail: 'rasterizer render pipeline, layer by layer',
   },
   editor: {
     seconds: 3.5,
@@ -69,18 +75,19 @@ export const titleCards = {
 
 export const flythrough = {
   mode: MODES.raster,
-  // The recording opens with a false start and a three second pause; the good take runs
-  // 11.6s to 35.6s, and the camera jumps to the next sequencer shot at 35.5s - stop short
-  // of it or the cut into the next card catches the teleport
-  clips: [{ src: 'footage/intro_new.mp4', seconds: 23.2, trimBeforeSeconds: 11.6 }] as Clip[],
+  // The camera starts moving on frame 500 of the recording and jumps to the next sequencer shot
+  // on frame 2028; the clip ends on the frame before the jump, or the cut into the next card
+  // catches the teleport
+  clips: [{ src: 'footage/intro.mp4', seconds: (2028 - 500) / 60, trimBeforeSeconds: 500 / 60 }] as Clip[],
 };
 
-// One rendering mode of one locked-off shot
+// One rendering mode of one comparison shot
 export type Stage = {
   mode: Mode;
   src: MediaPath;
-  // Into the recording. Every clip is a static camera, so the window is picked by how steady
-  // and how high the burned-in fps reads. A still has none.
+  // Into the recording. Every comparison plays the same 15 s sequencer shot in each mode, so the
+  // trim is the frame its camera starts moving, nudged by a frame where matching the edges of
+  // the two modes says so: the same output frame then shows the same camera.
   trimBeforeSeconds?: number;
 };
 
@@ -99,51 +106,62 @@ export const rasterVsPathTracing = {
     {
       name: 'Exterior, rear',
       stages: [
-        { mode: MODES.raster, src: 'footage/raster_0.mp4', trimBeforeSeconds: 4.5 },
-        { mode: MODES.pathTracer, src: 'footage/pt_0.mp4', trimBeforeSeconds: 1 },
+        { mode: MODES.raster, src: 'footage/raster0.mp4', trimBeforeSeconds: 241 / 60 },
+        { mode: MODES.pathTracer, src: 'footage/pt0.mp4', trimBeforeSeconds: 448 / 60 },
       ],
+      // The glossy rear fender, which drifts from (1130, 450) to (1136, 468) while the callout is
+      // up. Above it are the wing's grey end plate and the white 33, so the text goes under the
+      // tail light, on the black lower bumper.
       callout: {
         atSeconds: 4.2,
         seconds: 3,
-        x: 1180,
-        y: 640,
+        x: 1133,
+        y: 459,
         title: 'Clear coat',
         detail: 'two-layer material',
+        label: { x: 1060, y: 660 },
+        bend: { x: 1150, y: 660 },
       },
     },
     {
       name: 'Exterior, front',
       stages: [
-        { mode: MODES.raster, src: 'footage/raster_1.mp4', trimBeforeSeconds: 14.5 },
-        { mode: MODES.pathTracer, src: 'footage/pt_1.mp4', trimBeforeSeconds: 10 },
+        { mode: MODES.raster, src: 'footage/raster1.mp4', trimBeforeSeconds: 203 / 60 },
+        { mode: MODES.pathTracer, src: 'footage/pt1.mp4', trimBeforeSeconds: 962 / 60 },
       ],
     },
     {
       name: 'Interior',
       stages: [
-        { mode: MODES.raster, src: 'footage/raster_2.mp4', trimBeforeSeconds: 14.5 },
-        { mode: MODES.pathTracer, src: 'footage/pt_2.mp4', trimBeforeSeconds: 3 },
-        { mode: MODES.pathTracerGlass, src: 'footage/pt_2_real_glass.mp4', trimBeforeSeconds: 2 },
+        { mode: MODES.raster, src: 'footage/raster2.mp4', trimBeforeSeconds: 408 / 60 },
+        { mode: MODES.pathTracer, src: 'footage/pt2.mp4', trimBeforeSeconds: 728 / 60 },
+        { mode: MODES.pathTracerGlass, src: 'footage/pt2_real_glass.mp4', trimBeforeSeconds: 1804 / 60 },
       ],
     },
   ] as Comparison[],
 };
 
-// One shot lit up layer by layer, swept with the same line the mode comparison uses.
-// Stages 1-5 are the renderer's linear HDR buffer with exposure and the sRGB encode only,
-// no tone map, so the grade arriving with Post is part of what the last step visibly adds;
-// stage 6 is the engine's own final image. See docs/frame-capture.md for the capture recipe.
-export const breakdownSweep = {
-  holdSeconds: 2,
-  sweepSeconds: 2.6,
+export type PipelineStage = {
+  title: string;
+  detail: string;
+  src: MediaPath;
+  holdSeconds: number;
+};
+
+// The same shot built up pass by pass, named by an accordion bar. Stills 2-6 are the linear HDR
+// buffer with exposure 1 and the sRGB encode only, stage 7 the engine's final image; Geometry is
+// five debug views side by side and holds longer so they can all be read.
+export const breakdownStages = {
+  changeSeconds: 0.5,
   stages: [
-    { mode: { title: 'Baked Volumes', detail: 'indirect diffuse' }, src: 'stills/breakdown/bd1_volumes.png' },
-    { mode: { title: 'SSGI', detail: 'indirect diffuse' }, src: 'stills/breakdown/bd2_ssgi.png' },
-    { mode: { title: 'Reflection Probes', detail: 'indirect specular' }, src: 'stills/breakdown/bd3_probes.png' },
-    { mode: { title: 'SSR', detail: 'indirect specular' }, src: 'stills/breakdown/bd4_ssr.png' },
-    { mode: { title: 'Direct Light', detail: 'analytic lights + shadows' }, src: 'stills/breakdown/bd5_direct.png' },
-    { mode: { title: 'Post', detail: 'tonemap, bloom, fog' }, src: 'stills/breakdown/bd6_post.png' },
-  ] as Stage[],
+    { title: 'Geometry', detail: 'G-buffer', src: 'stills/breakdown2/bd1_geometry_labeled.png', holdSeconds: 4 },
+    { title: 'Baked Volumes', detail: 'indirect diffuse', src: 'stills/breakdown2/bd2_volumes.png', holdSeconds: 2.5 },
+    { title: 'Reflection Probes', detail: 'indirect specular', src: 'stills/breakdown2/bd3_probes.png', holdSeconds: 2.5 },
+    { title: 'Direct Lighting', detail: 'analytic lights + shadows', src: 'stills/breakdown2/bd4_direct.png', holdSeconds: 2.5 },
+    { title: 'SSGI', detail: 'indirect diffuse', src: 'stills/breakdown2/bd5_ssgi.png', holdSeconds: 2.5 },
+    { title: 'SSR', detail: 'indirect specular', src: 'stills/breakdown2/bd6_ssr.png', holdSeconds: 2.5 },
+    { title: 'Post', detail: 'tonemap, bloom, fog', src: 'stills/breakdown2/bd7_post.png', holdSeconds: 2.5 },
+  ] as PipelineStage[],
 };
 
 export type BreakdownLayer = {

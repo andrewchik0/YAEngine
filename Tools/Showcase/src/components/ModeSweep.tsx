@@ -15,9 +15,10 @@ type ModeSweepProps = {
 export const modeSweepFrames = (stageCount: number, holdSeconds: number, sweepSeconds: number) =>
   sec(holdSeconds) * stageCount + sec(sweepSeconds) * (stageCount - 1);
 
-// The camera is locked in every comparison recording, so the modes are pixel aligned and a sweep
-// needs no matching. Each sweep crosses the whole frame - never a left half against a right half -
-// and the same line cuts the label, so what is on screen is always named.
+// Every mode of a comparison is trimmed to the same moment of one camera move, so the modes stay
+// pixel aligned while the camera travels and a sweep needs no matching. Each sweep crosses the
+// whole frame - never a left half against a right half - and the same line cuts the label, so
+// what is on screen is always named.
 export const ModeSweep: React.FC<ModeSweepProps> = ({ stages, holdSeconds, sweepSeconds }) => {
   const frame = useCurrentFrame();
   const hold = sec(holdSeconds);
