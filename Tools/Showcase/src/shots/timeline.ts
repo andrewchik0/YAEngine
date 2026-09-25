@@ -260,7 +260,6 @@ export const credits = {
     { what: 'Bistro scene', credit: 'Amazon Lumberyard, NVIDIA ORCA', license: 'CC BY 4.0' },
     { what: 'Car model', credit: 'Ruf RWB "MAKKO" [33] by TRINIKZ, Sketchfab', license: 'CC BY-NC 4.0' },
     { what: 'HDRI', credit: 'Belfast Sunset (Pure Sky), Poly Haven', license: 'CC0' },
-    { what: 'Music', credit: TODO, license: TODO },
   ] as Attribution[],
 };
 
